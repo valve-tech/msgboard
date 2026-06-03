@@ -1,0 +1,63 @@
+{
+  "name": "@msgboard/hardhat",
+  "version": "0.0.1",
+  "description": "Hardhat plugin for MsgBoard",
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "commonjs": "dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./provider": {
+      "types": "./dist/provider.d.ts",
+      "require": "./dist/provider.js",
+      "import": "./dist/provider.js",
+      "default": "./dist/provider.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "require": "./dist/types.js",
+      "import": "./dist/types.js",
+      "default": "./dist/types.js"
+    },
+    "./tasks": {
+      "types": "./dist/tasks.d.ts",
+      "require": "./dist/tasks.js",
+      "import": "./dist/tasks.js",
+      "default": "./dist/tasks.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "devDependencies": {
+    "@nomicfoundation/hardhat-network-helpers": "^1.0.8",
+    "hardhat": "^2.16.1",
+    "nyc": "^17.1.0",
+    "solidity-coverage": "^0.8.15",
+    "tsx": "^4.19.3",
+    "viem": "^2.28.0",
+    "vitest": "^3.1.2"
+  },
+  "scripts": {
+    "build": "npm run compile",
+    "print": "hardhat help",
+    "watch": "npm run compile:watch",
+    "compile": "tsc && hardhat compile",
+    "compile:watch": "as-soon -w contracts npm run compile",
+    "test": "vitest",
+    "coverage": "hardhat compile-for-coverage && vitest run --coverage && hardhat compile",
+    "coverage:compile:watch": "as-soon -w contracts hardhat compile-for-coverage",
+    "coverage:watch": "hardhat compile-for-coverage && vitest --coverage"
+  },
+  "dependencies": {
+    "@msgboard/sdk": "^0.0.28"
+  }
+}

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="favicon.webp" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="robots" content="noindex nofollow" />
+    <title>Distributed MsgBoard</title>
+    <meta name="description" content="Distributed MsgBoard — permissionless, unstoppable, ephemeral messaging over any EVM chain running the msgboard_ module." />
+    <script>
+      // apply the saved/system theme before paint to avoid a flash of the wrong theme
+      (function () {
+        try {
+          var p = localStorage.getItem('theme') || 'system'
+          var dark = p === 'dark' || (p === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+          if (dark) document.documentElement.classList.add('dark')
+        } catch (e) {}
+      })()
+    </script>
+  </head>
+
+  <body>
+    <div style="position: relative" id="app"></div>
+    <script type="module" src="src/main.ts"></script>
+  </body>
+</html>

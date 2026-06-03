@@ -1,0 +1,29 @@
+@import 'tailwindcss';
+
+/* class-based dark mode: styles under `.dark` (toggled on <html>) apply dark variants */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  color-scheme: light;
+}
+:root:has(.dark), .dark {
+  color-scheme: dark;
+}
+
+/* contain stray horizontal overflow (e.g. absolutely-positioned tooltips near the
+   viewport edge) so narrow screens never scroll sideways. `clip` (not `hidden`)
+   avoids creating a scroll container, so vertical scroll and sticky still work.
+   Applied to the root element too — that is the viewport scroller. */
+html,
+body {
+  overflow-x: clip;
+}
+
+body {
+  @apply bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100;
+}
+
+[disabled] {
+  cursor: not-allowed !important;
+  /* @apply bg-transparent; */
+}
