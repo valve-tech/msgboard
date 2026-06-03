@@ -1,0 +1,28 @@
+{
+  "name": "pulsechain-msgboard",
+  "version": "0.0.1",
+  "private": true,
+  "workspaces": [
+    "packages/core",
+    "packages/sdk",
+    "packages/hardhat",
+    "packages/ui",
+    "packages/sponsor"
+  ],
+  "scripts": {
+    "docker:build": "docker compose build",
+    "build": "npm run build --workspace=*",
+    "lint": "npm run lint --workspace=*",
+    "test": "npm run build && npm run test --workspace=*",
+    "test:client": "npm run test --workspace=packages/sdk",
+    "test:hh": "npm run test --workspace=packages/hardhat",
+    "start": "npm run start --workspace=packages/ui",
+    "clean": "rm -rf node_modules packages/*/node_modules packages/*/dist packages/*/cache postgres-data",
+    "ui:preview": "npm run preview --workspace=packages/ui",
+    "ui:dev": "npm run dev --workspace=packages/ui",
+    "sponsor:spam": "npm run spam --workspace=packages/sponsor",
+    "sponsor:bridge": "npm run bridge --workspace=packages/sponsor",
+    "sponsor:start": "npm run start --workspace=packages/sponsor"
+  },
+  "packageManager": "yarn@4.12.0+sha512.f45ab632439a67f8bc759bf32ead036a1f413287b9042726b7cc4818b7b49e14e9423ba49b18f9e06ea4941c1ad062385b1d8760a8d5091a1a31e5f6219afca8"
+}

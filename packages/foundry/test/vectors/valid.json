@@ -1,0 +1,11 @@
+{
+  "nonce": "152",
+  "blockHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "category": "0xc49cf97b8d9bf5764a871f2ad6bcfeb28ca7b1ad007f9f51b1852be6c029870e",
+  "data": "0x",
+  "workMultiplier": "1",
+  "workDivisor": "65536",
+  "difficulty": "256",
+  "challengeX": "0x8ca0727a40ec0c3a8750de5c7d56ebc50998c587fb50b91b365b3302abc5e118",
+  "workHash": "0x0514cdade47365ae6eac998ba3ee66faf995901064af733da80869bf37858200"
+}

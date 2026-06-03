@@ -1,0 +1,38 @@
+{
+  "name": "@msgboard/core",
+  "version": "0.0.1",
+  "description": "MsgBoard proof-of-work engine (msgpow): pure primitives and encoding",
+  "repository": "gitlab:pulsechaincom/msgboard",
+  "author": "MsgBoard",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "commonjs": "./dist/index.js",
+  "exports": {
+    ".": {
+      "require": "./dist/index.js",
+      "default": "./dist/index.js",
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "keywords": ["ethereum", "pow", "proof-of-work", "msgboard", "msgpow"],
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "test": "vitest run"
+  },
+  "files": ["dist/"],
+  "dependencies": {
+    "bn.js": "^5.2.1",
+    "elliptic": "^6.6.1",
+    "viem": "^2.25.0"
+  },
+  "devDependencies": {
+    "@types/bn.js": "^5.1.6",
+    "@types/elliptic": "^6.4.18",
+    "typescript": "^5.8.2",
+    "vitest": "^3.1.1"
+  }
+}

@@ -1,0 +1,151 @@
+networks:
+  msgboard:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  caddy_data:
+  caddy_config:
+
+# shared definition for the per-network spam writers (one container per chain)
+x-spam-writer: &spam-writer
+  build:
+    context: .
+    dockerfile: ./Dockerfile
+  restart: unless-stopped
+  networks:
+    - msgboard
+  command: ['npm', 'run', 'sponsor:spam']
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./deploy/caddy/origin.pem:/etc/caddy/origin.pem:ro
+      - ./deploy/caddy/origin.key:/etc/caddy/origin.key:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - ui
+      - faucet
+    networks:
+      - msgboard
+
+  ui:
+    container_name: ui
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+      args:
+        VITE_RPC_1: ${VITE_RPC_1:-}
+        VITE_RPC_369: ${VITE_RPC_369:-}
+        VITE_RPC_943: ${VITE_RPC_943:-}
+    restart: unless-stopped
+    networks:
+      - msgboard
+    # Root Dockerfile CMD runs `npm run start` -> `vite preview --host` on port 4173,
+    # which serves the built UI AND the /api/rpc-proxy endpoint. No host port: Caddy
+    # reaches it over the compose network.
+
+  faucet:
+    container_name: faucet
+    build:
+      context: ./packages/faucet
+      dockerfile: ./Dockerfile
+    restart: unless-stopped
+    environment:
+      WEB3_PROVIDER: ${WEB3_PROVIDER:-https://rpc.v4.testnet.pulsechain.com}
+      PRIVATE_KEY: ${FAUCET_PRIVATE_KEY:-}
+      PORT: 8080
+      PROXY_COUNT: 1
+      PAYOUT: ${PAYOUT:-10}
+    networks:
+      - msgboard
+
+  sponsor:
+    container_name: sponsor
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    depends_on:
+      - msgboard-postgres
+    restart: unless-stopped
+    networks:
+      - msgboard
+    environment:
+      MNEMONIC: ${MNEMONIC:-}
+      DATABASE_URL: postgres://msgboard-postgres:${POSTGRES_PASSWORD:-password}@msgboard-postgres:5432/msgboard-postgres
+      RPC_369: ${RPC_369:-}
+      RPC_943: ${RPC_943:-}
+    command: ['npm', 'run', 'sponsor:start']
+
+  # spam: posts random lorem-style messages so each board shows activity. Submission
+  # is proof-of-work gated, so it needs only an msgboard-enabled RPC — no wallet,
+  # no database. One writer per network (SPAM_CHAIN_ID selects 1, 369, or 943);
+  # SPAM_INTERVAL_MS / SPAM_CATEGORIES tune cadence and categories for all of them.
+  spam-943:
+    <<: *spam-writer
+    container_name: spam-943
+    environment:
+      SPAM_CHAIN_ID: '943'
+      RPC_943: ${RPC_943:-}
+      SPAM_INTERVAL_MS: ${SPAM_INTERVAL_MS:-60000}
+      SPAM_CATEGORIES: ${SPAM_CATEGORIES:-lorem,musings,chatter}
+
+  spam-369:
+    <<: *spam-writer
+    container_name: spam-369
+    environment:
+      SPAM_CHAIN_ID: '369'
+      RPC_369: ${RPC_369:-}
+      SPAM_INTERVAL_MS: ${SPAM_INTERVAL_MS:-60000}
+      SPAM_CATEGORIES: ${SPAM_CATEGORIES:-lorem,musings,chatter}
+
+  spam-1:
+    <<: *spam-writer
+    container_name: spam-1
+    environment:
+      SPAM_CHAIN_ID: '1'
+      RPC_1: ${RPC_1:-}
+      SPAM_INTERVAL_MS: ${SPAM_INTERVAL_MS:-60000}
+      SPAM_CATEGORIES: ${SPAM_CATEGORIES:-lorem,musings,chatter}
+
+  # bridge: the bridge-crossing sponsor writer. Watches the bridge for new bridgers
+  # and posts a PoW `gasmoneyplease` message for each, which the `sponsor` service
+  # reads and funds with gas. (Formerly mis-named "spam".)
+  bridge:
+    container_name: bridge
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    restart: unless-stopped
+    networks:
+      - msgboard
+    environment:
+      RPC_369: ${RPC_369:-}
+      RPC_943: ${RPC_943:-}
+      # default to PulseChain v4 testnet only (id 369 = mainnet, which the v4-only
+      # sponsor does not fund); override DISABLED_CHAINS to change.
+      DISABLED_CHAINS: ${DISABLED_CHAINS:-369}
+    command: ['npm', 'run', 'sponsor:bridge']
+
+  msgboard-postgres:
+    container_name: msgboard-postgres
+    image: postgres:16
+    shm_size: 16g
+    restart: unless-stopped
+    command: postgres -c 'max_connections=500' -c work_mem=256MB -c maintenance_work_mem=256MB -c max_wal_size=1GB
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - msgboard
+    environment:
+      POSTGRES_DB: msgboard-postgres
+      POSTGRES_USER: msgboard-postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}

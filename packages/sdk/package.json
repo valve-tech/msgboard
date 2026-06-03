@@ -1,0 +1,64 @@
+{
+  "name": "@msgboard/sdk",
+  "version": "0.0.28",
+  "description": "MsgBoard client SDK for the msgboard_ JSON-RPC module",
+  "repository": "gitlab:pulsechaincom/msgboard",
+  "author": "PulseChain",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "commonjs": "./dist/index.js",
+  "exports": {
+    ".": {
+      "require": "./dist/index.js",
+      "default": "./dist/index.js",
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "keywords": [
+    "ethereum",
+    "smart-contracts",
+    "pow",
+    "proof-of-work"
+  ],
+  "scripts": {
+    "lint:fix": "eslint --fix --format=stylish src",
+    "lint": "eslint --format=stylish src",
+    "test": "DEBUG=msgboard vitest run",
+    "build": "tsc",
+    "watch": "tsc -w",
+    "gen:docs": "tsx scripts/generate-reference.ts"
+  },
+  "files": [
+    "dist/",
+    "openrpc.json"
+  ],
+  "devDependencies": {
+    "@eslint/js": "^9.25.1",
+    "@open-rpc/schema-utils-js": "^2.2.1",
+    "@types/bn.js": "^5.1.6",
+    "@types/debug": "^4.1.12",
+    "@types/elliptic": "^6.4.18",
+    "@typescript-eslint/eslint-plugin": "^8.29.0",
+    "@typescript-eslint/parser": "^8.29.0",
+    "eslint": "^9.23.0",
+    "eslint-config-prettier": "^10.1.2",
+    "eslint-plugin-prettier": "^5.2.6",
+    "ethers": "^6.13.5",
+    "globals": "^16.0.0",
+    "jiti": "^2.4.2",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "typescript-eslint": "^8.31.0",
+    "vitest": "^3.1.1"
+  },
+  "dependencies": {
+    "@msgboard/core": "^0.0.1",
+    "bn.js": "^5.2.1",
+    "debug": "^4.4.0",
+    "elliptic": "^6.6.1",
+    "viem": "^2.25.0"
+  }
+}

@@ -1,0 +1,54 @@
+networks:
+  msgboard:
+    driver: bridge
+
+volumes:
+  msgboard:
+    external: true
+
+services:
+  # ui:
+  #   container_name: ui
+  #   build:
+  #     context: .
+  #     dockerfile: ./Dockerfile
+  #   ports:
+  #     - 4173:4173
+  #     - 5173:5173
+  #   volumes:
+  #     - .:/app
+  #   restart: unless-stopped
+  #   networks:
+  #     - msgboard
+  #   command: ['npm', 'run', 'ui:preview']
+  sponsor:
+    container_name: sponsor
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    depends_on:
+      - msgboard-postgres
+    networks:
+      - msgboard
+    volumes:
+      - .:/app
+    environment:
+      MNEMONIC: ${MNEMONIC:-}
+      # FAKE_TRANSFERS: true
+      DATABASE_URL: postgres://msgboard-postgres:password@msgboard-postgres:5432/msgboard-postgres
+    command: ['npm', 'run', 'sponsor:start']
+  msgboard-postgres:
+    container_name: msgboard-postgres
+    image: postgres:16
+    shm_size: 16g
+    command: postgres -c 'max_connections=500' -c work_mem=256MB -c maintenance_work_mem=256MB -c max_wal_size=1GB
+    ports:
+      - 9876:5432
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+    networks:
+      - msgboard
+    environment:
+      - POSTGRES_DB=msgboard-postgres
+      - POSTGRES_USER=msgboard-postgres
+      - POSTGRES_PASSWORD=password

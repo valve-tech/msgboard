@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "es2020",
+    "module": "CommonJS",
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "outDir": "./dist",
+    "declaration": true,
+    "types": ["vitest"],
+    "resolveJsonModule": true
+  },
+  "exclude": ["vitest.config.ts", "hardhat.config.cjs", "dist", "test"]
+}

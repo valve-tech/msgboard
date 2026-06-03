@@ -1,0 +1,50 @@
+{
+  "name": "msgboard-ui",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "start": "npm run preview -- --host",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "lint": "prettier --check . && eslint .",
+    "format": "prettier --write .",
+    "docker:build": "docker compose build",
+    "test:integration": "playwright test",
+    "test:unit": "vitest"
+  },
+  "devDependencies": {
+    "@iconify/svelte": "^4.2.0",
+    "@playwright/test": "^1.51.1",
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "@tailwindcss/postcss": "^4.1.4",
+    "@tsconfig/svelte": "^5.0.4",
+    "@types/eslint": "^9.6.1",
+    "@types/markdown-it": "^14.1.2",
+    "postcss": "^8.5.3",
+    "prettier": "^3.5.3",
+    "prettier-plugin-svelte": "^3.3.3",
+    "svelte": "^5.25.6",
+    "svelte-check": "^4.1.6",
+    "tailwindcss": "^4.1.2",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.5",
+    "vitest": "^3.1.2"
+  },
+  "dependencies": {
+    "@msgboard/sdk": "^0.0.28",
+    "@reown/appkit": "^1.7.2",
+    "@reown/appkit-adapter-wagmi": "^1.7.2",
+    "@tailwindcss/vite": "^4.1.2",
+    "@wagmi/connectors": "^5.7.12",
+    "@wagmi/core": "^2.16.7",
+    "@walletconnect/ethereum-provider": "^2.19.2",
+    "@walletconnect/safe-json": "^1.0.2",
+    "markdown-it": "^14.1.1",
+    "shiki": "^3.4.1",
+    "tsx": "^4.19.3",
+    "viem": "^2.25.0"
+  }
+}

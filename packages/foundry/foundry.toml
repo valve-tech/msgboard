@@ -1,0 +1,13 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+test = "test"
+fs_permissions = [{ access = "read", path = "./test/vectors" }]
+remappings = [
+  "forge-std/=lib/forge-std/src/",
+  "elliptic-curve-solidity/=lib/elliptic-curve-solidity/contracts/",
+]
+
+[rpc_endpoints]
+msgboard = "${MSGBOARD_RPC}"
