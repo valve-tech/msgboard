@@ -31,6 +31,6 @@ contract MsgPowTest is Test {
         (MsgPow.Message memory m,) = _load();
         string memory json = vm.readFile("./test/vectors/valid.json");
         bytes32 expected = vm.parseJsonBytes32(json, ".workHash");
-        assertEq(MsgPow.workHash(m), expected, "workHash must match @msgboard/core");
+        assertEq(MsgPow.workHash(m), expected, "workHash must match msgboard/core");
     }
 }
