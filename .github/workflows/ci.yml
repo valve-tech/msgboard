@@ -32,3 +32,20 @@ jobs:
           forge install witnet/elliptic-curve-solidity --no-git
           forge build
           forge test -vv
+
+  foundry-integration:
+    # Live tests against a real msgboard node. Non-blocking: an external-endpoint hiccup
+    # should not fail required CI.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      MSGBOARD_RPC: https://one.valve.city/rpc/vk_demo/evm/943
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+      - name: forge integration tests (live msgboard node)
+        working-directory: packages/foundry
+        run: |
+          forge install foundry-rs/forge-std --no-git
+          forge install witnet/elliptic-curve-solidity --no-git
+          forge test --match-path "test/integration/*" -vv

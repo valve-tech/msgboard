@@ -4,7 +4,7 @@ pragma solidity ^0.8.20;
 import {EllipticCurve} from "elliptic-curve-solidity/EllipticCurve.sol";
 
 /// @title MsgPow — Solidity verification of the MsgBoard proof of work (msgpow).
-/// @notice Mirrors @msgboard/core's checkWork:
+/// @notice Mirrors msgboard/core's checkWork:
 ///   digest    = low 128 bits of sha256(workMultiplier(8B BE) || workDivisor(8B BE))
 ///   k         = (nonce * digest + uint256(blockHash)) mod n
 ///   X         = (k * G).x, encoded as minimal big-endian bytes
