@@ -1,0 +1,47 @@
+name: publish
+
+# Publish stream: on a semver tag (vX.Y.Z), build and publish the public
+# @msgboard/* packages whose version is not already on the npm registry.
+#
+# Prerequisite (human, one-time): create the @msgboard org on npmjs.com and add
+# a repository secret NPM_TOKEN (an npm automation token with publish rights to
+# @msgboard) under Settings -> Secrets and variables -> Actions.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: npm ci
+
+      # build in dependency order (core <- sdk <- hardhat); hardhat ships its tsc output
+      - run: npm run build --workspace @msgboard/core
+      - run: npm run build --workspace @msgboard/sdk
+      - run: (cd packages/hardhat && npx tsc)
+
+      - name: Publish public @msgboard/* (idempotent)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for entry in "@msgboard/core:packages/core" "@msgboard/sdk:packages/sdk" "@msgboard/hardhat:packages/hardhat"; do
+            pkg="${entry%%:*}"
+            dir="${entry##*:}"
+            ver=$(node -p "require('./$dir/package.json').version")
+            if npm view "$pkg@$ver" version >/dev/null 2>&1; then
+              echo "$pkg@$ver already published, skipping"
+            else
+              echo "publishing $pkg@$ver"
+              npm publish --workspace "$pkg" --access public
+            fi
+          done
