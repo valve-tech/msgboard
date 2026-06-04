@@ -2,9 +2,12 @@
   "name": "@msgboard/core",
   "version": "0.0.1",
   "description": "MsgBoard proof-of-work engine (msgpow): pure primitives and encoding",
-  "repository": "gitlab:pulsechaincom/msgboard",
+  "repository": "github:valve-tech/msgboard",
   "author": "MsgBoard",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -19,6 +22,7 @@
   },
   "keywords": ["ethereum", "pow", "proof-of-work", "msgboard", "msgpow"],
   "scripts": {
+    "prebuild": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "tsc",
     "watch": "tsc -w",
     "test": "vitest run"

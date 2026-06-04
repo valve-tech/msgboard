@@ -2,9 +2,12 @@
   "name": "@msgboard/sdk",
   "version": "0.0.28",
   "description": "MsgBoard client SDK for the msgboard_ JSON-RPC module",
-  "repository": "gitlab:pulsechaincom/msgboard",
-  "author": "PulseChain",
+  "repository": "github:valve-tech/msgboard",
+  "author": "MsgBoard",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -27,6 +30,7 @@
     "lint:fix": "eslint --fix --format=stylish src",
     "lint": "eslint --format=stylish src",
     "test": "DEBUG=msgboard vitest run",
+    "prebuild": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "tsc",
     "watch": "tsc -w",
     "gen:docs": "tsx scripts/generate-reference.ts"
