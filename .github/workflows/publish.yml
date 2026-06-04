@@ -3,9 +3,25 @@ name: publish
 # Publish stream: on a semver tag (vX.Y.Z), build and publish the public
 # @msgboard/* packages whose version is not already on the npm registry.
 #
-# Prerequisite (human, one-time): create the @msgboard org on npmjs.com and add
-# a repository secret NPM_TOKEN (an npm automation token with publish rights to
-# @msgboard) under Settings -> Secrets and variables -> Actions.
+# Authentication is OpenID Connect trusted publishing — NO long-lived npm token.
+# GitHub mints a short-lived OpenID Connect token (requires the id-token: write
+# permission below) and npm 11.5.1+ exchanges it for publish rights, provided each
+# package has a matching trusted-publisher record on npmjs.com.
+#
+# Human prerequisites (one-time):
+#   1. Because npm (unlike PyPI) cannot register a trusted publisher for a package
+#      that does not yet exist, publish each @msgboard/* package once by hand from a
+#      machine with an interactive `npm login` session (a browser session token, not
+#      an automation token). This bootstrap publish carries no provenance; every
+#      OpenID Connect publish afterward does.
+#   2. On npmjs.com, add a GitHub Actions trusted publisher to EACH package
+#      (npmjs.com/package/<name>/access). Fields must match this workflow exactly:
+#        Organization or user: valve-tech
+#        Repository:           msgboard
+#        Workflow filename:    publish.yml   (filename only, no path)
+#        Environment name:     (leave blank — this job declares no environment)
+#        Allowed actions:      npm publish
+# A mismatch on any field surfaces only as a generic 404 at publish time.
 
 on:
   push:
@@ -15,6 +31,9 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # mint the OpenID Connect token npm exchanges for publish rights
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -23,6 +42,10 @@ jobs:
           node-version: 22
           registry-url: 'https://registry.npmjs.org'
 
+      # Node 22 ships npm 10.x; trusted publishing needs 11.5.1+. --force avoids a
+      # self-upgrade crash ("Cannot find module 'promise-retry'").
+      - run: npm install -g --force npm@latest
+
       - run: npm ci
 
       # build in dependency order (core <- sdk <- hardhat); hardhat ships its tsc output
@@ -30,9 +53,8 @@ jobs:
       - run: npm run build --workspace @msgboard/sdk
       - run: (cd packages/hardhat && npx tsc)
 
+      # No NODE_AUTH_TOKEN: authentication is OpenID Connect. Provenance is automatic.
       - name: Publish public @msgboard/* (idempotent)
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           for entry in "@msgboard/core:packages/core" "@msgboard/sdk:packages/sdk" "@msgboard/hardhat:packages/hardhat"; do
             pkg="${entry%%:*}"
