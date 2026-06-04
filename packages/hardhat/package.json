@@ -2,6 +2,8 @@
   "name": "@msgboard/hardhat",
   "version": "0.0.1",
   "description": "Hardhat plugin for MsgBoard",
+  "repository": "github:valve-tech/msgboard",
+  "license": "MIT",
   "publishConfig": {
     "access": "public"
   },
@@ -47,6 +49,7 @@
     "vitest": "^3.1.2"
   },
   "scripts": {
+    "prebuild": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "npm run compile",
     "print": "hardhat help",
     "watch": "npm run compile:watch",
