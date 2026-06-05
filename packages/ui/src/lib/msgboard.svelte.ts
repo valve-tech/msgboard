@@ -10,10 +10,10 @@ import { rpcs, type ChainOption, defaultCustomChain, needsProxy } from './rpc.sv
 
 const worker = new Worker()
 
-let defaultChainOption: ChainOption = 'pulsechainV4'
+let defaultChainOption: ChainOption = 'pulsechain'
 
 try {
-  defaultChainOption = (localStorage.getItem('chainOption') as ChainOption) ?? 'pulsechainV4'
+  defaultChainOption = (localStorage.getItem('chainOption') as ChainOption) ?? 'pulsechain'
 } catch {}
 
 export class ChainState {

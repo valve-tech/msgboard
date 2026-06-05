@@ -71,14 +71,8 @@
     </h1>
 
     <p class="max-w-md px-2 text-sm font-light text-gray-400 text-pretty sm:max-w-xl sm:text-lg md:text-xl">
-      Unstoppable, ephemeral messaging for any app — no gas, no token, no account.
+      Unstoppable, ephemeral messaging for any app.<br />No gas, no token, no account.
     </p>
-
-    <!-- proof-of-work "stamp" motif (honest: states the mechanism, not a fabricated message) -->
-    <div class="flex items-center gap-2 font-mono text-[10px] text-amber-300/80 sm:text-sm">
-      <span class="size-2 rounded-full bg-amber-400 motion-safe:animate-pulse"></span>
-      proof-of-work stamped · no gas
-    </div>
 
     <div class="flex flex-col items-center gap-2">
       <span class="text-[10px] uppercase tracking-[0.2em] text-white/40">Supported on</span>
