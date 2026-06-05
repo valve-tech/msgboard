@@ -82,7 +82,7 @@
 
 <div class="flex flex-col gap-4">
   <div class="flex flex-wrap items-center justify-between gap-3">
-    <h2 class="text-2xl font-bold text-slate-900 dark:text-gray-100">JSON-RPC methods</h2>
+    <h2 id="json-rpc-methods" class="scroll-mt-16 text-2xl font-bold text-slate-900 dark:text-gray-100">JSON-RPC methods</h2>
     <a
       href={playgroundUrl}
       target="_blank"
@@ -141,7 +141,7 @@
     </div>
   {/each}
 
-  <h2 class="mt-6 text-2xl font-bold text-slate-900 dark:text-gray-100">Schemas</h2>
+  <h2 id="schemas" class="mt-6 scroll-mt-16 text-2xl font-bold text-slate-900 dark:text-gray-100">Schemas</h2>
 
   {#each Object.entries(schemas) as [name, schema]}
     <div
