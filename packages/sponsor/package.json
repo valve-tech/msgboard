@@ -17,6 +17,7 @@
   },
   "type": "module",
   "dependencies": {
+    "@msgboard/relayer": "^0.0.1",
     "@msgboard/sdk": "^0.0.28",
     "@types/pg": "^8.11.11",
     "pg": "^8.14.1",
