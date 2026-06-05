@@ -72,6 +72,8 @@ board.getDifficulty('0x...') // bigint
 
 `workMultiplier` and `workDivisor` come from `status()` and are applied automatically by `doPoW`.
 
+Because each node validates incoming messages against **its own** current factors, these two numbers are also an implicit board-level setting, not just a per-message cost. Raising the required work — a higher `workMultiplier`, or a lower `workDivisor` — makes the board reject any message whose proof of work falls below the new threshold, so it accumulates **fewer** messages; loosening them admits **more**. Operators tune the same two knobs to trade spam-resistance against message volume. A client must therefore grind against the board's **live** factors (which `doPoW` reads from `status()`): work that was valid under looser settings can be rejected once a board tightens them.
+
 ## Categories
 
 A category is a 32-byte hash. Pass a string and the client hashes it for you (`categoryHash`); pass hex and it is used as-is. The demo board uses the `gasmoneyplease` category.
@@ -307,7 +309,7 @@ These run in the client, not on the node, so they are not in the OpenRPC spec:
 
 ## Machine-readable spec
 
-The JSON-RPC surface is published as an OpenRPC document at `openrpc.json` in this package. Point the OpenRPC Playground or a code generator at it.
+The JSON-RPC surface is published as an OpenRPC document — [`openrpc.json`](https://github.com/valve-tech/msgboard/blob/master/packages/sdk/openrpc.json) — in this package. Point the [OpenRPC Playground](https://playground.open-rpc.org/) or a code generator at it.
 
 ## License
 
