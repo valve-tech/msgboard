@@ -14,6 +14,12 @@ packages/foundry/out/
 packages/foundry/cache/
 packages/foundry/lib/
 
+# Yarn artifacts: this repo is npm-managed (package-lock.json is the lockfile).
+# Reject stray Yarn 4 / Plug'n'Play files so a `yarn` run can't be committed.
+.yarn/
+.pnp.*
+yarn.lock
+
 # --- excluded from the public valve-tech repo (kept local) ---
 # private deployment infra (msgboard.xyz ops)
 deploy/
