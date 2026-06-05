@@ -2,11 +2,19 @@
 
 Updated: 2026-06-05
 
-## SESSION 2026-06-05: @msgboard/relayer package
+## SESSION 2026-06-05: @msgboard/relayer package — COMPLETE + PUBLISHED
 
 ### Accomplished
 Built and shipped `@msgboard/relayer` (packages/relayer) — a controllable, safe-by-default
 pool-watcher engine. All 20 tasks complete; 12 test files, 39 tests, all green.
+
+`@msgboard/relayer@0.0.1` is LIVE on npm (verified: `npm view @msgboard/relayer`). Published
+via OpenID Connect trusted publishing on tag `v0.0.1-rc2` (run 27038182699, 51s, all green).
+The `v0.0.1` tag triggered the same workflow but hit a registry-read-lag race: the bootstrap
+publish had just landed so `npm view` returned non-zero, fell through to a re-publish attempt,
+and failed with "cannot publish over". Fixed the idempotency check in `.github/workflows/publish.yml`
+(fallback: if publish fails AND `npm view` NOW succeeds, treat as success). The `v0.0.1-rc2` tag
+re-ran with the fixed workflow and all four packages were correctly skipped as "already published".
 
 **Package contents:**
 - `Relayer<T>` class: `start()` / `stop()` / `runOnce()`. Safe by default — no outbound side
@@ -38,10 +46,10 @@ validated and coerced to bounded integers before interpolation into SQL.
 - `postgresStore` exposes a `migrate()` method; callers call it once at startup (no auto-migrate).
 
 ### Next
-- Version bump: `@msgboard/relayer` is 0.0.1. Ready to add to the OIDC publish set.
-- Bump `packages/core/package.json` version if API surface changed (check before publish).
-- Tag `vX.Y.Z` on master to trigger the OpenID Connect npm publish workflow for `@msgboard/relayer`.
 - Archivist + gas sponsor require a running Postgres — document in deploy ansible vars.
+- Node 20 action deprecation warning in publish.yml (actions/checkout@v4, actions/setup-node@v4).
+  GitHub forces Node 24 on 2026-09-16. Bump to @v5 before then (low urgency, no functional impact yet).
+- examples/ viem-adapter + forge cheatcode (parked — see "PARKED" note below).
 
 ## SESSION 2026-06-04: npm OIDC, package-manager fix, hero redesign, dev links
 PUBLISH (npm OIDC trusted publishing): publish.yml rewritten for OpenID Connect — id-token:write,
