@@ -5,14 +5,17 @@
   import Footer from '../components/Footer.svelte'
 
   const md = new MarkdownIt({ html: false, linkify: true, breaks: false })
-  const html = md.render(readme)
+  // Strip HTML comments (e.g. the GENERATED:OPENRPC anchor markers) before rendering.
+  // With html:false, markdown-it treats `<!-- ... -->` as literal text and would
+  // otherwise print the markers verbatim in the page.
+  const html = md.render(readme.replace(/<!--[\s\S]*?-->/g, ''))
 </script>
 
 <div class="mx-auto max-w-3xl px-4 py-12">
   <div class="flex items-center justify-between text-sm">
     <a href="#/" class="text-indigo-600 dark:text-indigo-400 hover:underline">← Back to home</a>
     <a
-      href="https://gitlab.com/pulsechaincom/msgboard/"
+      href="https://github.com/valve-tech/msgboard"
       target="_blank"
       rel="noopener noreferrer"
       class="text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline">Source ↗</a>
