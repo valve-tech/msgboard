@@ -35,9 +35,9 @@ jobs:
       id-token: write   # mint the OpenID Connect token npm exchanges for publish rights
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           registry-url: 'https://registry.npmjs.org'
