@@ -1,4 +1,4 @@
-import { createPublicClient, http } from 'viem'
+import { createPublicClient, type Transport } from 'viem'
 import { MsgBoardClient, type Provider } from '@msgboard/sdk'
 import { resolveChain } from './chains.js'
 import { defaultLogger, type Logger } from './logger.js'
@@ -7,16 +7,29 @@ import type { RelayerConfig, RelayerContext, RelayerMode, TickReport } from './t
 const DEFAULT_INTERVAL_MS = 30_000
 const DEFAULT_PRUNE_EVERY_TICKS = 30
 
+/** Calls eth_chainId on the node and returns the numeric chain id. */
+const detectChainId = async (transport: Transport): Promise<number> => {
+  const probe = createPublicClient({ transport })
+  return probe.getChainId()
+}
+
 /** Builds the runtime context (viem + SDK clients) for a relayer config. */
-const buildContext = <T>(config: RelayerConfig<T>, logger: Logger): RelayerContext => {
-  const chain = resolveChain(config.node.chainId)
-  const publicClient = createPublicClient({
-    chain,
-    transport: http(config.node.rpcUrl, { timeout: 30_000 }),
-  })
+const buildContext = async <T>(config: RelayerConfig<T>, logger: Logger): Promise<RelayerContext> => {
+  const node = config.node
+  const chain = node.chain ?? await (async () => {
+    const id = await detectChainId(node.transport)
+    try {
+      return resolveChain(id)
+    } catch {
+      throw new Error(
+        `detected chain ${id} from the node is not a known network — pass node.chain explicitly to support it`,
+      )
+    }
+  })()
+  const publicClient = createPublicClient({ chain, transport: node.transport })
   const client = new MsgBoardClient(publicClient as unknown as Provider)
   return {
-    node: config.node,
+    node,
     mode: config.mode ?? 'observe',
     chain,
     publicClient,
@@ -48,7 +61,7 @@ const sleep = (ms: number, signal: AbortSignal): Promise<void> => {
 export class Relayer<T> {
   private readonly config: RelayerConfig<T>
   private readonly logger: Logger
-  private readonly context: RelayerContext
+  private contextPromise: Promise<RelayerContext> | null = null
   private readonly intervalMs: number
   private readonly pruneEveryTicks: number
   private tickCount = 0
@@ -59,17 +72,24 @@ export class Relayer<T> {
   constructor(config: RelayerConfig<T>) {
     this.config = config
     this.logger = config.logger ?? defaultLogger('relayer')
-    this.context = buildContext(config, this.logger)
     this.intervalMs = config.intervalMs ?? DEFAULT_INTERVAL_MS
     this.pruneEveryTicks = config.pruneEveryTicks ?? DEFAULT_PRUNE_EVERY_TICKS
   }
 
   get mode(): RelayerMode {
-    return this.context.mode
+    return this.config.mode ?? 'observe'
+  }
+
+  private ensureContext(): Promise<RelayerContext> {
+    if (!this.contextPromise) {
+      this.contextPromise = buildContext(this.config, this.logger)
+    }
+    return this.contextPromise
   }
 
   /** Runs a single tick and returns a report. Used by tests and one-shot runs. */
   async runOnce(): Promise<TickReport> {
+    const ctx = await this.ensureContext()
     const report: TickReport = {
       polled: 0,
       recorded: 0,
@@ -78,10 +98,10 @@ export class Relayer<T> {
       described: 0,
       deduped: 0,
     }
-    const items = await this.config.source.poll(this.context)
+    const items = await this.config.source.poll(ctx)
     report.polled = items.length
     for (const item of items) {
-      await this.handleItem(item, report)
+      await this.handleItem(item, report, ctx)
     }
     this.tickCount += 1
     await this.maybePrune()
@@ -119,28 +139,29 @@ export class Relayer<T> {
     }
   }
 
-  private async handleItem(item: T, report: TickReport): Promise<void> {
-    await this.recordItem(item, report)
-    const eligible = await this.isEligible(item)
+  private async handleItem(item: T, report: TickReport, ctx: RelayerContext): Promise<void> {
+    await this.recordItem(item, report, ctx)
+    const eligible = await this.isEligible(item, ctx)
     if (!eligible.proceed) {
       if (eligible.reason === 'deduped') report.deduped += 1
       return
     }
     report.eligible += 1
-    await this.actOnItem(item, report)
+    await this.actOnItem(item, report, ctx)
   }
 
-  private async recordItem(item: T, report: TickReport): Promise<void> {
+  private async recordItem(item: T, report: TickReport, ctx: RelayerContext): Promise<void> {
     if (!this.config.sink) return
-    await this.config.sink.record(item, this.context)
+    await this.config.sink.record(item, ctx)
     report.recorded += 1
   }
 
   private async isEligible(
     item: T,
+    ctx: RelayerContext,
   ): Promise<{ proceed: boolean; reason?: 'condition' | 'deduped' }> {
     if (this.config.condition) {
-      const ok = await this.config.condition(item, this.context)
+      const ok = await this.config.condition(item, ctx)
       if (!ok) return { proceed: false, reason: 'condition' }
     }
     if (this.config.store) {
@@ -150,14 +171,14 @@ export class Relayer<T> {
     return { proceed: true }
   }
 
-  private async actOnItem(item: T, report: TickReport): Promise<void> {
-    if (this.context.mode === 'observe') {
-      this.logger('observe: %s', this.config.action.describe(item, this.context))
+  private async actOnItem(item: T, report: TickReport, ctx: RelayerContext): Promise<void> {
+    if (ctx.mode === 'observe') {
+      this.logger('observe: %s', this.config.action.describe(item, ctx))
       report.described += 1
       return
     }
     try {
-      const result = await this.config.action.execute(item, this.context)
+      const result = await this.config.action.execute(item, ctx)
       report.executed += 1
       if (this.config.store) {
         await this.config.store.remember(this.config.key(item), result)

@@ -1,5 +1,5 @@
 import pg from 'pg'
-import { type Hex, isAddress } from 'viem'
+import { http, type Hex, isAddress } from 'viem'
 import { mnemonicToAccount } from 'viem/accounts'
 import type { RPCMessage } from '@msgboard/sdk'
 import {
@@ -31,7 +31,7 @@ const main = async () => {
   console.log('sponsoring with %o (mode=%s)', account.address, mode)
 
   const relayer = new Relayer<RPCMessage>({
-    node: { rpcUrl, chainId: 943 },
+    node: { transport: http(rpcUrl) },
     mode,
     intervalMs: 20_000,
     source: msgboardContentSource({ category: 'gasmoneyplease' }),

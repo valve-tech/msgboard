@@ -21,7 +21,7 @@ const fakePool = (
   }
 }
 
-const ctx = { node: { chainId: 943, rpcUrl: '' } } as unknown as RelayerContext
+const ctx = { chain: { id: 943 } } as unknown as RelayerContext
 
 const message = (over: Partial<RPCMessage> = {}): RPCMessage =>
   ({

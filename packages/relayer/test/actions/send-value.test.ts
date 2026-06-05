@@ -22,7 +22,7 @@ describe('sendValueAction', () => {
     const waitForTransactionReceipt = vi.fn(async () => ({ transactionHash: '0xtx' }))
     const ctx = {
       chain: { id: 943 },
-      node: { rpcUrl: 'http://localhost' },
+      node: { transport: {} as never },
       publicClient: { waitForTransactionReceipt },
     } as unknown as RelayerContext
     const action = sendValueAction<string>({

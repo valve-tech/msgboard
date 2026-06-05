@@ -8,15 +8,14 @@
  *   DATABASE_URL   Postgres connection string
  *
  * Optional env vars:
- *   MSGBOARD_RPC   JSON-RPC endpoint (defaults to public demo node)
- *   CHAIN_ID       Chain identifier (defaults to 943 — PulseChain testnet v4)
+ *   MSGBOARD_RPC   JSON-RPC endpoint (defaults to public demo node on PulseChain mainnet)
  */
 import pg from 'pg'
+import { http } from 'viem'
 import { Relayer, msgboardContentSource, postgresArchiveSink, noopAction } from '@msgboard/relayer'
 import type { RPCMessage } from '@msgboard/sdk'
 
-const rpcUrl = process.env.MSGBOARD_RPC ?? 'https://one.valve.city/rpc/vk_demo/evm/943'
-const chainId = Number(process.env.CHAIN_ID ?? 943)
+const rpcUrl = process.env.MSGBOARD_RPC ?? 'https://one.valve.city/rpc/vk_demo/evm/369'
 const dbUrl = process.env.DATABASE_URL
 
 if (!dbUrl) {
@@ -29,7 +28,7 @@ const archive = postgresArchiveSink({ pool, retention: { days: 365 } })
 await archive.migrate()
 
 const relayer = new Relayer<RPCMessage>({
-  node: { rpcUrl, chainId },
+  node: { transport: http(rpcUrl) },
   mode: 'observe', // sink always runs; 'observe' means action.execute is skipped
   intervalMs: 20_000,
   source: msgboardContentSource(),
@@ -39,4 +38,4 @@ const relayer = new Relayer<RPCMessage>({
 })
 
 relayer.start()
-console.log(`archivist running on chain ${chainId} (${rpcUrl})`)
+console.log(`archivist started — rpc: ${rpcUrl}`)

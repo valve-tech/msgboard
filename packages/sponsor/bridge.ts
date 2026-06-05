@@ -1,4 +1,4 @@
-import type { Address } from 'viem'
+import { http, type Address } from 'viem'
 import { pulsechain, pulsechainV4 } from 'viem/chains'
 import {
   Relayer,
@@ -34,7 +34,7 @@ const startForChain = (chainId: number): void => {
     return
   }
   const relayer = new Relayer<Address>({
-    node: { rpcUrl: rpcByChain[chainId], chainId },
+    node: { transport: http(rpcByChain[chainId]) },
     mode,
     intervalMs: 120_000,
     source: bridgeAffirmationSource({ bridgeAddress: bridgeByChain[chainId] }),

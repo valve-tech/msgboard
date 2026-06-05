@@ -1,3 +1,5 @@
+import { http } from 'viem'
+import { pulsechainV4 } from 'viem/chains'
 import { describe, expect, it, vi } from 'vitest'
 import { Relayer } from '../src/relayer.js'
 import type { RelayerConfig } from '../src/types.js'
@@ -5,7 +7,7 @@ import type { RelayerConfig } from '../src/types.js'
 type Item = { id: string }
 
 const baseConfig = (over: Partial<RelayerConfig<Item>>): RelayerConfig<Item> => ({
-  node: { rpcUrl: 'http://localhost:8545', chainId: 943 },
+  node: { transport: http('http://localhost:8545'), chain: pulsechainV4 },
   source: { poll: async () => [{ id: 'a' }] },
   action: {
     describe: (item) => `would act on ${item.id}`,

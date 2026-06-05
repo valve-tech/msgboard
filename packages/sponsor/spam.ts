@@ -1,3 +1,4 @@
+import { http } from 'viem'
 import { mainnet, pulsechain, pulsechainV4 } from 'viem/chains'
 import { Relayer, generatedSource, noopStore, submitMessageAction } from '@msgboard/relayer'
 
@@ -40,7 +41,7 @@ const sentence = (): string => {
 const mode = process.env.SPAM_OBSERVE ? 'observe' : 'live'
 
 const relayer = new Relayer<Post>({
-  node: { rpcUrl, chainId },
+  node: { transport: http(rpcUrl) },
   mode,
   intervalMs,
   source: generatedSource(() => ({ category: pick(categoryNames), text: sentence() })),

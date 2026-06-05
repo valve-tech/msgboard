@@ -100,7 +100,7 @@ export const postgresArchiveSink = (
        ON CONFLICT (hash, chain_id) DO NOTHING`,
       [
         message.hash,
-        context.node.chainId,
+        context.chain.id,
         message.category,
         tryDecodeText(message.category),
         message.data,
