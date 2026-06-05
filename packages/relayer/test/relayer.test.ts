@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Relayer } from '../src/relayer.js'
-import type { RelayerConfig, RelayerContext } from '../src/types.js'
+import type { RelayerConfig } from '../src/types.js'
 
 type Item = { id: string }
 
@@ -93,5 +93,52 @@ describe('Relayer.runOnce', () => {
     const report = await relayer.runOnce()
     expect(execute).toHaveBeenCalledTimes(1)
     expect(report.eligible).toBe(1)
+  })
+})
+
+describe('Relayer lifecycle', () => {
+  it('start() runs ticks until stop() and stop awaits the in-flight tick', async () => {
+    let polls = 0
+    const relayer = new Relayer(
+      baseConfig({
+        mode: 'observe',
+        intervalMs: 5,
+        source: {
+          poll: async () => {
+            polls += 1
+            return [{ id: 'a' }]
+          },
+        },
+      }),
+    )
+    relayer.start()
+    await new Promise((r) => setTimeout(r, 30))
+    await relayer.stop()
+    const seen = polls
+    await new Promise((r) => setTimeout(r, 30))
+    expect(polls).toBe(seen) // no ticks after stop
+    expect(seen).toBeGreaterThan(1)
+  })
+
+  it('start() is idempotent (a second call does not start a second loop)', async () => {
+    let polls = 0
+    const relayer = new Relayer(
+      baseConfig({
+        mode: 'observe',
+        intervalMs: 5,
+        source: {
+          poll: async () => {
+            polls += 1
+            return []
+          },
+        },
+      }),
+    )
+    relayer.start()
+    relayer.start()
+    await new Promise((r) => setTimeout(r, 30))
+    await relayer.stop()
+    // a single loop at 5ms over ~30ms yields far fewer than a doubled loop would
+    expect(polls).toBeLessThan(12)
   })
 })

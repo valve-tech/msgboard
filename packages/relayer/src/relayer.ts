@@ -25,6 +25,22 @@ const buildContext = <T>(config: RelayerConfig<T>, logger: Logger): RelayerConte
   }
 }
 
+/** Resolves after `ms`, or immediately if the signal aborts. */
+const sleep = (ms: number, signal: AbortSignal): Promise<void> => {
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve()
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    const onAbort = () => {
+      clearTimeout(timer)
+      resolve()
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
 /**
  * A controllable pool-watcher. Safe by default: in `observe` mode it records and
  * logs what it would do, but performs no outbound side effect.
@@ -33,11 +49,12 @@ export class Relayer<T> {
   private readonly config: RelayerConfig<T>
   private readonly logger: Logger
   private readonly context: RelayerContext
-  // Stored for the lifecycle loop introduced in Task 3 (`start()`); not yet read here.
-  // @ts-expect-error -- consumed by start() in a later task
   private readonly intervalMs: number
   private readonly pruneEveryTicks: number
   private tickCount = 0
+  private running = false
+  private loopPromise: Promise<void> | null = null
+  private abort: AbortController | null = null
 
   constructor(config: RelayerConfig<T>) {
     this.config = config
@@ -69,6 +86,37 @@ export class Relayer<T> {
     this.tickCount += 1
     await this.maybePrune()
     return report
+  }
+
+  /** Begins the poll loop. Idempotent — a second call is a no-op while running. */
+  start(): void {
+    if (this.running) return
+    this.running = true
+    this.abort = new AbortController()
+    const signal = this.abort.signal
+    this.loopPromise = this.loop(signal)
+  }
+
+  /** Stops the loop and awaits the in-flight tick. */
+  async stop(): Promise<void> {
+    if (!this.running) return
+    this.running = false
+    this.abort?.abort()
+    await this.loopPromise
+    this.loopPromise = null
+    this.abort = null
+  }
+
+  private async loop(signal: AbortSignal): Promise<void> {
+    while (!signal.aborted) {
+      try {
+        await this.runOnce()
+      } catch (error) {
+        this.logger('tick failed: %o', error instanceof Error ? error.message : error)
+      }
+      if (signal.aborted) return
+      await sleep(this.intervalMs, signal)
+    }
   }
 
   private async handleItem(item: T, report: TickReport): Promise<void> {
