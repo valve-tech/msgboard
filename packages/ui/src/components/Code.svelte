@@ -1,24 +1,8 @@
 <!-- @component Code Block based on: https://shiki.style/ -->
 
 <script module>
-  import { createHighlighterCoreSync } from 'shiki/core';
-  import { createJavaScriptRegexEngine } from 'shiki/engine/javascript';
-  // Themes
-  // https://shiki.style/themes
-  import themeDarkPlus from 'shiki/themes/dark-plus.mjs';
-  // Languages
-  // https://shiki.style/languages
-  import shell from 'shiki/langs/shell.mjs';
-  import typescript from 'shiki/langs/typescript.mjs';
-  import json from 'shiki/langs/json.mjs';
-  // https://shiki.style/guide/sync-usage
-  const shiki = createHighlighterCoreSync({
-    engine: createJavaScriptRegexEngine(),
-    // Implement your import theme.
-    themes: [themeDarkPlus],
-    // Implement your imported and supported languages.
-    langs: [shell, typescript, json]
-  });
+  // Shared shiki instance (also used by the docs markdown renderer).
+  import { shiki } from '../lib/highlighter';
 </script>
 
 <script lang="ts">
