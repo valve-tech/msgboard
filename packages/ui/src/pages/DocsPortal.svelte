@@ -1,14 +1,25 @@
 <script lang="ts">
   import MarkdownIt from 'markdown-it'
-  import { readme } from '../lib/docs-content.generated'
+  import { readme, openrpc } from '../lib/docs-content.generated'
   import Docs from '../components/Docs.svelte'
   import Footer from '../components/Footer.svelte'
+  import OpenRpcReference from '../components/OpenRpcReference.svelte'
 
   const md = new MarkdownIt({ html: false, linkify: true, breaks: false })
-  // Strip HTML comments (e.g. the GENERATED:OPENRPC anchor markers) before rendering.
-  // With html:false, markdown-it treats `<!-- ... -->` as literal text and would
-  // otherwise print the markers verbatim in the page.
-  const html = md.render(readme.replace(/<!--[\s\S]*?-->/g, ''))
+  // Strip HTML comments (e.g. the GENERATED:OPENRPC anchor markers) so html:false
+  // markdown-it doesn't print them as literal text.
+  const stripComments = (s: string) => s.replace(/<!--[\s\S]*?-->/g, '')
+
+  // Split the README around the generated OpenRPC block: the prose stays markdown,
+  // but the reference is rendered by the structured <OpenRpcReference> component
+  // (built from the same `openrpc` object), not as flat markdown tables.
+  const START = '<!-- GENERATED:OPENRPC:START -->'
+  const END = '<!-- GENERATED:OPENRPC:END -->'
+  const startIdx = readme.indexOf(START)
+  const endIdx = readme.indexOf(END)
+  const hasBlock = startIdx >= 0 && endIdx > startIdx
+  const beforeHtml = md.render(stripComments(hasBlock ? readme.slice(0, startIdx) : readme))
+  const afterHtml = hasBlock ? md.render(stripComments(readme.slice(endIdx + END.length))) : ''
 </script>
 
 <div class="mx-auto max-w-3xl px-4 py-12">
@@ -21,8 +32,16 @@
       class="text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline">Source ↗</a>
   </div>
   <article class="docs-prose mt-6 text-slate-800 dark:text-gray-200">
-    {@html html}
+    {@html beforeHtml}
   </article>
+  {#if hasBlock}
+    <div class="mt-8">
+      <OpenRpcReference {openrpc} />
+    </div>
+    <article class="docs-prose mt-8 text-slate-800 dark:text-gray-200">
+      {@html afterHtml}
+    </article>
+  {/if}
 </div>
 
 <section class="border-t border-gray-200 dark:border-gray-700">
