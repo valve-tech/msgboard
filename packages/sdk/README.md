@@ -307,6 +307,32 @@ These run in the client, not on the node, so they are not in the OpenRPC spec:
 - `getDifficulty(data)` — the difficulty for a given payload, as a `bigint`.
 - Utilities: `categoryHash`, `checkWork`, `difficulty`, `encodeData`, `toRLP`, `fromRLP`, `fromRPCMessage`, `toRPCMessage`, `wrapLegacySend`.
 
+## Building automations
+
+For server-side work — polling continuously, reacting to specific categories, archiving messages, triggering cross-chain actions — install the companion relayer package:
+
+```sh
+npm i @msgboard/relayer
+```
+
+```ts
+import { Relayer, msgboardContentSource, noopAction } from '@msgboard/relayer'
+import type { RPCMessage } from '@msgboard/sdk'
+
+const relayer = new Relayer<RPCMessage>({
+  node: { rpcUrl: 'https://one.valve.city/rpc/vk_demo/evm/943', chainId: 943 },
+  source: msgboardContentSource({ category: 'myapp' }),
+  key: (msg) => msg.hash,
+  action: noopAction(),
+  // mode defaults to 'observe' — swap in webhookAction or submitMessageAction and set
+  // mode: 'live' to execute real effects
+})
+
+relayer.start()
+```
+
+`Relayer` polls on a configurable heartbeat, deduplicates via a pluggable store (in-memory, Postgres), records everything to an optional archive sink regardless of mode, and gates `action.execute` on `mode: 'live'`. See the [`@msgboard/relayer`](https://www.npmjs.com/package/@msgboard/relayer) package for the full API, built-in sources/actions, and runnable examples.
+
 ## Machine-readable spec
 
 The JSON-RPC surface is published as an OpenRPC document — [`openrpc.json`](https://github.com/valve-tech/msgboard/blob/master/packages/sdk/openrpc.json) — in this package, and hosted at [`msgboard.xyz/openrpc.json`](https://msgboard.xyz/openrpc.json). Open it in the [OpenRPC Playground](https://playground.open-rpc.org/?schemaUrl=https%3A%2F%2Fmsgboard.xyz%2Fopenrpc.json) (it loads automatically), or point a code generator at the hosted spec.
