@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "tsc --noEmit",
     "viem-demo": "tsx src/viem-demo.ts",
     "archivist": "tsx src/archivist.ts"
   },
