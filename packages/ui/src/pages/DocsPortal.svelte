@@ -4,7 +4,9 @@
   import Docs from '../components/Docs.svelte'
   import Footer from '../components/Footer.svelte'
   import OpenRpcReference from '../components/OpenRpcReference.svelte'
+  import SideToc from '../components/SideToc.svelte'
   import { highlightToHtml } from '../lib/highlighter'
+  import { slugify } from '../lib/section-nav'
 
   // Highlight fenced code blocks with the same shiki instance as <Code>, so the
   // prose snippets (viem/ethers quickstart, etc.) are highlighted, not plain.
@@ -14,6 +16,11 @@
     breaks: false,
     highlight: (code, lang) => highlightToHtml(code, lang),
   })
+  // give every heading a stable id so the side table of contents can scroll to it
+  md.renderer.rules.heading_open = (tokens, idx, options, env, self) => {
+    tokens[idx].attrSet('id', slugify(tokens[idx + 1]?.content ?? ''))
+    return self.renderToken(tokens, idx, options)
+  }
   // Strip HTML comments (e.g. the GENERATED:OPENRPC anchor markers) so html:false
   // markdown-it doesn't print them as literal text.
   const stripComments = (s: string) => s.replace(/<!--[\s\S]*?-->/g, '')
@@ -28,7 +35,27 @@
   const hasBlock = startIdx >= 0 && endIdx > startIdx
   const beforeHtml = md.render(stripComments(hasBlock ? readme.slice(0, startIdx) : readme))
   const afterHtml = hasBlock ? md.render(stripComments(readme.slice(endIdx + END.length))) : ''
+
+  // build the side-TOC list from the README H2 headings, with the structured
+  // OpenRPC sections slotted in where the generated block sits.
+  const headings = (markdown: string) =>
+    markdown
+      .split('\n')
+      .filter((line) => line.startsWith('## '))
+      .map((line) => line.slice(3).trim())
+  const docSections = [
+    ...headings(hasBlock ? readme.slice(0, startIdx) : readme).map((t) => ({ id: slugify(t), label: t })),
+    ...(hasBlock
+      ? [
+          { id: 'json-rpc-methods', label: 'JSON-RPC methods' },
+          { id: 'schemas', label: 'Schemas' },
+        ]
+      : []),
+    ...headings(hasBlock ? readme.slice(endIdx + END.length) : '').map((t) => ({ id: slugify(t), label: t })),
+  ]
 </script>
+
+<SideToc sections={docSections} />
 
 <div class="mx-auto max-w-3xl px-4 py-12">
   <div class="flex items-center justify-between text-sm">
@@ -59,9 +86,9 @@
 <Footer />
 
 <style>
-  .docs-prose :global(h1) { font-size: 2rem; font-weight: 700; margin: 1.5rem 0 1rem; }
-  .docs-prose :global(h2) { font-size: 1.5rem; font-weight: 700; margin: 2rem 0 0.75rem; }
-  .docs-prose :global(h3) { font-size: 1.15rem; font-weight: 600; margin: 1.5rem 0 0.5rem; }
+  .docs-prose :global(h1) { font-size: 2rem; font-weight: 700; margin: 1.5rem 0 1rem; scroll-margin-top: 4rem; }
+  .docs-prose :global(h2) { font-size: 1.5rem; font-weight: 700; margin: 2rem 0 0.75rem; scroll-margin-top: 4rem; }
+  .docs-prose :global(h3) { font-size: 1.15rem; font-weight: 600; margin: 1.5rem 0 0.5rem; scroll-margin-top: 4rem; }
   .docs-prose :global(p) { margin: 0.75rem 0; line-height: 1.7; }
   .docs-prose :global(ul) { list-style: disc; padding-left: 1.5rem; margin: 0.75rem 0; }
   .docs-prose :global(a) { color: var(--color-indigo-600, #4f46e5); text-decoration: underline; }
