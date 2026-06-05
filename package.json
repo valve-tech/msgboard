@@ -7,7 +7,8 @@
     "packages/sdk",
     "packages/hardhat",
     "packages/ui",
-    "packages/sponsor"
+    "packages/sponsor",
+    "packages/relayer"
   ],
   "scripts": {
     "docker:build": "docker compose build",
@@ -22,6 +23,7 @@
     "ui:dev": "npm run dev --workspace=packages/ui",
     "sponsor:spam": "npm run spam --workspace=packages/sponsor",
     "sponsor:bridge": "npm run bridge --workspace=packages/sponsor",
-    "sponsor:start": "npm run start --workspace=packages/sponsor"
+    "sponsor:start": "npm run start --workspace=packages/sponsor",
+    "test:relayer": "npm run test --workspace=packages/relayer"
   }
 }
