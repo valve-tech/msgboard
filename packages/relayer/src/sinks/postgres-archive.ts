@@ -130,8 +130,8 @@ export const postgresArchiveSink = (
     if (filter.until) add('first_seen_at <= $?', filter.until.toISOString())
     if (filter.contains) add('content ILIKE $?', `%${filter.contains}%`)
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : ''
-    const limit = filter.limit ?? 100
-    const offset = filter.offset ?? 0
+    const limit = Math.min(Math.max(Number.parseInt(String(filter.limit ?? 100), 10) || 100, 1), 1000)
+    const offset = Math.max(Number.parseInt(String(filter.offset ?? 0), 10) || 0, 0)
     const { rows } = await pool.query(
       `SELECT hash, chain_id, category, category_text, data, content, block_number, block_hash, first_seen_at FROM message_archive ${where} ORDER BY first_seen_at DESC LIMIT ${limit} OFFSET ${offset}`,
       params,
