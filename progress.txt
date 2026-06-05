@@ -1,0 +1,555 @@
+# MsgBoard — Progress
+
+Updated: 2026-06-05
+
+## SESSION 2026-06-05: @msgboard/relayer package
+
+### Accomplished
+Built and shipped `@msgboard/relayer` (packages/relayer) — a controllable, safe-by-default
+pool-watcher engine. All 20 tasks complete; 12 test files, 39 tests, all green.
+
+**Package contents:**
+- `Relayer<T>` class: `start()` / `stop()` / `runOnce()`. Safe by default — no outbound side
+  effect unless mode is explicitly 'live'. AbortController-based stop with in-flight-tick drain.
+- Stores: `memoryTtlStore` (in-memory time-to-live), `postgresStore` (durable dedup), `noopStore`
+- Sinks: `postgresArchiveSink` (1-year `message_archive` table + `query()` surface),
+  `postgresSink` (generic durable record sink)
+- Sources: `msgboardContentSource`, `bridgeAffirmationSource` (at finalized block), `generatedSource`
+- Actions: `submitMessageAction` (PoW + addMessage), `sendValueAction` (native coin transfer),
+  `webhookAction`, `noopAction`
+- Public exports barrel (`src/index.ts`), full README with usage + known limitations
+
+**Security fix:** SQL injection guard added to `postgresArchiveSink.query()` — limit/offset now
+validated and coerced to bounded integers before interpolation into SQL.
+
+**Sponsor scripts refactored:**
+- `packages/sponsor/index.ts` → gas sponsor on the engine (Postgres dedup, 10-coin sendValue,
+  archive sink; `FAKE_TRANSFERS` env maps to `mode: 'observe'`)
+- `packages/sponsor/bridge.ts` → bridge watcher on the engine (per-chain Relayer, memory-ttl
+  dedup; now requires `BRIDGE_LIVE=1` for live mode — safe-by-default behaviour change)
+- `packages/sponsor/spam.ts` → spam writer on the engine (generatedSource + submitMessage +
+  noopStore; now requires `SPAM_OBSERVE=1` absent to run live; flip `SPAM_OBSERVE=1` to observe)
+
+### Key decisions
+- Archive owned by a dedicated archivist relayer (not bolted onto bridge watcher) because
+  bridge items are addresses and `RPCMessage` sink would be type-mismatched.
+- `RelayerStore<_T>` uses underscore prefix to satisfy `noUnusedLocals` while preserving the
+  generic for caller ergonomics — standard TypeScript convention.
+- `postgresStore` exposes a `migrate()` method; callers call it once at startup (no auto-migrate).
+
+### Next
+- Version bump: `@msgboard/relayer` is 0.0.1. Ready to add to the OIDC publish set.
+- Bump `packages/core/package.json` version if API surface changed (check before publish).
+- Tag `vX.Y.Z` on master to trigger the OpenID Connect npm publish workflow for `@msgboard/relayer`.
+- Archivist + gas sponsor require a running Postgres — document in deploy ansible vars.
+
+## SESSION 2026-06-04: npm OIDC, package-manager fix, hero redesign, dev links
+PUBLISH (npm OIDC trusted publishing): publish.yml rewritten for OpenID Connect — id-token:write,
+npm@latest (>=11.5.1) in-runner, NO NODE_AUTH_TOKEN/NPM_TOKEN (commit 2fb2b1c). Confirmed against npm
+docs: npm (unlike PyPI) needs a package to EXIST before a trusted publisher can be registered, so a
+one-time bootstrap publish is required. USER did the bootstrap publish locally (interactive npm login,
+NOT an automation token — they refused tokens) + set up GitHub Actions trusted publishers on npmjs.com
+(valve-tech / msgboard / publish.yml / blank env / npm publish). @msgboard/core,/sdk,/hardhat are
+PUBLISHED + PUBLIC. Helper left at scripts/bootstrap-npm-publish.sh (idempotent; bash 3.2-safe empty
+array idiom; --otp passthrough). Future releases: git tag vX.Y.Z -> publish.yml over OIDC.
+  Also: publish-readiness metadata fix (commit 095269d) — repository -> github:valve-tech/msgboard on
+  all 3, publishConfig.access public, license MIT on hardhat, prebuild "rmSync dist" (a stale
+  dist/openrpc.test.* would otherwise ship; bare tsc never deletes orphaned outputs).
+
+PACKAGE MANAGER (commit 38c1687): removed the committed `packageManager: yarn@4.x` field — it
+contradicted the repo (npm end-to-end: tracked package-lock.json, npm --workspace scripts, npm ci CI)
+and lured a `yarn` run that booted Yarn 4 PnP (.pnp.cjs/.pnp.loader.mjs/.yarn/) which evicted hoisted
+packages (vite, playwright "vanished"). Fix: deleted the PnP intruders, `npm ci` to restore
+node_modules, removed the field, gitignored .yarn/.pnp.*/yarn.lock. THE REPO IS npm, NOT yarn.
+
+HERO REDESIGN (commit f6f8d28, DEPLOYED): replaced the blue/purple gradient band (washed out on both
+the white and gray-950 page) with a deep ink panel that reads on both. Warm amber proof-of-work
+"stamp" theme: radial glow + dot-grid, flat dartboard mark (Icon mdi:bullseye-arrow, NOT the 3D emoji)
+in a stamp ring, mono "proof-of-work stamped · no gas" line, solid amber + ghost "Read the docs"
+buttons. Stacked layout: bullseye line / rotating word on its OWN fixed line / MsgBoard (so the suffix
+never jumps). Responsive type text-3xl..lg:text-7xl (smaller on mobile). Dropped the 943 hero icon
+(gib.show renders it with the PulseChain mark -> looked like a dup) and the white rings on network icons.
+
+DEV LINKS (commit f6369ff, DEPLOYED): GitHub (github.com/valve-tech/msgboard) + npm
+(npmjs.com/package/@msgboard/sdk) pill links under the "Happy Devs" section in Docs.svelte.
+
+DOCS PORTAL OVERHAUL (commits 44af53d, 748e968, 84a439e, a297405 — all DEPLOYED + live-verified):
+- 44af53d: fixed GENERATED:OPENRPC marker leaking as literal text (DocsPortal renders README with
+  markdown-it html:false, which prints `<!-- ... -->` verbatim) — strip HTML comments before render;
+  also repointed the docs "Source" link gitlab.com/pulsechaincom -> github.com/valve-tech.
+- 84a439e: NEW packages/ui/src/components/OpenRpcReference.svelte — renders the structured `openrpc`
+  object (already exported by docs-content.generated.ts, was unused) as method cards (param tables,
+  linked result types, collapsible shiki request/response examples) + a schema explorer whose $ref
+  types click-scroll to their definitions. DocsPortal splits the README on the GENERATED markers so
+  prose stays markdown but the reference region is the component. Replaces the old flat markdown.
+- 748e968 + a297405: README content — difficulty factors are an IMPLICIT BOARD CONFIG (see
+  [[msgboard-difficulty-board-config]] memory); linked openrpc.json + OpenRPC Playground; linked
+  valve.city + noted its endpoints are API-keyed (vk_demo = public demo key; see
+  [[valve-city-link-and-api-keys]] memory). Regenerate after README edits: `npm run gen:docs
+  --workspace @msgboard/sdk` (emits docs-content.generated.ts).
+- NOTE: svelte-check shows 2 PRE-EXISTING @types/glob/minimatch errors (node_modules) — unrelated.
+
+DOCS CODE HIGHLIGHTING (commit 4ac1ff1, DEPLOYED): the README prose code blocks rendered plain
+(markdown-it has no highlighter by default) while the <Code> examples were shiki-highlighted.
+Extracted the shiki instance to packages/ui/src/lib/highlighter.ts (used by BOTH <Code> and a
+markdown-it `highlight` fn, with ts/sh fence aliases); prose code is now highlighted too.
+
+OPENRPC PLAYGROUND ONE-CLICK (commit ea29065, DEPLOYED + verified end-to-end): the spec is hosted at
+msgboard.xyz/openrpc.json (gen:docs now also writes packages/ui/public/openrpc.json; vite serves it)
+and an "Open in OpenRPC Playground" button on the docs reference opens
+playground.open-rpc.org/?schemaUrl=<encoded msgboard.xyz/openrpc.json>. Param is `schemaUrl`.
+  CADDY/CORS GOTCHA: the playground fetches the spec cross-origin, so deploy/caddy/Caddyfile adds
+  `header /openrpc.json Access-Control-Allow-Origin "*"` to the msgboard.xyz block. BUT site.yml's
+  "Restart caddy" handler is only notified by the CERT tasks, NOT the Caddyfile sync, and Caddy does
+  not watch its bind-mounted config — so after a Caddyfile change you MUST restart caddy yourself:
+  `ssh -o IdentitiesOnly=yes -i ~/.ssh/msgboard_box_id_ed25519 root@88.99.62.98 'docker restart caddy'`
+  (run ssh INLINE — zsh does not word-split an `SSH="ssh -o ..."` variable, so `$SSH 'cmd'` fails with
+  "no such file or directory"). Verified: /openrpc.json -> 200 + access-control-allow-origin: *.
+
+SIDE TOC + DEEP LINKS (commit 69aab03, deploy bk13sslcn in flight): floating sticky table of contents
+on Home (7 sections) and Docs (12). New packages/ui/src/components/SideToc.svelte +
+packages/ui/src/lib/section-nav.ts (scrollToSection / get+setSectionParam / slugify). Home wraps each
+section in <section id=...>; DocsPortal gives README headings ids via a markdown-it heading_open rule
+(same slugify) and slots in the OpenRPC component h2 ids (json-rpc-methods, schemas). An
+IntersectionObserver drives the active HIGHLIGHT only; the URL's `?section=<id>` updates on CLICK
+(avoids a mid-scroll race). Deep links ride location.search, NOT the hash — the router
+(lib/page.svelte.ts) stores the WHOLE hash as route.id and matches it exactly (=== '/docs'), so a
+section in the hash would break routing; location.search is invisible to it. TOC is xl:block (hidden
+below 1280px). gotcha: harness LSP flagged window/document "unknown" in a plain .ts via the ROOT
+tsconfig (no dom lib) — false alarm; svelte-check uses tsconfig.app.json (has dom) and is clean.
+
+TOOLING NOTES: UI dev server is the USER's on :5173 (don't start your own; they said so). Screenshots:
+Chrome headless via `"/Applications/Google Chrome.app/.../Google Chrome" --headless=new
+--force-device-scale-factor=2 --virtual-time-budget --window-size=W,H --screenshot=out file://...`
+(playwright bundled-chromium version drifts; use channel:'chrome'; in zsh `status` is READ-ONLY so use
+another var name). `open <png>` shows it to the user (Read only shows ME the image).
+
+PARKED — examples/viem-adapter/forge-cheatcode design (decisions locked, NOT yet spec'd/built):
+target = BOTH gated-live (MSGBOARD_RPC) + deterministic, mirroring the foundry-integration CI job.
+viem: SDK is provider-agnostic (Provider.request); README passes a viem client directly; verify it
+type-checks + works, add fromViem() only if friction. forge: verify submit+raw end-to-end (run
+PostMessage.s.sol, confirm acceptance — Solidity CANNOT read the message back: vm.rpc objects are
+opaque ABI blobs + typed readers deferred; the read-back belongs in TS). on-chain PoW verification =
+a DETERMINISTIC REFERENCE most users never run (MsgPow.sol already byte-matches @msgboard/core on a
+golden vector). examples/ = a private workspace package @msgboard/examples (public-safe: demo key
+only), each demo runs vs a mock by default + live when MSGBOARD_RPC set. Other packages -> docs that
+point to examples/.
+
+## (older) Updated: 2026-06-03
+
+## UI REBRAND DEPLOYED TO msgboard.xyz (2026-06-04) + npm OIDC publish stream
+DEPLOY: the rebrand/hero/docs UI (in-tree since the initial commit but never shipped) is now LIVE.
+Ran deploy/ansible/site.yml (rsync local tree -> box -> docker rebuild). PLAY RECAP ok=22 failed=0;
+ui container rebuilt; msgboard.xyz now serves <title>Distributed MsgBoard</title> + new meta. All
+health probes green (board page, RPC proxy 405, faucet HTTPS).
+  GOTCHAS: (1) local deploy/ansible/inventory.ini still holds the REDACTED placeholder IP
+  203.0.113.10 (the publish-redaction sweep overwrote the local gitignored file too). Deploy with
+  `-e ansible_host=88.99.62.98` to override, OR put the real IP back locally (it's gitignored).
+  (2) In the Bash tool's zsh, `status` is READ-ONLY — `status=$?` errors and makes the whole command
+  exit 1 even when ansible succeeded (false-failure). Use a different var name.
+
+PUBLISH (npm OIDC trusted publishing; commit 2fb2b1c rewrote publish.yml):
+  publish.yml now uses OpenID Connect (id-token: write, npm@latest >=11.5.1, NO NODE_AUTH_TOKEN /
+  NPM_TOKEN). CONFIRMED against npm docs: npm (unlike PyPI) needs a package to EXIST before a trusted
+  publisher can be registered -> a one-time bootstrap publish is required. valvecitydev is owner of
+  the @msgboard npm org; logged in on this Mac (session token, not an automation token -> honors
+  "no automation token"). BUT account has 2FA-for-writes: `npm publish` returns EOTP and needs a
+  one-time password. BLOCKED awaiting user OTP; then publish core->sdk->hardhat with --otp=, then
+  user adds a GitHub Actions trusted publisher to each pkg on npmjs.com (valve-tech / msgboard /
+  publish.yml / blank env / npm publish), after which `git tag vX.Y.Z` publishes via OIDC.
+
+## CI ported to GitHub Actions + full tree re-verified GREEN (2026-06-03; commits 3ce09ad, b60801c)
+The publish stream described in the older blocks below as a GitLab ".gitlab-ci.yml" is now
+GitHub Actions. Two workflows live under .github/workflows/:
+  - ci.yml: 3 jobs. (1) node — npm ci, build core<-sdk<-hardhat(tsc), run the deterministic SDK
+    tests (openrpc + render-reference). (2) foundry — forge install forge-std + witnet
+    elliptic-curve-solidity (--no-git), forge build + test. (3) foundry-integration —
+    continue-on-error (non-blocking), live msgboard node at one.valve.city /evm/943.
+  - publish.yml: on a vX.Y.Z tag, idempotently publishes public @msgboard/core, /sdk, /hardhat
+    (skips any version already on npm). Needs repo secret NPM_TOKEN (npm automation token).
+  - b60801c also added packages/foundry test/PoWGate.t.sol (valid-work / invalid-work / replay
+    rejection gate example) + examples — all passing.
+RE-VERIFIED LOCALLY 2026-06-03 (node v24, forge present): node build chain all exit 0; SDK
+deterministic tests 6/6; foundry 8/8 (MsgPow 3, MsgBoard integration 2, PoWGate 3). Working tree
+clean, master == origin/master. Tree is SHIPPABLE.
+PUBLISH-READINESS FIX LANDED + PUSHED (2026-06-03; commit 095269d, signed valvecitydev,
+origin/master == master): repository -> github:valve-tech/msgboard on core/sdk (was the abandoned
+gitlab:pulsechaincom/msgboard) + hardhat (had none); publishConfig.access public on core/sdk;
+license MIT on hardhat; sdk author PulseChain -> MsgBoard; prebuild "rmSync dist" on all three (a
+stale dist/openrpc.test.* would otherwise ship — bare tsc never deletes orphaned outputs).
+VERIFIED green: all 3 build, sdk publish set is test-free, sdk deterministic tests 6/6.
+
+REMAINING is entirely HUMAN-GATED (cannot be done from this machine — gh here is gibsfinancedev,
+NOT valvecitydev who owns the private repo; npm token invalid):
+  (1) USER: review private repo, then flip PUBLIC (from a valvecitydev-authed gh:
+      gh repo edit valve-tech/msgboard --visibility public).
+  (2) USER one-time: create @msgboard npm org on npmjs.com, add a npm automation token as the
+      GitHub repo secret NPM_TOKEN (Settings -> Secrets and variables -> Actions).
+  (3) THEN: tag a release (git tag vX.Y.Z && git push origin vX.Y.Z) to fire publish.yml.
+  (4) optional: register valvecitydev signing key on GitHub for the Verified badge
+      (gh auth refresh -s admin:ssh_signing_key, as valvecitydev).
+  (5) post-launch MANUAL: npm deprecate @pulsechain/msgboard "moved to @msgboard/sdk".
+
+## MOVED + PUBLISHED (private) under valve-tech 2026-06-03
+Repo relocated: ~/Documents/3commascapital/gitlab/pulsechaincom/msgboard -> ~/Documents/valve-tech/github/msgboard.
+Identity auto-switched to valvecitydev (includeIf on ~/Documents/valve-tech/github/). Pushed to
+github.com/valve-tech/msgboard (PRIVATE) via SSH alias github.com-valvetech. HISTORY WIPED to a single
+signed initial commit (e31ba4c, valvecitydev). Pre-wipe .git backed up:
+~/Documents/valve-tech/github/.msgboard-prewipe-git-backup.tgz (5.2M) — restore if old history needed.
+SECURITY: no secrets ever committed (vault/origin.key/ui-mnemonic gitignored + never committed); prod box
+IP 88.99.62.98 redacted -> 203.0.113.10 across tree; deploy/ + the 2026-06-01 faucet-deploy spec/plan
+gitignored (kept LOCAL, NOT published — verified deploy/ 404 on remote). Memory dir copied to new path slug.
+REMAINING: (1) USER reviews private repo then flips PUBLIC (gh repo edit valve-tech/msgboard --visibility public);
+(2) optional: register valvecitydev signing key on GitHub for Verified badge (gh auth refresh -s admin:ssh_signing_key);
+(3) npm publish: create @msgboard npm org + NPM_TOKEN CI var, then tag vX.Y.Z to fire the publish stream;
+(4) old github 3commascapital/msgboard + gitlab pulsechaincom/msgboard still hold OLD history (untouched).
+
+## @msgboard brand + package restructure (Plan A + Plan B IMPLEMENTED + signed; publish/push TODO) 2026-06-03
+### PLAN A DONE (commits 4cc772f extract core, 6ef7c32 rename sdk, 93b317f hardhat, b0a30e4 CI) — all signed, on master, NOT pushed.
+  Verified: builds (core/sdk/hardhat-tsc/ui) all green; tests sdk 6/6 + hardhat 18/18.
+  Now: @msgboard/core@0.0.1 (packages/core), @msgboard/sdk@0.0.28 (packages/sdk, was @pulsechain/msgboard),
+  @msgboard/hardhat@0.0.1 (packages/hardhat, was private @pulsechain/hardhat-msgboard) — all public.
+  GOTCHAS handled: core had to be CommonJS (not ESM) so the CJS SDK can require it; hardhat
+  type-extensions.ts imported the SDK via a stale relative path '../../client/dist' (sed only caught
+  @pulsechain/msgboard strings) -> fixed to '@msgboard/sdk'. progress.txt is now gitignored (had infra notes).
+  REMAINING for the brand launch: (1) HUMAN: create @msgboard npm org + add NPM_TOKEN as a masked GitLab CI
+  var; (2) push + tag vX.Y.Z to trigger the publish stream; (3) Phase 5 MANUAL post-launch:
+  `npm deprecate @pulsechain/msgboard "moved to @msgboard/sdk"`. (Plan B Foundry library is DONE.)
+  Foundry forge lib publishes via git tag (forge install <repo>) — covered by the same vX.Y.Z tag; no npm needed.
+### (original planning note below)
+Decided: move TS tooling onto OWN brand npm scope @msgboard (confirmed available, even bare 'msgboard').
+Lineup: @msgboard/core (the PoW engine "msgpow", extracted from packages/client utils.ts+types.ts) <-
+@msgboard/sdk (MsgBoardClient, the renamed @pulsechain/msgboard) <- @msgboard/hardhat (un-private the
+existing private @pulsechain/hardhat-msgboard plugin). PLUS a Foundry library doing BOTH a vm.rpc
+cheatcode wrapper (MsgBoard.sol) AND a pure-Solidity msgpow verifier (MsgPow.sol).
+- Confirmed decisions: rename dirs (packages/client->packages/sdk, add packages/core); Foundry lives in
+  this monorepo (packages/foundry); versions CONTINUE 0.0.x (core/hardhat 0.0.1); deprecate (not delete)
+  @pulsechain/msgboard; doPoW orchestration stays in sdk (core = pure primitives).
+- Spec: docs/superpowers/specs/2026-06-03-msgboard-brand-and-packages-design.md
+- Split into TWO plans (independent subsystems):
+  - Plan A (WRITTEN): docs/superpowers/plans/2026-06-03-msgboard-brand-restructure.md — TS restructure
+    (extract core -> rename sdk + repoint ui/sponsor/hardhat consumers -> un-private hardhat) + GitLab CI
+    publish stream (.gitlab-ci.yml, publishes public @msgboard/* on a vX.Y.Z tag, idempotent).
+  - Plan B (DONE + signed: commits f2901cd scaffold, 118c6d4 MsgPow, e00ff5b MsgBoard, 471f85e CI): the
+    Foundry library at packages/foundry. MsgPow.sol = pure-Solidity msgpow verifier using Witnet
+    elliptic-curve-solidity (forge install witnet/elliptic-curve-solidity; remap to contracts/ NOT src/).
+    CRITICAL FIDELITY proven: test_workHash_matches_core asserts MsgPow.workHash byte-matches @msgboard/core
+    on a golden vector (gen via packages/foundry/script/gen-vectors.cjs at wm=1/wd=65536 -> difficulty 256,
+    nonce found instantly; embedded test/vectors/valid.json). digest=low128(sha256(wm8||wd8)); scalar k=
+    (nonce*digest+blockHash) mod n; X=minimal-big-endian bytes of (k*G).x; sha256(X||cat32||data)%diff==0.
+    ~700k gas/verify (ecMul). MsgBoard.sol = vm.rpc cheatcode helper (submit + raw); typed object-readers
+    DEFERRED (vm.rpc object-encoding needs a live-endpoint spike). 4 forge tests pass; CI foundry job added.
+    GOTCHA: secp256k1 PP literal had an extra F (65 digits) -> computed correct 64-hex via python.
+- LANDSCAPE FOUND on this machine: older standalone source craftsmanfounder_gitlab/msgboard/msgboard-npmpackage
+  (@pulsechain/msgboard v0.0.24, predecessor of packages/client) + msgboard-ui/msgboard-ui4 (scattered layers,
+  NOT consolidated, out of scope). Protocol = reth fork crates reth-msgboard + reth-msgboard-types.
+  @pulsechain/msgboard is the ONLY thing published on npm (0.0.28); msgpow/hardhat-* are not published.
+- HUMAN PREREQ (blocks real publishes): create @msgboard org on npmjs.com + add automation token as GitLab
+  CI masked var NPM_TOKEN.
+- Consumers of @pulsechain/msgboard to repoint: packages hardhat, sponsor, ui (deps + ~12 source imports).
+- NOT yet committed: the spec edit, Plan A, and this progress note are written but the 1Password SSH agent
+  idle-locked again -> awaiting unlock to sign. (gotcha: subagents canNOT sign in background; controller commits.)
+
+## Copy review + rebrand + hero redesign (DONE, build-verified + screenshotted; NOT yet committed/deployed) 2026-06-03
+Scope: honesty pass on user-facing copy, chain-agnostic rebrand, hero animation, decode-toggle default.
+- FALSE CLAIMS FIXED:
+  - SalesPitch.svelte: removed "Use MsgBoard with any App or chain via rpc.pulsechain.com. No fees."
+    (rpc.pulsechain.com does NOT serve msgboard_ — only valve.city does; the <Copy> handed out a
+    dead endpoint). Now: "Permissionless, Paid in Work" card — "no gas/token/account, you mint your
+    own proof-of-work stamp ... that stamp is the gate." Removed now-unused Copy import.
+  - ProtocolComparison.svelte: "Simple REST API & WebSocket" -> "Simple JSON-RPC API" (it's JSON-RPC,
+    NO websocket in packages/client — verified). uptime "Utilizes Crypto Network" -> "Backed by the
+    chain's nodes".
+- REBRAND "PulseChain MsgBoard" -> "Distributed MsgBoard" (chain-agnostic; app now serves 1/369/943).
+  User considered EVM/Private/Distributed; chose Distributed. (Private was REJECTED — would be a false
+  privacy claim; ProtocolComparison says metadata is exposed to the contact node.) Spots: Welcome h1
+  (now in hero), Footer copyright, NextSteps prose, index.html (added <title>, fixed meta description).
+  SalesPitch P2P line de-chained: "across PulseChain's P2P network" -> "across the peer-to-peer network".
+- RPC DEFAULT FIX: rpc.svelte.ts:56 chain 369 fallback rpc.pulsechain.com -> one.valve.city/rpc/vk_demo/evm/369
+  (rpcUrl field is documented as "the rpc url ... running msgboard"; rpc.pulsechain.com doesn't).
+  NOTE/LATENT: 943 default (rpc.v4.testnet.pulsechain.com) and 1 default (ethereum-rpc.publicnode.com)
+  have the SAME issue — left as-is (prod uses VITE_RPC_* from vault; user only OK'd 369).
+- HERO REDESIGN (Welcome.svelte rewrite): rotating prefix word cycling Permissionless -> Stamped by
+  Work -> Ephemeral -> Distributed, "MsgBoard" held static. Single-cell CSS grid (grid-area:1/1) so
+  in/out fly transitions overlap instead of doubling width. Gated on prefers-reduced-motion. Static
+  subtitle "Unstoppable, ephemeral messaging for any app." + "Supported on" row of gib.show coin
+  icons (369/1/943). Replaced the old typewriter effect.
+- DECODE TOGGLE DEFAULT: TreeView.svelte decodeAll default false->true (lines ~20 and ~30) so the
+  0x/txt toggle defaults to txt ("users don't need to know the guts"). Persisted user choice still wins.
+- VERIFIED: vite build passes (✓ 7.5s). Playwright screenshots (light/dark desktop + 390px mobile):
+  hero centers, rotating word + 3 chain icons render, mobile wraps cleanly, decode toggle shows txt.
+- NOT committed/deployed yet. Commit signing via 1Password (op SSH agent); NEVER --no-gpg-sign.
+
+## SDK + docs portal (DONE, build+review-verified; NOT pushed/deployed) 2026-06-03
+Brainstormed -> spec -> plan -> subagent-driven implementation (3 phases, each spec+quality reviewed).
+Spec: docs/superpowers/specs/2026-06-03-msgboard-sdk-docs-design.md
+Plan: docs/superpowers/plans/2026-06-03-msgboard-sdk-docs.md
+- Phase 1 (commit 5539380): packages/client/openrpc.json — OpenRPC (NOT OpenAPI; msgboard is JSON-RPC)
+  for the 5 wire methods (status/categories/content/addMessage/getMessage). doPoW/getDifficulty
+  EXCLUDED (client-side). Validated by src/openrpc.test.ts via @open-rpc/schema-utils-js. Added to
+  package files[]. tsconfig excludes **/*.test.ts from the tsc build (test used import.meta -> broke CJS build).
+- Phase 2 (commit 89f16e8): canonical README.md (fixed stale ethers addMessage(work)->addMessage(work.message);
+  quickstart + guides). src/render-reference.ts = pure renderReference(doc)->markdown (in src/ so it's
+  type-checked; tested by src/render-reference.test.ts). scripts/generate-reference.ts injects the
+  reference between <!-- GENERATED:OPENRPC:START/END --> markers in README AND emits
+  packages/ui/src/lib/docs-content.generated.ts (readme string + openrpc obj). `npm run gen:docs`. Idempotent.
+- Phase 3 (commit 38ade15): packages/ui/src/pages/DocsPortal.svelte renders the README via markdown-it
+  (html:false -> no {@html} injection) + reuses the live Docs.svelte playground + Footer. Routed via the
+  EXISTING hash router (lib/page.svelte): App.svelte adds `{:else if page.route.id === '/docs'}`. NextSteps
+  "Explore the API" card -> #/docs (icon mdi:gitlab -> mdi:book-open-page-variant) + a "Source" link to the repo.
+- VERIFIED: client `npm run build` + openrpc/render-reference tests pass (3 pre-existing live-RPC integration
+  failures in test/index.test.ts are KNOWN/unrelated). ui `npm run build` passes. Playwright: /#/docs renders
+  README + reference (msgboard_status x2) + playground. Final review: Ship-ready.
+- GOTCHA: 1Password SSH agent idle-locked mid-run; subagents CANNOT sign (background, no TTY) -> the
+  controller commits. If "failed to fill whole buffer", user unlocks 1Password, then re-run git commit.
+- DEFERRED (not touched): Zod validation upgrade; chain 943/1 default RPC fallbacks (same latent issue as
+  369, prod uses VITE_RPC_* from vault).
+- NOT pushed (GitHub git@3commasgithub:3commascapital/msgboard.git) or deployed (ansible). Awaiting user.
+
+## Spam cadence -> 1/min per chain (DONE + DEPLOYED 2026-06-02; commit aff91d2)
+SPAM_INTERVAL_MS default 30000 -> 60000 in docker-compose.prod.yml (all 3 writers).
+Confirmed live: spam-1/369/943 "posting every 60000ms". NOTE: per-core CPU still spikes to
+100% during each post because PoW (secp256k1 mul x ~168k attempts) takes tens of seconds —
+the interval only adds idle gaps between grinds, so AVERAGE util/load trends down but isn't
+near-zero. Real CPU lever would be difficulty (workMultiplier), not the interval. Box has
+ample room for a few static sites (memory ~8% used, several idle cores).
+
+## Tap/keyboard-accessible info tooltips (DONE + DEPLOYED 2026-06-02; commit 3c791d1)
+Info.svelte trigger is now a <button> (aria-label + focus-visible ring): tooltips show on
+tap (touch) and keyboard focus via group-focus-within, not just hover. onclick stopPropagation
+so tapping an info icon inside a clickable tree row doesn't toggle the row. Verified live
+(7 info buttons, tooltip visible on focus); no horizontal-scroll regression (scrollX stays 0).
+
+## Box capacity check (2026-06-02): 8-core box, load ~3 (the 3 PoW spammers each peg 1 core),
+## 5 cores idle (~36% util). Memory trivial: 4.8Gi/62Gi used, 57Gi free; each container
+## 8-184 MiB (<0.3%). PoW is sustained (each post's work fills most of the 30s interval).
+## To reduce CPU later: raise SPAM_INTERVAL_MS.
+
+## Data-tree + tooltip responsivity under 640px (DONE + DEPLOYED 2026-06-02; commit ab7f7dc)
+DEPLOYED + VERIFIED live at 390px on msgboard.xyz: no sideways scroll (scrollW==vw==390),
+tree labels aligned/no collision, stats numbers intact. Desktop unchanged.
+
+## (history) Data-tree + tooltip responsivity under 640px
+- TreeView.svelte: below sm (640px) the tree is text-xs (desktop unchanged at text-base);
+  key column w-20 sm:w-28; indent pl-3 sm:pl-4. Value wrapping is now type-aware —
+  isHexValue ? break-all : break-words — so the stats row no longer splits numbers
+  ("175472"/"10000") mid-digit; hex still wraps anywhere.
+- Info.svelte: tooltip w-72 sm:w-96 + max-w-[calc(100vw-1rem)] so it fits narrow screens.
+- app.css: html,body { overflow-x: clip } — kills the sideways page scroll caused by
+  absolutely-positioned tooltips near the right edge (clip, not hidden, so vertical
+  scroll + sticky still work). Verified at 390px: pageScrollW==vw==390, canScrollX=false.
+- VERIFIED at 390px (Ethereum board, real msgs) + 1000px desktop unchanged; UI build passes.
+- STAGED, NOT committed/deployed — 1Password SSH agent locked again ("agent returned an
+  error" / "failed to write commit object"). Files: TreeView.svelte, Info.svelte, app.css.
+  Next: unlock 1P -> sign-commit -> ansible deploy.
+
+
+## Multi-chain spam + Ethereum-in-UI + non-blocking msgboard probe (DONE + DEPLOYED 2026-06-02; commits 2dc79d8, 64891c6)
+DEPLOYED + VERIFIED: spam-1/spam-369/spam-943 all up; PulseChain board count 0x4, Ethereum
+0x3 (both filling). Live msgboard.xyz: chain selector has Ethereum; selecting it shows green
+"msgboard" badge + 3 messages/3 categories. Vault got vault_rpc_1 + vault_vite_rpc_1
+(valve.city /evm/1, prod + demo keys).
+GOTCHA fixed: splitting `spam` into spam-1/369/943 orphaned the old `spam` container — added
+--remove-orphans to site.yml (commit 64891c6) and removed the orphan by hand.
+NON-ISSUE (resolved): spam-1 looked "stuck" (no post for ~4min, 100% CPU) right after deploy —
+it was just slow on the first PoW during the build/cold-start; it posts normally now. Same
+difficulty factors on all chains (0x2710/0xf4240).
+
+## (superseded by the DONE block above) Multi-chain spam + Ethereum-in-UI + non-blocking msgboard probe
+Goal: run spam writers for PulseChain (369) + Ethereum (1) (not just v4/943), add Ethereum
+to the UI chain selector, and add a non-blocking msgboard_status probe surfaced in the UI.
+- VERIFIED: valve.city has msgboard_ enabled on 943, 369, AND 1 (probed msgboard_status,
+  all enabled:true). valve.city RPC pattern: https://one.valve.city/rpc/<key>/evm/<chainId>
+  (prod key vk_Et… in vault; public demo key vk_demo for VITE/browser).
+- spam.ts: generalized to be chain-agnostic. SPAM_CHAIN_ID (1|369|943) selects the network
+  (default 943, preserves old behaviour); RPC from SPAM_RPC|RPC_<id>|VITE_RPC_<id>|fallback;
+  maps id->viem chain (mainnet/pulsechain/pulsechainV4).
+- docker-compose.prod.yml: replaced single `spam` with spam-943/spam-369/spam-1 (one writer
+  per chain) sharing an x-spam-writer YAML anchor. Added VITE_RPC_1 to ui build args.
+- Dockerfile: ARG/ENV VITE_RPC_1. env.j2: added RPC_1 + VITE_RPC_1. vault.yml.example: added
+  vault_rpc_1 + vault_vite_rpc_1 (documented).
+- UI: rpc.svelte.ts adds 'ethereum' option (mainnet, VITE_RPC_1, fallback publicnode).
+  msgboard.svelte.ts: NEW msgboardEnabled state + probeMsgboard() — independent of
+  content() (so it reports even when content fails), race-guarded, also refreshes global
+  work factors; loadContent fires it WITHOUT awaiting (non-blocking); setters reset to null
+  (=checking) on change. SelectChain.svelte: small badge (green "msgboard" / red "no msgboard"
+  / pulsing "checking") with a title tooltip, left of the copy/proxy controls.
+- VERIFIED locally (dev 5173): Ethereum option present; badge green on valve.city /evm/1,
+  red "no msgboard" on PulseChain (g4mm4, no namespace). UI build + sponsor tsc + compose
+  config all pass. Added VITE_RPC_1=valve.city demo to gitignored packages/ui/.env for dev.
+- BLOCKED on 1Password (idle-locked): still need to (1) add vault_rpc_1 + vault_vite_rpc_1
+  to the encrypted vault, (2) sign-commit, (3) ansible deploy. Vault left intact/encrypted.
+
+
+## "Join the Network" landing section + gib.show skill (DONE + DEPLOYED 2026-06-02, commit 388ce05)
+- DEPLOYED: pushed to GitHub (388ce05, signed), ansible-playbook site.yml synced + rebuilt
+  the stack on the box (failed=0, all probes green). Verified live on https://msgboard.xyz/:
+  3 teams, 9 gib.show logos, no PublicNode, node links = valve-tech/reth + erigon-pulse x2.
+- FINAL node links: valve.city -> github.com/valve-tech/reth; PulseChain + g4mm4 ->
+  gitlab.com/pulsechaincom/erigon-pulse (user chose erigon over go-pulse).
+
+- NEW packages/ui/src/components/JoinNetwork.svelte: a per-team support matrix shown as
+  segmented "loading bars". Each team is a row (name links to their home page); each segment
+  is one network (369 PulseChain, 943 v4 testnet) with the chain coin logo + label + status
+  dot. Teams: valve.city (both supported), PulseChain + g4mm4 (both pending, pulsing amber
+  dot), PublicNode (both unsupported). Legend at top; placed in Home.svelte after <Docs />,
+  before <ProtocolComparison />.
+- Chain logos come from gib.show: icon = `https://gib.show/image/${chainId}?w=48&h=48&format=webp`
+  (the /image/{chainId} NETWORK endpoint — not the native-zero-address hack — plus 2x webp so
+  the ~47KB PNG becomes a few KB and stays crisp on Retina).
+- NEW local skill ~/.claude/skills/gib-show/SKILL.md documenting the gib.show image + token-list
+  API (sourced from github.com/gibsfinance/assets staging docs/skills). Reusable across projects.
+- VERIFIED: dev server localhost:5173, both light AND dark mode (8 logos render); `vite build`
+  passes. (npm run check shows 2 PRE-EXISTING errors in node_modules/@types/glob — unrelated.)
+- 2026-06-02 follow-ups: added Ethereum (chain 1) column — valve.city supported,
+  PulseChain + g4mm4 pending. REMOVED PublicNode entirely (they publish no node code).
+- node-link mechanism: Team has a `node` field (URL to the team's open-source node code);
+  when set, a small "⛁ node" link (mdi:source-repository) renders under the team name.
+  Filled: valve.city -> github.com/valve-tech/reth (VERIFIED: has crates/net/msgboard +
+  msgboard-types); PulseChain + g4mm4 -> gitlab.com/pulsechaincom/go-pulse (PulseChain's
+  canonical go-ethereum fork; g4mm4 runs PulseChain's node code). go-pulse-vs-erigon-pulse
+  is a judgment call — flag to user; swap to erigon-pulse/pulse-node if they meant another.
+- NOT yet committed or deployed — awaiting user OK on the go-pulse choice + landing review.
+
+## UI iteration round 2 (DONE 2026-06-02, deployed; commits d4121b9, 6134970, 17f332d)
+- Data tree (TreeView) redesigned to compact flat list: chevrons (not carets) expand on
+  row/chevron click; click any VALUE to copy (cursor + light "Click to copy" tooltip that
+  flips to green "Copied!"); removed the Copy button; long values wrap (min-w-0+break-all);
+  right-aligned key column (w-28) restored for the visual line; subtle hover (bg-gray-500/10).
+- Proxy: added valve.city to ALLOWED_RPC_HOSTS in vite.config.ts (the /api/rpc-proxy
+  allowlist was rejecting the production RPC one.valve.city with 403). Official
+  rpc.v4.testnet.pulsechain.com does NOT support msgboard_ — valve.city does.
+- THEME: added light/dark/system toggle in the footer (default system), lib/theme.svelte.ts
+  store (persists 'theme' in localStorage, applies .dark on <html>, matchMedia for system),
+  no-FOUC inline script in index.html, @custom-variant dark in app.css. Full dark theme
+  added across ~20 components (dark: variants) via 4 parallel subagents + manual TreeView.
+  Verified light + dark in browser; both clean.
+- spam.ts RPC = valve.city (supports msgboard_, verified msgboard_status enabled:true).
+
+## UI iteration round 1 + spam bot (DONE 2026-06-02, deployed; commits 8529d48, c60c1ca)
+- ToggleButton now supports offIcon/onIcon + iconClass; fixed a11y bug (aria-checked was
+  hardcoded "false" -> now reflects state, + aria-label).
+- direct/proxy toggle: lightning (mdi:lightning-bolt) / server (mdi:server) icons.
+- keccak toggle: 0x text / fingerprint (mdi:fingerprint) icon, iconClass size-3.5 (bigger).
+- DISABLED-TOGGLE TOOLTIP FIX: a disabled <button> is inert (no hover events), so hovering
+  a disabled toggle showed nothing. Fix: wrap toggle+Info in a shared `group` span and add
+  pointer-events-none to the disabled button so hover falls through to the wrapper ->
+  hovering the (disabled) toggle now triggers the existing Info tooltip. Verified in browser.
+- SPAM BOT: was never deployed. spam.ts is the WRITER (watches bridge AffirmationCompleted,
+  PoW-posts gasmoneyplease per bridger; no wallet/db needed). index.ts (sponsor:start) is the
+  READER (sends gas). Added a `spam` service to docker-compose.prod.yml (DISABLED_CHAINS=369,
+  v4 only). Now running. BUT logs show "[PulseChain V4] no recent bridgers found" -> it only
+  posts when someone bridges to v4 in the last ~1000 blocks (~2.7h). Quiet testnet = empty
+  board even with the bot up. If demo messages are wanted regardless of bridge activity, that
+  needs a different (generic poster) change.
+
+## OUTSTANDING TASKS (external — not on the box; box side is done)
+1. [x] DONE 2026-06-02: msgboard.xyz LIVE end-to-end. https://msgboard.xyz/ -> 200,
+        /api/rpc-proxy relays real RPC (eth_chainId -> 0x3af). www -> 200.
+        Path: user set CF origin IP + Full(Strict); first cert in vault was wrong domain
+        (valve.city) -> 526; user replaced with msgboard.xyz origin cert (SAN
+        *.msgboard.xyz, msgboard.xyz); redeployed. GOTCHA: docker compose up does NOT
+        reload Caddy when only the mounted cert file changes -> added a site.yml handler
+        "Restart caddy" notified by the cert tasks (commit fa67c98). validate-vault.yml
+        now also asserts the cert SAN covers msgboard.xyz.
+2a. [x] DONE 2026-06-02: Faucet HTTPS LIVE. PulseChain pointed an unproxied A record
+        faucet.v4.testnet.pulsechain.com -> 88.99.62.98. Enabled the HTTPS block in
+        deploy/caddy/Caddyfile, pushed it to the box over SSH, restarted caddy. Caddy got
+        a Let's Encrypt cert (issuer Let's Encrypt, valid Jun 2 -> Aug 31 2026). Now BOTH:
+        https://faucet.v4.testnet.pulsechain.com/ -> 200 (LE cert; http->https 308 redirect)
+        and http://88.99.62.98/ -> 200 (by IP).
+2b. [x] DONE 2026-06-02: committed + pushed the Caddyfile HTTPS-enable change
+        (commit d363280). git now matches the box.
+        Cert: Let's Encrypt 90-day, Caddy AUTO-RENEWS (~day 60); caddy_data volume
+        persists renewal state. No longer-lived public cert pursued (LE auto-renew is
+        the right call; CF Origin 15yr only possible if PulseChain proxied the faucet).
+        SSH to box reminder: -o BatchMode=yes -o IdentitiesOnly=yes -i ~/.ssh/msgboard_box_id_ed25519
+        (zsh does not word-split; pass ssh -o flags inline, not via a variable).
+
+## (historical) Faucet HTTPS pre-DNS notes
+- [ ] Faucet HTTPS: PulseChain points an UNPROXIED A record
+        faucet.v4.testnet.pulsechain.com -> 88.99.62.98, THEN flip the faucet block in
+        deploy/caddy/Caddyfile from the http:// block to the commented HTTPS block and
+        re-run: cd deploy/ansible && ansible-playbook site.yml --vault-password-file <(op read op://valve/msgboard_vault/password)
+        Until then faucet is live at http://88.99.62.98/ (200, "PLS Testnet Faucet").
+
+## Task (COMPLETE)
+Vendored the PulseChain faucet (pls-faucet) into this repo and built deployment for the
+full stack (UI, sponsor, faucet, postgres) to Hetzner box 88.99.62.98 behind a
+containerized Caddy reverse proxy handling multiple TLS endpoints.
+
+## Delivered (all on master, pushed to github 3commascapital/msgboard @ b47aa89)
+- packages/faucet — vendored via git subtree (--squash), Go app, kept OUT of npm workspaces.
+- deploy/caddy/Caddyfile — msgboard.xyz via Cloudflare Origin Cert; faucet via Let's Encrypt.
+- docker-compose.prod.yml — standalone; only Caddy publishes 80/443; postgres/sponsor internal.
+- deploy/ansible/ — inventory, group_vars/all.yml, vault.yml.example (real vault gitignored),
+  templates/env.j2, site.yml (idempotent provision + deploy + probes), README.md runbook.
+- Dockerfile fix: COPY package*.json ./ (was broken under classic docker builder).
+- Spec: docs/superpowers/specs/2026-06-01-msgboard-faucet-deploy-design.md
+- Plan: docs/superpowers/plans/2026-06-01-msgboard-faucet-deploy.md
+
+## Verified
+- Full prod stack builds (msgboard-ui/faucet/sponsor images).
+- Caddyfile validates; playbook syntax-checks clean.
+- UI smoke test: / =200, GET /api/rpc-proxy =405 (proxy middleware mounted), POST =400.
+- Final holistic review passed (APPROVE WITH NITS; nits fixed).
+
+## Key decisions
+- UI runs vite preview container (ui:4173), NOT static — needs /api/rpc-proxy endpoint.
+  Caddy reverse_proxies it. Probe asserts 405 (not 404) to prove relay is mounted.
+- TLS split: msgboard.xyz (ours) = Cloudflare Origin Cert Full Strict; faucet (PulseChain
+  DNS) = Caddy auto Let's Encrypt, requires UNPROXIED A record at the box.
+- Faucet SSL probe is NON-FATAL (failed_when: false) — deploy succeeds even if the faucet
+  A record isn't set yet; Caddy retries ACME in background.
+- github push uses SSH alias `3commasgithub` (default github.com identity gibsfinancedev
+  lacks access to 3commascapital private repos). gitlab origin not pushed (per user).
+
+## Box provisioning (DONE 2026-06-01)
+- Box was in Hetzner rescue with BLANK disks (no OS). Installed via installimage:
+  Ubuntu 24.04.3 LTS, software RAID0 (SWRAIDLEVEL 0) across sda+sdb. Config was
+  /tmp/setup.conf on the box. hostname=msgboard. root=/dev/md2 ext4 ~845G (raid0),
+  swap=md0 (raid0), /boot=md1 (raid1, installimage forces /boot mirror). Rebooted,
+  verified Ubuntu installed, deploy key works as root.
+- SSH: ssh -i ~/.ssh/msgboard_box_id_ed25519 root@88.99.62.98
+  (must pin -o IdentitiesOnly=yes -i that key, else "too many auth failures").
+  Host key changed after install; old rescue key removed from known_hosts.
+
+## Faucet HTTP phase (DONE, commit 146f2dc)
+- deploy/caddy/Caddyfile serves faucet over http://88.99.62.98/ until PulseChain sets the
+  A record. Flip the http:// block to the commented HTTPS block + redeploy when DNS ready.
+- site.yml has interim http-by-IP faucet probe + non-fatal https probe.
+
+## DEPLOYED 2026-06-01 (commit fc1dd1c)
+- Ran ansible-playbook site.yml against the box. All 5 containers Up:
+  caddy, faucet, ui, sponsor, msgboard-postgres.
+- Faucet LIVE over HTTP by IP: http://88.99.62.98/ -> 200, "PLS Testnet Faucet".
+- Box serves msgboard.xyz on 443 via the Cloudflare origin cert: / -> 200,
+  /api/rpc-proxy -> 405 (verified with curl --resolve msgboard.xyz:443:88.99.62.98 -k).
+- Vault validated (validate-vault.yml): cert/key are a matching pair, CN=CloudFlare
+  Origin Certificate, expires 2041. Vault password fetched from op://valve/msgboard_vault/password.
+- BUG FOUND + FIXED during deploy: faucet panicked "invalid hex character 'x'" because
+  PRIVATE_KEY had a 0x prefix; env.j2 now strips ^0x. Also fixed ansible.cfg (removed
+  yaml stdout callback) and pinned ssh key in inventory.
+- The HTTPS-by-hostname faucet probe "pass" is a FALSE POSITIVE (hits PulseChain's
+  existing faucet at that domain, which still resolves elsewhere — not our box).
+- .vault_pass was created from op then DELETED after deploy.
+
+## Remaining (external DNS — not on the box)
+- msgboard.xyz: public DNS -> 66.33.22.59 (Cloudflare edge). Point the Cloudflare ORIGIN
+  record at 88.99.62.98, SSL/TLS mode Full(Strict), so public traffic reaches our box.
+- faucet: PulseChain points UNPROXIED A record faucet.v4.testnet.pulsechain.com -> 88.99.62.98,
+  then flip deploy/caddy/Caddyfile faucet block from http:// to the HTTPS block + redeploy.
+
+## (historical) Remaining before a REAL deploy
+1. (USER is doing this) Fill the Ansible Vault: cd deploy/ansible/group_vars;
+   cp vault.yml.example vault.yml; ansible-vault encrypt vault.yml; ansible-vault edit.
+   Secrets: faucet private key, sponsor mnemonic, postgres password, RPCs, CF origin cert+key.
+2. Run: cd deploy/ansible && ansible-playbook site.yml --ask-vault-pass
+   (NOTE: inventory uses ansible_user=root; ensure the msgboard_box_id_ed25519 key is the
+   one ssh uses — may need ansible_ssh_private_key_file in inventory or --private-key.)
+3. faucet over HTTP works immediately; switch Caddyfile to HTTPS once PulseChain points an
+   UNPROXIED A record for faucet.v4.testnet.pulsechain.com -> 88.99.62.98.
+
+## Notes
+- packages/client integration tests fail in CI-less local runs (live RPC rejects custom
+  msgboard_addMessage method) — pre-existing, unrelated to this work; client untouched.
