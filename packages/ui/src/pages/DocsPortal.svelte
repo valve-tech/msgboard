@@ -4,8 +4,16 @@
   import Docs from '../components/Docs.svelte'
   import Footer from '../components/Footer.svelte'
   import OpenRpcReference from '../components/OpenRpcReference.svelte'
+  import { highlightToHtml } from '../lib/highlighter'
 
-  const md = new MarkdownIt({ html: false, linkify: true, breaks: false })
+  // Highlight fenced code blocks with the same shiki instance as <Code>, so the
+  // prose snippets (viem/ethers quickstart, etc.) are highlighted, not plain.
+  const md = new MarkdownIt({
+    html: false,
+    linkify: true,
+    breaks: false,
+    highlight: (code, lang) => highlightToHtml(code, lang),
+  })
   // Strip HTML comments (e.g. the GENERATED:OPENRPC anchor markers) so html:false
   // markdown-it doesn't print them as literal text.
   const stripComments = (s: string) => s.replace(/<!--[\s\S]*?-->/g, '')
