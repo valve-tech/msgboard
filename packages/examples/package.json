@@ -1,0 +1,17 @@
+{
+  "name": "@msgboard/examples",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "viem-demo": "tsx src/viem-demo.ts",
+    "archivist": "tsx src/archivist.ts"
+  },
+  "dependencies": {
+    "@msgboard/sdk": "*",
+    "@msgboard/relayer": "*",
+    "pg": "^8.14.1",
+    "tsx": "^4.19.3",
+    "viem": "^2.25.0"
+  }
+}

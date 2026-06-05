@@ -8,7 +8,8 @@
     "packages/hardhat",
     "packages/ui",
     "packages/sponsor",
-    "packages/relayer"
+    "packages/relayer",
+    "packages/examples"
   ],
   "scripts": {
     "docker:build": "docker compose build",
