@@ -20,14 +20,22 @@
       "types": "./dist/index.d.ts"
     }
   },
-  "keywords": ["ethereum", "pow", "proof-of-work", "msgboard", "msgpow"],
+  "keywords": [
+    "ethereum",
+    "pow",
+    "proof-of-work",
+    "msgboard",
+    "msgpow"
+  ],
   "scripts": {
     "prebuild": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "tsc",
     "watch": "tsc -w",
     "test": "vitest run"
   },
-  "files": ["dist/"],
+  "files": [
+    "dist/"
+  ],
   "dependencies": {
     "bn.js": "^5.2.1",
     "elliptic": "^6.6.1",
