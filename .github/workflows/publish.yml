@@ -65,6 +65,15 @@ jobs:
               echo "$pkg@$ver already published, skipping"
             else
               echo "publishing $pkg@$ver"
-              npm publish --workspace "$pkg" --access public
+              # Treat "cannot publish over previously published" as success in case the
+              # registry read above lagged behind a recent bootstrap publish.
+              npm publish --workspace "$pkg" --access public || {
+                if npm view "$pkg@$ver" version >/dev/null 2>&1; then
+                  echo "$pkg@$ver confirmed on registry after publish attempt, continuing"
+                else
+                  echo "$pkg@$ver publish failed and version not found on registry"
+                  exit 1
+                fi
+              }
             fi
           done
