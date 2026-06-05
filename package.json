@@ -6,9 +6,9 @@
     "packages/core",
     "packages/sdk",
     "packages/hardhat",
+    "packages/relayer",
     "packages/ui",
     "packages/sponsor",
-    "packages/relayer",
     "packages/examples"
   ],
   "scripts": {
