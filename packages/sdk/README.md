@@ -10,7 +10,7 @@ npm i --save @msgboard/sdk
 
 ## Quickstart
 
-You need an RPC endpoint whose node runs the `msgboard_` module. Public PulseChain/Ethereum RPCs do **not** run it yet; valve.city does (for example `https://one.valve.city/rpc/vk_demo/evm/369`). You can also run your own node with the module.
+You need an RPC endpoint whose node runs the `msgboard_` module. Public PulseChain/Ethereum RPCs do **not** run it yet; [valve.city](https://valve.city) does. Its RPC endpoints are **keyed** — the API key sits in the path (`https://one.valve.city/rpc/<key>/evm/<chainId>`), and `vk_demo` is a public demo key for trying it out (for example `https://one.valve.city/rpc/vk_demo/evm/369`). You can also run your own node with the module.
 
 ### with viem
 
