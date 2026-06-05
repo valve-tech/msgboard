@@ -4,7 +4,6 @@ import {
   type WalletClient,
   createWalletClient,
   formatEther,
-  http,
 } from 'viem'
 import type { RelayerAction, RelayerContext } from '../types.js'
 
@@ -28,7 +27,7 @@ export const sendValueAction = <T>(options: SendValueActionOptions<T>): RelayerA
     createWalletClient({
       account: options.account,
       chain: context.chain,
-      transport: http(context.node.rpcUrl, { timeout: 30_000 }),
+      transport: context.node.transport,
     })
   return {
     describe: (item, context) =>

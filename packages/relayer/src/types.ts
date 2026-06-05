@@ -1,5 +1,5 @@
 import type { MsgBoardClient } from '@msgboard/sdk'
-import type { Chain, PublicClient } from 'viem'
+import type { Chain, PublicClient, Transport } from 'viem'
 import type { Logger } from './logger.js'
 
 /** The two operating modes. `observe` never produces an outbound side effect. */
@@ -7,10 +7,13 @@ export type RelayerMode = 'observe' | 'live'
 
 /** Identifies the msgboard node a relayer watches. */
 export type RelayerNode = {
-  /** The JSON-RPC URL of the msgboard node. */
-  rpcUrl: string
-  /** The chain id of the node (1, 369, or 943). */
-  chainId: number
+  /** viem Transport for the node (e.g. `http('https://...')`). */
+  transport: Transport
+  /**
+   * viem Chain definition. When omitted, the chain id is detected automatically
+   * via `eth_chainId` on the first tick. Pass explicitly for custom networks.
+   */
+  chain?: Chain
 }
 
 /** Everything a source, action, or sink may need at runtime. */
@@ -18,7 +21,7 @@ export type RelayerContext = {
   node: RelayerNode
   mode: RelayerMode
   chain: Chain
-  /** A viem public client over `node.rpcUrl`. */
+  /** A viem public client backed by `node.transport`. */
   publicClient: PublicClient
   /** A msgboard SDK client wrapping `publicClient`. */
   client: MsgBoardClient
