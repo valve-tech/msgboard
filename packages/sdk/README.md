@@ -309,7 +309,7 @@ These run in the client, not on the node, so they are not in the OpenRPC spec:
 
 ## Machine-readable spec
 
-The JSON-RPC surface is published as an OpenRPC document — [`openrpc.json`](https://github.com/valve-tech/msgboard/blob/master/packages/sdk/openrpc.json) — in this package. Point the [OpenRPC Playground](https://playground.open-rpc.org/) or a code generator at it.
+The JSON-RPC surface is published as an OpenRPC document — [`openrpc.json`](https://github.com/valve-tech/msgboard/blob/master/packages/sdk/openrpc.json) — in this package, and hosted at [`msgboard.xyz/openrpc.json`](https://msgboard.xyz/openrpc.json). Open it in the [OpenRPC Playground](https://playground.open-rpc.org/?schemaUrl=https%3A%2F%2Fmsgboard.xyz%2Fopenrpc.json) (it loads automatically), or point a code generator at the hosted spec.
 
 ## License
 

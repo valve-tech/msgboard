@@ -24,6 +24,10 @@
 
   let { openrpc }: { openrpc: OpenRpc } = $props()
 
+  // hosted spec + one-click Playground (it fetches the spec via ?schemaUrl=)
+  const specUrl = 'https://msgboard.xyz/openrpc.json'
+  const playgroundUrl = `https://playground.open-rpc.org/?schemaUrl=${encodeURIComponent(specUrl)}`
+
   const schemas = openrpc.components?.schemas ?? {}
   const refName = (ref: string) => ref.split('/').pop() as string
   const schemaId = (name: string) => `schema-${name}`
@@ -77,7 +81,16 @@
 {/snippet}
 
 <div class="flex flex-col gap-4">
-  <h2 class="text-2xl font-bold text-slate-900 dark:text-gray-100">JSON-RPC methods</h2>
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <h2 class="text-2xl font-bold text-slate-900 dark:text-gray-100">JSON-RPC methods</h2>
+    <a
+      href={playgroundUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      class="inline-flex items-center gap-1.5 rounded-full bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-indigo-500">
+      Open in OpenRPC Playground ↗
+    </a>
+  </div>
 
   {#each openrpc.methods as method}
     <div
