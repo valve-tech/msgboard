@@ -1,0 +1,306 @@
+{
+  "openrpc": "1.2.6",
+  "info": {
+    "title": "MsgBoard JSON-RPC API",
+    "version": "0.0.28",
+    "description": "JSON-RPC methods exposed by the msgboard_ module. Any node running the module serves these methods. Proof of work, not a fee, gates message submission.",
+    "license": {
+      "name": "MIT"
+    }
+  },
+  "methods": [
+    {
+      "name": "msgboard_status",
+      "summary": "Board status and the difficulty factors required for valid messages.",
+      "params": [],
+      "result": {
+        "name": "status",
+        "schema": {
+          "$ref": "#/components/schemas/Status"
+        }
+      },
+      "examples": [
+        {
+          "name": "default",
+          "params": [],
+          "result": {
+            "name": "status",
+            "value": {
+              "enabled": true,
+              "count": "0x0",
+              "size": "0x0",
+              "workMultiplier": "0x2710",
+              "workDivisor": "0xf4240"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "msgboard_categories",
+      "summary": "The list of 32-byte category hashes currently present on the board.",
+      "params": [],
+      "result": {
+        "name": "categories",
+        "schema": {
+          "$ref": "#/components/schemas/Categories"
+        }
+      },
+      "examples": [
+        {
+          "name": "gasmoneyplease",
+          "params": [],
+          "result": {
+            "name": "categories",
+            "value": [
+              "0x6761736d6f6e6579706c65617365000000000000000000000000000000000000"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "msgboard_content",
+      "summary": "All messages on the board, grouped by category hash. Optionally filtered.",
+      "params": [
+        {
+          "name": "filter",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/ContentFilter"
+          }
+        }
+      ],
+      "result": {
+        "name": "content",
+        "schema": {
+          "$ref": "#/components/schemas/Content"
+        }
+      },
+      "examples": [
+        {
+          "name": "empty",
+          "params": [
+            {
+              "name": "filter",
+              "value": {}
+            }
+          ],
+          "result": {
+            "name": "content",
+            "value": {}
+          }
+        }
+      ]
+    },
+    {
+      "name": "msgboard_addMessage",
+      "summary": "Submit a proof-of-work message (RLP-encoded) to the board.",
+      "params": [
+        {
+          "name": "rlp",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/Hex"
+          }
+        }
+      ],
+      "result": {
+        "name": "hash",
+        "schema": {
+          "$ref": "#/components/schemas/Hex"
+        }
+      },
+      "examples": [
+        {
+          "name": "submit",
+          "params": [
+            {
+              "name": "rlp",
+              "value": "0xf800"
+            }
+          ],
+          "result": {
+            "name": "hash",
+            "value": "0x0d1e2f00000000000000000000000000000000000000000000000000c46845f9"
+          }
+        }
+      ]
+    },
+    {
+      "name": "msgboard_getMessage",
+      "summary": "Fetch a single message by its hash.",
+      "params": [
+        {
+          "name": "hash",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/Hex"
+          }
+        }
+      ],
+      "result": {
+        "name": "message",
+        "schema": {
+          "$ref": "#/components/schemas/RPCMessage"
+        }
+      },
+      "examples": [
+        {
+          "name": "zero",
+          "params": [
+            {
+              "name": "hash",
+              "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+            }
+          ],
+          "result": {
+            "name": "message",
+            "value": {
+              "version": "0x1",
+              "blockHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+              "blockNumber": "0x0",
+              "category": "0x0000000000000000000000000000000000000000000000000000000000000000",
+              "data": "0x0000000000000000000000000000000000000000000000000000000000000000",
+              "nonce": "0x0",
+              "hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+              "workMultiplier": "0x0",
+              "workDivisor": "0x0"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "components": {
+    "schemas": {
+      "Hex": {
+        "title": "Hex",
+        "type": "string",
+        "pattern": "^0x[0-9a-fA-F]*$"
+      },
+      "Status": {
+        "title": "Status",
+        "type": "object",
+        "required": [
+          "enabled",
+          "count",
+          "size",
+          "workMultiplier",
+          "workDivisor"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the module is enabled on this node."
+          },
+          "count": {
+            "$ref": "#/components/schemas/Hex",
+            "description": "Overall count of messages stored on the board."
+          },
+          "size": {
+            "$ref": "#/components/schemas/Hex",
+            "description": "Overall size of messages stored on the board."
+          },
+          "workMultiplier": {
+            "$ref": "#/components/schemas/Hex",
+            "description": "Factor that increases required work."
+          },
+          "workDivisor": {
+            "$ref": "#/components/schemas/Hex",
+            "description": "Factor that decreases required work."
+          }
+        }
+      },
+      "Categories": {
+        "title": "Categories",
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/Hex"
+        }
+      },
+      "ContentFilter": {
+        "title": "ContentFilter",
+        "type": "object",
+        "properties": {
+          "category": {
+            "$ref": "#/components/schemas/Hex",
+            "description": "Restrict to one category hash."
+          },
+          "fromBlock": {
+            "$ref": "#/components/schemas/Hex",
+            "description": "Lower block bound (hex quantity)."
+          },
+          "toBlock": {
+            "$ref": "#/components/schemas/Hex",
+            "description": "Upper block bound (hex quantity)."
+          }
+        }
+      },
+      "RPCMessage": {
+        "title": "RPCMessage",
+        "type": "object",
+        "required": [
+          "version",
+          "blockHash",
+          "blockNumber",
+          "category",
+          "data",
+          "nonce",
+          "hash",
+          "workMultiplier",
+          "workDivisor"
+        ],
+        "properties": {
+          "version": {
+            "$ref": "#/components/schemas/Hex",
+            "description": "Message/encoding version."
+          },
+          "blockHash": {
+            "$ref": "#/components/schemas/Hex",
+            "description": "Hash of the block the message is rooted to."
+          },
+          "blockNumber": {
+            "$ref": "#/components/schemas/Hex",
+            "description": "Number of the block the message is rooted to."
+          },
+          "category": {
+            "$ref": "#/components/schemas/Hex",
+            "description": "32-byte category hash."
+          },
+          "data": {
+            "$ref": "#/components/schemas/Hex",
+            "description": "Arbitrary message data."
+          },
+          "nonce": {
+            "$ref": "#/components/schemas/Hex",
+            "description": "Nonce discovered through proof of work."
+          },
+          "hash": {
+            "$ref": "#/components/schemas/Hex",
+            "description": "The message hash."
+          },
+          "workMultiplier": {
+            "$ref": "#/components/schemas/Hex",
+            "description": "Work multiplier in force when posted."
+          },
+          "workDivisor": {
+            "$ref": "#/components/schemas/Hex",
+            "description": "Work divisor in force when posted."
+          }
+        }
+      },
+      "Content": {
+        "title": "Content",
+        "type": "object",
+        "description": "Messages grouped by category hash.",
+        "additionalProperties": {
+          "type": "array",
+          "items": {
+            "$ref": "#/components/schemas/RPCMessage"
+          }
+        }
+      }
+    }
+  }
+}

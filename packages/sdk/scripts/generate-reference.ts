@@ -38,4 +38,10 @@ const module = [
 ].join('\n')
 writeFileSync(join(uiLib, 'docs-content.generated.ts'), module, 'utf8')
 
-console.log('generated README reference region and packages/ui/src/lib/docs-content.generated.ts')
+// 3) copy the spec into the website public dir so it is served at /openrpc.json
+// (Caddy adds Access-Control-Allow-Origin there so the OpenRPC Playground can
+// fetch it cross-origin via ?schemaUrl=).
+const uiPublic = join(repoRoot, 'packages', 'ui', 'public')
+writeFileSync(join(uiPublic, 'openrpc.json'), `${JSON.stringify(doc, null, 2)}\n`, 'utf8')
+
+console.log('generated README reference, docs-content.generated.ts, and ui/public/openrpc.json')
