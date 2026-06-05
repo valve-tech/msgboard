@@ -8,6 +8,12 @@
       "name": "MIT"
     }
   },
+  "servers": [
+    {
+      "name": "PulseChain mainnet (valve.city demo)",
+      "url": "https://one.valve.city/rpc/vk_demo/evm/369"
+    }
+  ],
   "methods": [
     {
       "name": "msgboard_status",

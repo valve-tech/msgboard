@@ -31,10 +31,12 @@ Sink and Store are intentionally separate: the sink runs in **both** modes; the 
 ## Minimal usage
 
 ```ts
+import { http } from 'viem'
 import { Relayer, msgboardContentSource, noopAction } from '@msgboard/relayer'
 
 const relayer = new Relayer({
-  node: { rpcUrl: 'https://rpc.v4.testnet.pulsechain.com', chainId: 943 },
+  node: { transport: http('https://rpc.pulsechain.com') },
+  // chain auto-detected via eth_chainId; pass node.chain to override
   // mode defaults to 'observe' — no on-chain writes
   source: msgboardContentSource({ category: 'myapp' }),
   key: (msg) => msg.hash,

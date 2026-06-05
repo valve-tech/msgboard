@@ -80,7 +80,7 @@ A category is a 32-byte hash. Pass a string and the client hashes it for you (`c
 
 ## Ephemerality
 
-Messages are short-lived: the board retains roughly the last 120 blocks of messages, so the board is a live signal, not durable storage.
+Messages are short-lived: the board retains roughly the last 120 blocks of messages, so the board is a live signal, not durable storage. The board also has a maximum size cap — if a burst of large messages fills the cap before the 120-block window expires, new submissions may be rejected until older messages age out. Design for loss: treat the board as a delivery channel, not a store.
 
 ## Keeping work off the UI thread
 
@@ -301,11 +301,27 @@ Object whose values are `RPCMessage[]`.
 
 ## Client methods (not JSON-RPC)
 
-These run in the client, not on the node, so they are not in the OpenRPC spec:
+These run in the client process, not on the node, so they are not part of the OpenRPC spec.
 
-- `doPoW(category, data, limit?)` — grind a valid proof-of-work message. Returns `{ message, stats }`.
-- `getDifficulty(data)` — the difficulty for a given payload, as a `bigint`.
-- Utilities: `categoryHash`, `checkWork`, `difficulty`, `encodeData`, `toRLP`, `fromRLP`, `fromRPCMessage`, `toRPCMessage`, `wrapLegacySend`.
+### `doPoW(category, data, limit?)`
+
+Grinds a valid proof-of-work message. Reads current difficulty from `status()` before starting, so the work is always valid for the live board settings. Returns `{ message, stats }` where `stats` includes `nonce`, `duration`, and the number of iterations. The `limit` parameter sets a maximum number of iterations — useful for streaming progress or cancellation in long-running environments.
+
+### `getDifficulty(data)`
+
+Returns the difficulty threshold for a given payload hex string as a `bigint`. Helpful for estimating how long `doPoW` will take before committing to it.
+
+### `categoryHash(name)`
+
+Encodes a plain-text category name to the 32-byte hex hash the board stores. Pass the result directly to `doPoW` or `content()` filters.
+
+### `wrapLegacySend(provider)`
+
+Wraps an ethers v5 `JsonRpcProvider` (or any provider with a `send` method) into the `Provider` interface the client expects. Use this when you cannot upgrade to viem.
+
+### Other utilities
+
+`checkWork`, `difficulty`, `encodeData`, `toRLP`, `fromRLP`, `fromRPCMessage`, `toRPCMessage` — lower-level building blocks for custom proof-of-work loops, message encoding, and RPC message conversion. Their signatures are in the TypeScript types shipped with the package.
 
 ## Building automations
 
@@ -316,11 +332,13 @@ npm i @msgboard/relayer
 ```
 
 ```ts
+import { http } from 'viem'
 import { Relayer, msgboardContentSource, noopAction } from '@msgboard/relayer'
 import type { RPCMessage } from '@msgboard/sdk'
 
 const relayer = new Relayer<RPCMessage>({
-  node: { rpcUrl: 'https://one.valve.city/rpc/vk_demo/evm/943', chainId: 943 },
+  node: { transport: http('https://one.valve.city/rpc/vk_demo/evm/369') },
+  // chain is auto-detected via eth_chainId — pass node.chain to override
   source: msgboardContentSource({ category: 'myapp' }),
   key: (msg) => msg.hash,
   action: noopAction(),
@@ -335,7 +353,9 @@ relayer.start()
 
 ## Machine-readable spec
 
-The JSON-RPC surface is published as an OpenRPC document — [`openrpc.json`](https://github.com/valve-tech/msgboard/blob/master/packages/sdk/openrpc.json) — in this package, and hosted at [`msgboard.xyz/openrpc.json`](https://msgboard.xyz/openrpc.json). Open it in the [OpenRPC Playground](https://playground.open-rpc.org/?schemaUrl=https%3A%2F%2Fmsgboard.xyz%2Fopenrpc.json) (it loads automatically), or point a code generator at the hosted spec.
+The JSON-RPC surface is published as an OpenRPC document — [`openrpc.json`](https://github.com/valve-tech/msgboard/blob/master/packages/sdk/openrpc.json) — in this package, and hosted at [`msgboard.xyz/openrpc.json`](https://msgboard.xyz/openrpc.json). Open it in the [OpenRPC Playground](https://playground.open-rpc.org/?schemaUrl=https%3A%2F%2Fmsgboard.xyz%2Fopenrpc.json) (it loads the schema and pre-selects the valve.city PulseChain mainnet endpoint so you can call live methods directly), or point a code generator at the hosted spec.
+
+All published packages are under the [`@msgboard`](https://www.npmjs.com/search?q=%40msgboard) scope on npm.
 
 ## License
 
