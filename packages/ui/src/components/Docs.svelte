@@ -1,6 +1,7 @@
 <script lang="ts">
   import { keccak256, numberToHex, stringToHex } from 'viem'
   import Code from './Code.svelte'
+  import Icon from '@iconify/svelte'
   import { chain } from '../lib'
   const languages = ['typescript', 'shell'] as const
   const methods = ['status', 'categories', 'content', 'addMessage', 'getMessage'] as const
@@ -142,6 +143,24 @@ type Message = MessageSeed & {
 
 <div class="flex flex-col items-center justify-center px-4 py-16 gap-4 border-y border-gray-200 dark:border-gray-700 overflow-hidden bg-gray-50 dark:bg-gray-900">
   <h2 class="text-3xl font-bold font-mono p-4">Simple API = ❤️ Happy Devs 💻</h2>
+  <div class="flex flex-row flex-wrap items-center justify-center gap-3">
+    <a
+      href="https://github.com/valve-tech/msgboard"
+      target="_blank"
+      rel="noopener noreferrer"
+      class="inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium text-gray-700 ring-1 ring-gray-300 transition hover:text-gray-900 hover:ring-gray-400 dark:text-gray-300 dark:ring-gray-600 dark:hover:text-white dark:hover:ring-gray-500">
+      <Icon icon="mdi:github" class="size-5" />
+      GitHub
+    </a>
+    <a
+      href="https://www.npmjs.com/package/@msgboard/sdk"
+      target="_blank"
+      rel="noopener noreferrer"
+      class="inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium text-gray-700 ring-1 ring-gray-300 transition hover:text-gray-900 hover:ring-gray-400 dark:text-gray-300 dark:ring-gray-600 dark:hover:text-white dark:hover:ring-gray-500">
+      <Icon icon="mdi:npm" class="size-5" />
+      npm
+    </a>
+  </div>
   <div class="flex flex-row items-end gap-2">
     <!-- <label for="location" class="block text-sm/6 font-medium text-gray-900">Network</label> -->
     <div class="grid grid-cols-1 gap-2 min-w-32">
