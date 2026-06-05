@@ -1,47 +1,21 @@
-import { MsgBoardClient, type Provider, encodeData } from '@msgboard/sdk'
-import { createPublicClient, http, stringToHex, type Chain } from 'viem'
 import { mainnet, pulsechain, pulsechainV4 } from 'viem/chains'
+import { Relayer, generatedSource, noopStore, submitMessageAction } from '@msgboard/relayer'
 
-/**
- * spam: posts random lorem-style messages to the msgboard so the board has
- * visible activity. Submission is proof-of-work gated (no wallet or gas needed) —
- * it only needs an RPC whose `msgboard_` namespace is enabled.
- *
- * Chain-agnostic: set SPAM_CHAIN_ID (1, 369, or 943) to choose which network this
- * writer targets, and run one process per network. The RPC comes from SPAM_RPC,
- * else RPC_<chainId>, else VITE_RPC_<chainId>, else a public fallback.
- *
- * NOTE: this is the demo/load writer. The bridge-crossing sponsor lives in
- * bridge.ts (run via `npm run bridge`), not here.
- */
+type Post = { category: string; text: string }
 
-/** the networks this writer can target, keyed by chain id */
-const chainsById: Record<number, Chain> = {
-  1: mainnet,
-  369: pulsechain,
-  943: pulsechainV4,
-}
-
-/** which network to post to (default: v4 testnet, preserving prior behaviour) */
 const chainId = Number(process.env.SPAM_CHAIN_ID ?? 943)
-const chain = chainsById[chainId]
-if (!chain) {
-  throw new Error(
-    `spam: unsupported SPAM_CHAIN_ID ${chainId} (expected one of ${Object.keys(chainsById).join(', ')})`,
-  )
+const supported = new Set<number>([mainnet.id, pulsechain.id, pulsechainV4.id])
+if (!supported.has(chainId)) {
+  throw new Error(`spam: unsupported SPAM_CHAIN_ID ${chainId} (expected 1, 369, or 943)`)
 }
 
-/** msgboard RPC for the selected chain (must expose the msgboard_ namespace) */
-const rpc =
+const rpcUrl =
   process.env.SPAM_RPC ||
   process.env[`RPC_${chainId}`] ||
   process.env[`VITE_RPC_${chainId}`] ||
   'https://rpc.v4.testnet.pulsechain.com'
 
-/** milliseconds between posts */
 const intervalMs = Number(process.env.SPAM_INTERVAL_MS ?? 30_000)
-
-/** small rotating set of categories — a few distinct ones, with duplicates over time */
 const categoryNames = (process.env.SPAM_CATEGORIES ?? 'lorem,musings,chatter')
   .split(',')
   .map((s) => s.trim())
@@ -57,44 +31,32 @@ const words = (
 
 const pick = <T>(arr: readonly T[]): T => arr[Math.floor(Math.random() * arr.length)]
 
-/** a lorem-style sentence of 6-14 words, capitalized and period-terminated */
 const sentence = (): string => {
   const length = 6 + Math.floor(Math.random() * 9)
   const body = Array.from({ length }, () => pick(words)).join(' ')
   return `${body.charAt(0).toUpperCase()}${body.slice(1)}.`
 }
 
-const main = async () => {
-  const provider = createPublicClient({
-    chain,
-    transport: http(rpc, { timeout: 30_000 }),
-  })
-  const client = new MsgBoardClient(provider as Provider)
-  const status = await client.status()
-  // match the node's current difficulty so submitted work is accepted
-  client.setDifficultyFactors(BigInt(status.workMultiplier), BigInt(status.workDivisor))
-  console.log(
-    'spam: chain=%o (%d) msgboard enabled=%o; posting every %dms under categories %o',
-    chain.name,
-    chainId,
-    status.enabled,
-    intervalMs,
-    categoryNames,
-  )
-  while (true) {
-    try {
-      const name = pick(categoryNames)
-      const text = sentence()
-      // direct (zero-padded) category so the name stays human-readable in the UI
-      const category = stringToHex(name, { size: 32 })
-      const work = await client.doPoW(category, encodeData(text))
-      const hash = await client.addMessage(work.message)
-      console.log('spam: posted category=%o text=%o hash=%o', name, text, hash)
-    } catch (e) {
-      console.error('spam: post failed, retrying: %o', e instanceof Error ? e.message : e)
-    }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs))
-  }
-}
+const mode = process.env.SPAM_OBSERVE ? 'observe' : 'live'
 
-main()
+const relayer = new Relayer<Post>({
+  node: { rpcUrl, chainId },
+  mode,
+  intervalMs,
+  source: generatedSource(() => ({ category: pick(categoryNames), text: sentence() })),
+  key: (post) => `${post.category}:${post.text}`,
+  store: noopStore<Post>(),
+  action: submitMessageAction<Post>({
+    category: (post) => post.category,
+    data: (post) => post.text,
+  }),
+})
+
+console.log(
+  'spam: chain=%d posting every %dms under categories %o (mode=%s)',
+  chainId,
+  intervalMs,
+  categoryNames,
+  mode,
+)
+relayer.start()
