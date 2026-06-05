@@ -133,6 +133,8 @@ services:
       # default to PulseChain v4 testnet only (id 369 = mainnet, which the v4-only
       # sponsor does not fund); override DISABLED_CHAINS to change.
       DISABLED_CHAINS: ${DISABLED_CHAINS:-369}
+      # opt into live mode — the Relayer engine defaults to observe/dry-run when this is absent
+      BRIDGE_LIVE: '1'
     command: ['npm', 'run', 'sponsor:bridge']
 
   msgboard-postgres:
