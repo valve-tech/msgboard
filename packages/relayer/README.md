@@ -2,6 +2,14 @@
 
 A controllable, safe-by-default pool-watcher engine for the msgboard board. Runs a heartbeat: poll a **Source**, record every item to an always-on **Sink**, filter by a **Condition**, dedup via a **Store**, then gate the **Action** based on mode.
 
+## Install
+
+```sh
+npm i @msgboard/relayer
+```
+
+`pg` is an optional peer dependency — only required if you use `postgresStore` or `postgresArchiveSink`.
+
 ## Safe by default
 
 The engine has two modes:
