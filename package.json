@@ -5,9 +5,9 @@
   "workspaces": [
     "packages/core",
     "packages/sdk",
+    "packages/history",
     "packages/hardhat",
     "packages/relayer",
-    "packages/history",
     "packages/indexer",
     "packages/ui",
     "packages/sponsor",
