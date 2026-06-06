@@ -20,7 +20,9 @@ client ─GraphQL─▶ Cloudflare (archive.msgboard.xyz) ─▶ Caddy ─▶ Ha
   `anonymous` role gets `SELECT`-only on that one table (max 1000 rows per query, aggregations on).
 - **Edge** — Caddy proxies only `/v1/graphql` and `/healthz` on `archive.msgboard.xyz`. The Hasura
   admin API, metadata, raw SQL, and console are not exposed publicly; reach them via an SSH tunnel to
-  `127.0.0.1:8081` on the box.
+  `127.0.0.1:8081` on the box. The **admin secret is the authentication boundary**, not the loopback
+  binding or the tunnel — those are defense-in-depth. Anyone who can reach the admin endpoints still
+  needs the secret.
 
 ## Schema
 
@@ -117,3 +119,7 @@ online:
   the environment / compose.
 - The archive shares the existing `msgboard-postgres` database; Hasura also stores its own metadata
   there (in the `hdb_catalog` schema).
+- **The Hasura admin secret is mandatory.** An empty secret disables Hasura's role enforcement, which
+  would give every request full admin access (all tables, mutations, raw SQL) — so the compose file
+  fails fast (`HASURA_ADMIN_SECRET` uses `:?`) and `docker compose up` refuses to start until a real
+  secret is set. The read-only `anonymous` role is only enforced because the admin secret is present.
