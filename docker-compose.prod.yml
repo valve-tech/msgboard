@@ -29,6 +29,8 @@ services:
       - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./deploy/caddy/origin.pem:/etc/caddy/origin.pem:ro
       - ./deploy/caddy/origin.key:/etc/caddy/origin.key:ro
+      # GraphiQL explorer static page served at archive.msgboard.xyz
+      - ./deploy/caddy/graphiql:/srv/graphiql:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
