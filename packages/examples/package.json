@@ -9,6 +9,7 @@
     "submit-message": "tsx src/submit-message.ts",
     "keep-alive": "tsx src/keep-alive.ts",
     "request-fulfill": "tsx src/request-fulfill.ts",
+    "multi-sig-collect": "tsx src/multi-sig-collect.ts",
     "write-for-me": "tsx src/write-for-me.ts",
     "archivist": "tsx src/archivist.ts"
   },
