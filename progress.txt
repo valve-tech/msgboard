@@ -75,13 +75,50 @@ after the publish workflow failed on the stale lockfile.
 - Invariant run depth (256) kept at default — CI completes in ~6 min total. If CI runners slow
   down, reduce to 64 via a `foundry.toml` `[profile.ci]` block.
 
+### FOLLOW-ON (same session, three tasks done in order)
+
+**1. @msgboard/examples build-out (commit 3581c51).** The parked viem-adapter + forge-cheatcode
+demos turned out to ALREADY EXIST (`viem-demo.ts`; `packages/foundry/script/PostMessage.s.sol` +
+`grind-message.cjs` + `MsgBoard.sol` cheatcode helper). So "build out" became closing the gaps:
+- Fixed a real bug in `write-for-me.ts`: it defaulted to `https://rpc.pulsechain.com`, which does
+  NOT serve the `msgboard_` namespace — the relay failed out of the box. Now defaults to the
+  valve.city demo testnet endpoint (chain 943, safe-by-default so it never posts to mainnet).
+- Standardized its env var `RPC_URL` → `MSGBOARD_RPC` (matches viem-demo + archivist).
+- Made the startup banner print via `console.log` (was `defaultLogger`, the `debug` library —
+  silent unless DEBUG is set, so `npm run write-for-me` showed a blank terminal).
+- NEW `submit-message.ts` — the canonical write flow (`status` → `setDifficultyFactors` →
+  `doPoW` → `addMessage`), which was missing from TypeScript. Safe-by-default: requires
+  MSGBOARD_RPC or it prints the flow and exits without grinding (PoW takes minutes, posts live).
+- NEW `packages/examples/README.md` — a demo table + endpoints + cross-link to the Foundry demo.
+- Added `write-for-me` + `submit-message` to package.json scripts (both were unreachable before).
+- VERIFIED: tsc --noEmit clean; viem-demo reads live (12 msgs); write-for-me binds loopback,
+  200 on good RLP, 400 on bad body; submit-message safe path exits 0.
+
+**2. Node 24 CI alignment (commit 902cfaa).** The progress note above was STALE — the actions
+were already at `@v5` (commit 4a57574), so the Node 20 runtime deprecation was already resolved.
+The real gap was that CI tested Node 22 while local dev runs Node 24.13.0 (which ships npm 11.12.1,
+above the 11.5.1 trusted-publishing floor). Added `.nvmrc` (= 24) as the single source of truth and
+pointed both workflows at it via `node-version-file: '.nvmrc'` (DRY — was duplicated `node-version: 22`).
+Did NOT add an `engines` field to the published packages — that would wrongly constrain library
+consumers to Node 24; only the dev/CI toolchain needs it. VERIFIED: both YAMLs parse; the CI node
+job's exact steps (core/sdk/hardhat builds + 6 SDK tests) pass on local Node 24.
+
+**3. Relayer tests for the new code (commit 32451b3).** The two files shipped this session had no
+dedicated tests. Added `test/actions/forward-message.test.ts` (4 tests: forwards RLP verbatim,
+surfaces hash as ref, propagates rejection) and `test/sources/http-queue.test.ts` (9 tests: queue+
+drain, 400 on parse reject, 404 wrong path/method, 401 token auth, 429 queue cap, maxBatchSize
+draining, 64 KiB body cap, non-loopback-without-token throws). http-queue tests hit a real server
+via global fetch with a connection-retry helper (the source binds async and exposes no ready signal).
+Relayer suite now 14 files / 52 tests (was 39), all green.
+
 ### Next
-- `examples/` viem-adapter + forge-cheatcode: still parked (design locked in the PARKED note below;
-  not yet spec'd or built).
-- Node 20 action deprecation in `publish.yml`: GitHub forces Node 24 on 2026-09-16.
-  Bump `actions/setup-node` to `@v5` before then (no functional impact yet, low urgency).
-- SDK `gen:docs` does NOT need a re-run: it reads `packages/sdk/README.md`, which was untouched
-  this session. Only `packages/relayer/README.md` changed (a separate, hand-maintained file).
+- KNOWN (benign): `packages/relayer/package.json` exports map orders conditions so `types`/`default`
+  come AFTER `import`/`require` — esbuild warns they're unreachable. One-line fix (move `types` first,
+  `default` last) but out of scope this session; flagged, not done.
+- SDK `gen:docs` does NOT need a re-run: it reads `packages/sdk/README.md`, untouched this session.
+  Only `packages/relayer/README.md` + the new `packages/examples/README.md` changed (hand-maintained).
+- Untracked `.serena/` and `scripts/` predate this session — not committed; confirm with user whether
+  they should be gitignored or added.
 
 ---
 
