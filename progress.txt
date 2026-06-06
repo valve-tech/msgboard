@@ -1,6 +1,89 @@
 # MsgBoard — Progress
 
-Updated: 2026-06-05
+Updated: 2026-06-06
+
+## SESSION 2026-06-06: "Write for me" relay, version 0.0.30, Foundry fuzz+invariant tests — COMPLETE
+
+### Accomplished
+
+**"Write for me" push-based relay pattern** — two new exports in `@msgboard/relayer`:
+
+- `packages/relayer/src/sources/http-queue.ts` — `httpQueueSource<T>`: a `RelayerSource` backed
+  by a Node.js `http.Server`. Clients POST pre-computed RLP (or any payload); the server buffers
+  items in memory and drains them per heartbeat tick. Hardened against four security findings:
+  - Queue cap: 1000 items max; returns HTTP 429 when full.
+  - Body cap: 64 KiB hard limit; streaming abort kills oversized requests mid-flight.
+  - Loopback-only default: binds to 127.0.0.1 by default; throws at startup if a non-loopback
+    `host` is passed without a bearer `token` (prevents silent internet exposure).
+  - Slow-loris protection: `server.headersTimeout = server.requestTimeout = 10_000`.
+
+- `packages/relayer/src/actions/forward-message.ts` — `forwardMessageAction()`: calls
+  `client.addMessage(rlp)` without doing proof-of-work (client pre-computes PoW and POSTs the
+  result). Returned hash is surfaced as `{ ok: true, ref: hash }`.
+
+- `packages/examples/src/write-for-me.ts` — runnable wiring: `httpQueueSource` + `forwardMessageAction`.
+  Parse step validates `body.rlp` is hex and caps RLP at 4 096 bytes. SIGINT handler stops
+  cleanly. Key: `(rlp) => rlp`, mode: `'live'`.
+
+- `packages/relayer/README.md` — "Write for me" section with curl example + "transform anything" note.
+
+**Version bump 0.0.30** — all packages bumped: `@msgboard/core`, `@msgboard/sdk`, `@msgboard/relayer`,
+`@msgboard/hardhat`, `@msgboard/examples`, `msgboard-ui`, `msgboard-sponsor`. All cross-references
+updated to `^0.0.30`. `package-lock.json` regenerated via `npm install` and committed separately
+(the lockfile must be regenerated whenever workspace versions change, or `npm ci` in the publish
+workflow fails with a version mismatch).
+
+**npm publish** — `@msgboard/core@0.0.30`, `@msgboard/sdk@0.0.30`, `@msgboard/relayer@0.0.30`,
+`@msgboard/hardhat@0.0.30` all live on the registry. Published via OIDC on the `v0.0.30` tag.
+The original `v0.0.30` tag was deleted and re-created to point past the lockfile-sync commit
+after the publish workflow failed on the stale lockfile.
+
+**Foundry fuzz tests** (`packages/foundry/test/MsgPow.fuzz.t.sol`) — 12 property tests, all passing:
+- `minimalBytes`: no leading zeros, bounded to 32 bytes, roundtrip lossless (256 runs each, no ecMul).
+- `digest`: bounded to 128 bits, deterministic (256 runs each, no ecMul).
+- `workHash`: deterministic, sensitive to `data`, sensitive to `category` (32 runs each — ecMul).
+- `verify`: reverts on zero difficulty, difficulty-1 accepts every message, stricter difficulty
+  implies trivial, deterministic (32 runs each — ecMul; `ext_verify` wrapper for `vm.expectRevert`
+  on library internal calls).
+- `/// forge-config: default.fuzz.runs = 32` inline annotations keep CI fast for ecMul-heavy tests.
+
+**Foundry invariant tests** (`packages/foundry/test/PoWGate.invariant.t.sol`) — 2 invariants passing,
+256 runs × 128 000 calls each (~662 s locally, ~5m44s in CI including build):
+- `invariant_used_stamps_never_cleared` — once `gate.used(wh)` is true it must remain true.
+- `invariant_min_difficulty_immutable` — `gate.minDifficulty()` never changes.
+
+  Handler design: `enterGolden()` submits the canonical vector; `enterAlt(nonceOffset)` submits
+  a message with a shifted nonce. Tracks `goldenHashUsed` (set on any successful entry whose
+  `workHash` equals `goldenHash`) so the invariant can assert the stamp is never cleared.
+
+  A THIRD invariant (`invariant_only_golden_stamp_can_be_used`) was removed: the fuzzer found
+  that nonce periodicity over the secp256k1 curve (curve order
+  `NN = 0xFFFF…BAAEDCE6AF48A03BBFD25E8CD0364141`) means two nonces differing by NN produce
+  identical `workHash`. Adding NN to the golden nonce yields a different message that passes
+  `verify()` and sets `gate.used(goldenHash) = true` — without the original golden message
+  ever having been submitted. The invariant's assumption that only the golden message can consume
+  the golden stamp was wrong. The handler documents NN as a named constant and the behavior is
+  correct (replay protection still holds: the stamp can only be consumed once).
+
+**CI** — confirmed green on commit `cc009b7` (the lockfile-sync commit). Foundry job 5m44s.
+
+### Key decisions
+- `httpQueueSource` throws at construction (not silently ignoring) if a public bind is requested
+  without a token. Fast-fail at misconfiguration is better than a runtime surprise.
+- RLP cap (4 096 bytes) is enforced in the example's `parse` callback, not in the HTTP layer,
+  so library users can set their own cap appropriate to their payload type.
+- Invariant run depth (256) kept at default — CI completes in ~6 min total. If CI runners slow
+  down, reduce to 64 via a `foundry.toml` `[profile.ci]` block.
+
+### Next
+- `examples/` viem-adapter + forge-cheatcode: still parked (design locked in the PARKED note below;
+  not yet spec'd or built).
+- Node 20 action deprecation in `publish.yml`: GitHub forces Node 24 on 2026-09-16.
+  Bump `actions/setup-node` to `@v5` before then (no functional impact yet, low urgency).
+- SDK `gen:docs` does NOT need a re-run: it reads `packages/sdk/README.md`, which was untouched
+  this session. Only `packages/relayer/README.md` changed (a separate, hand-maintained file).
+
+---
 
 ## SESSION 2026-06-05: @msgboard/relayer package — COMPLETE + PUBLISHED
 
