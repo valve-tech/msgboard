@@ -1,6 +1,6 @@
 {
   "name": "@msgboard/relayer",
-  "version": "0.0.30",
+  "version": "0.0.31",
   "description": "Controllable, safe-by-default pool-watcher relayer for the msgboard board",
   "repository": "github:valve-tech/msgboard",
   "author": "MsgBoard",
@@ -20,7 +20,12 @@
       "default": "./dist/index.js"
     }
   },
-  "keywords": ["msgboard", "relayer", "pool-watcher", "pulsechain"],
+  "keywords": [
+    "msgboard",
+    "relayer",
+    "pool-watcher",
+    "pulsechain"
+  ],
   "scripts": {
     "prebuild": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "tsc",
@@ -29,17 +34,21 @@
     "test:watch": "vitest",
     "lint": "prettier --check ."
   },
-  "files": ["dist/"],
+  "files": [
+    "dist/"
+  ],
   "dependencies": {
-    "@msgboard/history": "^0.0.30",
-    "@msgboard/sdk": "^0.0.30",
+    "@msgboard/history": "^0.0.31",
+    "@msgboard/sdk": "^0.0.31",
     "viem": "^2.25.0"
   },
   "peerDependencies": {
     "pg": "^8.14.1"
   },
   "peerDependenciesMeta": {
-    "pg": { "optional": true }
+    "pg": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/pg": "^8.11.11",
