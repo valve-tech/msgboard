@@ -15,6 +15,7 @@ with `MSGBOARD_RPC`.
 | `viem-demo.ts` | `npm run viem-demo --workspace=packages/examples` | read-only | a viem `PublicClient` works directly as the SDK `Provider` |
 | `submit-message.ts` | `npm run submit-message --workspace=packages/examples` | writes (live) | the canonical write flow: `status` → `doPoW` → `addMessage` |
 | `keep-alive.ts` | `npm run keep-alive --workspace=packages/examples` | writes (live) | keep a message in the ephemeral pool by re-posting before it ages out of the ~120-block window |
+| `request-fulfill.ts` | `npm run request-fulfill --workspace=packages/examples` | read-only / watcher | broadcast a signed request, watch a category, verify the signature, fulfill — the skeleton behind Intent Distribution, Action Requests, and Account Abstraction |
 | `write-for-me.ts` | `npm run write-for-me --workspace=packages/examples` | writes (relay) | a push-based relay that forwards client-computed RLP without re-doing proof-of-work |
 | `archivist.ts` | `npm run archivist --workspace=packages/examples` | read-only + Postgres | sink-only relayer that archives every message to Postgres |
 
@@ -71,6 +72,18 @@ Tunable via `RETENTION_BLOCKS`, `REFRESH_AT_BLOCKS_LEFT`, and `CHECK_INTERVAL_MS
 takes a few minutes in the JavaScript SDK even at demo difficulty (the node grinds faster
 natively), so a tight retention window may not leave enough time to re-grind before eviction —
 in production you would lower the board's difficulty or grind with a faster implementation.
+
+### request-fulfill
+
+The shared pattern behind **Intent Distribution**, **Action Requests**, and **Account Abstraction**:
+a user signs a request off-chain, posts it under a category, and any watcher recovers the signer and
+decides whether to fulfill it. Because board data is untrusted, the fulfiller must verify the
+signature before acting.
+
+- No `MSGBOARD_RPC`: runs the whole pipeline in-process against a fresh signature — sign → encode →
+  decode → recover → verify → fulfill — and shows that a tampered request fails verification.
+- `MSGBOARD_RPC` set: runs a relayer-engine watcher (`msgboardContentSource` + a signature-checking
+  condition + a fulfilling action) over the `intent` category.
 
 ### write-for-me
 
