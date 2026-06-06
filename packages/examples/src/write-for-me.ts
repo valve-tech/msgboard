@@ -6,7 +6,11 @@
  * itself — it just needs a wallet-free msgboard node connection.
  *
  * Usage:
- *   RPC_URL=https://rpc.pulsechain.com npx ts-node write-for-me.ts
+ *   npm run write-for-me --workspace=packages/examples
+ *
+ * Set MSGBOARD_RPC to point the relay at the chain you want to forward to.
+ * Defaults to the public demo testnet endpoint (chain 943) so a misconfigured
+ * relay never posts to mainnet by accident.
  *
  * Submitting a message from a client (curl):
  *   curl -X POST http://localhost:3001/submit \
@@ -19,7 +23,9 @@
 import { http, isHex, type Hex } from 'viem'
 import { Relayer, httpQueueSource, forwardMessageAction, defaultLogger } from '@msgboard/relayer'
 
-const rpcUrl = process.env['RPC_URL'] ?? 'https://rpc.pulsechain.com'
+// Note: rpc.pulsechain.com does NOT serve the msgboard_ namespace — only nodes
+// running the msgboard reth fork (e.g. valve.city) do. Use such an endpoint.
+const rpcUrl = process.env['MSGBOARD_RPC'] ?? 'https://one.valve.city/rpc/vk_demo/evm/943'
 const port = Number(process.env['PORT'] ?? 3001)
 const token = process.env['RELAY_TOKEN']
 const logger = defaultLogger('write-for-me')
@@ -58,10 +64,13 @@ const relayer = new Relayer<Hex>({
 
 relayer.start()
 
-logger(`write-for-me relay listening on port ${port} — rpc: ${rpcUrl}`)
+// User-facing startup banner via console.log so it shows without DEBUG set
+// (the relayer's own logger is debug-gated: run with DEBUG='*' for relay internals).
+console.log(`write-for-me relay listening on port ${port} — rpc: ${rpcUrl}`)
+console.log(`POST { "rlp": "0x..." } to http://localhost:${port}/submit`)
 
 process.on('SIGINT', async () => {
-  logger('shutting down…')
+  console.log('\nshutting down…')
   await relayer.stop()
   await queue.close()
   process.exit(0)

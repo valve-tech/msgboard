@@ -1,0 +1,82 @@
+# @msgboard/examples
+
+Runnable, self-contained demos for the msgboard TypeScript packages. This is a private
+workspace package (`private: true`) — it is not published to npm; it exists so the docs in
+the other packages can point at working code.
+
+Each demo is safe by default: read-only demos fall back gracefully when no node is reachable,
+and write demos refuse to do real proof-of-work unless you explicitly point them at a node
+with `MSGBOARD_RPC`.
+
+## The demos
+
+| Demo | run | reads/writes | demonstrates |
+|---|---|---|---|
+| `viem-demo.ts` | `npm run viem-demo --workspace=packages/examples` | read-only | a viem `PublicClient` works directly as the SDK `Provider` |
+| `submit-message.ts` | `npm run submit-message --workspace=packages/examples` | writes (live) | the canonical write flow: `status` → `doPoW` → `addMessage` |
+| `write-for-me.ts` | `npm run write-for-me --workspace=packages/examples` | writes (relay) | a push-based relay that forwards client-computed RLP without re-doing proof-of-work |
+| `archivist.ts` | `npm run archivist --workspace=packages/examples` | read-only + Postgres | sink-only relayer that archives every message to Postgres |
+
+## Endpoints
+
+All demos default to (or require) `MSGBOARD_RPC` — a JSON-RPC endpoint served by a node running
+the msgboard reth fork. The public demo endpoint is:
+
+```
+https://one.valve.city/rpc/vk_demo/evm/943   # chain 943 (testnet)
+https://one.valve.city/rpc/vk_demo/evm/369   # chain 369 (PulseChain mainnet)
+```
+
+`vk_demo` is a public, rate-limited demo key — fine for trying the demos, not for production.
+Note that ordinary RPC endpoints (for example `rpc.pulsechain.com`) do **not** serve the
+`msgboard_` namespace; only msgboard-fork nodes such as valve.city do.
+
+## Demo details
+
+### viem-demo
+
+Confirms the SDK is provider-agnostic: a `createPublicClient` from viem is passed straight into
+`new MsgBoardClient(...)`. Reads `status()` and `content()`. Falls back to an explanatory message
+if no live node is reachable.
+
+### submit-message
+
+The fundamental write path, in four steps:
+
+1. `status()` — read the board's difficulty factors.
+2. `setDifficultyFactors(...)` — grind against the same difficulty the node enforces.
+3. `doPoW(category, data)` — find a valid nonce (minutes at production difficulty; pegs a core).
+4. `addMessage(work.message)` — submit; the node re-verifies the work before accepting.
+
+Because it does real work and posts a live message, it requires `MSGBOARD_RPC` to be set and
+prints the flow without grinding when it is not.
+
+### write-for-me
+
+A long-running relay. Clients solve proof-of-work locally and POST the resulting RLP; the relay
+forwards every accepted submission on chain without doing any proof-of-work itself.
+
+```sh
+curl -X POST http://localhost:3001/submit \
+  -H 'Content-Type: application/json' \
+  -d '{"rlp":"0x..."}'
+```
+
+Protect the endpoint by setting `RELAY_TOKEN` and sending `Authorization: Bearer <token>`.
+Defaults to the testnet demo endpoint so a misconfigured relay never posts to mainnet by accident.
+
+### archivist
+
+A sink-only relayer: every message the board returns is recorded to a Postgres `message_archive`
+table with a one-year retention. Runs in `observe` mode (the sink always runs; no on-chain action).
+Requires `DATABASE_URL`.
+
+## Foundry / Solidity
+
+The Solidity-side demo lives in [`packages/foundry`](../foundry):
+
+- [`script/PostMessage.s.sol`](../foundry/script/PostMessage.s.sol) — a Forge script that grinds a
+  valid message off-chain (via the core SDK over `--ffi`) and submits it with the `MsgBoard`
+  cheatcode helper.
+- [`examples/PoWGate.sol`](../foundry/examples/PoWGate.sol) — a contract that gates an action behind
+  on-chain proof-of-work verification using `MsgPow.sol`.
