@@ -34,6 +34,7 @@ services:
     depends_on:
       - ui
       - faucet
+      - hasura
     networks:
       - msgboard
 
@@ -136,6 +137,55 @@ services:
       # opt into live mode — the Relayer engine defaults to observe/dry-run when this is absent
       BRIDGE_LIVE: '1'
     command: ['npm', 'run', 'sponsor:bridge']
+
+  # indexer: the dedicated, multichain archivist. One relayer per chain watches every
+  # category and records what it sees into the message_archive table (postgresArchiveSink,
+  # backed by @msgboard/history). This is the WRITE side of the historical archive that
+  # Hasura serves. Independent of the sponsor scripts on purpose.
+  indexer:
+    container_name: indexer
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    depends_on:
+      - msgboard-postgres
+    restart: unless-stopped
+    networks:
+      - msgboard
+    environment:
+      DATABASE_URL: postgres://msgboard-postgres:${POSTGRES_PASSWORD:-password}@msgboard-postgres:5432/msgboard-postgres
+      INDEXER_CHAINS: ${INDEXER_CHAINS:-1,369,943}
+      RPC_1: ${RPC_1:-}
+      RPC_369: ${RPC_369:-}
+      RPC_943: ${RPC_943:-}
+      INDEXER_INTERVAL_MS: ${INDEXER_INTERVAL_MS:-20000}
+      RETENTION_DAYS: ${RETENTION_DAYS:-365}
+    command: ['npm', 'run', 'indexer:start']
+
+  # hasura: GraphQL over the message_archive table. Published on LOOPBACK ONLY
+  # (127.0.0.1:8081) — Caddy proxies the public GraphQL endpoint at archive.msgboard.xyz,
+  # and the admin API/console are reachable only via an SSH tunnel to this port.
+  # The `anonymous` unauthorized role gets SELECT-only on message_archive (set at deploy).
+  hasura:
+    container_name: hasura
+    image: hasura/graphql-engine:v2.42.0 # pinned v2 Community Edition (Apache-2.0)
+    depends_on:
+      - msgboard-postgres
+    restart: unless-stopped
+    networks:
+      - msgboard
+    ports:
+      - '127.0.0.1:8081:8080'
+    environment:
+      HASURA_GRAPHQL_DATABASE_URL: postgres://msgboard-postgres:${POSTGRES_PASSWORD:-password}@msgboard-postgres:5432/msgboard-postgres
+      HASURA_GRAPHQL_ENABLE_CONSOLE: 'false'
+      HASURA_GRAPHQL_ADMIN_SECRET: ${HASURA_ADMIN_SECRET:-}
+      # Unauthenticated requests assume the read-only `anonymous` role.
+      HASURA_GRAPHQL_UNAUTHORIZED_ROLE: anonymous
+      # GraphQL is fetched cross-origin by browsers; Hasura emits the CORS headers.
+      HASURA_GRAPHQL_CORS_DOMAIN: '*'
+      HASURA_GRAPHQL_DEV_MODE: 'false'
+      HASURA_GRAPHQL_ENABLE_TELEMETRY: 'false'
 
   msgboard-postgres:
     container_name: msgboard-postgres
