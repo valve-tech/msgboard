@@ -2,6 +2,49 @@
 
 Updated: 2026-06-06
 
+## GraphQL HISTORICAL ARCHIVE (Hasura + dedicated indexer) — BUILT + VERIFIED LOCALLY, NOT YET DEPLOYED
+User wants GraphQL over historical data via Hasura, hosted on the existing Hetzner box, at
+archive.msgboard.xyz, with a DEDICATED multichain archivist (NOT bolted onto the sponsor scripts),
+public read-only.
+
+WHAT EXISTS NOW (committed):
+- packages/indexer (msgboard-indexer, private, commit feat indexer) — the dedicated multichain
+  archivist. One Relayer per chain in INDEXER_CHAINS (default 1,369,943): msgboardContentSource (all
+  categories) -> postgresArchiveSink (shared pool), mode observe, noopAction. Env: DATABASE_URL,
+  RPC_<id>, INDEXER_INTERVAL_MS, RETENTION_DAYS. Root script `indexer:start`. Registered in workspaces.
+  VERIFIED: throwaway postgres + live demo 369+943 -> archived 6 (369) + 10 (943) rows, correct chain_id.
+- docker-compose.prod.yml (tracked, commit feat deploy Hasura): added `indexer` service (root Dockerfile,
+  indexer:start) + `hasura` service (hasura/graphql-engine:v2.42.0, anonymous unauthorized role,
+  console off, admin secret, CORS *, published 127.0.0.1:8081 LOOPBACK ONLY). caddy depends_on += hasura.
+- docs/graphql-archive.md (committed) — endpoint, schema, example GraphQL queries, + the human-gated
+  DNS/vault/deploy steps.
+
+DEPLOY CHANGES ARE LOCAL-ONLY (deploy/ is gitignored — lives in the working tree, deployed via ansible
+sync, NOT committed). These edits are made and must stay in the local tree:
+- deploy/caddy/Caddyfile — archive.msgboard.xyz block, origin cert (covers *.msgboard.xyz), proxies
+  ONLY /v1/graphql + /healthz to hasura:8080; everything else 404. (Validated via `caddy adapt`.)
+- deploy/ansible/templates/env.j2 — added HASURA_ADMIN_SECRET={{ vault_hasura_admin_secret }}.
+- deploy/ansible/group_vars/vault.yml.example — added vault_hasura_admin_secret.
+- deploy/ansible/site.yml — after compose up: wait for message_archive table (indexer creates it) +
+  hasura healthz, then POST pg_track_table + pg_create_select_permission (anonymous, SELECT-only, 9
+  cols, filter {}, allow_aggregations, limit 1000) to 127.0.0.1:8081/v1/metadata with the admin secret;
+  status_code [200,400] so reruns are idempotent. Added loopback + non-fatal hostname GraphQL probes.
+  (ansible-playbook --syntax-check passes with the op vault password.)
+
+FULL GraphQL STACK VERIFIED LOCALLY (throwaway pg + indexer + hasura v2.42.0 on a docker network):
+track 200, anonymous permission 200; ANONYMOUS query (no admin secret) returned message content;
+anonymous aggregate matched DB (369=6, 943=10); anonymous filtered query worked; re-track -> 400
+(idempotent); metadata/run_sql WITHOUT the admin secret -> 400 access-denied (admin surface protected,
+and Caddy doesn't expose those paths anyway). All throwaway containers/networks removed.
+
+HUMAN-GATED to go live (in docs/graphql-archive.md): (1) Cloudflare DNS orange-cloud archive.msgboard.xyz
+-> box IP, Full(Strict) [existing *.msgboard.xyz origin cert covers it]; (2) add vault_hasura_admin_secret
+to the encrypted vault; (3) ansible-playbook site.yml -e ansible_host=<ip> --vault-password-file <(op ...).
+Admin/console via SSH tunnel to 127.0.0.1:8081 only.
+
+PREREQUISITE NOTE: the indexer must publish @msgboard packages at ^0.0.31 (already on npm) — the box
+builds from the root Dockerfile (npm i + npm run build), so the workspace resolves them locally anyway.
+
 ## RELEASE v0.0.31 (history package) — PUBLISHED + VERIFIED on npm
 publish.yml run 79897130415 succeeded (1m25s). All 5 public packages confirmed live at 0.0.31 via
 direct registry query: @msgboard/core, /sdk, /history (FIRST OIDC release), /hardhat, /relayer.
