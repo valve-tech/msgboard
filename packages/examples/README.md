@@ -20,6 +20,7 @@ with `MSGBOARD_RPC`.
 | `antagonistic-game.ts` | `npm run antagonistic-game --workspace=packages/examples` | read-only / watcher | a commit-reveal rock-paper-scissors round refereed over the board — impartial inputs, cheating caught |
 | `write-for-me.ts` | `npm run write-for-me --workspace=packages/examples` | writes (relay) | a push-based relay that forwards client-computed RLP without re-doing proof-of-work |
 | `archivist.ts` | `npm run archivist --workspace=packages/examples` | read-only + Postgres | sink-only relayer that archives every message to Postgres |
+| `history-server.ts` | `npm run history-server --workspace=packages/examples` | read-only + Postgres | the full historical-data flow: archive live board traffic **and** serve it over an HTTP query API |
 
 ## Endpoints
 
@@ -130,6 +131,22 @@ Defaults to the testnet demo endpoint so a misconfigured relay never posts to ma
 A sink-only relayer: every message the board returns is recorded to a Postgres `message_archive`
 table with a one-year retention. Runs in `observe` mode (the sink always runs; no on-chain action).
 Requires `DATABASE_URL`.
+
+### history-server
+
+The full historical-data flow over a single Postgres table, combining both halves:
+
+- **write side** — an archivist relayer records every board message it sees (`@msgboard/relayer`'s
+  `postgresArchiveSink`, backed by `@msgboard/history`).
+- **read side** — `@msgboard/history`'s `archiveServer` exposes an HTTP query API over the archive.
+
+```sh
+curl 'http://localhost:4040/messages?category=gasmoneyplease&contains=hello&limit=20'
+curl 'http://localhost:4040/health'
+```
+
+Requires `DATABASE_URL`; tunable via `PORT`, `HISTORY_TOKEN`, `RETENTION_DAYS`. Prints the flow and
+exits when `DATABASE_URL` is not set.
 
 ## Foundry / Solidity
 

@@ -12,11 +12,13 @@
     "multi-sig-collect": "tsx src/multi-sig-collect.ts",
     "antagonistic-game": "tsx src/antagonistic-game.ts",
     "write-for-me": "tsx src/write-for-me.ts",
-    "archivist": "tsx src/archivist.ts"
+    "archivist": "tsx src/archivist.ts",
+    "history-server": "tsx src/history-server.ts"
   },
   "dependencies": {
     "@msgboard/sdk": "*",
     "@msgboard/relayer": "*",
+    "@msgboard/history": "*",
     "pg": "^8.14.1",
     "tsx": "^4.19.3",
     "viem": "^2.25.0"
