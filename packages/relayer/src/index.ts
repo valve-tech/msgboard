@@ -31,6 +31,10 @@ export { bridgeAffirmationSource } from './sources/bridge-affirmation.js'
 export { generatedSource } from './sources/generated.js'
 
 export { submitMessageAction } from './actions/submit-message.js'
+export { forwardMessageAction } from './actions/forward-message.js'
 export { sendValueAction } from './actions/send-value.js'
 export { webhookAction } from './actions/webhook.js'
 export { noopAction } from './actions/noop.js'
+
+export { httpQueueSource } from './sources/http-queue.js'
+export type { HttpQueueSource, HttpQueueSourceOptions } from './sources/http-queue.js'
