@@ -60,7 +60,7 @@
 
 <h3 class="text-lg italic justify-between flex mb-2">
   <span class="flex flex-row items-center gap-x-2">
-    <ToggleButton off="txt" on="0x" checked={showHexResult} onclick={() => onToggleShowHex(!showHexResult)} />
+    <ToggleButton off="txt" on="0x" offIcon="mdi:format-text" onIcon="mdi:code-brackets" checked={showHexResult} onclick={() => onToggleShowHex(!showHexResult)} />
     <Info text="The category is 32 bytes long. It is often used coordinate where to look for messages on the msgboard by clients to quickly find useful messages for their protocol. Switch the toggle to `0x` to view the hex version of your input." />
     Category
     <span class="group flex items-center gap-x-2">

@@ -29,7 +29,7 @@
     </div>
     <h3 class="text-2xl font-semibold mb-4 text-slate-800 dark:text-gray-100">Permissionless, Paid in Work</h3>
     <p class="text-base leading-relaxed text-slate-600 dark:text-gray-300">
-      No gas, no token, no account — you mint your own proof-of-work <span class="font-medium text-emerald-600 dark:text-emerald-400">stamp</span> for each message. Anyone can mint one; everyone must — that stamp is the gate that keeps the board spam-resistant.
+      No gas, no token, no account. You mint a proof-of-work <span class="font-medium text-emerald-600 dark:text-emerald-400">stamp</span> for each message — that stamp is what keeps the board spam-free.
     </p>
   </div>
 </div>
