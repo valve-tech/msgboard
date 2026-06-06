@@ -39,11 +39,12 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version-file: '.nvmrc'
           registry-url: 'https://registry.npmjs.org'
 
-      # Node 22 ships npm 10.x; trusted publishing needs 11.5.1+. --force avoids a
-      # self-upgrade crash ("Cannot find module 'promise-retry'").
+      # Node 24 already ships npm 11.x (trusted publishing needs 11.5.1+); this pins the
+      # very latest to stay ahead of the floor. --force avoids a self-upgrade crash
+      # ("Cannot find module 'promise-retry'").
       - run: npm install -g --force npm@latest
 
       - run: npm ci
