@@ -61,6 +61,52 @@ const recent = await archive.query({ chainId: 943, category: 'lorem', limit: 20 
 
 `query()` filters by `chainId`, `category` (hex or decoded text), `since`/`until`, `contains` (substring match on decoded content), `limit`, and `offset`.
 
+## "Write for me" relay
+
+A push-based relay pattern where clients solve proof-of-work locally and POST the result — the relay forwards it on-chain on their behalf.
+
+```ts
+import { http, isHex, type Hex } from 'viem'
+import { Relayer, httpQueueSource, forwardMessageAction, defaultLogger } from '@msgboard/relayer'
+
+const queue = httpQueueSource<Hex>({
+  port: 3001,
+  token: process.env.RELAY_TOKEN,
+  parse: (body) => {
+    const { rlp } = body as { rlp: string }
+    if (!isHex(rlp)) throw new Error('expected hex rlp')
+    return rlp as Hex
+  },
+})
+
+const relayer = new Relayer<Hex>({
+  node: { transport: http('https://rpc.pulsechain.com') },
+  mode: 'live',
+  source: queue,
+  key: (rlp) => rlp,
+  action: forwardMessageAction(),
+  logger: defaultLogger('relay'),
+})
+
+relayer.start()
+```
+
+Clients submit with:
+
+```sh
+curl -X POST http://localhost:3001/submit \
+  -H 'Content-Type: application/json' \
+  -d '{"rlp":"0x..."}'
+```
+
+The `rlp` value comes from the SDK client's `doPoW()` result: `work.message`. The relay calls `msgboard_addMessage` with it directly — no wallet, no second proof-of-work.
+
+`httpQueueSource` buffers POSTed items in memory and drains them on each heartbeat tick. An optional `token` field enables bearer-token auth. See `examples/write-for-me.ts` for a full runnable version.
+
+### Transform anything
+
+Because `httpQueueSource` is generic and `forwardMessageAction` only needs a `Hex` RLP, you can build relays for arbitrary protocols by adding a transform step: accept whatever your protocol produces, convert it to a `msgboard_addMessage`-compatible RLP in `parse`, and let the relayer forward it.
+
 ## Example relayers
 
 | Relayer | source | store | sink | action (live only) | demonstrates |
@@ -69,10 +115,11 @@ const recent = await archive.query({ chainId: 943, category: 'lorem', limit: 20 
 | Bridge watcher (`bridge.ts`) | `bridgeAffirmationSource` (per chain) | memory-ttl | — | `submitMessageAction` | finalized event source, multi-node |
 | Spam writer (`spam.ts`) | `generatedSource(sentence)` | noop | — | `submitMessageAction` | producer source, noop dedup |
 | Archivist | all content | — | `postgresArchiveSink` 1yr | `noopAction` | sink-only; records in observe mode |
+| "Write for me" relay (`write-for-me.ts`) | `httpQueueSource` (POSTed RLP) | noop | — | `forwardMessageAction` | push-based, client-side PoW |
 | Cross-chain mirror | content on 369 | memory-ttl | — | `submitMessageAction` on 943 | source node ≠ action node |
 | Moderation flagger | all content + blocklist predicate | — | `postgresSink('flagged')` | `noopAction` | condition + sink, no action |
 
-See `examples/` for runnable code for the archivist, mirror, and flagger.
+See `examples/` for runnable code for the archivist, mirror, flagger, and write-for-me relay.
 
 ## Known limitations
 
