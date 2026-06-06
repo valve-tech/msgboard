@@ -10,6 +10,10 @@ deploy/ansible/group_vars/vault.yml
 # visual brainstorm artifacts
 .superpowers
 progress.txt
+
+# Serena MCP project cache + local-only root scripts
+.serena/
+/scripts/
 packages/foundry/out/
 packages/foundry/cache/
 packages/foundry/lib/
