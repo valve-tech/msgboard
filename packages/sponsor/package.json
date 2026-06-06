@@ -1,6 +1,6 @@
 {
   "name": "msgboard-sponsor",
-  "version": "0.0.1",
+  "version": "0.0.30",
   "private": true,
   "main": "dist/sponsor.js",
   "scripts": {
@@ -17,8 +17,8 @@
   },
   "type": "module",
   "dependencies": {
-    "@msgboard/relayer": "^0.0.1",
-    "@msgboard/sdk": "^0.0.28",
+    "@msgboard/relayer": "^0.0.30",
+    "@msgboard/sdk": "^0.0.30",
     "@types/pg": "^8.11.11",
     "pg": "^8.14.1",
     "tsx": "^4.19.3",
