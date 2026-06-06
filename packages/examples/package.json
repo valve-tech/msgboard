@@ -10,6 +10,7 @@
     "keep-alive": "tsx src/keep-alive.ts",
     "request-fulfill": "tsx src/request-fulfill.ts",
     "multi-sig-collect": "tsx src/multi-sig-collect.ts",
+    "antagonistic-game": "tsx src/antagonistic-game.ts",
     "write-for-me": "tsx src/write-for-me.ts",
     "archivist": "tsx src/archivist.ts"
   },
