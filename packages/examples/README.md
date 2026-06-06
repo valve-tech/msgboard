@@ -16,6 +16,7 @@ with `MSGBOARD_RPC`.
 | `submit-message.ts` | `npm run submit-message --workspace=packages/examples` | writes (live) | the canonical write flow: `status` → `doPoW` → `addMessage` |
 | `keep-alive.ts` | `npm run keep-alive --workspace=packages/examples` | writes (live) | keep a message in the ephemeral pool by re-posting before it ages out of the ~120-block window |
 | `request-fulfill.ts` | `npm run request-fulfill --workspace=packages/examples` | read-only / watcher | broadcast a signed request, watch a category, verify the signature, fulfill — the skeleton behind Intent Distribution, Action Requests, and Account Abstraction |
+| `multi-sig-collect.ts` | `npm run multi-sig-collect --workspace=packages/examples` | read-only / watcher | collect M-of-N owner signatures over a shared payload and assemble them once the threshold is met |
 | `write-for-me.ts` | `npm run write-for-me --workspace=packages/examples` | writes (relay) | a push-based relay that forwards client-computed RLP without re-doing proof-of-work |
 | `archivist.ts` | `npm run archivist --workspace=packages/examples` | read-only + Postgres | sink-only relayer that archives every message to Postgres |
 
@@ -84,6 +85,18 @@ signature before acting.
   decode → recover → verify → fulfill — and shows that a tampered request fails verification.
 - `MSGBOARD_RPC` set: runs a relayer-engine watcher (`msgboardContentSource` + a signature-checking
   condition + a fulfilling action) over the `intent` category.
+
+### multi-sig-collect
+
+**Multi-Sigs**: owners share their individual signatures over the board instead of routing through a
+central coordinator. Each owner signs the same payload and posts it under a category; a collector
+verifies each signature against the known owner set, dedups by signer, and assembles the set (sorted
+by signer, as on-chain verifiers expect) once it reaches the threshold.
+
+- No `MSGBOARD_RPC`: simulates a 2-of-3 signing, showing a non-owner signature and a duplicate signer
+  both rejected, then the threshold met and the set assembled.
+- `MSGBOARD_RPC` + `MULTISIG_OWNERS`: runs a relayer-engine watcher over the `multisig` category that
+  accumulates signatures across polls.
 
 ### write-for-me
 
