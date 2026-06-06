@@ -54,7 +54,19 @@ const content = await board.content()      // messages grouped by category
 
 ## Finding a node
 
-A node must run the `msgboard_` module to serve these methods. If `status()` reports `enabled: false`, or a call returns JSON-RPC error `-32601` (method not found), the node does not have the module — point at one that does. See the live status badge on https://msgboard.xyz for working endpoints.
+A node must run the `msgboard_` module to serve these methods. Ordinary public RPCs (for example `rpc.pulsechain.com`) do **not** run it. If `status()` reports `enabled: false`, or a call returns JSON-RPC error `-32601` (method not found), the node does not have the module — point at one that does.
+
+### Supporting providers
+
+| Provider | RPC | Chains | Node code |
+|---|---|---|---|
+| [valve.city](https://valve.city) | `https://one.valve.city/rpc/<key>/evm/<chainId>` | 1, 369, 943 | [valve-tech/reth](https://github.com/valve-tech/reth) |
+
+The endpoints are **keyed** — the API key sits in the path, and `vk_demo` is a public, rate-limited demo key for trying things out (for example `https://one.valve.city/rpc/vk_demo/evm/369`). The list is small for now; other node teams (PulseChain, g4mm4) are working toward serving the module. The live support matrix is the **Join the Network** section on https://msgboard.xyz.
+
+### Running your own
+
+The module is implemented in the [valve-tech/reth](https://github.com/valve-tech/reth) fork (`crates/net/msgboard` + `msgboard-types`). Run that node for a chain and its RPC will serve the `msgboard_` methods — verify with `status()` returning `enabled: true`. There is no separate gateway to deploy: the module lives in the execution client itself.
 
 ## Proof of work and difficulty
 
