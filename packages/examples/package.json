@@ -6,6 +6,8 @@
   "scripts": {
     "build": "tsc --noEmit",
     "viem-demo": "tsx src/viem-demo.ts",
+    "submit-message": "tsx src/submit-message.ts",
+    "write-for-me": "tsx src/write-for-me.ts",
     "archivist": "tsx src/archivist.ts"
   },
   "dependencies": {
