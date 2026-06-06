@@ -120,6 +120,33 @@ Relayer suite now 14 files / 52 tests (was 39), all green.
 - Untracked `.serena/` and `scripts/` predate this session — not committed; confirm with user whether
   they should be gitignored or added.
 
+### FOLLOW-ON 2 (housekeeping + keep-alive example)
+- `.serena/` and `/scripts/` now gitignored (commit e80c4d4) — user confirmed.
+- Exports-map fix (commit cd9c5c7): core, sdk, AND relayer all ordered conditions with `types`
+  LAST (esbuild warned `types`/`default` unreachable behind `import`/`require`). hardhat was the
+  only correct one. Fixed all three to `types` first, `default` last (matching hardhat). Rebuilt
+  all three; esbuild warning gone; relayer 52 tests still green; examples typecheck clean.
+- NEW `keep-alive.ts` example (commit 94ac5ee) — pool persistence. The board retains only ~120
+  blocks of messages (see [[msgboard-difficulty-board-config]]); a message rooted at block B is
+  evicted ~120 blocks later. The demo posts a message then each interval: reads head block, looks
+  the message up by hash (`getMessage` returns null once evicted), computes remaining life =
+  RETENTION_BLOCKS - (head - rootBlock), and re-grinds+re-submits when gone or within
+  REFRESH_AT_BLOCKS_LEFT of eviction (doPoW re-roots to current head → fresh ~120-block lease).
+  VERIFIED the monitoring core against live data: getMessage(realHash) non-null + hash matches,
+  getMessage(fake)=null, and the tick math on a real msg gave age=101/remaining=19→REFRESH
+  (confirms the 120-block window exactly). CAVEAT discovered + documented: the JS SDK grind takes
+  a few MINUTES at demo difficulty (not "tens of seconds" — my first draft claim was wrong and is
+  fixed in the file + README); the node grinds faster natively. So a 150s live run didn't finish
+  the initial grind — the post path is structurally identical to submit-message (verified) and
+  grind-message.cjs (proven).
+- OPEN (asked user): build examples for the 6 UI "Use Cases" (UseCases.svelte: Multi-Sigs, Intent
+  Distribution, Onboarding/Education, Action Requests, Account Abstraction, Antagonistic Games).
+  Most collapse to one request/fulfill skeleton (post structured payload under a category; a
+  watcher reads + acts). Proposed building 1-2 representative ones rather than 6 speculative demos.
+
+### NOT PUSHED
+Everything this session is local on master (through commit 94ac5ee). User has not asked to push yet.
+
 ---
 
 ## SESSION 2026-06-05: @msgboard/relayer package — COMPLETE + PUBLISHED
