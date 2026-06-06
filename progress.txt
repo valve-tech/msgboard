@@ -183,12 +183,53 @@ SO THAT DECISION IS STILL OPEN.
 Final verification (all green): examples tsc --noEmit clean (7 scripts); relayer 52 tests / 14 files;
 foundry 24 tests (MsgPow fuzz 12 + PoWGate 3 + PoWMint 4 + golden), excluding the ~11-min invariants.
 
-### NOT PUSHED
-Everything this session is local on master (through commit 480c667). User has not asked to push yet.
-Reminder: the new examples post to / read from the live demo board (chain 943) when run with
-MSGBOARD_RPC; offline modes need no node. The 4 use-case scripts are wired in packages/examples
-package.json (viem-demo, submit-message, keep-alive, request-fulfill, multi-sig-collect,
-antagonistic-game, write-for-me, archivist).
+PUSHED through 5ff469b (the use-case examples + docs + Node 24 + exports fix batch). Then started
+the history package (below), which is NOT yet pushed as of this note.
+
+### FOLLOW-ON 4 — NEW PACKAGE @msgboard/history (user: "push then work on history" + "full working historical data example in the examples")
+
+Extracted the archive into its own published package. Layering: sdk <- history <- relayer (no cycle).
+- `packages/history` (commit: feat history archive + query server). Owns the storage core +
+  HTTP query API, NO relayer dependency:
+  - `createArchive({ pool, retention })` → { migrate, record(message, chainId), prune, query } —
+    the message_archive schema + the SQL-injection-guarded query (limit/offset clamped). `Queryable`
+    is a local structural type (any pg Pool/Client fits), so history does NOT depend on relayer.
+  - `archiveServer({ archive, port, host, token })` → Node http read API: GET /health, GET /messages
+    (?chainId&category&since&until&contains&limit&offset). Hardened like the relayer's http-queue:
+    loopback-default bind, non-loopback requires token, /messages 401 without bearer (/health open),
+    10s header/request timeouts. 15 tests (6 archive + 9 server) all pass.
+- `packages/relayer/src/sinks/postgres-archive.ts` (commit: refactor delegate) — now a THIN ADAPTER
+  wrapping createArchive; record(message, context) → archive.record(message, context.chain.id);
+  migrate/prune/query pass through. Re-exports ArchiveQuery/ArchiveRetention/ArchivedMessage from
+  history. relayer gains dep @msgboard/history ^0.0.30. Relayer 52 tests still green (the existing
+  postgres-archive.test.ts passes unchanged — identical SQL/params).
+- Root package.json workspaces: added packages/history (it's an EXPLICIT list, not packages/*).
+- CI (ci.yml): build history + run its tests in the node job. publish.yml: build order
+  core<-sdk<-history<-hardhat<-relayer; publish loop includes history BEFORE relayer.
+- `packages/examples/src/history-server.ts` (commit: build wire) — THE FULL WORKING EXAMPLE: one
+  Postgres table, archivist relayer writes live board traffic (postgresArchiveSink) + archiveServer
+  serves the HTTP query API over the same archive. Safe-by-default (needs DATABASE_URL). Wired as
+  `npm run history-server`. examples gains dep @msgboard/history.
+  VERIFIED END-TO-END with a throwaway postgres:16 container (port 5440) + live demo board 943:
+  archivist captured 10 real messages; GET /messages returned them with decoded content; GET
+  /health ok; ?contains=Minim filtered to 4 (ILIKE case-insensitive); ?limit=2 → 2 rows. Container
+  removed after.
+
+Full build chain green (core/sdk/history/relayer/hardhat); history 15 + relayer 52 tests; examples tsc clean.
+
+### RELEASE GOTCHAS for @msgboard/history (HUMAN-GATED, like the relayer bootstrap)
+1. @msgboard/history is a NEW npm package. OIDC trusted publishing CANNOT publish a package that does
+   not yet exist, so it needs a ONE-TIME bootstrap: `npm publish --workspace @msgboard/history --access public`
+   from a logged-in valvecitydev session, THEN add a GitHub Actions trusted publisher on npmjs.com
+   (valve-tech / msgboard / publish.yml / blank env / npm publish). Until then the publish.yml history
+   step will fail.
+2. VERSION BUMP needed to ship this: all packages are at 0.0.30 and ALREADY published. The published
+   relayer@0.0.30 does NOT depend on history; our local relayer@0.0.30 now does. To release, bump
+   history (new, 0.0.31) + relayer (changed) — and anything re-exporting — to 0.0.31, regen lockfile,
+   tag v0.0.31. (history must be on npm before relayer, since relayer depends on ^history.)
+
+### NOT PUSHED (history batch)
+The history package commits (feat/refactor/build) are local on master, not yet pushed.
 
 ---
 
