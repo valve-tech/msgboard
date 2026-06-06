@@ -144,8 +144,51 @@ Relayer suite now 14 files / 52 tests (was 39), all green.
   Most collapse to one request/fulfill skeleton (post structured payload under a category; a
   watcher reads + acts). Proposed building 1-2 representative ones rather than 6 speculative demos.
 
+### FOLLOW-ON 3 (use-case examples + docs; user asked for all 4 + docs)
+User chose to build ALL four use-case examples plus two docs improvements. Each new example follows
+the same shape: an INSTANT offline demo (no node) of the core logic + a live relayer-engine watcher
+when MSGBOARD_RPC is set (the engine needs a live RPC because buildContext calls eth_chainId).
+
+- `request-fulfill.ts` (commit 86b642d) — Intent Distribution / Action Requests / Account Abstraction.
+  Sign a request (viem), encode→post→decode→recover→verify→fulfill; offline shows a tampered request
+  rejected. Live: relayer watcher on the `intent` category (msgboardContentSource + signature
+  condition + fulfilling action). VERIFIED offline (sign/verify/tamper) + live boot (polls content).
+- `multi-sig-collect.ts` (commit 2518530) — Multi-Sigs. M-of-N: owners post ECDSA sigs over a shared
+  payload; collector verifies vs owner set, dedups by signer, assembles sorted-by-signer at threshold.
+  Offline 2-of-3 shows non-owner + duplicate rejected, then threshold met. VERIFIED offline + live guard.
+- `packages/foundry/examples/PoWMint.sol` + `test/PoWMint.t.sol` (commit 656b166) — Onboarding/Education.
+  Minimal token whose mint is gated by MsgPow.verify; one mint per unique work stamp (global, not
+  per-caller). 4 forge tests pass (valid mint, replay, cross-caller stamp reuse, invalid work).
+- `antagonistic-game.ts` (commit 9b53f01) — Antagonistic Games. Rock-paper-scissors via commit-reveal;
+  referee pairs commits+reveals per round and adjudicates; a reveal not matching its commit is
+  disqualified. Offline plays one round + a caught cheat. Live: referee watcher on `rps` category.
+- DOCS "Finding a node" (commit 4588e23): added a Supporting-providers table (valve.city → reth fork
+  github.com/valve-tech/reth, chains 1/369/943, vk_demo key) + "Running your own" (module lives in
+  valve-tech/reth crates/net/msgboard).
+- DOCS "Proof of work and difficulty" (commit 480c667): rewrote the imprecise "validates against its
+  own factors" para into the accurate FLOOR MODEL — a message declares its OWN wm/wd (baked into the
+  work via the challenge digest); the node accepts if workHash%difficulty==0 AND the declared
+  difficulty >= the board's floor. So messages need NOT match board config, only clear one work
+  threshold; may pay above it. EMPIRICALLY CONFIRMED on-chain: a message declaring 30000/3000000 was
+  accepted by a 10000/1000000 board (test in this session). Added a setDifficultyFactors manipulation
+  snippet. Regenerated docs-content.generated.ts (gen:docs). Updated [[msgboard-difficulty-board-config]]
+  memory to the floor model.
+
+History package: user asked "where are we with the history package?" — there is NONE. The historical
+archive lives in @msgboard/relayer as postgresArchiveSink (1-yr message_archive table + query() by
+chainId/category/since/until/contains/limit/offset), populated by the archivist.ts example. NOT a
+standalone @msgboard/history package. User chose "examples/docs first, then decide" on extracting it —
+SO THAT DECISION IS STILL OPEN.
+
+Final verification (all green): examples tsc --noEmit clean (7 scripts); relayer 52 tests / 14 files;
+foundry 24 tests (MsgPow fuzz 12 + PoWGate 3 + PoWMint 4 + golden), excluding the ~11-min invariants.
+
 ### NOT PUSHED
-Everything this session is local on master (through commit 94ac5ee). User has not asked to push yet.
+Everything this session is local on master (through commit 480c667). User has not asked to push yet.
+Reminder: the new examples post to / read from the live demo board (chain 943) when run with
+MSGBOARD_RPC; offline modes need no node. The 4 use-case scripts are wired in packages/examples
+package.json (viem-demo, submit-message, keep-alive, request-fulfill, multi-sig-collect,
+antagonistic-game, write-for-me, archivist).
 
 ---
 
