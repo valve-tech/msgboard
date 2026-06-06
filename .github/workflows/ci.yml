@@ -16,9 +16,12 @@ jobs:
       - run: npm ci
       - run: npm run build --workspace @msgboard/core
       - run: npm run build --workspace @msgboard/sdk
+      - run: npm run build --workspace @msgboard/history
       - run: (cd packages/hardhat && npx tsc)
       # deterministic SDK unit tests (the OpenRPC spec + reference renderer)
       - run: (cd packages/sdk && npx vitest run src/openrpc.test.ts src/render-reference.test.ts)
+      # @msgboard/history archive + query-server tests (deterministic, no DB needed)
+      - run: npm run test --workspace @msgboard/history
 
   foundry:
     runs-on: ubuntu-latest

@@ -49,16 +49,18 @@ jobs:
 
       - run: npm ci
 
-      # build in dependency order (core <- sdk <- hardhat <- relayer); hardhat ships its tsc output
+      # build in dependency order (core <- sdk <- history <- relayer); hardhat ships its tsc output
       - run: npm run build --workspace @msgboard/core
       - run: npm run build --workspace @msgboard/sdk
+      - run: npm run build --workspace @msgboard/history
       - run: (cd packages/hardhat && npx tsc)
       - run: npm run build --workspace @msgboard/relayer
 
       # No NODE_AUTH_TOKEN: authentication is OpenID Connect. Provenance is automatic.
       - name: Publish public @msgboard/* (idempotent)
         run: |
-          for entry in "@msgboard/core:packages/core" "@msgboard/sdk:packages/sdk" "@msgboard/hardhat:packages/hardhat" "@msgboard/relayer:packages/relayer"; do
+          # @msgboard/history is published before @msgboard/relayer, which depends on it.
+          for entry in "@msgboard/core:packages/core" "@msgboard/sdk:packages/sdk" "@msgboard/history:packages/history" "@msgboard/hardhat:packages/hardhat" "@msgboard/relayer:packages/relayer"; do
             pkg="${entry%%:*}"
             dir="${entry##*:}"
             ver=$(node -p "require('./$dir/package.json').version")
