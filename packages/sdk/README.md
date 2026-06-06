@@ -84,7 +84,30 @@ board.getDifficulty('0x...') // bigint
 
 `workMultiplier` and `workDivisor` come from `status()` and are applied automatically by `doPoW`.
 
-Because each node validates incoming messages against **its own** current factors, these two numbers are also an implicit board-level setting, not just a per-message cost. Raising the required work — a higher `workMultiplier`, or a lower `workDivisor` — makes the board reject any message whose proof of work falls below the new threshold, so it accumulates **fewer** messages; loosening them admits **more**. Operators tune the same two knobs to trade spam-resistance against message volume. A client must therefore grind against the board's **live** factors (which `doPoW` reads from `status()`): work that was valid under looser settings can be rejected once a board tightens them.
+### The board enforces a floor, not a fixed config
+
+A message **declares its own** `workMultiplier` and `workDivisor` — they are fields of the message, and they are cryptographically baked into the work (the challenge is derived from a digest of the two factors, so you cannot misreport them without redoing the grind). The node computes the message's difficulty from the message's *own* declared factors and accepts it when **both**:
+
+1. the proof of work satisfies that declared difficulty (`workHash % difficulty == 0`), and
+2. the declared difficulty is **at least** the board's current minimum — a single work threshold.
+
+The consequence is the part that surprises people: **a message does not have to use the same factors as the board.** It only has to do *at least* as much work as the floor demands. Any factor pair whose resulting difficulty meets or exceeds the floor is accepted — even a different ratio, even far more work than required. (Verified on a live node: a message declaring `30000 / 3000000` was accepted by a board configured for `10000 / 1000000`.)
+
+### Manipulating the work
+
+`doPoW` reads the board's live factors from `status()` because they produce the **cheapest valid message** — the least work that still clears the floor. But you can deliberately do more:
+
+```ts
+const status = await board.status()
+// Default: grind exactly to the board's floor (cheapest acceptable message).
+board.setDifficultyFactors(BigInt(status.workMultiplier), BigInt(status.workDivisor))
+
+// Or do extra work — e.g. halve the divisor to double the difficulty. Still accepted (it
+// clears the floor), and it stays valid even if the board later tightens up to that level.
+board.setDifficultyFactors(BigInt(status.workMultiplier), BigInt(status.workDivisor) / 2n)
+```
+
+So the two factors are best understood as a **board-level floor** plus a **per-message dial**: operators raise the floor (a higher `workMultiplier` or lower `workDivisor`) to admit fewer messages and resist spam, or lower it to admit more; individual senders may always pay *above* the floor. The only failure mode is paying **below** it — work that cleared a looser floor is rejected once the board raises it, which is why `doPoW` grinds against the **live** factors by default.
 
 ## Categories
 
