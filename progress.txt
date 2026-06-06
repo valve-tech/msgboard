@@ -2,6 +2,22 @@
 
 Updated: 2026-06-06
 
+## RELEASE v0.0.31 (history package) — PUBLISHED + VERIFIED on npm
+publish.yml run 79897130415 succeeded (1m25s). All 5 public packages confirmed live at 0.0.31 via
+direct registry query: @msgboard/core, /sdk, /history (FIRST OIDC release), /hardhat, /relayer.
+The published relayer@0.0.31 correctly declares dependency @msgboard/history@^0.0.31. Release done.
+
+User bootstrap-published @msgboard/history@0.0.30 to npm (verified live via direct registry query;
+`npm view` had stale-cache E404 lag) + configured its trusted publisher. Then synced ALL packages
+0.0.30 -> 0.0.31 (core/sdk/hardhat/relayer/history/examples/ui/sponsor) + cross-refs ^0.0.30 -> ^0.0.31
+(commit f971d9d), regenerated lockfile in the SAME commit (a split caused an npm-ci mismatch last
+release). Tagged + pushed v0.0.31 (signed; tag.gpgsign=true) -> fired publish.yml. The public set
+published in dependency order: core, sdk, history (FIRST OIDC release), hardhat, relayer (now depends
+on @msgboard/history@^0.0.31). examples/ui/sponsor are private, not published. core/sdk/hardhat are
+byte-identical no-op republishes (inherent to the all-in-sync versioning convention).
+NOTE: scripts/bootstrap-npm-publish.sh (gitignored, local-only) was updated to include history+relayer
+in the package list + build steps, for any future new-package bootstrap.
+
 ## SESSION 2026-06-06: "Write for me" relay, version 0.0.30, Foundry fuzz+invariant tests — COMPLETE
 
 ### Accomplished
