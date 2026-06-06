@@ -63,6 +63,10 @@ out-of-band for now. Typed readers are a planned addition built on that parse pa
 - [`examples/PoWGate.sol`](examples/PoWGate.sol) — a contract that gates an action behind a
   valid proof of work (`MsgPow.verify`), with replay protection. Exercised by
   `test/PoWGate.t.sol` against the golden vector.
+- [`examples/PoWMint.sol`](examples/PoWMint.sol) — onboarding by proof of work: a minimal token
+  whose mint is gated by `MsgPow.verify`. Each unique work stamp mints exactly once (for anyone),
+  so "burn some CPU" becomes a sybil-resistant cost of entry with no whitelist or payment rail.
+  Exercised by `test/PoWMint.t.sol`.
 - [`script/PostMessage.s.sol`](script/PostMessage.s.sol) — a Forge script that posts a real
   message: it grinds a valid proof-of-work message off-chain via the SDK (over FFI), then
   `submit`s it. Posting requires proof of work tied to a recent block, which is impractical in
@@ -78,9 +82,9 @@ out-of-band for now. Typed readers are a planned addition built on that parse pa
 
 ```
 src/                 MsgPow.sol (verifier), MsgBoard.sol (cheatcode helper)
-test/                MsgPow.t.sol, PoWGate.t.sol   — unit/example tests (deterministic, CI)
+test/                MsgPow.t.sol, PoWGate.t.sol, PoWMint.t.sol   — unit/example tests (deterministic, CI)
 test/integration/    MsgBoard.t.sol                — live tests, gated on MSGBOARD_RPC
-examples/            PoWGate.sol
+examples/            PoWGate.sol, PoWMint.sol
 script/              gen-vectors.cjs, grind-message.cjs, PostMessage.s.sol
 ```
 
