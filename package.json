@@ -7,6 +7,7 @@
     "packages/sdk",
     "packages/hardhat",
     "packages/relayer",
+    "packages/history",
     "packages/ui",
     "packages/sponsor",
     "packages/examples"

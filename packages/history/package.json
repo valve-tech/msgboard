@@ -1,0 +1,48 @@
+{
+  "name": "@msgboard/history",
+  "version": "0.0.30",
+  "description": "Historical archive for the msgboard board: durable storage and an HTTP query API",
+  "repository": "github:valve-tech/msgboard",
+  "author": "MsgBoard",
+  "license": "MIT",
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "keywords": ["msgboard", "history", "archive", "indexer", "pulsechain"],
+  "scripts": {
+    "prebuild": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "tsc",
+    "watch": "tsc -w",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "prettier --check ."
+  },
+  "files": ["dist/"],
+  "dependencies": {
+    "@msgboard/sdk": "^0.0.30",
+    "viem": "^2.25.0"
+  },
+  "peerDependencies": {
+    "pg": "^8.14.1"
+  },
+  "peerDependenciesMeta": {
+    "pg": { "optional": true }
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.11",
+    "typescript": "^5.8.2",
+    "vitest": "^3.1.1"
+  }
+}
