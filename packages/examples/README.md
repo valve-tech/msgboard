@@ -14,6 +14,7 @@ with `MSGBOARD_RPC`.
 |---|---|---|---|
 | `viem-demo.ts` | `npm run viem-demo --workspace=packages/examples` | read-only | a viem `PublicClient` works directly as the SDK `Provider` |
 | `submit-message.ts` | `npm run submit-message --workspace=packages/examples` | writes (live) | the canonical write flow: `status` → `doPoW` → `addMessage` |
+| `keep-alive.ts` | `npm run keep-alive --workspace=packages/examples` | writes (live) | keep a message in the ephemeral pool by re-posting before it ages out of the ~120-block window |
 | `write-for-me.ts` | `npm run write-for-me --workspace=packages/examples` | writes (relay) | a push-based relay that forwards client-computed RLP without re-doing proof-of-work |
 | `archivist.ts` | `npm run archivist --workspace=packages/examples` | read-only + Postgres | sink-only relayer that archives every message to Postgres |
 
@@ -50,6 +51,26 @@ The fundamental write path, in four steps:
 
 Because it does real work and posts a live message, it requires `MSGBOARD_RPC` to be set and
 prints the flow without grinding when it is not.
+
+### keep-alive
+
+The board is ephemeral — it retains only roughly the last ~120 blocks of messages, so a message
+rooted at block B is evicted once the head advances ~120 blocks past it. Any use case where a
+message must persist (a standing multi-sig request, an open intent for solvers, a pending action
+request) has to watch its own message and re-post fresh proof-of-work before it ages out.
+
+This demo posts a message, then each interval:
+
+1. reads the head block and looks the message up by hash (`getMessage` returns `null` once evicted),
+2. computes remaining life = `RETENTION_BLOCKS - (head - rootBlock)`,
+3. re-grinds and re-submits when the message is gone or within `REFRESH_AT_BLOCKS_LEFT` of eviction
+   — re-grinding re-roots the message to the current head, buying a fresh ~120-block lease.
+
+Tunable via `RETENTION_BLOCKS`, `REFRESH_AT_BLOCKS_LEFT`, and `CHECK_INTERVAL_MS`. Requires
+`MSGBOARD_RPC`; prints the strategy without grinding when it is not set. Note that each grind
+takes a few minutes in the JavaScript SDK even at demo difficulty (the node grinds faster
+natively), so a tight retention window may not leave enough time to re-grind before eviction —
+in production you would lower the board's difficulty or grind with a faster implementation.
 
 ### write-for-me
 
