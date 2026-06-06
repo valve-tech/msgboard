@@ -127,3 +127,6 @@ The Solidity-side demo lives in [`packages/foundry`](../foundry):
   cheatcode helper.
 - [`examples/PoWGate.sol`](../foundry/examples/PoWGate.sol) — a contract that gates an action behind
   on-chain proof-of-work verification using `MsgPow.sol`.
+- [`examples/PoWMint.sol`](../foundry/examples/PoWMint.sol) — **Onboarding/Education**: a token whose
+  mint is gated by proof of work. Each unique work stamp mints once, making "burn some CPU" a
+  sybil-resistant cost of entry with no whitelist or payment. Exercised by `test/PoWMint.t.sol`.
