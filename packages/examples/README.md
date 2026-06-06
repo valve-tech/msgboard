@@ -17,6 +17,7 @@ with `MSGBOARD_RPC`.
 | `keep-alive.ts` | `npm run keep-alive --workspace=packages/examples` | writes (live) | keep a message in the ephemeral pool by re-posting before it ages out of the ~120-block window |
 | `request-fulfill.ts` | `npm run request-fulfill --workspace=packages/examples` | read-only / watcher | broadcast a signed request, watch a category, verify the signature, fulfill — the skeleton behind Intent Distribution, Action Requests, and Account Abstraction |
 | `multi-sig-collect.ts` | `npm run multi-sig-collect --workspace=packages/examples` | read-only / watcher | collect M-of-N owner signatures over a shared payload and assemble them once the threshold is met |
+| `antagonistic-game.ts` | `npm run antagonistic-game --workspace=packages/examples` | read-only / watcher | a commit-reveal rock-paper-scissors round refereed over the board — impartial inputs, cheating caught |
 | `write-for-me.ts` | `npm run write-for-me --workspace=packages/examples` | writes (relay) | a push-based relay that forwards client-computed RLP without re-doing proof-of-work |
 | `archivist.ts` | `npm run archivist --workspace=packages/examples` | read-only + Postgres | sink-only relayer that archives every message to Postgres |
 
@@ -97,6 +98,18 @@ by signer, as on-chain verifiers expect) once it reaches the threshold.
   both rejected, then the threshold met and the set assembled.
 - `MSGBOARD_RPC` + `MULTISIG_OWNERS`: runs a relayer-engine watcher over the `multisig` category that
   accumulates signatures across polls.
+
+### antagonistic-game
+
+**Antagonistic Games**: games that need impartial inputs use the board as a neutral channel and
+commit-reveal to pit players against each other. Each player commits `keccak256(move, salt)` (hiding
+the move but binding to it), then reveals `(move, salt)` once both commits are posted; anyone can
+check the reveal against the commit and adjudicate. Proof of work makes fake commits costly and the
+~120-block ephemerality gives a natural reveal deadline (stalling forfeits).
+
+- No `MSGBOARD_RPC`: plays one rock-paper-scissors round in-process and shows a player who reveals a
+  move they did not commit to being disqualified.
+- `MSGBOARD_RPC` set: runs a relayer-engine referee over the `rps` category.
 
 ### write-for-me
 
