@@ -2,7 +2,40 @@
 
 Updated: 2026-06-06
 
-## GraphQL HISTORICAL ARCHIVE (Hasura + dedicated indexer) — BUILT + VERIFIED LOCALLY, NOT YET DEPLOYED
+## GraphQL HISTORICAL ARCHIVE — LIVE ON PRODUCTION (2026-06-06)
+archive.msgboard.xyz/v1/graphql is LIVE: anonymous read-only GraphQL over message_archive, indexing
+all 3 chains (verified live: chain 1=8, 369=11, 943=10 rows and growing). /v1/metadata -> 404 at the
+edge; /healthz -> 200; msgboard.xyz still 200. Hasura + indexer containers Up + healthy on the box.
+Admin secret in vault + backed up to op://valve/msgboard_hasura_admin_secret/password (user; matches).
+app_dir on the box = /opt/msgboard. box IP 88.99.62.98 (inventory has redacted placeholder; deploy
+with -e ansible_host=88.99.62.98).
+
+THREE GOTCHAS HIT DURING DEPLOY (all fixed):
+1. BUILD ORDER (committed 8d722d7, pushed): the root `npm run build` = `npm run build --workspace=*`
+   builds workspaces in package.json `workspaces` ARRAY ORDER. history was listed AFTER relayer, so a
+   clean box build compiled relayer before history's dist/*.d.ts existed -> "Cannot find module
+   '@msgboard/history'" -> first deploy FAILED at the docker build (prod was UNHARMED: build fails
+   before compose recreates containers). Fix: reordered workspaces to core,sdk,history,hardhat,relayer,
+   indexer,... Verified with a clean `rm -rf packages/*/dist && npm run build`.
+2. VAULT SECRET MISSING: the vault had no vault_hasura_admin_secret; env.j2 renders HASURA_ADMIN_SECRET
+   from it and compose now fail-fasts (`:?`) on empty. Generated `openssl rand -hex 32`, added to the
+   vault via ansible-vault edit + scripted EDITOR (backup + integrity check, no plaintext-to-disk of the
+   whole vault beyond ansible's managed temp). User mirrored it to op (verified MATCH).
+3. CADDY STALE SINGLE-FILE MOUNT (the big one): docker-compose mounts ./deploy/caddy/Caddyfile as a
+   SINGLE FILE. rsync REPLACES the file (new inode), so the running caddy keeps serving the OLD inode;
+   `caddy reload` AND `docker restart` both re-read the stale mount. The archive.msgboard.xyz block was
+   on the host file but NOT in the container (docker exec caddy grep -c = 0) -> Caddy returned empty-200
+   for the unmatched host (that's Caddy's default for no-site-match). FIX: `docker compose up -d
+   --force-recreate caddy` re-resolves the mount. Added a "Recreate caddy" task to site.yml (local-only)
+   so future deploys always force-recreate caddy. NOTE: the existing "Restart caddy" handler (cert
+   rotation) likely has the SAME latent issue — restart != recreate — worth converting to force-recreate
+   if cert rotation ever appears not to take effect.
+
+DIAGNOSIS TECHNIQUE that nailed it: curl the ORIGIN directly bypassing Cloudflare with
+`curl -sk --resolve archive.msgboard.xyz:443:88.99.62.98 https://archive.msgboard.xyz/...` — isolated
+Caddy from Cloudflare and showed Caddy itself was returning empty-200 / proxying /v1/metadata.
+
+## (earlier this session) GraphQL HISTORICAL ARCHIVE — BUILT + VERIFIED LOCALLY
 User wants GraphQL over historical data via Hasura, hosted on the existing Hetzner box, at
 archive.msgboard.xyz, with a DEDICATED multichain archivist (NOT bolted onto the sponsor scripts),
 public read-only.
