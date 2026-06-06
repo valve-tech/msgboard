@@ -144,7 +144,7 @@
 
         {#if decodable}
           <span class="shrink-0 self-center">
-            <ToggleButton off="0x" on="txt" checked={effectiveDecoded} onclick={toggleDecode} />
+            <ToggleButton off="0x" on="txt" offIcon="mdi:code-brackets" onIcon="mdi:format-text" checked={effectiveDecoded} onclick={toggleDecode} />
           </span>
         {/if}
       </div>

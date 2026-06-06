@@ -32,7 +32,7 @@
 
 <div class="flex flex-row items-center justify-between">
   <h3 class="text-lg justify-between flex mb-2 italic flex-row items-center gap-x-2 text-left">
-    <ToggleButton off="txt" on="0x" checked={showHexResult} onclick={() => onToggleShowHex(!showHexResult)} />
+    <ToggleButton off="txt" on="0x" offIcon="mdi:format-text" onIcon="mdi:code-brackets" checked={showHexResult} onclick={() => onToggleShowHex(!showHexResult)} />
     <Info text="The message can be any input. The text will be converted to a hex string, and the bytes counted. For each byte the difficulty will increase. Switch the toggle to `0x` to view the resulting hex version of your input." />
     <span>Message</span>
   </h3>
