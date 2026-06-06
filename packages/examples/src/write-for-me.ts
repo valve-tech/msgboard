@@ -24,6 +24,9 @@ const port = Number(process.env['PORT'] ?? 3001)
 const token = process.env['RELAY_TOKEN']
 const logger = defaultLogger('write-for-me')
 
+/** 4 KiB — well above any real msgboard message; rejects obviously oversized payloads early. */
+const MAX_RLP_BYTES = 4096
+
 const queue = httpQueueSource<Hex>({
   port,
   token,
@@ -38,6 +41,8 @@ const queue = httpQueueSource<Hex>({
     }
     const rlp = (body as { rlp: string }).rlp
     if (!isHex(rlp)) throw new Error('rlp must be a hex string starting with 0x')
+    const rlpBytes = (rlp.length - 2) / 2
+    if (rlpBytes > MAX_RLP_BYTES) throw new Error(`rlp exceeds maximum size of ${MAX_RLP_BYTES} bytes`)
     return rlp as Hex
   },
 })
