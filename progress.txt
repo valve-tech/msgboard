@@ -2,6 +2,22 @@
 
 Updated: 2026-06-06
 
+## GraphiQL EXPLORER UI — LIVE at archive.msgboard.xyz/ (2026-06-06)
+archive.msgboard.xyz now serves a GraphiQL explorer AT THE ROOT (UI), with the API at /v1/graphql.
+Static page deploy/caddy/graphiql/index.html (GraphiQL 3.7.1 UMD + React 18.3.1 UMD from unpkg, ALL
+with SRI integrity hashes per the security hook; fetcher -> https://archive.msgboard.xyz/v1/graphql).
+Caddy archive block: @api path /v1/graphql /healthz -> hasura; handle / -> file_server /srv/graphiql;
+handle {} -> 404 (admin never proxied). docker-compose.prod.yml (TRACKED, commit 56636a1) mounts
+./deploy/caddy/graphiql:/srv/graphiql:ro on caddy. deploy/caddy/graphiql/index.html + the Caddyfile
+are gitignored (local-only, like the rest of deploy/).
+DEPLOYED via TARGETED path (no image rebuild needed for a config+static change): scp the 3 files to
+/opt/msgboard + `docker compose up -d --force-recreate caddy` (force-recreate REQUIRED — Caddyfile is a
+single-file mount + the new volume changes the caddy service def; see the stale-mount gotcha below).
+VERIFIED: archive.msgboard.xyz/ -> 200 text/html GraphiQL; headless-chrome screenshot shows the
+explorer rendered with the default message_archive query; /v1/graphql returns data; /v1/metadata 404;
+msgboard.xyz 200. Public, anonymous, read-only. Hosted GraphiQL alternatives also work (Apollo Sandbox
+at studio.apollographql.com pointed at the endpoint — introspection + CORS verified).
+
 ## GraphQL HISTORICAL ARCHIVE — LIVE ON PRODUCTION (2026-06-06)
 archive.msgboard.xyz/v1/graphql is LIVE: anonymous read-only GraphQL over message_archive, indexing
 all 3 chains (verified live: chain 1=8, 369=11, 943=10 rows and growing). /v1/metadata -> 404 at the
