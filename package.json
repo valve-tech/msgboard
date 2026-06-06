@@ -8,6 +8,7 @@
     "packages/hardhat",
     "packages/relayer",
     "packages/history",
+    "packages/indexer",
     "packages/ui",
     "packages/sponsor",
     "packages/examples"
@@ -26,6 +27,7 @@
     "sponsor:spam": "npm run spam --workspace=packages/sponsor",
     "sponsor:bridge": "npm run bridge --workspace=packages/sponsor",
     "sponsor:start": "npm run start --workspace=packages/sponsor",
-    "test:relayer": "npm run test --workspace=packages/relayer"
+    "test:relayer": "npm run test --workspace=packages/relayer",
+    "indexer:start": "npm run start --workspace=packages/indexer"
   }
 }
