@@ -24,8 +24,10 @@
  *     — provider commits secrets, consumer requests, secrets are revealed into a seed, the
  *     dice roll settles the bets — and shows that a provider who reveals a secret that does
  *     not match its committed preimage is caught (the on-chain `SecretMismatch`).
- *   • RANDOM_RPC set: reads a real on-chain seed for a randomness `key` from the deployed
- *     contract (PulseChain testnet v4 / 943 by default) and derives the same dice roll.
+ *   • RANDOM_RPC set: reads a real on-chain seed for a randomness `key` and derives the same
+ *     dice roll. The seed is read from the gibsfinance/random ponder indexer when INDEXER_URL is
+ *     set (https://seed.msgboard.xyz), otherwise straight from the deployed contract (PulseChain
+ *     testnet v4 / 943 by default).
  *
  * Usage:
  *   npm run randomness-game --workspace=packages/examples
@@ -79,6 +81,18 @@ export const settleBets = (seed: Hex, bets: readonly Bet[], sides: number): { ro
 }
 
 const SIDES = 6
+
+/** Reads a cast seed for a key from the gibsfinance/random ponder indexer (GraphQL). */
+const fetchSeedFromIndexer = async (indexerUrl: string, key: Hex): Promise<Hex | null> => {
+  const query = 'query($key: String!) { casts(where: { key: $key }) { items { seed } } }'
+  const response = await fetch(indexerUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ query, variables: { key } }),
+  })
+  const body = (await response.json()) as { data?: { casts?: { items?: Array<{ seed?: Hex }> } } }
+  return body.data?.casts?.items?.[0]?.seed ?? null
+}
 
 async function main() {
   const rpcUrl = process.env.RANDOM_RPC
@@ -135,27 +149,32 @@ async function main() {
   if (!key) {
     console.log('\nSet RANDOM_KEY to a randomness key (the value heat() returns) to read its seed.')
     console.log('A key is produced by requesting randomness on chain; see @gibs/random for the')
-    console.log('ink → heat → cast lifecycle, or query the ponder indexer for an existing key.\n')
+    console.log('ink → heat → cast lifecycle, or set INDEXER_URL (https://seed.msgboard.xyz) to find one.\n')
     process.exit(0)
   }
 
-  const client = createPublicClient({ chain, transport: http(rpcUrl) })
-  console.log(`\nreading randomness ${key.slice(0, 18)}… from ${address} on chain ${chainId}`)
-  const result = (await client.readContract({
-    address,
-    abi: randomAbi,
-    functionName: 'randomness',
-    args: [key],
-  })) as { seed: Hex }
-
   const zero = `0x${'00'.repeat(32)}`
-  if (!result.seed || result.seed === zero) {
+  const indexerUrl = process.env.INDEXER_URL // gibsfinance/random ponder indexer (seed.msgboard.xyz once live)
+  let seed: Hex | null = null
+
+  // Prefer the indexer when configured; fall back to reading the contract directly.
+  if (indexerUrl) {
+    console.log(`\nquerying the indexer at ${indexerUrl} for ${key.slice(0, 18)}…`)
+    seed = await fetchSeedFromIndexer(indexerUrl, key)
+  }
+  if (!seed || seed === zero) {
+    const client = createPublicClient({ chain, transport: http(rpcUrl) })
+    console.log(`reading randomness ${key.slice(0, 18)}… from ${address} on chain ${chainId}`)
+    seed = ((await client.readContract({ address, abi: randomAbi, functionName: 'randomness', args: [key] })) as { seed: Hex }).seed
+  }
+
+  if (!seed || seed === zero) {
     console.log('seed is not set yet — the randomness has not been cast (revealed). Try again later.\n')
     process.exit(0)
   }
 
-  const { roll, winners } = settleBets(result.seed, [{ player: 'alice', guess: 4 }, { player: 'bob', guess: 2 }], SIDES)
-  console.log(`on-chain seed: ${result.seed}`)
+  const { roll, winners } = settleBets(seed, [{ player: 'alice', guess: 4 }, { player: 'bob', guess: 2 }], SIDES)
+  console.log(`seed: ${seed}`)
   console.log(`dice roll (1-${SIDES}): ${roll}`)
   console.log(`anyone can recompute this roll from the seed — provably fair. winners: ${winners.join(', ') || 'none'}\n`)
 }
