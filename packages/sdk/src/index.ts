@@ -14,7 +14,7 @@ import type {
   WorkResult,
   WorkStats,
 } from '@msgboard/core'
-import { categoryHash, checkWork, difficulty, encodeData, toRLP } from '@msgboard/core'
+import { categoryHash, createChallengeSearch, difficulty, encodeData, toRLP } from '@msgboard/core'
 
 export * from '@msgboard/core'
 
@@ -128,15 +128,19 @@ export class MsgBoardClient {
     const start = Date.now()
     this.progressHandler({ ...stats })
 
+    // Incremental challenge search: advances the challenge point by one curve ADDITION
+    // per nonce instead of a full scalar MULTIPLY, ~10x faster while staying bit-identical
+    // to checkWork (the node's verifier). It mutates message.nonce and rebases on its own
+    // when the block poller above updates message.blockHash mid-grind.
+    const search = createChallengeSearch(message)
     while (true) {
       if (this.cancelled) {
         killPoll = true
         return { message, stats }
       }
-      message.nonce += 1n
-      stats.duration = Date.now() - start
       stats.iterations += 1n
-      const hash = checkWork(message, stats.difficulty)
+      const hash = search.next(stats.difficulty)
+      stats.duration = Date.now() - start
       if (hash) {
         message.hash = hash
         stats.isValid = true
