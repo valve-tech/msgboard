@@ -2,6 +2,25 @@
 
 Updated: 2026-06-07
 
+## UI + SPAM — carousels, readable categories, ellipsis reverted (2026-06-07)
+- READABLE SPAM CATEGORIES (2d6a794): the board showed category HASHES because spam passed plain
+  strings ('lorem') and doPoW's categoryHash() keccak256-hashes any non-hex string. Fix in spam.ts:
+  pre-encode with stringToHex(name, { size: 32 }) — categoryHash leaves an already-hex value untouched,
+  so the board stores the utf8 name. VERIFIED LIVE: archive category_text now = lorem/musings/chatter
+  across all 3 chains (was null). Old hashed-category messages age out of the boards in ~20 min.
+  KEY FACT for future: categories are bytes32 with TWO encodings — keccak (categoryHash hashes a string
+  name; irreversible, not readable) vs direct utf8 (stringToHex padded; readable, ≤32 bytes only).
+- MIDDLE-ELLIPSIS REVERTED (3f2a0d0): user disliked the category/hash truncation. Removed middleEllipsis
+  (and its tests); tree shows full values again. KEPT the gobbledygook fix (resolveCategoryValue: decoded
+  name when printable, else raw hex — never decoded keccak garbage). With readable categories now, the
+  tree shows the plain name.
+- CAROUSELS (9dc85c7): new reusable Carousel.svelte (scroll-snap, prev/next arrows, edge fades, hidden
+  scrollbar, native swipe). UseCases + NextSteps ("Ready to Build the Future?") moved from static grids
+  onto it; NextSteps cards are now data-driven (literal Tailwind class strings kept for purge). Verified
+  via preview screenshots. Latest live bundle index-Sg1zmfr3.js.
+- SALES PITCH (03b5792 + earlier): "Permissionless, Paid in Work" split into two cards (4-up grid);
+  Permissionless copy = "math is the only toll" (emphasised, parallel to the "stamp" highlight).
+
 ## UI FIXES — tree trims, dark toggles, sales-pitch split (2026-06-07)
 Several UI fixes, all deployed (ui image rebuilt each time; latest live bundle index-C09RDYS2.js).
 - MESSAGE-HASH TRIM (369164f): extended the category-header trim to message-hash group nodes — any hex
