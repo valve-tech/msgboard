@@ -23,7 +23,8 @@ if (USE_DEVNET) {
     },
   })
 } else {
-  chain.rpcUrls.default.http = ['https://rpc-testnet-pulsechain.g4mm4.io']
+  // valve.city serves the msgboard_ module; public PulseChain RPCs (e.g. g4mm4) do not.
+  chain.rpcUrls.default.http = [process.env.MSGBOARD_RPC ?? 'https://one.valve.city/rpc/vk_demo/evm/943']
 }
 
 const longTimeout = 10_000_000
