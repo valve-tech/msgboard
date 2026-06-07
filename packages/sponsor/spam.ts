@@ -1,5 +1,5 @@
 import { Worker, isMainThread } from 'node:worker_threads'
-import { http } from 'viem'
+import { http, stringToHex } from 'viem'
 import { mainnet, pulsechain, pulsechainV4 } from 'viem/chains'
 import { Relayer, generatedSource, noopStore, submitMessageAction } from '@msgboard/relayer'
 import { resolveWorkerCount } from './spam-workers.js'
@@ -58,7 +58,10 @@ const startGrinder = (): void => {
     key: (post) => `${post.category}:${post.text}`,
     store: noopStore<Post>(),
     action: submitMessageAction<Post>({
-      category: (post) => post.category,
+      // direct utf8-encode the category into 32 bytes (e.g. "lorem") so the board stores a
+      // readable name rather than keccak256(name) — categoryHash() leaves an already-hex
+      // value untouched, so this skips the hashing path.
+      category: (post) => stringToHex(post.category, { size: 32 }),
       data: (post) => post.text,
     }),
   })
