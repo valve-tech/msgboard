@@ -26,7 +26,7 @@
  *     not match its committed preimage is caught (the on-chain `SecretMismatch`).
  *   • RANDOM_RPC set: reads a real on-chain seed for a randomness `key` and derives the same
  *     dice roll. The seed is read from the gibsfinance/random ponder indexer when INDEXER_URL is
- *     set (https://entropy.msgboard.xyz), otherwise straight from the deployed contract (PulseChain
+ *     set (https://evm-943-entropy.msgboard.xyz), otherwise straight from the deployed contract (PulseChain
  *     testnet v4 / 943 by default).
  *
  * Usage:
@@ -149,12 +149,12 @@ async function main() {
   if (!key) {
     console.log('\nSet RANDOM_KEY to a randomness key (the value heat() returns) to read its seed.')
     console.log('A key is produced by requesting randomness on chain; see @gibs/random for the')
-    console.log('ink → heat → cast lifecycle, or set INDEXER_URL (https://entropy.msgboard.xyz) to find one.\n')
+    console.log('ink → heat → cast lifecycle, or set INDEXER_URL (https://evm-943-entropy.msgboard.xyz) to find one.\n')
     process.exit(0)
   }
 
   const zero = `0x${'00'.repeat(32)}`
-  const indexerUrl = process.env.INDEXER_URL // gibsfinance/random ponder indexer (entropy.msgboard.xyz once live)
+  const indexerUrl = process.env.INDEXER_URL // gibsfinance/random ponder indexer (evm-943-entropy.msgboard.xyz once live)
   let seed: Hex | null = null
 
   // Prefer the indexer when configured; fall back to reading the contract directly.
