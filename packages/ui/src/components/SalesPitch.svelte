@@ -2,8 +2,8 @@
   import Icon from '@iconify/svelte';
 </script>
 
-<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 p-4 md:p-8 max-w-7xl mx-auto">
-  <div class="group flex-1 text-center p-8 rounded-xl transition-all duration-200 hover:-translate-y-1 border border-slate-200/10">
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 px-8 py-12 max-w-7xl mx-auto">
+  <div class="group flex-1 text-center p-6 rounded-xl transition-all duration-200 hover:-translate-y-1 border border-slate-200/10">
     <div class="flex justify-center mb-4">
       <Icon icon="mdi:shield-check" width="32" height="32" class="text-slate-600 dark:text-slate-400 transition-colors duration-200 group-hover:text-emerald-500" />
     </div>
@@ -13,17 +13,17 @@
     </p>
   </div>
 
-  <div class="group flex-1 text-center p-8 rounded-xl transition-all duration-200 hover:-translate-y-1 border border-slate-200/10">
+  <div class="group flex-1 text-center p-6 rounded-xl transition-all duration-200 hover:-translate-y-1 border border-slate-200/10">
     <div class="flex justify-center mb-4">
       <Icon icon="mdi:lightning-bolt" width="32" height="32" class="text-slate-600 dark:text-slate-400 transition-colors duration-200 group-hover:text-emerald-500" />
     </div>
-    <h3 class="text-2xl font-semibold mb-4 text-slate-800 dark:text-gray-100">Lightning-Fast & Ephemeral</h3>
+    <h3 class="text-2xl font-semibold mb-4 text-slate-800 dark:text-gray-100">Ephemeral</h3>
     <p class="text-base leading-relaxed text-slate-600 dark:text-gray-300">
       Messages are temporary and lightweight, delivering speed and scalability without cluttering the network.
     </p>
   </div>
 
-  <div class="group flex-1 text-center p-8 rounded-xl transition-all duration-200 hover:-translate-y-1 border border-slate-200/10">
+  <div class="group flex-1 text-center p-6 rounded-xl transition-all duration-200 hover:-translate-y-1 border border-slate-200/10">
     <div class="flex justify-center mb-4">
       <Icon icon="mdi:lock-open-variant" width="32" height="32" class="text-slate-600 dark:text-slate-400 transition-colors duration-200 group-hover:text-emerald-500" />
     </div>
@@ -33,7 +33,7 @@
     </p>
   </div>
 
-  <div class="group flex-1 text-center p-8 rounded-xl transition-all duration-200 hover:-translate-y-1 border border-slate-200/10">
+  <div class="group flex-1 text-center p-6 rounded-xl transition-all duration-200 hover:-translate-y-1 border border-slate-200/10">
     <div class="flex justify-center mb-4">
       <Icon icon="mdi:postage-stamp" width="32" height="32" class="text-slate-600 dark:text-slate-400 transition-colors duration-200 group-hover:text-emerald-500" />
     </div>
