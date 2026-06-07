@@ -58,6 +58,14 @@
         'A commit-reveal rock-paper-scissors match played over the board, using it as a neutral channel between players whose incentives are opposed.',
     },
     {
+      title: 'Provably-fair dice',
+      script: 'randomness-game',
+      file: 'randomness-game.ts',
+      icon: 'mdi:dice-multiple-outline',
+      description:
+        'A dice game coordinated over the board with its unbiasable seed sourced from the gibsfinance commit-reveal randomness contract — every player derives the same roll from the on-chain seed.',
+    },
+    {
       title: 'Historical archive server',
       script: 'history-server',
       file: 'history-server.ts',
