@@ -48,7 +48,7 @@ export const needsProxy = (url: string): boolean => (
 export const rpcs = new SvelteMap<ChainOption, ChainConfig>([
   ['pulsechainV4', {
     chain: pulsechainV4,
-    rpcUrl: VITE_RPC_943 ?? 'https://rpc.v4.testnet.pulsechain.com',
+    rpcUrl: VITE_RPC_943 ?? 'https://one.valve.city/rpc/vk_demo/evm/943',
     gasSponsor: { address: '0x5891148fFBea957c1C183313Dc8F63AbEf0f3958', amount: parseEther('10') }
   }],
   ['pulsechain', {
@@ -57,6 +57,6 @@ export const rpcs = new SvelteMap<ChainOption, ChainConfig>([
   }],
   ['ethereum', {
     chain: mainnet,
-    rpcUrl: VITE_RPC_1 ?? 'https://ethereum-rpc.publicnode.com',
+    rpcUrl: VITE_RPC_1 ?? 'https://one.valve.city/rpc/vk_demo/evm/1',
   }],
 ])
