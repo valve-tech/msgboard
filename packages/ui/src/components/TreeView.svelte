@@ -7,7 +7,7 @@
   import ToggleButton from './ToggleButton.svelte'
   import Icon from '@iconify/svelte'
   import { hexToString, stringToHex, type Hex } from 'viem'
-  import { middleEllipsis, resolveCategoryValue } from '../lib/tree-format'
+  import { resolveCategoryValue } from '../lib/tree-format'
 
   const _initialScope = getScope()
 
@@ -82,21 +82,12 @@
   // The category is a group header (an isRoot node with messages under it). Its label is a
   // 32-byte value: usually keccak256(name), which decodes to unprintable garbage — the source
   // of the "gobbledygook" categories. Show the decoded name only when it is real text (e.g.
-  // "gasmoneyplease"); otherwise show the raw hex, trimmed to a middle ellipsis. The full,
-  // untrimmed value is still what gets copied.
+  // "gasmoneyplease"); otherwise show the raw hex (a hash is not text). Values are shown in
+  // full — no truncation.
   const isCategoryHeader = $derived(isRoot && hasChildren)
   const categoryValue = $derived(resolveCategoryValue(target, decoded, effectiveDecoded))
-  /** the full, untrimmed value placed on the clipboard */
-  const copyValue = $derived(isCategoryHeader ? categoryValue : value)
-  /** What is rendered in the row. Group HEADERS (the category hash and the message-hash that
-   *  group a message's fields) are long hashes — trim them to a middle ellipsis so the tree
-   *  stays scannable. Leaf rows (data, nonce, stats, …) are left whole, and the full value is
-   *  always what gets copied. */
-  const displayValue = $derived.by(() => {
-    if (isCategoryHeader) return middleEllipsis(categoryValue)
-    if (hasChildren && isHexValue) return middleEllipsis(value)
-    return value
-  })
+  /** the value rendered in the row and copied on click */
+  const displayValue = $derived(isCategoryHeader ? categoryValue : value)
 
   // auto-expand only the hidden root container so its categories are listed;
   // categories/messages stay collapsed by default unless the user opened them before
@@ -112,7 +103,7 @@
   let copyTimer: ReturnType<typeof setTimeout>
   const copyToClipboard = (e: Event) => {
     e.stopPropagation()
-    navigator.clipboard.writeText(`${copyValue}`)
+    navigator.clipboard.writeText(`${displayValue}`)
     copied = true
     clearTimeout(copyTimer)
     copyTimer = setTimeout(() => { copied = false }, 350)
