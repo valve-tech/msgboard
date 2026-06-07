@@ -7,6 +7,18 @@
     <h2 class="text-3xl font-bold text-center text-slate-900 dark:text-gray-100 mb-12">Ready to Build the Future?</h2>
 
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+      <!-- Examples + GraphQL archive -->
+      <a href="#/examples" class="group flex flex-col p-6 rounded-xl border border-amber-300/60 dark:border-amber-500/30 transition-all duration-200 hover:-translate-y-1 bg-white dark:bg-gray-800 shadow-sm">
+        <div class="flex items-center justify-center w-12 h-12 rounded-lg bg-amber-400/10 ring-1 ring-amber-400/40 mb-4">
+          <Icon icon="mdi:bullseye-arrow" class="w-6 h-6 text-amber-500 dark:text-amber-400" />
+        </div>
+        <h3 class="text-xl font-semibold text-slate-900 dark:text-gray-100 mb-2">Run the Examples</h3>
+        <p class="text-slate-600 dark:text-gray-300 mb-4">Runnable scripts for every use case, plus the live GraphQL archive of historical messages.</p>
+        <span class="mt-auto text-amber-600 dark:text-amber-400 group-hover:text-amber-700 dark:group-hover:text-amber-300 flex items-center gap-2">
+          See examples <Icon icon="mdi:arrow-right" class="w-5 h-5 transition-transform group-hover:translate-x-1" />
+        </span>
+      </a>
+
       <!-- API Documentation -->
       <a href="#/docs" class="group flex flex-col p-6 rounded-xl border border-slate-200 dark:border-gray-700 transition-all duration-200 hover:-translate-y-1 bg-white dark:bg-gray-800 shadow-sm">
         <div class="flex items-center justify-center w-12 h-12 rounded-lg bg-blue-100 dark:bg-blue-900/40 mb-4">

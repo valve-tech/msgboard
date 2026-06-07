@@ -2,6 +2,7 @@
   import { page } from './lib/page.svelte'
   import Home from './pages/Home.svelte'
   import DocsPortal from './pages/DocsPortal.svelte'
+  import Examples from './pages/Examples.svelte'
   import RedirectToHome from './pages/RedirectToHome.svelte'
   $inspect(page.route.id)
 </script>
@@ -10,6 +11,8 @@
   <Home />
 {:else if page.route.id === '/docs'}
   <DocsPortal />
+{:else if page.route.id === '/examples'}
+  <Examples />
 {:else}
   <RedirectToHome />
 {/if}
