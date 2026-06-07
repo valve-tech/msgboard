@@ -2,6 +2,47 @@
 
 Updated: 2026-06-07
 
+## UI POLISH — sales-pitch spacing, RPC defaults, cursor, faucet toggle (2026-06-07, DEPLOYED x2)
+Five commits (153f4b9, 9e013ce, 0571ec7, 90ee74b on top of checkpoint ad15c89), two clean ansible
+deploys (both PLAY RECAP ok=31 changed=3 failed=0; faucet probe HTTPS-only — the HTTP-by-IP retirement
+is now confirmed live on its first real deploys). All in packages/ui, all live on msgboard.xyz.
+
+- SALES-PITCH SPACING + EPHEMERAL RENAME (153f4b9, SalesPitch.svelte). User: the 4 cards under the hero
+  had "a lot of padding AND a gap" — two spacing systems stacking (card p-8 + container p-8 + gap-6 =
+  ~64px between cards). Iterated live (screenshots on :5173) to the user's exact spec: PADDING-ONLY, no
+  gap. Final = container `px-8 py-12`, each card `p-6`. (Rejected intermediates: gap-only with no card
+  px; uniform p-2-on-both = 16px-everywhere but too narrow/squished.) Also renamed card 2
+  "Lightning-Fast & Ephemeral" -> "Ephemeral". NOTE still open: that card's BODY still says "delivering
+  speed and scalability" — offered to trim to match the rename, user hasn't decided.
+- RPC DEFAULTS -> valve.city (9e013ce, rpc.svelte.ts + .env.example). User saw g4mm4 as the default RPC
+  and called it a regression. ROOT CAUSE: g4mm4 was ONLY in the gitignored local packages/ui/.env
+  (VITE_RPC_943/369 = g4mm4), NOT in code or prod. KEY MENTAL MODEL: rpc.svelte.ts `VITE_RPC_x ?? '...'`
+  is the NO-ENV FALLBACK only; PRODUCTION bakes VITE_RPC_* from the ANSIBLE VAULT (vault_vite_rpc_* via
+  env.j2) at build time — verified the vault already holds valve.city vk_demo for all 3 chains, so prod
+  was never g4mm4. g4mm4 does NOT serve the msgboard_ module (JoinNetwork marks it "pending"; valve.city
+  is "supported"), so the local demo on 943/369 was hitting non-msgboard nodes. Fix: code defaults now
+  valve.city vk_demo for 943 + 1 (369 already was); commented the g4mm4 lines out of local .env; added
+  VITE_RPC_* docs to the tracked .env.example (it only had MNEMONIC/DATABASE_URL before). GOTCHA: Vite
+  reads .env ONLY at startup — the user had to restart their :5173 server for the .env change to apply.
+- CURSOR POINTER (0571ec7, app.css). User: carousel left/right arrows show no pointer -> look
+  non-interactive. ROOT CAUSE: Tailwind v4 preflight no longer sets cursor:pointer on <button> (v4
+  breaking change). Systemic, not carousel-specific. DRY fix = one base rule in app.css:
+  `button:not([disabled]), [role='button']:not([disabled]) { cursor: pointer }`. The existing
+  `[disabled] { cursor: not-allowed !important }` already covered disabled. Fixes ALL enabled buttons
+  app-wide. (Can't verify via screenshot — cursors don't render in captures.)
+- HIDE GAS-REQUEST TOGGLE WHEN NO FAUCET (90ee74b, Category.svelte). User: the toggle next to the
+  category input is always disabled, looks like a regression. It's the ⛽/txt MODE toggle (gas-request
+  faucet flow vs free category input). Gated by faucetIsActive = chainOption==='custom' || selectedOption
+  has a gasSponsor — and ONLY pulsechainV4 (943) has a gasSponsor. Default chainOption='pulsechain' (369)
+  since commit bb09613 (deliberate "default chain to 369"), so on the default mainnet view the faucet is
+  off and the toggle was permanently disabled = looked broken. User chose HIDE-WHEN-NO-FAUCET: wrapped
+  the toggle in {#if board.chain.faucetIsActive}; mode stays 'input' via the existing effect (Interactive
+  .svelte 53-57). Shows again on 943/custom. VERIFIED on :5173 (369 default): toggle gone, category input
+  full-width, board shows readable categories chatter/lorem/musings.
+  GOTCHA worth noting: web3.svelte.ts Account.currentChain defaults to chains[0]=pulsechainV4(943) but
+  msgboard.svelte.ts chainOption defaults to 'pulsechain'(369); the Interactive panel uses board.chain
+  (369). Minor inconsistency — not reconciled.
+
 ## THREE OPEN ITEMS CLOSED — secret backup, spam-fix verified, faucet probe retired (2026-06-07)
 Cleared all three items in the "OPEN ITEMS (2026-06-07)" list below, run in parallel via subagents.
 1. POSTGRES PASSWORD now mirrored to 1Password at op://valve/msgboard_postgres_password/password
