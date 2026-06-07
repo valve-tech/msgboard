@@ -33,32 +33,43 @@ const message = (over: Partial<RPCMessage> = {}): RPCMessage =>
 
 describe('createArchive', () => {
   it('migrate creates the message_archive table and indexes', async () => {
-    const pool = fakePool([[], [], [], []])
+    const pool = fakePool([[], [], [], [], []])
     const archive = createArchive({ pool, retention: { days: 365 } })
     await archive.migrate()
     expect(pool.calls[0].text).toMatch(/create table if not exists message_archive/i)
+    // The decoded-data column is `data_text`, mirroring `category`/`category_text`.
+    expect(pool.calls[0].text).toMatch(/data_text/i)
     expect(pool.calls.some((c) => /create index/i.test(c.text))).toBe(true)
   })
 
-  it('record upserts on (hash, chain_id) with decoded content', async () => {
+  it('migrate renames the legacy `content` column to `data_text` in place', async () => {
+    const pool = fakePool([[], [], [], [], []])
+    const archive = createArchive({ pool, retention: { days: 365 } })
+    await archive.migrate()
+    // Existing databases carry the old `content` column; the guarded rename brings
+    // them onto the new name without dropping data or breaking a fresh table.
+    expect(pool.calls.some((c) => /rename column content to data_text/i.test(c.text))).toBe(true)
+  })
+
+  it('record upserts on (hash, chain_id) with decoded data text', async () => {
     const pool = fakePool([[]])
     const archive = createArchive({ pool, retention: { days: 365 } })
     await archive.record(message(), 943)
     const call = pool.calls[0]
     expect(call.text).toMatch(/insert into message_archive/i)
     expect(call.text).toMatch(/on conflict \(hash, chain_id\) do nothing/i)
-    // params: hash, chain_id, category, category_text, data, content, block_number, block_hash
+    // params: hash, chain_id, category, category_text, data, data_text, block_number, block_hash
     expect(call.params?.[0]).toBe('0xdeadbeef')
     expect(call.params?.[1]).toBe(943)
     expect(call.params?.[3]).toBe('lorem') // decoded category text
-    expect(call.params?.[5]).toBe('hello world') // decoded content
+    expect(call.params?.[5]).toBe('hello world') // decoded data text
   })
 
   it('record leaves blobs with control characters as null text', async () => {
     const pool = fakePool([[]])
     const archive = createArchive({ pool, retention: { days: 365 } })
     await archive.record(message({ data: '0x0102' }), 1) // control bytes, not printable
-    expect(pool.calls[0].params?.[5]).toBeNull() // content stays null
+    expect(pool.calls[0].params?.[5]).toBeNull() // data_text stays null
   })
 
   it('prune deletes rows older than the retention window', async () => {

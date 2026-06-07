@@ -45,7 +45,7 @@ older than the retention window.
 const recent = await archive.query({
   chainId: 943,
   category: 'lorem', // bytes32 hex or its decoded text
-  contains: 'hello', // substring match on decoded content
+  contains: 'hello', // substring match on the decoded data text
   since: new Date('2026-01-01'),
   limit: 20,
 })
