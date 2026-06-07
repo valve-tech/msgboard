@@ -7,7 +7,10 @@ volumes:
   caddy_data:
   caddy_config:
 
-# shared definition for the per-network spam writers (one container per chain)
+# shared definition for the per-network spam writers (one container per chain).
+# Runs the COMPILED grinder (node dist/spam.js, via sponsor:spam:start) rather than tsx:
+# SPAM_WORKERS spawns worker threads, and tsx does not apply its loader inside a worker,
+# so a worker re-running the .ts entry cannot resolve sibling imports. The built .js does.
 x-spam-writer: &spam-writer
   build:
     context: .
@@ -15,7 +18,7 @@ x-spam-writer: &spam-writer
   restart: unless-stopped
   networks:
     - msgboard
-  command: ['npm', 'run', 'sponsor:spam']
+  command: ['npm', 'run', 'sponsor:spam:start']
 
 services:
   caddy:
@@ -100,6 +103,8 @@ services:
       RPC_943: ${RPC_943:-}
       SPAM_INTERVAL_MS: ${SPAM_INTERVAL_MS:-60000}
       SPAM_CATEGORIES: ${SPAM_CATEGORIES:-lorem,musings,chatter}
+      # parallel grind threads per chain (8-core box; grinders idle between posts)
+      SPAM_WORKERS: ${SPAM_WORKERS:-2}
 
   spam-369:
     <<: *spam-writer
@@ -109,6 +114,7 @@ services:
       RPC_369: ${RPC_369:-}
       SPAM_INTERVAL_MS: ${SPAM_INTERVAL_MS:-60000}
       SPAM_CATEGORIES: ${SPAM_CATEGORIES:-lorem,musings,chatter}
+      SPAM_WORKERS: ${SPAM_WORKERS:-2}
 
   spam-1:
     <<: *spam-writer
@@ -118,6 +124,7 @@ services:
       RPC_1: ${RPC_1:-}
       SPAM_INTERVAL_MS: ${SPAM_INTERVAL_MS:-60000}
       SPAM_CATEGORIES: ${SPAM_CATEGORIES:-lorem,musings,chatter}
+      SPAM_WORKERS: ${SPAM_WORKERS:-2}
 
   # bridge: the bridge-crossing sponsor writer. Watches the bridge for new bridgers
   # and posts a PoW `gasmoneyplease` message for each, which the `sponsor` service
