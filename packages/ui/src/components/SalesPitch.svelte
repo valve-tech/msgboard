@@ -9,7 +9,7 @@
     </div>
     <h3 class="text-2xl font-semibold mb-4 text-slate-800 dark:text-gray-100">Censorship-Resistant</h3>
     <p class="text-base leading-relaxed text-slate-600 dark:text-gray-300">
-      Messages flow freely across the peer-to-peer network, unstoppable by any authority. Your voice, always heard.
+      Messages flow freely across the peer-to-peer network — unstoppable by any authority.
     </p>
   </div>
 
@@ -19,7 +19,7 @@
     </div>
     <h3 class="text-2xl font-semibold mb-4 text-slate-800 dark:text-gray-100">Ephemeral</h3>
     <p class="text-base leading-relaxed text-slate-600 dark:text-gray-300">
-      Messages are temporary and lightweight, delivering speed and scalability without cluttering the network.
+      Messages are short-lived and lightweight, aging out without cluttering the network.
     </p>
   </div>
 
