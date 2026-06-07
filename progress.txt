@@ -1,6 +1,83 @@
 # MsgBoard — Progress
 
-Updated: 2026-06-06
+Updated: 2026-06-07
+
+## SPAM WRITERS / POW PERF — root cause = slow grind, NOT chain-specific (2026-06-07)
+User reported "spammers seem down." They are NOT down. First hypothesis ("mainnet PoW is more
+expensive") was WRONG and disproved by metrics — recorded here so the mistake isn't repeated.
+DATA (one instrumented doPoW+addMessage per chain, run inside the spam containers):
+  chain 943: difficulty=173372 iterations=211007 duration=135.5s -> 1557 hashes/s -> addMessage OK
+  chain 1:   difficulty=173172 iterations=468526 duration=293.5s -> 1596 hashes/s -> addMessage OK
+- msgboard_status on all 3 chains: IDENTICAL workMultiplier=10000 workDivisor=1000000 (difficulty
+  ~173k everywhere). User was right: no difficulty difference.
+- IDENTICAL grind rate (~1560 hashes/s) on every chain. chain-1 just drew 2.7x the mean iterations
+  this run vs 943's 1.2x — normal geometric-distribution variance, NOT a chain-1 bug.
+- Block heads are STABLE/monotonic on all chains (sampled 20x/10s) — the rooting block is not thrashing.
+ROOT CAUSE: the PoW hot path is NOT sha256-bound. core/src/utils.ts getChallenge() does a FULL
+elliptic-curve scalar multiplication `g.mul(nonce)` EVERY iteration (elliptic/bn.js, ~0.6ms each),
+capping the grind at ~1560/s. At difficulty ~173k that's ~110s PER MESSAGE on average — but the spam
+interval is 60s, so a single grinder can NEVER keep ANY board full. chain 1 just looks emptiest
+(lowest volume + unlucky variance). All boards are undersupplied, not just Ethereum.
+FIX (in progress, this session): the challenge scalar grows by a CONSTANT `digest` per nonce
+(nonce+=1), so the challenge POINT advances by a constant point D = g·digest each step. Replace the
+per-iteration scalar MULTIPLY with a running point ADDITION (challenge += D), rebasing once per block
+change. Bit-identical challenges (group homomorphism g·a+g·b=g·(a+b), and g·x depends only on x mod n),
+so it stays consensus-compatible; ~20-50x faster (->~3-6s/msg). Plus SPAM_WORKERS in spam.ts
+(worker_threads) for multi-core parallelism. checkWork/getChallenge stay UNCHANGED as the canonical
+verifier — only the SEARCH loop is optimized.
+DIAGNOSTIC RECIPE (reusable): docker stats (grinding=~99% CPU vs hung=~0%); msgboard_status per chain
+via `docker exec spam-$c node -e "fetch(process.env.RPC_$c, ...msgboard_status...)"` (no curl in the
+node:slim image — use node fetch); newest archived msg per chain via the GraphQL max(first_seen_at);
+to time a real grind, docker cp a probe .mjs into /app (NOT /tmp — ESM resolves node_modules from the
+file's dir) and `docker exec -w /app spam-$c node /app/probe.mjs`.
+
+## content → data_text RENAME — DEPLOYED + VERIFIED (2026-06-07, commit 84b70ed)
+Renamed the archive's decoded-message-data column `content` → `data_text`. Why: `content` broke the
+`category`/`category_text` pairing and collided with the protocol's own `msgboard_content` meaning
+(the board's whole contents). Now the decoded twin always mirrors its raw column and matches the node's
+own `data` field key (Message/RPCMessage in @msgboard/core). User directive: match existing/node terms,
+don't invent new vocabulary. Final archive convention: category/category_text + data/data_text.
+- Code (committed): @msgboard/history archive.ts (CREATE TABLE col, INSERT, SELECT, ArchivedMessage
+  type, `contains` filter clause), server.ts + history/relayer READMEs + docs/graphql-archive.md.
+  16 history + 52 relayer tests green.
+- SELF-HEALING MIGRATION: migrate() runs an information_schema-guarded `ALTER TABLE ... RENAME COLUMN
+  content TO data_text` — at most once, no-op on a fresh table. The indexer renames the column AND
+  starts writing the new name in the SAME restart, so there is no window where it inserts into a
+  missing column. (postgres-idempotent-data-migrations skill is for UPDATE/data migrations w/ a marker
+  table — a column RENAME is naturally idempotent via the existence guard; matches the file's existing
+  IF NOT EXISTS DDL style.)
+- DEPLOY made self-healing for Hasura (site.yml, gitignored): wait-probe now waits for the `data_text`
+  COLUMN (proves the rename ran, no race) → reload_metadata (so Hasura sees the renamed column) →
+  DROP + recreate the anonymous select permission (a bare create returns 400 and would keep the stale
+  `content` column) with `data_text`. Also updated the GraphiQL default query (graphiql/index.html).
+- VERIFIED LIVE: GraphQL exposes data_text, no longer content (`field 'content' not found`); an existing
+  row kept its decoded text (data preserved, not dropped); GraphiQL default query flipped to data_text.
+
+## DARTBOARD FAVICON + EXAMPLES PAGE — LIVE (2026-06-06, commit 6981d62)
+Normalized the favicon across surfaces to the amber bullseye (mdi:bullseye-arrow) that anchors the hero,
+replacing the old cork-board mark.
+- packages/ui/public/favicon.svg = new source of truth (amber glyph in a stamp ring on a dark rounded
+  square). Regenerated favicon.png (64px) + favicon.webp via rsvg-convert/cwebp, added apple-touch-icon.png
+  (180px). index.html serves SVG-first + PNG + apple-touch fallback.
+- deploy/caddy/graphiql/index.html (gitignored): same mark inlined as a base64 data-URI favicon (no extra
+  Caddy mount). Lives via the rsync, not git.
+- NEW /examples route (packages/ui/src/pages/Examples.svelte, wired in App.svelte): a prominent "Live
+  GraphQL archive" card → archive.msgboard.xyz, plus the 6 runnable examples (submit-message, keep-alive,
+  request-fulfill, multi-sig-collect, antagonistic-game, history-server) each with a copyable
+  `npm run X --workspace @msgboard/examples` command + GitHub source link, and a valve.city live-mode note.
+  Linked from the home NextSteps section (new amber "Run the Examples" card).
+- Deployed via full ansible run (rsync local tree + rebuild ui image + force-recreate caddy). VERIFIED
+  live through Cloudflare (cf-cache-status DYNAMIC, new bundle, favicon.svg = dartboard).
+
+## OPEN ITEMS (2026-06-07)
+- POSTGRES PASSWORD not backed up to 1Password: vault_postgres_password lives ONLY in the local ansible
+  vault + the box .env (confirmed `op item get msgboard_postgres_password` → not found). The Hasura admin
+  secret IS mirrored (op://valve/msgboard_hasura_admin_secret/password). If both vault + box were lost,
+  DB access is gone. User flagged this resilience gap; offered to mirror it (direct or print-the-command,
+  like the Hasura secret) — awaiting the go-ahead.
+- Spam chain-1 starvation decision (see top section) — awaiting user choice.
+- Faucet HTTP-by-IP probe fails every deploy (box now answers HTTPS by hostname since PulseChain set DNS);
+  non-fatal but the interim probe is obsolete — could retire it for a clean failed=0 with no scary retries.
 
 ## GraphiQL EXPLORER UI — LIVE at archive.msgboard.xyz/ (2026-06-06)
 archive.msgboard.xyz now serves a GraphiQL explorer AT THE ROOT (UI), with the API at /v1/graphql.
