@@ -23,6 +23,14 @@ body {
   @apply bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100;
 }
 
+/* Tailwind v4's preflight no longer sets cursor:pointer on buttons, so enabled
+   buttons render the default arrow and read as non-interactive. Restore pointer
+   for all enabled buttons/role=button app-wide (disabled handled below). */
+button:not([disabled]),
+[role='button']:not([disabled]) {
+  cursor: pointer;
+}
+
 [disabled] {
   cursor: not-allowed !important;
   /* @apply bg-transparent; */
