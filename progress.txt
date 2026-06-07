@@ -2,6 +2,21 @@
 
 Updated: 2026-06-07
 
+## UI FIXES — category trim + dark-mode toggles (2026-06-07, commits 3d1fe1f, b7d5fac)
+Two UI fixes, deployed (ui image rebuilt; live bundle index-DMMXqJ-1.js).
+- CATEGORY "gobbledygook": NOT a config change (verified SPAM_CATEGORIES + categoryHash untouched).
+  Categories are 32-byte keccak256(name) hashes; the tree showed them DECODED by default, so a hash
+  rendered as unprintable garbage. Fix (TreeView.svelte + new lib/tree-format.ts): category headers now
+  show the decoded name only when it is real text (e.g. gasmoneyplease), else the raw hex trimmed to a
+  middle ellipsis (0x200ac67a0d…f9778d81); full value still copied. 8 unit tests in tree-format.test.ts
+  (first UI unit tests — UI had no vitest config, but `vitest` resolves from root + pure helpers run in
+  node env). Helpers built with String.fromCharCode in tests (literal control chars get stripped by the
+  Write/JSON layer — use String.fromCharCode(n) or \\uXXXX, never literal control bytes).
+- DARK-MODE TOGGLES washed out (ToggleButton.svelte): the handle stays LIGHT in dark mode (a light knob
+  reads on the dark track — correct), but the glyph used light dark: variants (dark:text-gray-400,
+  dark:text-amber-300) = light text on a light handle. Fixed to text-gray-600 / text-amber-700 (dark in
+  both modes). Verified with a before/after Tailwind-CDN screenshot.
+
 ## SPAM WRITERS / POW PERF — root cause = slow grind, NOT chain-specific (2026-06-07)
 User reported "spammers seem down." They are NOT down. First hypothesis ("mainnet PoW is more
 expensive") was WRONG and disproved by metrics — recorded here so the mistake isn't repeated.
