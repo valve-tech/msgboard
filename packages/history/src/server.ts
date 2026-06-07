@@ -64,7 +64,7 @@ const parseQuery = (params: URLSearchParams): ArchiveQuery => {
  * - `GET /health`   → `{ ok: true }`
  * - `GET /messages` → `{ messages: ArchivedMessage[] }`, filtered by query params:
  *   `chainId`, `category` (hex or decoded text), `since`/`until` (ISO dates),
- *   `contains` (substring on decoded content), `limit` (≤ 1000), `offset`.
+ *   `contains` (substring on decoded data text), `limit` (≤ 1000), `offset`.
  *
  * Security defaults mirror the relayer's push source: binds to `127.0.0.1`
  * unless `host` is set, and a non-loopback bind requires `token`. Slow

@@ -59,7 +59,7 @@ await archive.migrate()
 const recent = await archive.query({ chainId: 943, category: 'lorem', limit: 20 })
 ```
 
-`query()` filters by `chainId`, `category` (hex or decoded text), `since`/`until`, `contains` (substring match on decoded content), `limit`, and `offset`.
+`query()` filters by `chainId`, `category` (hex or decoded text), `since`/`until`, `contains` (substring match on the decoded data text), `limit`, and `offset`.
 
 The storage and query layer lives in [`@msgboard/history`](../history); `postgresArchiveSink` is the adapter that drives it from the relayer heartbeat. Use `@msgboard/history`'s `archiveServer` to expose the same archive over an HTTP query API.
 

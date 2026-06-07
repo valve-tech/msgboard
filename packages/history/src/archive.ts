@@ -23,7 +23,7 @@ export type ArchiveQuery = {
   category?: string
   since?: Date
   until?: Date
-  /** Substring match on decoded content. */
+  /** Substring match on the decoded message data (the `data_text` column). */
   contains?: string
   limit?: number
   offset?: number
@@ -36,7 +36,7 @@ export type ArchivedMessage = {
   category: string | null
   category_text: string | null
   data: string | null
-  content: string | null
+  data_text: string | null
   block_number: string | null
   block_hash: string | null
   first_seen_at: string
@@ -88,12 +88,30 @@ export const createArchive = (options: ArchiveOptions): Archive => {
         category      TEXT,
         category_text TEXT,
         data          TEXT,
-        content       TEXT,
+        data_text     TEXT,
         block_number  BIGINT,
         block_hash    TEXT,
         first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         PRIMARY KEY (hash, chain_id)
       )`,
+    )
+    // The decoded-data column was originally named `content`; it is now `data_text`
+    // to mirror `category`/`category_text` and the node's own `data` field key.
+    // Rename in place on existing databases — guarded so it runs at most once and
+    // never fires on a fresh table (which is already created with `data_text`).
+    await pool.query(
+      `DO $$
+       BEGIN
+         IF EXISTS (
+           SELECT 1 FROM information_schema.columns
+           WHERE table_name = 'message_archive' AND column_name = 'content'
+         ) AND NOT EXISTS (
+           SELECT 1 FROM information_schema.columns
+           WHERE table_name = 'message_archive' AND column_name = 'data_text'
+         ) THEN
+           ALTER TABLE message_archive RENAME COLUMN content TO data_text;
+         END IF;
+       END $$`,
     )
     await pool.query(`CREATE INDEX IF NOT EXISTS message_archive_seen_idx ON message_archive (first_seen_at)`)
     await pool.query(
@@ -105,7 +123,7 @@ export const createArchive = (options: ArchiveOptions): Archive => {
   const record = async (message: RPCMessage, chainId: number): Promise<void> => {
     await pool.query(
       `INSERT INTO message_archive
-        (hash, chain_id, category, category_text, data, content, block_number, block_hash)
+        (hash, chain_id, category, category_text, data, data_text, block_number, block_hash)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        ON CONFLICT (hash, chain_id) DO NOTHING`,
       [
@@ -136,13 +154,13 @@ export const createArchive = (options: ArchiveOptions): Archive => {
     if (filter.category !== undefined) add('(category = $? OR category_text = $?)', filter.category)
     if (filter.since) add('first_seen_at >= $?', filter.since.toISOString())
     if (filter.until) add('first_seen_at <= $?', filter.until.toISOString())
-    if (filter.contains) add('content ILIKE $?', `%${filter.contains}%`)
+    if (filter.contains) add('data_text ILIKE $?', `%${filter.contains}%`)
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : ''
     // limit/offset are interpolated, so coerce to bounded integers (never user SQL).
     const limit = Math.min(Math.max(Number.parseInt(String(filter.limit ?? 100), 10) || 100, 1), 1000)
     const offset = Math.max(Number.parseInt(String(filter.offset ?? 0), 10) || 0, 0)
     const { rows } = await pool.query(
-      `SELECT hash, chain_id, category, category_text, data, content, block_number, block_hash, first_seen_at FROM message_archive ${where} ORDER BY first_seen_at DESC LIMIT ${limit} OFFSET ${offset}`,
+      `SELECT hash, chain_id, category, category_text, data, data_text, block_number, block_hash, first_seen_at FROM message_archive ${where} ORDER BY first_seen_at DESC LIMIT ${limit} OFFSET ${offset}`,
       params,
     )
     return rows as ArchivedMessage[]

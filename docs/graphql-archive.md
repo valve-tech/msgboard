@@ -35,7 +35,7 @@ The `message_archive` table is exposed as the `message_archive` GraphQL type:
 | `category` | String | bytes32 category hex |
 | `category_text` | String | decoded category, or null if not printable |
 | `data` | String | raw message data (hex) |
-| `content` | String | decoded content, or null if not printable |
+| `data_text` | String | the decoded message data, or null if not printable |
 | `block_number` | bigint | block the message was rooted to |
 | `block_hash` | String | |
 | `first_seen_at` | timestamptz | when the indexer first recorded it |
@@ -47,14 +47,14 @@ Recent messages on PulseChain v4 (943) mentioning "lorem":
 ```graphql
 query RecentLorem {
   message_archive(
-    where: { chain_id: { _eq: 943 }, content: { _ilike: "%lorem%" } }
+    where: { chain_id: { _eq: 943 }, data_text: { _ilike: "%lorem%" } }
     order_by: { first_seen_at: desc }
     limit: 20
   ) {
     hash
     chain_id
     category_text
-    content
+    data_text
     block_number
     first_seen_at
   }
@@ -76,7 +76,7 @@ Over HTTP:
 ```sh
 curl https://archive.msgboard.xyz/v1/graphql \
   -H 'Content-Type: application/json' \
-  -d '{"query":"{ message_archive(limit: 5, order_by: {first_seen_at: desc}) { hash chain_id content first_seen_at } }"}'
+  -d '{"query":"{ message_archive(limit: 5, order_by: {first_seen_at: desc}) { hash chain_id data_text first_seen_at } }"}'
 ```
 
 ## Deploying it (human-gated steps)
