@@ -7,6 +7,7 @@
   import ToggleButton from './ToggleButton.svelte'
   import Icon from '@iconify/svelte'
   import { hexToString, stringToHex, type Hex } from 'viem'
+  import { middleEllipsis, resolveCategoryValue } from '../lib/tree-format'
 
   const _initialScope = getScope()
 
@@ -55,6 +56,7 @@
     }
     if (pruned) saveTreeNodeState()
   }
+
 </script>
 
 <script lang="ts">
@@ -77,6 +79,18 @@
 
   const hasChildren = $derived(children.length > 0)
 
+  // The category is a group header (an isRoot node with messages under it). Its label is a
+  // 32-byte value: usually keccak256(name), which decodes to unprintable garbage — the source
+  // of the "gobbledygook" categories. Show the decoded name only when it is real text (e.g.
+  // "gasmoneyplease"); otherwise show the raw hex, trimmed to a middle ellipsis. The full,
+  // untrimmed value is still what gets copied.
+  const isCategoryHeader = $derived(isRoot && hasChildren)
+  const categoryValue = $derived(resolveCategoryValue(target, decoded, effectiveDecoded))
+  /** the full, untrimmed value placed on the clipboard */
+  const copyValue = $derived(isCategoryHeader ? categoryValue : value)
+  /** what is rendered in the row — category headers are trimmed, everything else is unchanged */
+  const displayValue = $derived(isCategoryHeader ? middleEllipsis(categoryValue) : value)
+
   // auto-expand only the hidden root container so its categories are listed;
   // categories/messages stay collapsed by default unless the user opened them before
   let expanded: boolean = $state(_expansionState[l] ?? hideContent)
@@ -91,7 +105,7 @@
   let copyTimer: ReturnType<typeof setTimeout>
   const copyToClipboard = (e: Event) => {
     e.stopPropagation()
-    navigator.clipboard.writeText(`${value}`)
+    navigator.clipboard.writeText(`${copyValue}`)
     copied = true
     clearTimeout(copyTimer)
     copyTimer = setTimeout(() => { copied = false }, 350)
@@ -129,7 +143,7 @@
           <button
             type="button"
             class={`block w-full ${isHexValue ? 'break-all' : 'break-words'} whitespace-pre-wrap text-left cursor-copy rounded px-1 -mx-1 transition-colors hover:bg-gray-500/10`}
-            onclick={copyToClipboard}>{value}</button>
+            onclick={copyToClipboard}>{displayValue}</button>
           <span
             class={`pointer-events-none absolute left-0 -top-5 z-20 whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-sans shadow transition-opacity duration-100 group-hover/cp:opacity-100 ${
               copied
