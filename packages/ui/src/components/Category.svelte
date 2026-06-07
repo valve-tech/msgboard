@@ -76,12 +76,13 @@
 </h3>
 <div class="w-full flex flex-row items-start">
   <div class="radio gap-2 grow flex items-start">
+    {#if board.chain.faucetIsActive}
     <span class="flex flex-row items-center py-2" class:italic={type === 'input'}>
       <ToggleButton off="⛽" on="txt"
-        disabled={!board.chain.faucetIsActive}
         checked={type === 'input'}
         onclick={() => selectCategory(type === 'gas-request' ? 'input' : 'gas-request')} />
     </span>
+    {/if}
     <div class="sm:flex rounded-lg flex-col flex-grow gap-1">
       <input
         type="text"
