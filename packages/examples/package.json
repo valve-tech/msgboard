@@ -5,6 +5,9 @@
   "type": "module",
   "scripts": {
     "build": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage",
     "viem-demo": "tsx src/viem-demo.ts",
     "submit-message": "tsx src/submit-message.ts",
     "keep-alive": "tsx src/keep-alive.ts",
@@ -22,5 +25,9 @@
     "pg": "^8.14.1",
     "tsx": "^4.19.3",
     "viem": "^2.25.0"
+  },
+  "devDependencies": {
+    "vitest": "^3.1.2",
+    "@vitest/coverage-v8": "^3.1.2"
   }
 }
