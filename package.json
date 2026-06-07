@@ -25,6 +25,7 @@
     "ui:preview": "npm run preview --workspace=packages/ui",
     "ui:dev": "npm run dev --workspace=packages/ui",
     "sponsor:spam": "npm run spam --workspace=packages/sponsor",
+    "sponsor:spam:start": "npm run spam:start --workspace=packages/sponsor",
     "sponsor:bridge": "npm run bridge --workspace=packages/sponsor",
     "sponsor:start": "npm run start --workspace=packages/sponsor",
     "test:relayer": "npm run test --workspace=packages/relayer",
