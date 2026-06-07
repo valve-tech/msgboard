@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from '@iconify/svelte';
+  import Carousel from './Carousel.svelte';
 
   interface UseCase {
     title: string;
@@ -43,15 +44,17 @@
 
 <div class="flex flex-col gap-4 text-center py-16 px-4">
   <h2 class="text-3xl font-bold text-slate-900 dark:text-gray-100 pb-4">Use Cases</h2>
-  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-7xl mx-auto">
-    {#each useCases as useCase}
-      <div class="group flex flex-col p-6 rounded-xl border border-slate-200 dark:border-gray-700 transition-all duration-200 hover:-translate-y-1 bg-white dark:bg-gray-800 shadow-sm">
-        <div class="flex justify-center mb-4">
-          <Icon icon={useCase.icon} width="32" height="32" class="text-slate-600 dark:text-gray-300 transition-colors duration-200 group-hover:text-blue-600 dark:group-hover:text-blue-400" />
+  <div class="w-full max-w-7xl mx-auto">
+    <Carousel items={useCases} label="Use cases">
+      {#snippet card(useCase)}
+        <div class="group flex h-full w-full flex-col text-center p-6 rounded-xl border border-slate-200 dark:border-gray-700 transition-all duration-200 hover:-translate-y-1 bg-white dark:bg-gray-800 shadow-sm">
+          <div class="flex justify-center mb-4">
+            <Icon icon={useCase.icon} width="32" height="32" class="text-slate-600 dark:text-gray-300 transition-colors duration-200 group-hover:text-blue-600 dark:group-hover:text-blue-400" />
+          </div>
+          <h3 class="text-xl font-semibold mb-3 text-slate-900 dark:text-gray-100">{useCase.title}</h3>
+          <p class="text-slate-600 dark:text-gray-300">{useCase.description}</p>
         </div>
-        <h3 class="text-xl font-semibold mb-3 text-slate-900 dark:text-gray-100">{useCase.title}</h3>
-        <p class="text-slate-600 dark:text-gray-300">{useCase.description}</p>
-      </div>
-    {/each}
+      {/snippet}
+    </Carousel>
   </div>
 </div>
