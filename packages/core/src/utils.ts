@@ -62,6 +62,67 @@ export function getChallenge(msg: types.MessageSeed) {
 }
 
 /**
+ * A stateful, fast proof-of-work search over consecutive nonces.
+ *
+ * {@link checkWork} recomputes `challenge = g·(nonce·digest + blockHash)` from scratch
+ * every nonce — a full elliptic-curve scalar MULTIPLICATION, which dominates the grind
+ * (~0.6 ms each in JS, capping a naive loop near ~1.5k hashes/s). But across consecutive
+ * nonces the scalar grows by a constant `digest` (nonce increments by 1), so the challenge
+ * POINT advances by a constant point `D = g·digest`. Replacing the per-nonce scalar MULTIPLY
+ * with a single point ADDITION makes the search ~20-50x faster while producing bit-identical
+ * challenges: `g·a + g·b = g·(a+b)`, and `g·x` depends only on `x mod n`, so the running point
+ * after k additions equals `g·(nonce·digest + blockHash)` exactly. The constant message bytes
+ * (32-byte category + data) are concatenated once.
+ *
+ * `next(msgDifficulty)` advances `message.nonce` by 1, steps (or rebases) the running point,
+ * and returns the work hash if `hash % msgDifficulty === 0n`, else null. It reads
+ * `message.blockHash` live every call: if it changed since the running point was based (the
+ * {@link MsgBoardClient.doPoW} block poller updates it mid-grind), the point is rebased with a
+ * single scalar multiply before continuing. {@link checkWork} remains the canonical verifier;
+ * this only accelerates finding a winning nonce, and must stay byte-for-byte equivalent to it.
+ *
+ * @param message the message to grind; its `nonce` is mutated in place as the search advances.
+ * @returns an object whose `next(msgDifficulty)` performs one nonce step.
+ */
+export function createChallengeSearch(message: types.MessageSeed) {
+  const digest = BigInt(difficultyDigest(message))
+  const stepPoint = g.mul(new BN(digest.toString())) // D = g·digest, constant for this grind
+  const suffix = new Uint8Array([
+    ...hexToBytes(message.category, { size: 32 }),
+    ...hexToBytes(message.data),
+  ])
+  let point: elliptic.curve.base.BasePoint | undefined
+  let basedBlockHash: Hex | undefined
+
+  // (Re)anchor the running point to the current nonce + blockHash with one scalar multiply.
+  const rebase = () => {
+    const scalar = message.nonce * digest + BigInt(message.blockHash)
+    point = g.mul(new BN(scalar.toString()))
+    basedBlockHash = message.blockHash
+  }
+
+  return {
+    next(msgDifficulty: bigint): Hex | null {
+      message.nonce += 1n
+      if (point === undefined || message.blockHash !== basedBlockHash) {
+        rebase()
+      } else {
+        point = point.add(stepPoint)
+      }
+      if (point!.isInfinity()) {
+        throw new Error('unable to create challenge')
+      }
+      const challenge = Uint8Array.from(point!.getX().toArray())
+      const hash = sha256(new Uint8Array([...challenge, ...suffix]))
+      if (BigInt(hash) % msgDifficulty !== 0n) {
+        return null
+      }
+      return hash
+    },
+  }
+}
+
+/**
  * Returns the modulus used for the PoW verification = (2^24)+(10k*dataLen).
  * @param factors the message difficulty factors
  * @param dataLen the length of message data
