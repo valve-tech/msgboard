@@ -2,8 +2,15 @@
 
 Updated: 2026-06-07
 
-## UI FIXES — category trim + dark-mode toggles (2026-06-07, commits 3d1fe1f, b7d5fac)
-Two UI fixes, deployed (ui image rebuilt; live bundle index-DMMXqJ-1.js).
+## UI FIXES — tree trims, dark toggles, sales-pitch split (2026-06-07)
+Several UI fixes, all deployed (ui image rebuilt each time; latest live bundle index-C09RDYS2.js).
+- MESSAGE-HASH TRIM (369164f): extended the category-header trim to message-hash group nodes — any hex
+  HEADER node (hasChildren) is middle-ellipsised; leaf rows (data/nonce/stats) stay whole, full hash
+  still copied. displayValue uses $derived.by with early returns (no nested ternaries).
+- SALES-PITCH SPLIT (1d63461): SalesPitch.svelte "Permissionless, Paid in Work" was one card conflating
+  two ideas. Split into Permissionless (mdi:lock-open-variant) + Paid in Work (mdi:postage-stamp), and
+  moved the row to a responsive 4-up grid (grid-cols-1 sm:2 lg:4). Verified via preview screenshot.
+- Earlier this session (commits 3d1fe1f, b7d5fac, bundle index-DMMXqJ-1.js):
 - CATEGORY "gobbledygook": NOT a config change (verified SPAM_CATEGORIES + categoryHash untouched).
   Categories are 32-byte keccak256(name) hashes; the tree showed them DECODED by default, so a hash
   rendered as unprintable garbage. Fix (TreeView.svelte + new lib/tree-format.ts): category headers now
