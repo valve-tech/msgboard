@@ -88,8 +88,15 @@
   const categoryValue = $derived(resolveCategoryValue(target, decoded, effectiveDecoded))
   /** the full, untrimmed value placed on the clipboard */
   const copyValue = $derived(isCategoryHeader ? categoryValue : value)
-  /** what is rendered in the row — category headers are trimmed, everything else is unchanged */
-  const displayValue = $derived(isCategoryHeader ? middleEllipsis(categoryValue) : value)
+  /** What is rendered in the row. Group HEADERS (the category hash and the message-hash that
+   *  group a message's fields) are long hashes — trim them to a middle ellipsis so the tree
+   *  stays scannable. Leaf rows (data, nonce, stats, …) are left whole, and the full value is
+   *  always what gets copied. */
+  const displayValue = $derived.by(() => {
+    if (isCategoryHeader) return middleEllipsis(categoryValue)
+    if (hasChildren && isHexValue) return middleEllipsis(value)
+    return value
+  })
 
   // auto-expand only the hidden root container so its categories are listed;
   // categories/messages stay collapsed by default unless the user opened them before
