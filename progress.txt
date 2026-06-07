@@ -2,6 +2,38 @@
 
 Updated: 2026-06-07
 
+## THREE OPEN ITEMS CLOSED — secret backup, spam-fix verified, faucet probe retired (2026-06-07)
+Cleared all three items in the "OPEN ITEMS (2026-06-07)" list below, run in parallel via subagents.
+1. POSTGRES PASSWORD now mirrored to 1Password at op://valve/msgboard_postgres_password/password
+   (PASSWORD category, concealed `password` field — structurally identical to
+   op://valve/msgboard_hasura_admin_secret/password). Source was vault_postgres_password in the
+   encrypted ansible vault (deploy/ansible/group_vars/vault.yml); the ansible vault password itself
+   is op://valve/msgboard_vault/password. Verified by sha256 MATCH of vault value vs op-stored value
+   (plaintext never printed/written — moved only through shell pipes). The DB-access resilience gap is
+   now closed. CAVEAT surfaced: the actual postgres password is a real but WEAK 8-char value — worth
+   rotating later (out of scope here; rotation touches box .env + vault + Postgres + Hasura conn).
+2. SPAM POW FIX VERIFIED LIVE + WORKING (read-only diagnosis, no deploy performed). The box WAS
+   redeployed after the perf commits: all three spam images rebuilt 2026-06-07 15:57 CEST (commits
+   4aaca5e + abe5394 landed ~08:20 CEST). Confirmed in the running containers: utils.js has the
+   running point-addition search loop (point = point.add(stepPoint)); spam.js imports node:worker_threads
+   and SPAM_WORKERS=2 on all 3 chains; logs show "launching 2 parallel grinders every 60000ms". CPU is
+   now a sawtooth (grind ~99% then idle to 0% between 60s ticks) — the OPPOSITE of the old pinned-100%-
+   and-still-behind symptom. CHAIN 1 NO LONGER STARVED: msgboard_status counts balanced (1=38, 369=33,
+   943=41), newest message on chains 1 & 943 only ~3s old. Archive totals balanced too (~947/986/979).
+   No action needed; the starvation decision is resolved by the already-deployed fix.
+   GOTCHA logged: only msgboard_status is intercepted by the valve.city proxy; other msgboard_* methods
+   404 (fall through to upstream). Use msgboard_status for counts + archive GraphQL (table message_archive)
+   for recency.
+3. FAUCET HTTP-BY-IP PROBE RETIRED from deploy/ansible/site.yml (gitignored, local-only, not committed).
+   Removed the "Probe the faucet over HTTP by IP (interim, non-fatal)" task (uri http://{{ansible_host}}/,
+   retries:5 delay:6 — ~30s of failed/retry noise per deploy, though failed_when:false kept it non-fatal).
+   Its registered var faucet_http_probe was referenced by the "Report faucet probe result" debug task —
+   rewrote that to a two-way report over the surviving probe. The working HTTPS-BY-HOSTNAME probe
+   ("Probe the faucet over HTTPS by hostname", https://faucet.v4.testnet.pulsechain.com/, register
+   faucet_probe) REMAINS, so faucet health is still checked. `ansible-playbook site.yml --syntax-check`
+   passes clean. FOLLOW-UP (not done): deploy/ansible/README.md + deploy/caddy/Caddyfile still describe
+   the HTTP-by-IP interim phase as current — now stale docs (also gitignored).
+
 ## UI + SPAM — carousels, readable categories, ellipsis reverted (2026-06-07)
 - READABLE SPAM CATEGORIES (2d6a794): the board showed category HASHES because spam passed plain
   strings ('lorem') and doPoW's categoryHash() keccak256-hashes any non-hex string. Fix in spam.ts:
@@ -110,15 +142,13 @@ replacing the old cork-board mark.
 - Deployed via full ansible run (rsync local tree + rebuild ui image + force-recreate caddy). VERIFIED
   live through Cloudflare (cf-cache-status DYNAMIC, new bundle, favicon.svg = dartboard).
 
-## OPEN ITEMS (2026-06-07)
-- POSTGRES PASSWORD not backed up to 1Password: vault_postgres_password lives ONLY in the local ansible
-  vault + the box .env (confirmed `op item get msgboard_postgres_password` → not found). The Hasura admin
-  secret IS mirrored (op://valve/msgboard_hasura_admin_secret/password). If both vault + box were lost,
-  DB access is gone. User flagged this resilience gap; offered to mirror it (direct or print-the-command,
-  like the Hasura secret) — awaiting the go-ahead.
-- Spam chain-1 starvation decision (see top section) — awaiting user choice.
-- Faucet HTTP-by-IP probe fails every deploy (box now answers HTTPS by hostname since PulseChain set DNS);
-  non-fatal but the interim probe is obsolete — could retire it for a clean failed=0 with no scary retries.
+## OPEN ITEMS (2026-06-07) — ALL THREE NOW CLOSED, see top section
+- [CLOSED] POSTGRES PASSWORD backed up to op://valve/msgboard_postgres_password/password (sha256-verified).
+- [CLOSED] Spam chain-1 starvation: the deployed perf fix resolved it — boards balanced across all 3 chains.
+- [CLOSED] Faucet HTTP-by-IP probe retired from site.yml; HTTPS-by-hostname probe remains. See top section.
+
+  Residual follow-up (optional, not done): rotate the weak 8-char postgres password; refresh the stale
+  HTTP-by-IP references in deploy/ansible/README.md + deploy/caddy/Caddyfile.
 
 ## GraphiQL EXPLORER UI — LIVE at archive.msgboard.xyz/ (2026-06-06)
 archive.msgboard.xyz now serves a GraphiQL explorer AT THE ROOT (UI), with the API at /v1/graphql.
