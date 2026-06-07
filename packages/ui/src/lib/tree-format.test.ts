@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isPrintable, middleEllipsis, resolveCategoryValue, stripPadding } from './tree-format'
+import { isPrintable, resolveCategoryValue, stripPadding } from './tree-format'
 
 const NUL = String.fromCharCode(0)
 const ctrl = (...codes: number[]): string => String.fromCharCode(...codes)
@@ -28,20 +28,6 @@ describe('stripPadding', () => {
     expect(stripPadding(GAS_DECODED)).toBe('gasmoneyplease')
     expect(stripPadding('hello')).toBe('hello')
     expect(stripPadding(`${NUL}${NUL}`)).toBe('')
-  })
-})
-
-describe('middleEllipsis', () => {
-  it('leaves short values untouched', () => {
-    expect(middleEllipsis('gasmoneyplease')).toBe('gasmoneyplease')
-    expect(middleEllipsis('0x1234')).toBe('0x1234')
-  })
-  it('trims a 32-byte category hash to a scannable middle ellipsis', () => {
-    const trimmed = middleEllipsis(HASH)
-    expect(trimmed).toBe('0x200ac67a0d…f9778d81')
-    expect(trimmed.length).toBeLessThan(HASH.length)
-    expect(trimmed.startsWith('0x200ac67a0d')).toBe(true)
-    expect(trimmed.endsWith('f9778d81')).toBe(true)
   })
 })
 

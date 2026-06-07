@@ -24,10 +24,6 @@ export const stripPadding = (text: string): string => {
   return text.slice(0, end).trim()
 }
 
-/** Shorten a long value to a middle ellipsis so category hashes stay scannable. */
-export const middleEllipsis = (text: string): string =>
-  text.length > 24 ? `${text.slice(0, 12)}…${text.slice(-8)}` : text
-
 /**
  * The full (untrimmed) value to show/copy for a category header: the decoded name when it
  * is real text, otherwise the raw hex (a hash is not text, so showing the hex beats garbage).
