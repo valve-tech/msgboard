@@ -2,6 +2,71 @@
 
 Updated: 2026-06-07
 
+## RANDOM INDEXER — ponder 0.10 -> 0.16 upgrade, backup + re-run validation (2026-06-07, NOT deployed)
+Goal (user): "keep the original code and backup the data ... then upgrade to latest ponder and rerun and
+see if we can get the same/similar data." For the gibsfinance/random ponder indexer that will run on the
+box at evm-943-entropy.msgboard.xyz.
+
+KEY FINDING — the data is EMPTY by design. The original index (ponder 0.10.9, packages/indexer/postgres-data,
+April 2025) had completed a full sync (ready, head ~21.47M) but ALL 16 entity tables had 0 rows. Confirmed
+WHY: an independent chunked getLogs scan over ALL chain-943 history (20,103,315 -> ~24,625,000) found ZERO
+logs for Random (0x775AF7...7217), Reader (0xd063...721B), AND Consumer (0x21B2...EF34). The randomness
+contracts have never emitted an event on testnet 943. So the correct indexed output is empty, and any
+re-index is also empty.
+
+BACKUP (gibsfinance/random/packages/indexer/backups/, gitignored):
+- indexer-data-2025-04-07.sql (full pg_dump, public + ponder_sync), BASELINE.md (the all-zero baseline),
+  original-src/ (pre-upgrade config/schema/handlers), UPGRADE-COMPARISON.md (the full write-up).
+- Pristine PGDATA dir at packages/indexer/postgres-data left untouched (ran pg_dump against a throwaway copy).
+
+UPGRADE — chose the `indexer` package (ponder 0.10.9, modern onchainTable/virtual-module API) as the base,
+NOT `indexer2` (0.7.17, legacy @ponder/core/createSchema) which had been vendored before. 0.10 -> 0.16
+changes applied: ponder ^0.16.6, viem ^2.48.11 (newest before this session's npm install cutoff 2026-05-10;
+2.52.2 is post-cutoff). Config: networks->chains, chainId->id, transport:http(url)->rpc:url, contract
+network->chain. Handlers: context.network.chainId -> context.chain.id. Disabled the `Random.ink()`
+CALL-TRACE handler (documented in src/random.ts) — it needs includeCallTraces + a trace RPC, was off in the
+original too; event handlers untouched. Added PONDER_START_BLOCK_943 override (defaults to deploy block).
+
+RE-VENDORED + VALIDATED at msgboard/deploy/random-indexer/ (gitignored, standalone on published
+@gibs/random@0.0.18; npm now, Dockerfile switched pnpm->npm). codegen + tsc both pass on 0.16.6. A clean
+`ponder start` against a fresh postgres created the identical 16 tables, completed backfill, reached
+/ready=200 at live head (~24.6M), with ALL entity tables 0 rows and GraphQL `casts{items{seed}}` /
+starts / heats / pointers all totalCount 0 — i.e. SAME (empty) data as the baseline. The .indexer2-backup
+sibling dir holds the previous (0.7) vendoring.
+
+RPC NOTES: valve.city vk_demo key has a per-second CU rate limit (429) — that key is for PUBLIC frontends
+only. Server-side services (this indexer) use the UNLIMITED key at op://valve/valve city unlimited key/password
+(vk_…, URL https://one.valve.city/rpc/<key>/evm/943). CONFIRMED: full-range run on the unlimited key = ZERO
+429s (vs constant on demo). BUT valve.city still caps getLogs at ~30k blocks/request (only the rate limit is
+lifted), so the full 4.5M backfill is slow (~1.5h, one-time); since all history is event-free, set
+PONDER_START_BLOCK_943 near head for fast bring-up if full history isn't needed. Public g4mm4 has no range
+cap but stalled on a full backfill here.
+
+DEPLOY WIRING — DONE (2026-06-07, in deploy/ansible, gitignored/local):
+- Per-contract startBlocks from the @gibs/random ignition journal (chain-943): Random 21,157,084,
+  Reader 21,157,093, Consumer 21,157,114 (the old 20,103,315 was ~1M blocks too early). ponder.config.ts
+  now uses DEPLOY_BLOCK_943 per contract = full history; PONDER_START_BLOCK_943 still overrides for fast
+  bring-up. Synced to both deploy/random-indexer and the gibsfinance/random repo. codegen+tsc green.
+- env.j2: added PONDER_RPC_URL_943={{ vault_ponder_rpc_url_943 }} and ENTROPY_943_SCHEMA={{ entropy_943_schema }}.
+- vault.yml.example: added vault_ponder_rpc_url_943 (UNLIMITED key URL, documented).
+- site.yml lifecycle: (1) compute next entropy_943_<n> via docker exec on the persistent
+  msgboard-postgres container (NOT compose — compose can't parse while ENTROPY_943_SCHEMA unset), set
+  fact BEFORE env render; (2) bring up msgboard-postgres first, wait pg_isready, CREATE DATABASE entropy
+  (guarded) so the indexer finds its db at boot; (3) full compose up --build; (4) wait for the new schema
+  to appear, then prune all entropy_943_<n> except the 2 highest (ponder_sync cache schema preserved);
+  (5) non-fatal /health probe of evm-943-entropy.msgboard.xyz. Does NOT block on /ready (cold backfill ~1h).
+- Dockerfile switched pnpm->npm (npm ci). docker-compose.prod.yml random-indexer-943 service already in place.
+
+PENDING (interactive, gated on user):
+1. op was idle-LOCKED mid-session — the local full-history backfill (deploy-block start, unlimited key) is
+   staged but not run. Re-auth op (e.g. `! op signin` or approve the desktop prompt) to run it locally, OR
+   just deploy — the box does its own backfill.
+2. Set vault_ponder_rpc_url_943 in the encrypted vault: `cd deploy/ansible && ansible-vault edit
+   group_vars/vault.yml`, value = https://one.valve.city/rpc/<UNLIMITED_KEY>/evm/943 (key at
+   op://valve/valve city unlimited key/password). Then run site.yml. First deploy backfills full history
+   (~1h cold on valve.city: rate limit lifted by the unlimited key, but getLogs is still capped at ~30k
+   blocks/request, so ~115 chunks over the archive).
+
 ## UI POLISH — sales-pitch spacing, RPC defaults, cursor, faucet toggle (2026-06-07, DEPLOYED x2)
 Five commits (153f4b9, 9e013ce, 0571ec7, 90ee74b on top of checkpoint ad15c89), two clean ansible
 deploys (both PLAY RECAP ok=31 changed=3 failed=0; faucet probe HTTPS-only — the HTTP-by-IP retirement

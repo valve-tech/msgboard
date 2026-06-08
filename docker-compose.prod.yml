@@ -171,6 +171,26 @@ services:
       RETENTION_DAYS: ${RETENTION_DAYS:-365}
     command: ['npm', 'run', 'indexer:start']
 
+  # random-indexer-943: the gibsfinance/random ponder indexer for chain 943, served at
+  # evm-943-entropy.msgboard.xyz (Caddy proxies to :42069 over the docker network — no host
+  # port). Builds from the vendored deploy/random-indexer snapshot. Each (re)index runs into
+  # a fresh Postgres schema entropy_943_<n> (PONDER_SCHEMA, computed per deploy), inside a
+  # dedicated `entropy` database on msgboard-postgres (created by the deploy before this starts).
+  random-indexer-943:
+    container_name: random-indexer-943
+    build:
+      context: ./deploy/random-indexer
+    depends_on:
+      - msgboard-postgres
+    restart: unless-stopped
+    networks:
+      - msgboard
+    environment:
+      DATABASE_URL: postgres://msgboard-postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@msgboard-postgres:5432/entropy
+      PONDER_RPC_URL_943: ${PONDER_RPC_URL_943:?PONDER_RPC_URL_943 must be set (one.valve.city/rpc/<key>/evm/943)}
+      PONDER_SCHEMA: ${ENTROPY_943_SCHEMA:?ENTROPY_943_SCHEMA must be set (entropy_943_<n>)}
+      PONDER_TELEMETRY_DISABLED: 'true'
+
   # hasura: GraphQL over the message_archive table. Published on LOOPBACK ONLY
   # (127.0.0.1:8081) — Caddy proxies the public GraphQL endpoint at archive.msgboard.xyz,
   # and the admin API/console are reachable only via an SSH tunnel to this port.
