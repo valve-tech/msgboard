@@ -2,6 +2,78 @@
 
 Updated: 2026-06-08
 
+## INDEXER PORT TO SOURCE + ON-CHAIN CLEANUP (2026-06-08, task 1 DONE; 2 & 3 pending user)
+
+Picking up the three outstanding items: (1) port the Random:Ink + Start/Cast `.select()` fixes back to
+the gibsfinance/random indexer source, (2) bleach the keccak pointer, (3) drain randomness acct9. The
+1Password service-account TODO stays deferred.
+
+TWO-CLONE DISCOVERY (important): there are TWO local clones of git@github.com:gibsfinance/random.git, and
+prior sessions used BOTH while progress.txt wrote both as "gibsfinance/random":
+  - A = ~/Documents/gibsfinance/random  (NON-standard path; npm, ponder 0.16.6) — the ACTIVE clone. Has
+    branches master (origin/master = 7c4983f, Apr 2025), subgraph, update-engines. The ponder-0.16 +
+    npm-workspace modernization + the indexer work live here on branch `update-engines`. B's HEAD is an
+    ancestor of A, so A strictly contains B. THIS is where the indexer port belongs.
+  - B = ~/Documents/gibsfinance/github/random  (canonical /github/ path; pnpm, ponder 0.9.17) — a STALE
+    clone on master @ 9c3de11 (Feb 2025), untouched ~1yr. BUT it holds the on-chain tool
+    packages/contracts/scripts/demo-consume-943.ts (untracked, written today) + a built artifacts/ +
+    ignition/deployments/chain-943/. The on-chain ink/heat/cast lifecycle was run from B. So tasks 2 & 3
+    (bleach/drain) run from B; the indexer lives in A. Don't conflate them again.
+
+ALL THREE DONE 2026-06-08. Summary:
+  - Task 1: indexer port committed (7d14f13, signed), pushed, PR opened https://github.com/gibsfinance/random/pull/5
+    (base master <- update-engines; carries the port + ponder-0.16/npm-workspace modernization + CI bump).
+  - Task 2: bleached the keccak pointer + handed off custody to acct0's wallet. bleach 0x9ec4b5d8 (block
+    24630510, +76.7 tPLS to custody), handoff 0x142a4026 (block 24630511); wallet net +78.6999 tPLS (76.7
+    recovered + 2 prior custody - gas). Script: B/packages/contracts/scripts/bleach-943.ts (untracked).
+  - Task 3: drained acct9 -> acct0 after a 1 tPLS test. test tx 0xb862070a (block 24630522, acct0 +1 tPLS),
+    full drain 0xba3735eb (block 24630524, +97,516,884.40 tPLS). acct9 now dust (~0.0002 tPLS); acct0 holds
+    ~197.67M tPLS (whole randomness float consolidated). Destination was acct0 per user (NOT seeds0). Script:
+    B/packages/contracts/scripts/drain-acct9-943.ts (untracked). Memory [[randomness-funded-wallet-943]] updated.
+  NOTE: the two new ops scripts (bleach-943.ts, drain-acct9-943.ts) live untracked in clone B alongside the
+  untracked demo-consume-943.ts. B is a stale Feb-2025 master clone; left untracked (consistent w/ the demo
+  script). If these ops scripts should be preserved in git, a better home is clone A or msgboard/deploy.
+  Still deferred (user, later): the 1Password service account.
+
+TASK 1 DETAIL — committed to A (gibsfinance/random) branch update-engines, commit 7d14f13 (signed), pushed,
+PR #5. What it took:
+  - Ported the validated Random:Ink event handler + the two `.select()` fixes + Bleach `provider` drop from
+    the gitignored deploy copy (msgboard/deploy/random-indexer) into A/packages/indexer/src/random.ts.
+  - Found A's node_modules still had ponder 0.10.9 despite package.json declaring ^0.16.6 (the 2026-06-07
+    upgrade bumped the manifest but never reinstalled) -> standalone tsc collapsed every handler to `never`.
+    Fixed with `npm install --legacy-peer-deps` (eslint-config-ponder 0.16.6 peer-conflicts with eslint 9;
+    lint-only, safe). Now ponder@0.16.6 installed; package-lock reconciled.
+  - Restored the missing chain-943 deployment-address record at
+    A/packages/contracts/ignition/deployments/chain-943/deployed_addresses.json (the config imports it; the
+    mapped-type cast had no known keys without it, so every contracts.Random.address was `| undefined`).
+  - Real API-drift fix in the ported handler: A's workspace lib/Random ABI renamed the section field
+    `durationIsTimestamp` -> `usesTimestamp` (same tuple position/type, so historical 943 calldata still
+    decodes positionally). The deploy copy was clean only because it used the OLDER published
+    @gibs/random@0.0.18 lib. Renamed InkSectionInput.usesTimestamp + the Pointer insert accordingly.
+  - Excluded packages/indexer/backups from tsc (tsconfig) + gitignored it (was the pg_dump/old-src dir
+    getting type-checked). RESULT: the ported handler + all real src/ are tsc-clean; the only 2 remaining
+    tsc errors are pre-existing, in ponder.config.ts, from stale Apr-2025 contracts artifacts missing their
+    typechain Random.d.ts/Reader.d.ts companions (hardhat isn't even installed) — a separate contracts
+    rebuild, out of scope. ponder codegen passes.
+
+TASK 2 DETAIL (bleach keccak pointer — DONE, see summary for tx hashes) — recovered ~76.7 tPLS, TWO txs from acct0:
+  - bleach(info) with info = the keccak section (provider 0xAF2b…, callAtChange false, durationIsTimestamp
+    false, duration 256, token zero, price 1e17, offset 0, index 0). Random.sol:737 — credits 767*0.1 =
+    76.7 tPLS to _custodied[acct0][zero]. Isolated from the seeds0 pointer (offset 767+ in the shared
+    _accessFlags[provider][token][price] bitmap); bleach@offset 0 only iterates slots 0..766 (all unconsumed).
+  - then handoff(acct0, zero, +amount) (Random.sol:717) — decrements custody, _distribute sends native tPLS
+    to acct0's wallet. Read balanceOf(acct0, zero) after bleach to get the exact amount.
+  - Tooling: the demo runner has NO bleach; write a small sibling script in B/packages/contracts mirroring
+    its safety (EXPECTED_PROVIDER guard, simulate-before-send). MNEMONIC via op read 'op://gibs/randomness/recovery phrase'.
+
+TASK 3 DETAIL (drain acct9 — DONE, see summary for tx hashes) — acct9 = randomness seed @ accountIndex 9 =
+  0x518f4af541014C6b42EFEe3638Eb2a32B8f2B500, was ~97.52M tPLS on 943. Swept to acct0 (user chose acct0,
+  not seeds0) after a 1 tPLS test. Plain native-tPLS transfer signed by acct9; acct9 now dust.
+
+ON-CHAIN GOTCHA (still applies): op idle-locks ~1-2 min; the SSH-agent commit signing also intermittently
+returns "failed to fill whole buffer" / "agent returned an error" — both = vault locked, fix is user Touch
+ID then re-run (NEVER --no-gpg-sign). Read op secrets in the SAME bash call as the work.
+
 ## GENERATE REAL ENTROPY ON 943 (2026-06-08, DONE — indexer serves the full real lifecycle)
 
 RESULT (verified at evm-943-entropy.msgboard.xyz/graphql, /ready=200): pointers=2, inks=2, preimages=1534,
