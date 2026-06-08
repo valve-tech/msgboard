@@ -2,7 +2,7 @@
 
 Updated: 2026-06-08
 
-## GENERATE REAL ENTROPY ON 943 (2026-06-08, IN PROGRESS — blocked on a decision + op unlock)
+## GENERATE REAL ENTROPY ON 943 (2026-06-08, IN PROGRESS — indexer redeployed, backfilling; seeds0 run pending)
 Goal (user): "ink a full contract and then cast and go through the whole consuming cycle 2x" using the funded
 `randomness` wallet (op://gibs/randomness, acct[0] = 0xAF2b2118376b51eEcB58327526bc082aED3e4225, ~100M tPLS on
 943), so the deployed entropy indexer finally gets real data. Price 0.1 tPLS/preimage ("0.1 is reasonable" —
@@ -46,13 +46,38 @@ VALIDATED against the real ink tx via a throwaway tsx script: decodes to ink, pr
 SECTION MATCH = YES, preimage count = 767. Handles only direct top-level ink() (all that exists on 943);
 multicaller-wrapped inks are skipped with a warning (none on 943).
 
-NEXT (blocked on `op` unlock — both the deploy vault password op://valve/msgboard_vault/password AND the
-mnemonic come from op): 1) redeploy the indexer (ansible; rsync deploy/random-indexer -> box, recreate schema,
-re-backfill full history -> indexes our ink: pointers=1, preimages=767, reaches head). 2) broadcast the 2
-consume cycles: from gibsfinance/random/packages/contracts, MNEMONIC="$(op read 'op://gibs/randomness/recovery
-phrase')" SKIP_INK=true npx tsx scripts/demo-consume-943.ts  (USE_TSTORE stays false). 3) verify the live
-indexer shows heats=10, starts=2, casts=2, links=10 (reveals stays 0 — we cast, not reveal, per the ask).
-TODO later: port the same Ink handler back to gibsfinance/random/packages/indexer source.
+SEED-COLLISION FOOTGUN (user spotted it): gibsfinance/random derives each provider secret as
+generateSecret(seed, accountIndex) = the PRIVATE KEY at m/44'/60'/{accountIndex}'/0/0 — the SAME path the
+wallet signers use. So secret[i] === wallet account i's private key. Re-checking balances both ways showed the
+`randomness` seed funds TWO accounts: acct0 0xAF2b... ~100.16M AND acct9 0x518f4af5...B500 ~97.52M (~197.7M
+total; earlier addressIndex-only scan missed acct9). A provider derives secrets from index 0 up, so if the
+funded `randomness` seed were ever used as RANDOMNESS_MNEMONIC and revealed secret[0]/secret[9], it would
+PUBLISH those wallets' keys. STATUS: SAFE — 943 has reveals/casts/links = 0 (nothing exposed), and our demo
+preimages were keccak(provider++index), not seed keys. See memory [[randomness-funded-wallet-943]].
+
+ISOLATION (user): instead of moving funds, the user added a fresh dedicated SECRET seed at
+op://gibs/randomness/add more/seeds0 (field "seeds0" on the randomness item). VERIFIED: valid 12-word,
+acct0 0x1012E865...312B, DISTINCT from the funded seed, EMPTY across all indices/schemes -> safe as
+RANDOMNESS_MNEMONIC. Rule locked in: RANDOMNESS_MNEMONIC = seeds0 (empty); the funded `randomness` seed is
+WALLET-ONLY, never a secret source. This protects the funded accounts in place; physically draining acct9 is
+now optional (deferred).
+
+SCRIPT UPGRADE (demo-consume-943.ts): added RANDOMNESS_MNEMONIC support (secret[i] = the real derivation
+mnemonicToAccount(seed,{accountIndex:i}).getHdKey().privateKey; preimage=keccak256(secret)); an empty-seed
+SAFETY GUARD that aborts if any consumed-index secret account holds a balance; CONSUME_OFFSET + offset taken
+from the Ink event so a SECOND ink (lands at offset 767) is consumed correctly. Dry-run with seeds0 PASSED
+(guard ok, ink simulation ok).
+
+DONE: indexer REDEPLOYED (ansible site.yml, -e ansible_host=88.99.62.98, vault pass via op). PLAY RECAP ok=42
+failed=0. New schema entropy_943_1, Random:Ink handler live. Backfilling full history now.
+
+NEXT: 1) wait for /ready=200 -> confirm pointers=1, preimages=767 (our existing keccak ink indexed by the new
+handler). 2) broadcast the REAL seeds0 run: from gibsfinance/random/packages/contracts,
+MNEMONIC="$(op read 'op://gibs/randomness/recovery phrase')" RANDOMNESS_MNEMONIC="$(op read 'op://gibs/randomness/add more/seeds0')"
+npx tsx scripts/demo-consume-943.ts  (inks a 2nd pointer w/ seeds0 secrets at offset 767, then 2x heat->cast).
+3) verify pointers=2, preimages=1534, heats=10, starts=2, casts=2, links=10. The first (keccak) pointer stays
+unconsumed (harmless; bleachable later). TODO: port the Ink handler back to gibsfinance/random/packages/indexer
+source. NOTE: `op` idle-locks ~every 1-2 min — read secrets in the SAME bash call as the work.
 
 ## RANDOM INDEXER — ponder 0.10 -> 0.16 upgrade, backup + re-run validation (2026-06-07, NOT deployed)
 Goal (user): "keep the original code and backup the data ... then upgrade to latest ponder and rerun and
