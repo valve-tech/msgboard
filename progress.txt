@@ -1,6 +1,45 @@
 # MsgBoard — Progress
 
-Updated: 2026-06-07
+Updated: 2026-06-08
+
+## GENERATE REAL ENTROPY ON 943 (2026-06-08, IN PROGRESS — blocked on a decision + op unlock)
+Goal (user): "ink a full contract and then cast and go through the whole consuming cycle 2x" using the funded
+`randomness` wallet (op://gibs/randomness, acct[0] = 0xAF2b2118376b51eEcB58327526bc082aED3e4225, ~100M tPLS on
+943), so the deployed entropy indexer finally gets real data. Price 0.1 tPLS/preimage ("0.1 is reasonable" —
+faucet gives 10). The funded acct is provider + owner + consumer at once, so the ink deposit and heat fee just
+cycle within one wallet; the only true cost is gas.
+
+TOOL: wrote a bounded, DB-free runner at gibsfinance/random/packages/contracts/scripts/demo-consume-943.ts
+(@gibs/random@0.0.18 source = matches the chain-943 deployment; tsx). It inks one full pointer (767 preimages),
+then runs heat->cast N times. Secrets are made in-memory and used for BOTH ink (preimage=keccak256(secret))
+and cast (the secret) — no persistence needed. Every call is simulateContract'd before broadcast. Env:
+SKIP_INK, USE_TSTORE (default false), DRY_RUN, PRICE_943, REQUIRED_PER_CYCLE, CONSUME_CYCLES.
+
+DONE: ink succeeded ON-CHAIN. tx 0x542c9432bf923d32649f99e8acf9f4fe044908ecee5c8cd69bb0b4c071d29c82,
+block 24628848, gas 5,420,450. Ink section 0xc861e776a82208992dda7869421a2fa1e70809d2538e9a9592ce8fcf4641b073.
+767 preimages, offset 0, 76.7 tPLS deposited (recoverable, sits as our contract balance).
+
+GOTCHA 1 — TSTORE: PulseChain testnet v4 predates EIP-1153, so heat's useTSTORE=true reverts with
+"invalid opcode: TSTORE". Fixed: USE_TSTORE defaults to false (the contract's regular-storage path). cast
+does not use TSTORE, so it is unaffected.
+
+GOTCHA 2 (BLOCKER) — the deployed indexer CANNOT index heat/cast as-is. Its Heat handler does `pointer!.offset`
+(deploy/random-indexer/src/random.ts:37) and updates Preimage rows; its Cast handler throws "no preimages
+found!" if no Preimage rows exist. Pointer + Preimage are populated ONLY by the disabled `Random.ink()`
+call-trace handler. So broadcasting heat/cast now would CRASH-LOOP the live indexer (currently empty but
+healthy, /ready=200). The ink/heat/cast must be indexed via that handler first.
+
+RESOLUTION PATH: re-enable the original `Random.ink()` call-trace handler (it lives in
+gibsfinance/random git HEAD:packages/indexer/src/random.ts — reads decoded ink inputs: sectionInput+bytecode,
+dataToPreimages, builds Pointer/Preimage/Ink), set includeCallTraces:true on Random in ponder.config.ts, and
+point the indexer RPC at g4mm4 (https://rpc-testnet-pulsechain.g4mm4.io) — VERIFIED g4mm4 serves
+debug_traceBlockByNumber w/ callTracer. Redeploy; re-backfill indexes our existing ink (pointers=1,
+preimages=767); THEN broadcast heat/cast ×2 (SKIP_INK=true) and they index correctly.
+
+OPEN DECISION: call-trace re-backfill start block — (a) raise Random startBlock to ~just before our ink
+(24,628,000); history before it is provably EMPTY so nothing is lost and the trace backfill is fast; vs
+(b) keep deploy-block start (21,157,084) and trace the full ~3.5M-block range (faithful to "from deployment",
+but slow). Also: `op` idle-locked mid-run — needs unlock to broadcast the consume cycles.
 
 ## RANDOM INDEXER — ponder 0.10 -> 0.16 upgrade, backup + re-run validation (2026-06-07, NOT deployed)
 Goal (user): "keep the original code and backup the data ... then upgrade to latest ponder and rerun and
