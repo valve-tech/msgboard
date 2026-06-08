@@ -29,17 +29,30 @@ found!" if no Preimage rows exist. Pointer + Preimage are populated ONLY by the 
 call-trace handler. So broadcasting heat/cast now would CRASH-LOOP the live indexer (currently empty but
 healthy, /ready=200). The ink/heat/cast must be indexed via that handler first.
 
-RESOLUTION PATH: re-enable the original `Random.ink()` call-trace handler (it lives in
-gibsfinance/random git HEAD:packages/indexer/src/random.ts — reads decoded ink inputs: sectionInput+bytecode,
-dataToPreimages, builds Pointer/Preimage/Ink), set includeCallTraces:true on Random in ponder.config.ts, and
-point the indexer RPC at g4mm4 (https://rpc-testnet-pulsechain.g4mm4.io) — VERIFIED g4mm4 serves
-debug_traceBlockByNumber w/ callTracer. Redeploy; re-backfill indexes our existing ink (pointers=1,
-preimages=767); THEN broadcast heat/cast ×2 (SKIP_INK=true) and they index correctly.
+DECISION (user): keep FULL history from the deploy block (21,157,084). That unlocked a STRICTLY BETTER fix
+than call traces: the ink() call emits an Ink event, and that event's transaction INPUT is the raw
+`ink(info, data)` calldata. So a `Random:Ink` EVENT handler decodes event.transaction.input
+(viem.decodeFunctionData) to recover the section params (token/price/duration) AND the preimage bytes — no
+call traces, no trace RPC, keeps deploy-block start AND the reliable valve.city RPC. Event-driven, so full
+history is cheap.
 
-OPEN DECISION: call-trace re-backfill start block — (a) raise Random startBlock to ~just before our ink
-(24,628,000); history before it is provably EMPTY so nothing is lost and the trace backfill is fast; vs
-(b) keep deploy-block start (21,157,084) and trace the full ~3.5M-block range (faithful to "from deployment",
-but slow). Also: `op` idle-locked mid-run — needs unlock to broadcast the consume cycles.
+DONE — wrote the `Random:Ink` event handler in deploy/random-indexer/src/random.ts (replaced the disabled
+call-trace stub): decode input -> [sectionInput, data]; offset = high 128 bits of packed event offset;
+guard randomUtils.section({...sectionInput,provider,offset}) === event section; dataToPreimages(data);
+insert Pointer (count/remaining = N, storage = event pointer, params from sectionInput, usesTimestamp =
+durationIsTimestamp) + Preimage[] (orderId = preimage(location(section,i))) + Ink. New-ponder API
+(insert().values()). Also dropped an unused `provider` in the Bleach handler. codegen + tsc CLEAN.
+VALIDATED against the real ink tx via a throwaway tsx script: decodes to ink, price 1e17, duration 256,
+SECTION MATCH = YES, preimage count = 767. Handles only direct top-level ink() (all that exists on 943);
+multicaller-wrapped inks are skipped with a warning (none on 943).
+
+NEXT (blocked on `op` unlock — both the deploy vault password op://valve/msgboard_vault/password AND the
+mnemonic come from op): 1) redeploy the indexer (ansible; rsync deploy/random-indexer -> box, recreate schema,
+re-backfill full history -> indexes our ink: pointers=1, preimages=767, reaches head). 2) broadcast the 2
+consume cycles: from gibsfinance/random/packages/contracts, MNEMONIC="$(op read 'op://gibs/randomness/recovery
+phrase')" SKIP_INK=true npx tsx scripts/demo-consume-943.ts  (USE_TSTORE stays false). 3) verify the live
+indexer shows heats=10, starts=2, casts=2, links=10 (reveals stays 0 — we cast, not reveal, per the ask).
+TODO later: port the same Ink handler back to gibsfinance/random/packages/indexer source.
 
 ## RANDOM INDEXER — ponder 0.10 -> 0.16 upgrade, backup + re-run validation (2026-06-07, NOT deployed)
 Goal (user): "keep the original code and backup the data ... then upgrade to latest ponder and rerun and
