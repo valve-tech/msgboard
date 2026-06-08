@@ -57,15 +57,25 @@ DEPLOY WIRING — DONE (2026-06-07, in deploy/ansible, gitignored/local):
   (5) non-fatal /health probe of evm-943-entropy.msgboard.xyz. Does NOT block on /ready (cold backfill ~1h).
 - Dockerfile switched pnpm->npm (npm ci). docker-compose.prod.yml random-indexer-943 service already in place.
 
-PENDING (interactive, gated on user):
-1. op was idle-LOCKED mid-session — the local full-history backfill (deploy-block start, unlimited key) is
-   staged but not run. Re-auth op (e.g. `! op signin` or approve the desktop prompt) to run it locally, OR
-   just deploy — the box does its own backfill.
-2. Set vault_ponder_rpc_url_943 in the encrypted vault: `cd deploy/ansible && ansible-vault edit
-   group_vars/vault.yml`, value = https://one.valve.city/rpc/<UNLIMITED_KEY>/evm/943 (key at
-   op://valve/valve city unlimited key/password). Then run site.yml. First deploy backfills full history
-   (~1h cold on valve.city: rate limit lifted by the unlimited key, but getLogs is still capped at ~30k
-   blocks/request, so ~115 chunks over the archive).
+LOCAL FULL-HISTORY BACKFILL — DONE/CONFIRMED (2026-06-07): ran ponder 0.16 over 21,157,084 -> head with
+the unlimited key; /ready=200, is_ready=1, reached live head, ALL entity tables 0, GraphQL casts/starts/
+heats totalCount 0. Full-range result == baseline == on-chain scan. 0 auth errors.
+
+DEPLOYED TO THE BOX 2026-06-07 (commit 8f19bc8 for docker-compose.prod.yml). Ran
+`ansible-playbook site.yml -e ansible_host=88.99.62.98 --vault-password-file <(op read op://valve/msgboard_vault/password)`.
+User set vault_ponder_rpc_url_943 (unlimited key URL) in the encrypted vault first. Outcome:
+- entropy indexer LIVE: random-indexer-943 container Up, schemas ponder_sync + entropy_943_0 created,
+  backfilling full history (~1h). Public: evm-943-entropy.msgboard.xyz/health 200, / (GraphiQL) 200,
+  /metrics 404 (Caddy blocks internal). msgboard.xyz 200 + archive.msgboard.xyz/healthz 200 (unaffected).
+- ONE task failed on first run: the prune shell (YAML folded-scalar orphaned the `|` pipe -> "/bin/sh: |
+  unexpected"). It is a NO-OP on a first deploy (only entropy_943_0 exists) but the failure aborted the
+  play before the Hasura tasks. Hasura was already configured by prior deploys (archive still 200), so no
+  harm. FIXED the prune (now ansible.builtin.shell + executable /bin/bash + literal block + mapfile/for;
+  bash -n verified). Did NOT re-run (would bump to entropy_943_1 and re-backfill ~1h for zero data gain);
+  the next routine deploy will run clean (failed=0) with the fixed prune.
+
+OPTIONAL later: per-chain entropy on 369 once gibsfinance/random is deployed there; evm-{1,369,943}-archive
+subdomains if wanted.
 
 ## UI POLISH — sales-pitch spacing, RPC defaults, cursor, faucet toggle (2026-06-07, DEPLOYED x2)
 Five commits (153f4b9, 9e013ce, 0571ec7, 90ee74b on top of checkpoint ad15c89), two clean ansible
