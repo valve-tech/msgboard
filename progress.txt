@@ -64,9 +64,11 @@ heats totalCount 0. Full-range result == baseline == on-chain scan. 0 auth error
 DEPLOYED TO THE BOX 2026-06-07 (commit 8f19bc8 for docker-compose.prod.yml). Ran
 `ansible-playbook site.yml -e ansible_host=88.99.62.98 --vault-password-file <(op read op://valve/msgboard_vault/password)`.
 User set vault_ponder_rpc_url_943 (unlimited key URL) in the encrypted vault first. Outcome:
-- entropy indexer LIVE: random-indexer-943 container Up, schemas ponder_sync + entropy_943_0 created,
-  backfilling full history (~1h). Public: evm-943-entropy.msgboard.xyz/health 200, / (GraphiQL) 200,
-  /metrics 404 (Caddy blocks internal). msgboard.xyz 200 + archive.msgboard.xyz/healthz 200 (unaffected).
+- entropy indexer LIVE: random-indexer-943 container Up, schemas ponder_sync + entropy_943_0 created.
+  Public: evm-943-entropy.msgboard.xyz/health 200, / (GraphiQL) 200, /metrics + /status 404 (Caddy blocks
+  internal). msgboard.xyz 200 + archive.msgboard.xyz/healthz 200 (unaffected).
+- BACKFILL COMPLETE (verified): /ready 200, GraphQL casts/pointers/starts/heats/reveals all totalCount 0
+  — full history from the deploy blocks, empty (== baseline == local run == on-chain scan).
 - ONE task failed on first run: the prune shell (YAML folded-scalar orphaned the `|` pipe -> "/bin/sh: |
   unexpected"). It is a NO-OP on a first deploy (only entropy_943_0 exists) but the failure aborted the
   play before the Hasura tasks. Hasura was already configured by prior deploys (archive still 200), so no
