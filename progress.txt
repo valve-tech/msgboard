@@ -76,8 +76,16 @@ User set vault_ponder_rpc_url_943 (unlimited key URL) in the encrypted vault fir
   bash -n verified). Did NOT re-run (would bump to entropy_943_1 and re-backfill ~1h for zero data gain);
   the next routine deploy will run clean (failed=0) with the fixed prune.
 
-OPTIONAL later: per-chain entropy on 369 once gibsfinance/random is deployed there; evm-{1,369,943}-archive
-subdomains if wanted.
+RANDOMNESS MNEMONICS CHECKED (2026-06-07): two in 1Password vault `gibs` — `randomness` and
+`Randomness Mnemonic Testnet`. Derived m/44'/60'/0'/0/{0..4} for each, balance-checked on 943 (via g4mm4).
+- `randomness` account[0] = 0xAF2b2118376b51eEcB58327526bc082aED3e4225 holds ~100,156,192.59 tPLS on 943
+  (matches the item's stored `wallet address`; 0 on 369 + Ethereum). This is the FUNDED provider wallet —
+  use it to run the ink->heat->cast lifecycle on 943 and finally generate real entropy events for the indexer.
+- `Randomness Mnemonic Testnet` account[0] = 0x2dA828fd6497C05c8E94416b4CF31F069dDE711C — empty (indices 0-4).
+Mnemonics never printed (read via op into env, addresses/balances only).
+
+OPTIONAL later: use the funded `randomness` wallet to produce entropy on 943 (populates the indexer);
+per-chain entropy on 369 once gibsfinance/random is deployed there; evm-{1,369,943}-archive subdomains if wanted.
 
 ## UI POLISH — sales-pitch spacing, RPC defaults, cursor, faucet toggle (2026-06-07, DEPLOYED x2)
 Five commits (153f4b9, 9e013ce, 0571ec7, 90ee74b on top of checkpoint ad15c89), two clean ansible
