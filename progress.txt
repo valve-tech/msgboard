@@ -31,6 +31,14 @@ seed protects the funded accounts in place; confirm with user if they still want
 Random:Ink + Start/Cast `.select()` fixes back to the gibsfinance/random/packages/indexer source (deploy copy
 is gitignored). (3) the keccak pointer (offset 0) can be bleached to recover its 76.7 tPLS deposit.
 
+TODO (user will do later, 2026-06-08): set up a 1Password SERVICE ACCOUNT to replace the flaky desktop
+integration. `op whoami` currently = "not signed in" (no CLI session), so `op read` succeeds only
+intermittently and every op-dependent step needs a retry loop. With a service account, export
+OP_SERVICE_ACCOUNT_TOKEN (e.g. from op://valve/...) and `op read`/ansible-vault/the demo script run
+non-interactively with no locking. Until then, keep the retry-loop pattern (see the ansible vault-pass helper
+in this session). NOTE: user previously preferred OIDC/no automation tokens ([[user-prefers-oidc-no-tokens]]
+in memory) — this service account is a deliberate, scoped exception for op automation.
+
 ## (superseded) GENERATE REAL ENTROPY ON 943 — earlier in-progress notes
 Goal (user): "ink a full contract and then cast and go through the whole consuming cycle 2x" using the funded
 `randomness` wallet (op://gibs/randomness, acct[0] = 0xAF2b2118376b51eEcB58327526bc082aED3e4225, ~100M tPLS on
