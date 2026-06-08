@@ -2,7 +2,36 @@
 
 Updated: 2026-06-08
 
-## GENERATE REAL ENTROPY ON 943 (2026-06-08, IN PROGRESS — indexer redeployed, backfilling; seeds0 run pending)
+## GENERATE REAL ENTROPY ON 943 (2026-06-08, DONE — indexer serves the full real lifecycle)
+
+RESULT (verified at evm-943-entropy.msgboard.xyz/graphql, /ready=200): pointers=2, inks=2, preimages=1534,
+heats=10, starts=2, casts=2, links=10, reveals=0 (we cast, not reveal). The 2 casts carry their generated
+seeds (0xf7178d14…, 0xb1d8bb8e…) — real randomness, indexed. Both pointers: provider 0xAF2b…, price 1e17,
+offsets 0 (keccak demo ink) and 767 (seeds0 ink), count 767 each.
+
+ON-CHAIN seeds0 run (real provider-style secrets from the empty seeds0 seed): ink
+0x276caf9bc4ea7d7db455bf2d7ba2755ffedf097d24eec4154dd08e8c25cc4599 (block 24629939, offset 767), then
+cycle1 heat 0xa8d39ab8… -> Start 0xf8f2caf2… -> cast 0x971c1f02… (seed 0xf7178d14…); cycle2 heat 0x9325c350…
+-> Start 0xfda544f0… -> cast 0xcfd7ed68… (seed 0xb1d8bb8e…). Net spent ~77.7 tPLS (76.7 recoverable ink
+deposit + ~1 gas). The earlier keccak ink (0x542c9432…, offset 0) remains unconsumed (harmless; bleachable).
+
+GOTCHA 3 (pre-existing indexer bug, fixed): the Start and Cast handlers used `context.db.sql
+.select(schema.Heat._.columns)` / `.select(schema.Preimage._.columns)` — `schema.X._` is undefined in this
+ponder/drizzle build, so the FIRST real Start event crashed ponder ("Cannot read properties of undefined
+(reading 'columns')") and it crash-looped. Fixed both to `.select()` (drizzle all-columns form) in
+deploy/random-indexer/src/random.ts. tsc clean, redeployed. The Random:Ink handler itself worked first try
+(indexed pointer#1 before the crash).
+
+DEPLOY NOTE: `op` desktop integration (no CLI session; `op whoami`=not signed in) returns the value only
+intermittently per read. Fix: the ansible vault-password helper now RETRIES `op read` up to 10x. Use the same
+retry pattern for any future op-dependent automation.
+
+OUTSTANDING / OPTIONAL: (1) physically draining acct9 (~97.5M) is now optional — using seeds0 as the secret
+seed protects the funded accounts in place; confirm with user if they still want the sweep. (2) port the
+Random:Ink + Start/Cast `.select()` fixes back to the gibsfinance/random/packages/indexer source (deploy copy
+is gitignored). (3) the keccak pointer (offset 0) can be bleached to recover its 76.7 tPLS deposit.
+
+## (superseded) GENERATE REAL ENTROPY ON 943 — earlier in-progress notes
 Goal (user): "ink a full contract and then cast and go through the whole consuming cycle 2x" using the funded
 `randomness` wallet (op://gibs/randomness, acct[0] = 0xAF2b2118376b51eEcB58327526bc082aED3e4225, ~100M tPLS on
 943), so the deployed entropy indexer finally gets real data. Price 0.1 tPLS/preimage ("0.1 is reasonable" —
