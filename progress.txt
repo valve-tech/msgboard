@@ -1,8 +1,82 @@
 # MsgBoard — Progress
 
-Updated: 2026-06-08
+Updated: 2026-06-09
 
-## COIN-FLIP FEATURE — DESIGN DONE, PLAN READY, BUILD NOT STARTED (2026-06-08)
+## COIN-FLIP SUB-PROJECT 1 (PERIPHERY CONTRACT) — BUILT, REVIEWED, MERGED LOCALLY (2026-06-09)
+
+DONE: CoinFlip.sol is fully implemented test-first, twice-reviewed (security-focused), and merged to
+gibsfinance/random clone B's LOCAL master. The whole suite is green (106 passing). Core Random/Consumer
+are byte-identical to origin/master (composition-only invariant held).
+
+WHERE: ~/Documents/gibsfinance/github/random/packages/contracts/
+  - contracts/CoinFlip.sol — the periphery contract
+  - test/CoinFlip.test.ts — 20 tests; helper inkValidatorPool + coinFlip fixture in test/utils.ts
+  - contracts/test/RejectableReceiver.sol — test-only (exercises the claim fallback)
+  - ignition/modules/CoinFlip.ts — deploy module (composes RandomModule, matches Consumer.ts style)
+  - lib/utils.ts — CoinFlip added to contractName (FULL path form 'contracts/CoinFlip.sol:CoinFlip')
+
+GIT STATE (IMPORTANT): clone B LOCAL master is now at e75eb53, ELEVEN commits ahead of origin/master
+(3426727), UNPUSHED. User chose "merge locally" (no push). The 11 commits: 1b3d866 (re-applied pot-bonus
+Random test), 310fcd8 (spike — note: the spike file was later git rm'd in e75eb53), then the 9 CoinFlip
+commits (skeleton → fifo matching → ink+heat → intake refactor → onCast settle → cancel/stale recovery →
+ignition module → C1/C2 fix → hardening). The old divergent local-master commit 5368c48 (stale Feb-2025
+pot-bonus test) was DISCARDED in the reset-to-coinflip; recoverable via `git reflog` (master@{1}).
+
+KEY DESIGN OUTCOMES (changes vs the original spec/plan — spec+plan docs were updated, commit f592f3e in
+msgboard):
+- WALK-AWAY IS hash(1), NOT hash(0). The spike proved Random.cast treats a revealed bytes32(0) as
+  "not supplied" (MISSING_SECRET) → never finalizes. So WALK_AWAY_SECRET = bytes32(uint256(1)),
+  WALK_AWAY_PREIMAGE = keccak256 of that 32-byte value. Settlement needs every selected secret revealed,
+  so a walk-away player's secret must be a public NON-ZERO value a validator can cast.
+- PLAYER SECTION IS CANONICAL (C1 fix). The contract inks both player preimages in one price-0 batch at a
+  PINNED section (FLIP_TOKEN=native, FLIP_DURATION_IS_TIMESTAMP=false, FLIP_DURATION=12, price 0); the
+  caller no longer supplies a per-flip template. This keeps the single _playerInkOffset in lockstep with
+  Random's per-(provider,encodeToken,price) _preimageCount (Random.ink auto-appends + sets the count). A
+  caller-controlled template would have desynced the offset across flips. playerSection(offset,index) is
+  exposed so off-chain casters rebuild the exact heat selection.
+- enterAndMatch IS THE SOLE ENTRY (C2 fix). The old queue-only enter/_pair recorded an unsettleable key=0
+  escrow flip (refund-only) — removed. enterAndMatch(side, preimage, validatorLocations[]) queues on no
+  match, and on a completing match inks players + heats [player0, player1, ...validators] with
+  settings.provider=address(this) + callAtChange=true so Random calls back onCast.
+- SETTLEMENT: onCast(key, seed) routes through a shared _settle: parity of seed picks winner (even=heads,
+  odd=tails), pays stake*2, marks Settled (status set BEFORE transfer = CEI, blocks double-pay). PLUS a
+  pull-based claim(flipId) fallback: onCast is fire-and-once (Random swallows a reverting callback), so if
+  the optimistic push fails the flip stays Pending with the seed finalized; claim() reads
+  randomness(key).seed and settles. refundStale(flipId) refunds both after STALE_BLOCKS=200 as the backstop.
+- Hardening: zero-preimage rejected at intake; _popQueued tombstone scan capped (MAX_QUEUE_SCAN=32) vs gas
+  griefing; Heated + Settled(+seed) events for the citation-rich UI; IRandom reused (only ink hand-declared).
+
+VERIFIED ECONOMICS (re-applied as 1b3d866): the "winner takes the pot bonus" Random test — non-expired
+cast credits the full heat `total` to the seed-selected provider on top of every provider's stake return.
+This is how validators get paid for entropy (separate from the escrowed player pot).
+
+NEXT STEPS (resume here):
+1. PUSH DECISION (user): local master is 11 commits ahead of origin/master, unpushed. Decide whether to
+   push + open a pull request off origin/master (the originally-anticipated target), or keep local. Also
+   land the still-pending indexer PR #5 (separate, on clone A's update-engines).
+2. SUB-PROJECT 2: the validator node service (3 always-on nodes that ink the pool, watch Start events,
+   reveal secrets over msgboard, and cast as fallback). Needs its own spec + plan. The contract's
+   playerSection()/Heated event give it what it needs to rebuild heat selections; validators ink at the
+   canonical section (token=0, durationIsTimestamp=false, duration=12, price=0).
+3. SUB-PROJECT 3: the citation-rich UI (per the spec's "teach, cite, verify" section).
+4. Optional contract follow-ons (non-blocking, noted by review): emit validator locations (not just count)
+   on Heated for self-contained indexing; configurable fee (v1 fee=0, payout=stake*2); ERC-20 support.
+
+GOTCHA (bit us repeatedly this session): 1Password SSH commit-signing has a SHORT auth-approval timeout
+that EXPIRES during long (~5-10 min) subagent runs, even when the vault is unlocked for reads (op account
+list / ssh-add -l succeed). Symptom: "1Password: failed to fill whole buffer" / "agent returned an error".
+Fix = user raises 1Password auto-lock timeout (Settings → Security → Auto-lock → long/Never) for the
+session; then commit from the controller. For subagent-driven builds, prefer committing centrally in the
+parent right after each subagent (short-lived window) rather than inside the long subagent. Prefix with
+SSH_AUTH_SOCK="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock" when a freshly-spawned
+shell routes to the wrong agent. NEVER --no-gpg-sign.
+
+TSC-vs-RUNTIME NOTE: the IDE flagged many "Property X does not exist on type {...}" diagnostics on
+CoinFlip.test.ts throughout the build — these are STALE hardhat-viem generated contract types lagging one
+recompile behind; hardhat regenerates artifacts before ts-node runs, so the tests pass and CI (compile +
+coverage, no standalone tsc on tests) is green. Not real failures.
+
+## COIN-FLIP FEATURE — DESIGN DONE, PLAN READY (2026-06-08; SUPERSEDED by the build section above)
 
 GOAL (user): a coin-flip game on msgboard powered by gibsfinance/random. Multiple people enter tokens to
 bet on a flip; "validators are the providers" (3 always-on nodes that ink the entropy pool); the seed
