@@ -106,7 +106,62 @@ is a wanted PRODUCT FEATURE (not needed for fairness/correctness — Path A has 
 PENDING USER ANSWER: Path A vs Path B (re-roll-on-stall as a feature?). User asked to see both flows
 side by side first; that side-by-side has now been presented in chat.
 
-AFTER the user confirms the GameBase scoping + reveal path: present the consolidated games-platform design in sections (architecture, the
+REVEAL-PATH DECISION — USER CHOSE UNDERMINE (Path B), correcting my Path A rec. User: "i don't like
+the ability for any of the users to stall out or re-roll the game... hence why the undermining was
+built in." CONCEDED: Path A's refund-on-stall IS exploitable — LAST-REVEALER-ABORT: a self-secret
+player who reveals last (after validators + opponent) can compute parity BEFORE revealing, see they
+lost, and withhold -> seed never finalizes -> refundStale refunds both -> they dodge the loss, denying
+the honest winner. DEEPER INSIGHT (the real reason undermine exists): undermine is what makes
+PLAYER-CONTRIBUTED ENTROPY safe — player secrets give strong fairness (unriggable even if ALL
+validators collude, 1 honest player suffices) but create the stall-to-abort option; undermine closes
+it (stall past expiry -> anyone overwrites your order preimage -> unpredictable re-roll you can't
+steer). Re-roll is a WEAPON AGAINST the staller, not a tool they can wield ("stallers risk being
+re-rolled" = good deterrent; "users can choose to re-roll" = the bad exploit undermine forbids).
+CONSEQUENCES of choosing Path B: (1) Phase-1 CoinFlip is INCOMPLETE on this axis — as built
+(ink-directly, no Consumer) a self-secret player HAS the stall-to-abort exploit; only walk-away hash(1)
+players are safe today. Path B = rework CoinFlip to CHAIN player secrets underminable (Consumer)
+instead of inking them. (2) GameBase now legitimately WRAPS Consumer (chain/tell/undermine = shared
+base machinery); user's original "build on Consumer" instinct was right.
+
+COLLUSION ANALYSIS (verified against Random.heat, lines 347-428) — THE LOAD-BEARING MECHANISM FACT:
+heat selection is CALLER-CONTROLLED. Operator passes potentialLocations; heat walks them in order and
+takes the first `required` that _ignite. NO protocol-enforced provider diversity, NO forced inclusion,
+NO selection randomization. key = locations.hash() (location POINTERS); seed = hash(revealed secrets)
+set at cast. => Whoever controls the selection AND knows the secrets behind it KNOWS THE DRAW at heat
+time.
+THE ATTACK on a validator-only draw (SELECTION-GRINDING): operator inked the pool so knows all its
+secrets; controls selection; draw is only 257 values [0..256]; off-chain BEFORE submitting heat it
+searches subsets of its known preimages for one whose hash(secrets) mod 257 ~= a confederate's
+committed guess g; submits that one selection; confederate wins every round. Cheap, offline, no
+on-chain trial, undetectable. PLAYER COMMIT-REVEAL does NOTHING against it (operator steers draw TO the
+confederate's guess, doesn't need others' guesses). UNDERMINE does NOTHING against it (undermine =
+reveal-timing past expiry; this happens at heat, pre-reveal).
+TWO DEFENSES (must remove selection-control OR secret-knowledge): (1) ENFORCED SELECTION DIVERSITY —
+GameBase requires heated set to span N DISTINCT registered validators (check each location's provider);
+safe iff >=1 of N honest. Implementable on top of heat (contract validates potentialLocations). Makes
+"entropy out of user's reach" safe BUT is an explicit validator-trust assumption -> must be disclosed
+in UI. (2) PLAYER-CONTRIBUTED ENTROPY — fold 1 committed undermine-protected player secret into seed;
+operator can't know it at selection time -> can't grind -> fair even if ALL validators collude. But
+player holds entropy (against the default).
+UNESCAPABLE TRADEOFF: "user holds zero entropy" and "user trusts zero validators" are MUTUALLY
+EXCLUSIVE. Entropy-out-of-reach default => player necessarily trusts validator set => that default MUST
+ship Defense 1 + disclosure. Trustless-vs-all-validators => player must hold a secret (Defense 2).
+LATENT: coin-flip both-players-walk-away (both hash(1)) has the IDENTICAL grind hole (seed =
+hash(1,1,validatorsecrets)). So ENFORCED SELECTION DIVERSITY belongs in GameBase regardless of game —
+it's the safety floor whenever no player contributes entropy.
+
+USER DIRECTION on entropy UX: "by default, the buttons, the UI, the TUI should all point to the
+entropy being out of reach for the user." => DEFAULT preset = validator-only draw, player just
+guesses/picks a side; player manages no entropy. (Mirrors coin-flip walk-away as default, self-secret
+as advanced.)
+MY RECOMMENDATION (pending user confirm): DEFAULT = validator-only draw + GameBase ENFORCES selection
+diversity across >=N distinct registered validators + UI discloses the ">=1 honest validator" trust
+assumption; ADVANCED opt-in = player-contributes-entropy (undermine-protected) for trustless-vs-all-
+validators; undermine stays in GameBase for whatever secrets are player-held.
+PENDING USER ANSWER: confirm that default (validator-only + enforced diversity + disclosure) and
+whether to keep the advanced player-entropy path.
+
+AFTER the user confirms the GameBase scoping + reveal path + entropy/diversity model: present the consolidated games-platform design in sections (architecture, the
 games-core substrate + Game interface, the base contract + two game modules, the raffle data/commit-
 reveal/settlement flow, error handling, testing), get section approvals, then WRITE THE SPEC(S) and
 have the user review before writing-plans. Off-chain package decision from scope C: @gibs/games-core
