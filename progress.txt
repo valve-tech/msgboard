@@ -319,6 +319,29 @@ DECISIONS LOCKED (for the design doc):
     ORTHOGONAL KNOB still open: N (diversity threshold) — larger N strengthens ">=1 honest" but needs more
     registered+live validators; separable, land in Section 4 or as a config constant.
     NEW PENDING SUB-Q: owner = plain onlyOwner address vs multisig from the start?
+    "WHY NOT JUST ENFORCE ON THE FRONTEND?" (user challenge, 2026-06-09) -> ANSWERED via a THREE-WAY
+    SPLIT of the diversity job; the deciding principle: THE FRONTEND IS NOT A TRUST BOUNDARY (contract is
+    permissionless; the grinding attacker SUPPLIES the heat selection and simply won't run your client, so
+    a client-side rule binds only the honest = lock on the wrong door). The three jobs:
+    (1) SELECTION (which validators, e.g. random 2/3) = FRONTEND/core, 100%; contract never chooses, caller
+        always supplies. User correct here.
+    (2) BINDING (the set USED == the set NAMED) = MUST be on-chain; frontend physically can't. Else UI shows
+        [A,B,C], player stakes, operator heats [X,X,X] (attacker sybils), grinds 256-draw, wins — a named
+        set that doesn't bind to behavior is a label with no force. Cheap: store declared set (or hash) in
+        game params at creation, equality-check at heat.
+    (3) CURATION (are those validators independent / not sybils) = the part that CAN move off-chain. Two
+        homes: (a) FRONTEND good-list — UI only surfaces games whose declared validators it trusts; safe
+        for trusted-client users only; every join-capable client must implement it. (b) ON-CHAIN REGISTRY
+        (=option A) — contract rejects unregistered providers at heat; protects EVERY caller, client-indep.
+    KICKER: on-chain cost is ~SAME either way (binding already forces a per-set check at heat; registry just
+    makes it "∈registered" vs "==declared" — one mapping lookup). So pushing curation to the frontend does
+    NOT save the on-chain work; it trades an on-chain list for off-chain list + client-trust + per-client
+    burden. You curate validators SOMEWHERE regardless; question = does the CONTRACT vouch or the UI.
+    GOTCHA constraining the "frontend creates games" flow: escrow is ON ENTRY (before heat), so the validator
+    set must be FIXED AT GAME CREATION (fits "first entrant defines params") + visible before anyone joins;
+    a set chosen later at arm time can't be client-vetted to protect already-staked funds.
+    DECISION NOW PENDING (reframed): trust boundary = CONTRACT vouches for validators (on-chain registry,
+    protects everyone) vs FRONTEND vouches + contract only binds (lighter on-chain, trusts the client)?
   NEXT sections to present: 4 = coin-flip matching+settle (incl. heat moving to operator arm step);
   5 = raffle round/commit-reveal/claim+settle; 6 = error handling/recovery; 7 = testing.
   Then write spec doc, self-review, user review gate, writing-plans.
