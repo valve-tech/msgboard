@@ -161,6 +161,55 @@ validators; undermine stays in GameBase for whatever secrets are player-held.
 PENDING USER ANSWER: confirm that default (validator-only + enforced diversity + disclosure) and
 whether to keep the advanced player-entropy path.
 
+UNDERMINE-IS-NOT-A-GRIND — DEFINITIVELY VERIFIED (user asked: "would undermining just be ~512 hashes
+until the same result is achieved even if we can't find their hashed secret?"). ANSWER: NO for
+value-grinding. Grounded in Random.sol _flick (line 132): `if (formerSecret.hash() != _toPreimage(info))
+revert SecretMismatch()`. _toPreimage reads the preimage from the INKED SSTORE2 pointer (_pointers[...])
+= WRITE-ONCE bytecode = IMMUTABLE from ink time. seed = revealed.hash() over these _flick-verified
+values. So injecting a CHOSEN value into a seed = reversing keccak256 = 2^256, NOT ~512. Every actor's
+freedom is BINARY (reveal the pinned secret, or withhold) — never "dial in a value". Undermine
+(Consumer._undermineExpired) overwrites CONSUMER's own _preimage[id] map, NOT Random's inked SSTORE2
+preimages, so it CANNOT inject a chosen value into a draw; its only power is the stall deterrent. =>
+Path B (undermine) adds NO hash-grinding hole.
+BUT user's general instinct is RIGHT about the surface that IS grindable: SELECTION, not values. 257
+possible draws => anyone who knows the secrets AND chooses which immutable preimages enter the seed
+grinds the draw in a few hundred OFFLINE tries (the operator selection-grinding attack). Defended by
+enforced selection diversity / player entropy. KEY: selection is LOCKED AT HEAT (cast requires
+key==locations.hash(), key fixed at heat) — so the defense is "constrain what selection heat accepts,"
+a GameBase up-front check; undermine is orthogonal (can't unlock selection post-heat). Net: undermine =
+safe to adopt, does what user wanted (kills stall-to-abort, no player-chooseable re-roll), no grind
+surface; grinding risk fully carried by the selection-diversity requirement.
+
+==> ALL HARD FAIRNESS/ARCHITECTURE DECISIONS ARE NOW MADE. NEXT STEP: write the consolidated
+games-platform DESIGN DOC. Asked the user to confirm proceeding to the write-up (offered to settle the
+minor opens inline). On their yes -> present design in sections per brainstorming skill, get section
+approvals, write docs/superpowers/specs/2026-06-09-games-platform-design.md (+ decide one-spec vs
+per-game), spec self-review, user review gate, THEN invoke writing-plans. Reconcile the Slice 1 spec's
+@gibs/coinflip-core naming into @gibs/games-core + @gibs/coinflip + @gibs/raffle.
+
+DECISIONS LOCKED (for the design doc):
+- Scope C: design BOTH coin-flip and a closest-guess raffle now; build a small GAMES PLATFORM.
+- Off-chain: @gibs/games-core substrate (chains, secrets, contracts, lifecycle, Game interface) +
+  @gibs/coinflip + @gibs/raffle consumers; examples/ in gibsfinance/random repo (pnpm). Thin
+  presentations (scripts/web/TUI) over the core.
+- On-chain: GameBase is ConsumerReceiver AND wraps Consumer (chain/tell/undermine = shared base
+  machinery: escrow, ink/heat wiring, onCast dispatch, cancel/refund-stale, ENFORCED SELECTION
+  DIVERSITY across >=N distinct registered validators). CoinFlip is GameBase, Raffle is GameBase; each
+  owns only its matching + scoring. (Rework Phase-1 CoinFlip from ink-directly to chained-underminable.)
+- Reveal: Path B (undermine) — strong fairness + no stall-to-abort + no player-chooseable re-roll.
+- Entropy/UX default: validator-only draw, entropy OUT OF PLAYER'S REACH (buttons/web/TUI default);
+  GameBase ENFORCES selection diversity + UI DISCLOSES ">=1 honest validator" trust. ADVANCED opt-in =
+  player-contributed entropy (undermine-protected) for trustless-vs-all-validators.
+- Raffle mechanics: draw in [0..256] linear-closest wins; many guesses/round, each its own equal stake
+  (anti-spam economics); first-entrant params; period = evaluation checkpoint that ROLLS FORWARD until
+  threshold M met (not a refund deadline); individual cancel = refund escape; NUDGE to canonical
+  param presets (anti-fragmentation); player GUESS commit-reveal (hash(guess,salt)), non-reveal =
+  FORFEIT (not abort).
+
+MINOR OPENS to settle inline while writing: (a) canonical-param enforcement — UI nudge + on-chain
+recommended-presets list vs hard whitelist; (b) equidistant tiebreak — earliest commit vs seed-selected
+among tied; (c) one combined spec vs platform spec + per-game specs; (d) exact N for selection diversity.
+
 AFTER the user confirms the GameBase scoping + reveal path + entropy/diversity model: present the consolidated games-platform design in sections (architecture, the
 games-core substrate + Game interface, the base contract + two game modules, the raffle data/commit-
 reveal/settlement flow, error handling, testing), get section approvals, then WRITE THE SPEC(S) and
