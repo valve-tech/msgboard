@@ -493,7 +493,27 @@ DECISIONS LOCKED (for the design doc):
     blanket-flood deterrent. Per-address cap remains an available later lever if needed.
   - NO-CONTEST POT -> contributing validators STANDS (separate from the fee; a pot distribution).
 
-  NEXT section to present: 7 = testing. Then write spec doc, self-review, user review gate, writing-plans.
+  SECTION 7 — TESTING: PRESENTED + APPROVED 2026-06-09. Foundry contract tests (GameBase escrow +
+  _heatBound binding/membership/no-slack + onCast guards + owner-only allowlist + refundStale/onChop;
+  CoinFlip matching + tombstone cap + parity + push/pull + ink-nothing deletion proof; Raffle
+  address-bound commit + rollover/arm + draw/claim window + reveal/overwrite + earliest-commit tiebreak
+  + finalise-less-fee + forfeit + no-contest + per-ticket refundStale); security-invariant tests
+  (selection-grind fuzz, salt-never-feeds-seed, guess-freeze, address-binding, no-last-revealer-abort);
+  Foundry invariant/fuzz (value conservation, draw uniformity, closest-revealer-wins, status
+  monotonicity); off-chain vitest (Game pure methods, round-trips, reader); CROSS-LAYER PARITY (fuzzed
+  off-chain settle == on-chain winner — the dual-impl drift guard); e2e on Anvil + manual 943.
+  SPEC SHAPE: ONE combined games-platform spec (not per-game).
+
+  *** BRAINSTORM COMPLETE 2026-06-09. All 7 sections approved. Spec WRITTEN + self-reviewed (no
+  placeholders; fee/validator-model/lifecycle internally consistent) + COMMITTED:
+  docs/superpowers/specs/2026-06-09-games-platform-design.md (commit a5e3f77). Supersedes the Slice 1
+  @gibs/coinflip-core naming (-> @gibs/games-core + @gibs/coinflip + @gibs/raffle) and its player-secret
+  entropy (-> validator-only).
+  NOW AT: USER REVIEW GATE — user reviews the written spec before writing-plans. On approval -> invoke
+  writing-plans skill to produce the implementation plan (build order is the 4-phase one in the spec:
+  GameBase+CoinFlip rework -> Raffle -> games-core+consumers -> front-end scripts).
+  OPENS to settle during writing-plans: subset size N (e.g. 3-of-5); canonical-param enforcement
+  (UI nudge + optional on-chain presets list, NOT hard whitelist); default fee bps per game (both 0).
 
 MINOR OPENS to settle inline while writing: (a) canonical-param enforcement — UI nudge + on-chain
 recommended-presets list vs hard whitelist; (b) equidistant tiebreak — earliest commit vs seed-selected
