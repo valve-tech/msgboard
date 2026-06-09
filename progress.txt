@@ -79,7 +79,34 @@ whether to fold a player entropy contribution in (probably not — keeps guess v
 (Rejected earlier: Opt 2 two independent contracts = duplicates plumbing+audit; Opt 3 one generic
 parameterized contract = YAGNI, Flip-of-2 vs Round-of-N have different state shapes.)
 
-AFTER the user confirms the GameBase scoping: present the consolidated games-platform design in sections (architecture, the
+CONSUMER vs INK-DIRECTLY — TRACED THE CODE (user challenged "why not extend/wrap Consumer?"):
+KEY FINDING: Consumer.tell() does NOT set the Random seed. tell writes Consumer's OWN
+_preimageToSecret map + emits ConsumerReveal + runs _undermineExpired; the seed in Random is ONLY set
+by Random.cast() (which fires onCast). So Consumer is NOT an alternative to cast — it's an OVERLAY on
+top of the same heat->cast->onCast path. Core Random already owns the full lifecycle: ink, heat, cast
+(reveal->seed), chop (refund unrevealed after expiry, fires onChop), timeline/_expired. CoinFlip rides
+this directly and never touches Consumer.
+THE TWO PATHS:
+  Path A (Phase 1, verified on 943): Game inks own section, heat(callAtChange:true)->key, operator/
+    validator Random.cast->seed->onCast->payout; claim() pull fallback; refundStale() + core chop on
+    expiry. GameBase is ConsumerReceiver + extracted escrow/heat/refund plumbing. Consumer untouched.
+  Path B (Consumer overlay): identical heat/cast/onCast PLUS Consumer.chainTo at heat + Consumer.tell
+    per secret at reveal (still requires Random.cast to set the seed). Buys EXACTLY ONE behavioral
+    diff at expiry: Path A aborts->refund (chop+refundStale); Path B's _undermineExpired overwrites the
+    order preimage to force a RE-ROLL so the game CONTINUES. Costs: Consumer's 5 storage maps +
+    chainTo/tell per secret + re-verify on 943; replaces the working path.
+WHY undermine isn't needed here: it matters only when a SINGLE secret-holder controls the outcome and
+can profitably stall. Neither game has that shape — coin-flip winner WANTS to cast (gets paid), loser
+can't stall (any validator / walk-away hash(1) casts); raffle draw is VALIDATOR entropy cast by the
+operator (no single player gates it), a non-revealing player just FORFEITS to next-closest revealer.
+Extend (is Consumer) = false is-a + dead storage; wrap (hold a Consumer) = exactly the unused
+FundedConsumer stub. Real is-a is ConsumerReceiver (callback target), which CoinFlip already declares.
+RECOMMENDATION TO USER: Path A. Adopt Path B ONLY if "a staller forces a re-roll instead of a refund"
+is a wanted PRODUCT FEATURE (not needed for fairness/correctness — Path A has those).
+PENDING USER ANSWER: Path A vs Path B (re-roll-on-stall as a feature?). User asked to see both flows
+side by side first; that side-by-side has now been presented in chat.
+
+AFTER the user confirms the GameBase scoping + reveal path: present the consolidated games-platform design in sections (architecture, the
 games-core substrate + Game interface, the base contract + two game modules, the raffle data/commit-
 reveal/settlement flow, error handling, testing), get section approvals, then WRITE THE SPEC(S) and
 have the user review before writing-plans. Off-chain package decision from scope C: @gibs/games-core
