@@ -306,6 +306,19 @@ DECISIONS LOCKED (for the design doc):
     sybil-defeated). ALSO noted: heat is currently called by the matching PLAYER inside enterAndMatch, but
     the converged design moves heat into an OPERATOR-driven arm step (reconcile in Section 4).
     PENDING USER ANSWER: confirm GameBase 5-piece shape + pick registry option (A vs B).
+    REGISTRY TRADEOFF LAID OUT (2026-06-09, user asked) -> REFINED RECOMMENDATION: option (A) owner-
+    managed allowlist IMPLEMENTED BEHIND A SWAPPABLE `IValidatorRegistry` INTERFACE (GameBase reads
+    registry.isRegistered(provider)); B droppable in later w/o touching GameBase or games. KEY REASONING
+    (the reframe): the grinding attack is OFFLINE + UNPROVABLE on-chain (operator hashes its known secrets
+    off-chain BEFORE submitting heat; nothing on-chain witnesses it). => slashing (B's whole lever) CANNOT
+    fire against the actual attack. B's honesty assumption is IDENTICAL to A (">=1 of N independent"); bonds
+    only make sybils economically costly (still profitable if winnings > amortized bond) and buy LIVENESS
+    deterrence which CHOP ALREADY COVERS (withholding validator forfeits Random stake -> refund). So for THIS
+    attack curated honesty (A) is a STRONGER + far cheaper guarantee than an unslashable bond; adopt B only
+    for DECENTRALIZATION, not security. C (distinctness-only) = security theater (sybil-defeated), rejected.
+    ORTHOGONAL KNOB still open: N (diversity threshold) — larger N strengthens ">=1 honest" but needs more
+    registered+live validators; separable, land in Section 4 or as a config constant.
+    NEW PENDING SUB-Q: owner = plain onlyOwner address vs multisig from the start?
   NEXT sections to present: 4 = coin-flip matching+settle (incl. heat moving to operator arm step);
   5 = raffle round/commit-reveal/claim+settle; 6 = error handling/recovery; 7 = testing.
   Then write spec doc, self-review, user review gate, writing-plans.
