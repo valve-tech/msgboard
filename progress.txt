@@ -448,9 +448,52 @@ DECISIONS LOCKED (for the design doc):
   validators? among those who actually contributed to the seed, since a non-revealing validator is
   chopped?); whether normal-round fee is also validator-bound or could later split protocol/validator.
 
-  NEXT sections to present: 6 = error handling/recovery (folds in validator-payout mechanics, fee
-  distribution, chop/refundStale, onCast-push-failure pull fallback, overwrite/claim-window edges);
-  7 = testing. Then write spec doc, self-review, user review gate, writing-plans.
+  SECTION 6 — ERROR HANDLING / RECOVERY: PRESENTED + APPROVED 2026-06-09.
+  RECOVERY MATRIX (both games):
+  - VALIDATOR LIVENESS (draw never produced): validators heated but don't cast by expiry -> core
+    Random.chop refunds the unrevealed validator preimages (fires onChop) -> game refundStale(instanceId)
+    after STALE_BLOCKS returns escrowed stakes. Coin-flip PUSHES both players (only 2). Raffle refunds
+    PULL, PER-TICKET (each committer calls refundStale(ticketId)) so a big round needs no giant push.
+    Real driver = did onCast fire (seed finalized) or not; no onCast ever -> refundStale is the exit.
+  - SETTLEMENT PUSH FAILURE (coin-flip): unchanged — Random swallows a reverting onCast, flip stays
+    Pending, claim() is the pull retry, AlreadyResolved-before-transfer guard = no double pay, NO
+    reentrancy guard (would block retry). Raffle barely affected: its onCast only RECORDS draw + opens
+    window (no transfer); payout already a pull (finalize).
+  - ZERO PLAYER REVEAL (raffle no-contest): after window with no provisional winner, finalize routes the
+    POT to the round's CONTRIBUTING validators = declared subset MINUS chopped (non-revealing) ones
+    (GameBase records chop set via onChop). If ALL chopped -> seed never finalized -> liveness case
+    (refundStale), not here.
+  - ROUND NEVER FILLS (raffle under M): cancel(ticketId) per-ticket escape, no deadline.
+  - CLAIM-WINDOW EDGES (raffle): reveal after close -> TooLate; wrong (guess,salt) -> hash mismatch
+    revert; double-reveal one ticket -> rejected (running-best already has it); equidistant -> earliest
+    committedAtBlock, then ticketId for same-block determinism.
+  - ARM GRIEFING (raffle): arm permissionless but _heatBound permits ONLY locations bound to declared
+    subset (⊆ allowlist) — no sybil substitution; requires committed>=M at a checkpoint and status
+    FILLING (one-shot -> DRAWING), no premature/double arm.
+  RECOVERY PRINCIPLE (load-bearing, proven in coin-flip): NEVER let a push be the only exit. Every
+  value path has a permissionless PULL fallback (claim, finalize, per-ticket refundStale, cancel) and
+  guards STATUS before transferring -> the state machine IS the reentrancy guard (contract holds none).
+  Raffle inherits this by keeping onCast side-effect-light (record, don't pay).
+  *** FEE MODEL — CORRECTED + FINALIZED (supersedes the Section 5 "fee rewards validators / one
+  mechanism with two triggers" framing, which was WRONG):
+  - VALIDATOR ENTROPY PAY is ALREADY handled by CORE RANDOM (its price/stake mechanism pays validators
+    when inked preimages are heated/consumed). We do NOT re-implement it. The game fee is a SEPARATE
+    rake in a different location (the game contract).
+  - GAME FEE = a PERCENTAGE of pot (basis points), OWNER-ADJUSTABLE, default zero, applied to BOTH games.
+    (User first said flat/both-supported, then revised to PERCENTAGE specifically because it doubles as
+    SPAM MITIGATION.) The percentage taxes a blanket-flooder's OWN large stake pile proportionally, so
+    past a coverage point the fee they pay exceeds the marginal others'-stakes they'd capture -> flooding
+    taxes itself. So the fee is BOTH a revenue knob AND the raffle anti-flooding tool. (Coin-flip has no
+    flooding shape; a nonzero coin-flip fee is just revenue and makes the flip slightly -EV — keep its
+    default zero, owner can raise.)
+  - FEE DESTINATION = a CONFIGURABLE ADDRESS (owner-set fee-recipient), NOT validators (Random pays them)
+    and NOT the no-contest pot.
+  - ANTI-SPAM POSTURE: at default fee 0, anti-spam = commit-reveal HIDING only (can't see uncovered
+    values -> flooding is blind w/ diminishing returns); raising the percentage adds the self-taxing
+    blanket-flood deterrent. Per-address cap remains an available later lever if needed.
+  - NO-CONTEST POT -> contributing validators STANDS (separate from the fee; a pot distribution).
+
+  NEXT section to present: 7 = testing. Then write spec doc, self-review, user review gate, writing-plans.
 
 MINOR OPENS to settle inline while writing: (a) canonical-param enforcement — UI nudge + on-chain
 recommended-presets list vs hard whitelist; (b) equidistant tiebreak — earliest commit vs seed-selected
