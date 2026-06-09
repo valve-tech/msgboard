@@ -342,6 +342,24 @@ DECISIONS LOCKED (for the design doc):
     a set chosen later at arm time can't be client-vetted to protect already-staked funds.
     DECISION NOW PENDING (reframed): trust boundary = CONTRACT vouches for validators (on-chain registry,
     protects everyone) vs FRONTEND vouches + contract only binds (lighter on-chain, trusts the client)?
+    *** RESOLVED 2026-06-09 (user chose FRONTEND VOUCHES + CONTRACT ONLY BINDS, against my recommendation):
+    The contract enforces BINDING ONLY (heated provider set == the set DECLARED at instance creation, plus
+    required == locations.length so contributing set == passed set). It does NOT maintain an on-chain
+    registry and does NOT check validator independence. CURATION of validator independence lives in the
+    FRONTEND good-list: a join-capable client only surfaces/permits games whose declared validators it
+    trusts. CONSEQUENCES LOCKED: (1) DROP IValidatorRegistry, the owner key, and registry options A/B from
+    on-chain scope entirely — no governance surface. (2) GameBase's heat helper is _heatBound (NOT
+    _heatWithDiversity): equality-check the heated providers against the instance's stored declared set;
+    no registry lookup. (3) Protection is CLIENT-CONDITIONAL: trusted-client users only stake into
+    frontend-vetted games and the contract guarantees those exact validators draw (safe iff >=1 honest);
+    raw-contract / untrusted-client callers can stake into a sybil game and lose — their risk, MUST be
+    disclosed. (4) The "validator set fixed at creation, visible before staking" gotcha is now load-
+    bearing: the declared set MUST be on-chain at instance creation so a client can vet it before any
+    funds are staked; binding stops an operator bait-and-switch (declare good set, heat sybil set).
+    (5) Provider-level binding suffices (don't need to pin exact preimages): a curated-independent set
+    with >=1 honest provider defeats grinding regardless of which of that provider's preimages is chosen,
+    since the operator never knows the honest provider's secret. Owner/multisig sub-question is now MOOT
+    (no on-chain registry to own).
   NEXT sections to present: 4 = coin-flip matching+settle (incl. heat moving to operator arm step);
   5 = raffle round/commit-reveal/claim+settle; 6 = error handling/recovery; 7 = testing.
   Then write spec doc, self-review, user review gate, writing-plans.
