@@ -180,7 +180,50 @@ a GameBase up-front check; undermine is orthogonal (can't unlock selection post-
 safe to adopt, does what user wanted (kills stall-to-abort, no player-chooseable re-roll), no grind
 surface; grinding risk fully carried by the selection-diversity requirement.
 
-==> ALL HARD FAIRNESS/ARCHITECTURE DECISIONS ARE NOW MADE. NEXT STEP: write the consolidated
+*** MAJOR REVERSAL (supersedes the Path B / undermine decision above) — UNDERMINE IS UNSAFE FOR
+SMALL-OUTPUT GAMES ***
+User's insight (the ~512-hash point, finally understood correctly): undermine is the CONSUMER
+REPLACEMENT path — _undermineExpired sets _preimage[id] = keccak(a value the CALLER CHOOSES). Not
+reversing keccak (2^256) — FORWARD-hashing chosen replacements (cheap). Timing kills it: undermine is
+allowed only AFTER the N validators have RELEASED, so all other seed inputs are known/fixed; the only
+free variable is the replaced contribution. Grinder loops v=0,1,2,... computes output=reduce(known
+secrets, v), stops at the desired output. Output space makes it trivial: RAFFLE 257 draws -> ~hundreds
+of tries ("up to ~512"); COIN-FLIP parity = 1 BIT -> ~2 tries. So undermine doesn't re-roll randomly
+for a small-output game — it lets the trigger DICTATE the outcome. STRICTLY WORSE than stall-to-abort
+(Path A lets a loser abort; Path B lets a griefer choose the winner). PATH B IS DEAD.
+THE GENERAL PROOF (both my earlier questions, combined): ANY player-held contribution to a small-output
+seed is exploitable — PINNED (Path A) => last revealer withholds to abort a loss; UNDERMINABLE (Path B)
+=> griefer forward-grinds the replacement to fix the result. No third option for a player-held seed
+input over a 2- or 257-value output. => The ONLY safe design: NO player (and nothing replaceable) feeds
+the small-output seed. This is the "entropy out of the user's reach" instinct, now a SECURITY
+REQUIREMENT not a UX nicety.
+NOTE: undermine/Consumer remain valid for LARGE-output consumers (grinding a specific 256-bit seed is
+infeasible) — just not for our tiny-output games. Phase-1's instinct to SKIP Consumer was correct; the
+Path B detour was wrong.
+
+==> CONVERGED FINAL DESIGN (this SUPERSEDES the "DECISIONS LOCKED" list below where they conflict):
+- Reveal/entropy: VALIDATOR-ONLY, PINNED entropy via core Random ink->heat->cast->onCast + chop on
+  expiry. NO Consumer, NO undermine, nothing replaceable feeds the result.
+- GameBase is ConsumerReceiver (NOT wrapping Consumer). Holds: random ref, escrow helpers, validator-
+  pool heat wiring WITH ENFORCED SELECTION DIVERSITY (heated set must span >=N distinct registered
+  validators; check each location's provider), onCast dispatch (key->instance, OnlyRandom,
+  AlreadyResolved -> game _settle), cancel/refundStale, chop handling.
+- Unpredictability: enforced selection diversity => safe iff >=1 of N validators honest (the locked-at-
+  heat selection lever is thus closed too). MUST be DISCLOSED in UI.
+- Liveness: multi-validator + chop (a withholding validator forfeits stake; dead set -> refundStale).
+  NO player can trigger an abort.
+- Players commit for SCORING ONLY: coin-flip side, or raffle hash(guess,salt). Non-reveal = FORFEIT
+  (lose to next-closest revealer); never touches the draw. Nothing for a player to stall or grind.
+- DROPPED: the "advanced player-contributed-entropy" option (unsafe here — that entropy IS the
+  stall/grind lever). Honest cost: small-output games INHERENTLY trust the validator selection (>=1
+  honest of N); you CANNOT buy trustless-vs-all-validators by handing the player entropy.
+- SIMPLIFICATIONS: coin-flip drops player secrets entirely (heat ONLY validators; parity of validator
+  entropy settles via onCast; walk-away hash(1) machinery no longer needed). Phase-1 CoinFlip reworks
+  toward this (remove player-preimage inking + _playerInkOffset; add selection-diversity check).
+- PENDING: user confirm of this converged landing, then write the design.
+
+==> (HISTORICAL, see reversal above) earlier this session we had tentatively chosen Path B/undermine;
+that is now superseded. NEXT STEP: write the consolidated
 games-platform DESIGN DOC. Asked the user to confirm proceeding to the write-up (offered to settle the
 minor opens inline). On their yes -> present design in sections per brainstorming skill, get section
 approvals, write docs/superpowers/specs/2026-06-09-games-platform-design.md (+ decide one-spec vs
@@ -192,14 +235,13 @@ DECISIONS LOCKED (for the design doc):
 - Off-chain: @gibs/games-core substrate (chains, secrets, contracts, lifecycle, Game interface) +
   @gibs/coinflip + @gibs/raffle consumers; examples/ in gibsfinance/random repo (pnpm). Thin
   presentations (scripts/web/TUI) over the core.
-- On-chain: GameBase is ConsumerReceiver AND wraps Consumer (chain/tell/undermine = shared base
-  machinery: escrow, ink/heat wiring, onCast dispatch, cancel/refund-stale, ENFORCED SELECTION
-  DIVERSITY across >=N distinct registered validators). CoinFlip is GameBase, Raffle is GameBase; each
-  owns only its matching + scoring. (Rework Phase-1 CoinFlip from ink-directly to chained-underminable.)
-- Reveal: Path B (undermine) — strong fairness + no stall-to-abort + no player-chooseable re-roll.
-- Entropy/UX default: validator-only draw, entropy OUT OF PLAYER'S REACH (buttons/web/TUI default);
-  GameBase ENFORCES selection diversity + UI DISCLOSES ">=1 honest validator" trust. ADVANCED opt-in =
-  player-contributed entropy (undermine-protected) for trustless-vs-all-validators.
+- On-chain: [SUPERSEDED by the converged design above — was "GameBase wraps Consumer/undermine"; now
+  GameBase is ConsumerReceiver only, NO Consumer, with enforced selection diversity.] CoinFlip is
+  GameBase, Raffle is GameBase; each owns only its matching + scoring.
+- Reveal: [SUPERSEDED — was Path B/undermine; now validator-only pinned entropy, no undermine.]
+- Entropy/UX: validator-only draw, entropy OUT OF PLAYER'S REACH (now a SECURITY requirement, not just
+  UX); GameBase ENFORCES selection diversity + UI DISCLOSES ">=1 honest validator" trust. [SUPERSEDED:
+  the advanced player-entropy opt-in is DROPPED as unsafe.]
 - Raffle mechanics: draw in [0..256] linear-closest wins; many guesses/round, each its own equal stake
   (anti-spam economics); first-entrant params; period = evaluation checkpoint that ROLLS FORWARD until
   threshold M met (not a refund deadline); individual cancel = refund escape; NUDGE to canonical
