@@ -2,6 +2,42 @@
 
 Updated: 2026-06-09
 
+## COIN-FLIP PHASE 2 — ARCHITECTURE DECIDED + SLICE 1 SPEC'D, AWAITING USER SPEC REVIEW (2026-06-09)
+
+USER DIRECTION (this session): use REACT (not the existing Svelte msgboard UI); run on BOTH Anvil
+(31337) and PulseChain v4 (943); cover BOTH roles (players AND validators/operators); a TUI would be
+nice ("just a representation issue"); put the apps under an examples/ folder in the random repo.
+
+DISCOVERY that reshaped scope (random repo already has more than expected):
+- packages/provider = @gibs/random-provider — a TRACKED, substantial provider node daemon (provide
+  inks entropy, consumer-bot heats/casts, knex/pg DB, signers, graphql to the indexer). The
+  validator/operator side is MOSTLY ALREADY BUILT upstream — extend, don't reinvent.
+- packages/my-app = a Ponder INDEXER (not a React app; nothing React scaffolded yet) — the citation
+  feed for the board.
+- random repo packages: contracts, indexer, my-app (ponder), provider. pnpm for my-app/provider.
+
+ARCHITECTURE (approved by user): chain-agnostic CORE + thin PRESENTATIONS. The TUI insight is the
+key — scripts, React web, and TUI are all thin shells over @gibs/coinflip-core (plain TS + viem)
+holding ALL duel logic: chains.ts (anvil+943 registry), player.ts, operator.ts, reader.ts,
+secrets.ts (fresh-per-flip entropy = the fairness primitive). No on-chain logic re-implemented per
+front end. Build order: Slice 1 core+multichain duel script -> Slice 2 operator/caster daemon (wrap
+provider) -> Slice 3 React web (player+operator surfaces) -> Slice 4 TUI (opentui skill exists).
+
+DONE this session (Phase 2):
+- Brainstormed + DECOMPOSED; wrote + committed the Slice 1 spec:
+  docs/superpowers/specs/2026-06-09-coinflip-core-design.md (msgboard commit e8f0ee6).
+- Location decided: examples/coinflip/{core,scripts,...} in the random repo (pnpm). CoinFlip.sol
+  stays in packages/contracts. Core depends on @gibs/random for ABIs.
+
+NEXT (resume here):
+1. USER REVIEWS the Slice 1 spec (gate). Two open questions flagged to user: (a) Anvil deploy
+   mechanism — core.ensureDeployed shells out to contracts hardhat ignition vs the duel script owns
+   deploy; (b) naming @gibs/coinflip-core / examples/coinflip. On approval -> invoke writing-plans.
+2. Then IMPLEMENT Slice 1: scaffold examples/coinflip/core, port duel-943 logic into player/
+   operator/reader, add an anvil/localhost network (31337) to hardhat.config + ignition deploy path,
+   write the Anvil integration test (incl. two-duels-different-seeds fairness regression), then
+   duel.ts --chain anvil|943 verified on both.
+
 ## COIN-FLIP DUEL HARNESS — PHASE 1 RAN END-TO-END ON 943 ✅ (2026-06-09)
 
 GOAL (user): "a UI for 2 private keys to start dueling." Clarified scope: build BOTH a script
