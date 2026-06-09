@@ -401,7 +401,55 @@ DECISIONS LOCKED (for the design doc):
   (declared params + _heatBound) serves both games. Chosen over per-deployment-immutable.
   LIFECYCLE: OPEN (queued) -> ARMED (paired) -> DRAWING (heated) -> SETTLED.
 
-  NEXT sections to present: 5 = raffle round/commit-reveal/claim+settle; 6 = error handling/recovery;
+  SECTION 5 — RAFFLE ROUND / COMMIT-REVEAL / CLAIM / SETTLE: PRESENTED + APPROVED 2026-06-09.
+  Raffle is GameBase (inherits escrow, owner-bounded validator allowlist, _heatBound, onCast dispatch,
+  refundStale/onChop). Adds round model + player commit-reveal + claim/overwrite scoring.
+  - INSTANCE (round keyed by param tuple): first entrant declares (stake, threshold M, validatorSubset
+    ⊆ allowlist, period); range fixed [1..256]. Frontend nudges to canonical tuples (anti-fragmentation);
+    same (stake,M,subset,period) -> same round.
+  - COMMIT (entry): commit(round, commitment) payable(stake); commitment = keccak256(abi.encode(guess,
+    salt, msg.sender)). Each commit = one ticket at equal stake; many per player. Guess HIDDEN + FROZEN
+    here (pre-draw). cancel(ticketId) refunds a still-waiting ticket (tombstone) = per-ticket escape.
+  - FILL + ROLLOVER: round accumulates commits. At each `period` checkpoint operator evaluates: commits
+    >= M -> freeze + arm; < M -> roll forward to next checkpoint (funds stay escrowed, nobody kicked).
+    period = draw CADENCE + commit cutoff; M = viability floor (draw can't fire before M).
+  - ARM + DRAW (operator; raffle's arm step, since no "second entrant" completes it): arm(round,
+    validatorLocations) -> _heatBound (heated providers == declared subset; subset ⊆ allowlist) -> key,
+    status DRAWING. Validator cast -> onCast(key, seed) -> Raffle._settle hook RECORDS the draw
+    = 1 + (uint256(seed) % 256) and OPENS a bounded CLAIM WINDOW. Does NOT pay yet (the key difference
+    from coin-flip's settle-on-cast).
+  - CLAIM/REVEAL/OVERWRITE (during window): reveal(ticketId, guess, salt) verifies
+    keccak256(abi.encode(guess,salt,msg.sender)) == commitment AND ticket.player == msg.sender; computes
+    distance = |guess - draw|; beats running best (ties -> EARLIEST COMMIT) -> OVERWRITES provisional
+    winner. Losers won't pay gas -> self-forfeit. Address-binding stops mempool copy-claim of a revealed
+    (guess,salt).
+  - FINALIZE: after window, finalize(round) pays provisional winner the whole pot (all stakes;
+    non-revealers' stakes included = forfeit) minus FEE, marks SETTLED. onCast push failure -> pull
+    fallback (mirror coin-flip claim + AlreadyResolved guard).
+  - TWO LOAD-BEARING BOUNDARIES (both enforced by the one keccak equality at reveal): (1) salt is
+    COMMITMENT-ONLY, NEVER feeds the draw seed (draw is validator-only, already cast before reveals;
+    salt only hides a guess in the 256-value space). (2) commitment FREEZES the guess pre-draw; overwrite
+    only changes WHICH already-committed/address-bound guess holds the pot, never injects a new/edited
+    guess post-draw.
+  DECISIONS LOCKED THIS SECTION:
+  - ANTI-SPAM = whole-pot-to-closest + a SMALL FEE (~0.5%). Hiding (commit-reveal) blunts TARGETED
+    flooding (can't see uncovered values); the fee kills BLANKET flooding (fee is levied on the
+    flooder's OWN large stake pile, so past a coverage point the fee they pay exceeds the marginal
+    others'-stakes they capture -> flooding taxes itself). No per-player cap needed.
+  - ZERO-REVEAL (nobody reveals in the window): the ROUND'S VALIDATORS OWN THE POT, conditioned on the
+    draw actually being produced (contributing validator secrets revealed/written). NOT refund-all, NOT
+    protocol-keeps.
+  - FEE DESTINATION = the round's revealing VALIDATORS (the natural fusion): 0.5% on normal rounds +
+    the whole pot on no-contest rounds both reward the validators who completed the draw. This is the
+    standing incentive for the honest-validator participation the whole security model (>=1 honest)
+    depends on — funded by the games whose fairness needs them. Anti-spam fee + no-reveal payout = ONE
+    validator-compensation mechanism with two triggers.
+  OPENS carried into Section 6: exact validator pot/fee DISTRIBUTION (equal split among revealing
+  validators? among those who actually contributed to the seed, since a non-revealing validator is
+  chopped?); whether normal-round fee is also validator-bound or could later split protocol/validator.
+
+  NEXT sections to present: 6 = error handling/recovery (folds in validator-payout mechanics, fee
+  distribution, chop/refundStale, onCast-push-failure pull fallback, overwrite/claim-window edges);
   7 = testing. Then write spec doc, self-review, user review gate, writing-plans.
 
 MINOR OPENS to settle inline while writing: (a) canonical-param enforcement — UI nudge + on-chain
