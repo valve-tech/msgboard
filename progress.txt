@@ -2,6 +2,81 @@
 
 Updated: 2026-06-08
 
+## COIN-FLIP FEATURE — DESIGN DONE, PLAN READY, BUILD NOT STARTED (2026-06-08)
+
+GOAL (user): a coin-flip game on msgboard powered by gibsfinance/random. Multiple people enter tokens to
+bet on a flip; "validators are the providers" (3 always-on nodes that ink the entropy pool); the seed
+decides the winner; the winner is incentivized to publish the reveal on-chain, with a validator publishing
+as fallback if they stall. The interface must be citation-rich + explanatory (audit-friendly, not a casino).
+
+DECOMPOSED into 3 sub-projects (build in order): (1) periphery coin-flip contract, (2) validator node
+service, (3) user interface. We brainstormed + spec'd + planned sub-project 1.
+
+DESIGN DECISIONS (locked):
+- Core Random/Consumer UNTOUCHED. Game logic lives in a NEW PERIPHERY contract (CoinFlip.sol, the
+  fleshed-out FundedConsumer idea) composing Random. Avoids "weird contract artifacting".
+- TERMINOLOGY (was the confusion): ink = publish/create the contract-full-of-preimages (the commit, like
+  invisible ink); heat = consume/select preimages (request, returns key); cast = reveal secrets -> seed.
+  Validators INK an always-on pool; a flip HEATs ~3 of them (+ player preimages); winner/validator CASTs.
+- TWO POTS, kept separate: (a) Random's own provider economics (stake return via _flick + seed-selected
+  provider gets `total` bonus — this is how validators get paid for entropy; VERIFIED by a new test, see
+  below); (b) the PLAYER wager pot, ESCROWED in the periphery contract and paid to the winner on settlement.
+- ESCROW-ON-ENTRY (not allowance-pull): stake taken when the player joins the queue, so nothing can fall
+  through at pairing time. Recovery = cancel/refund an unmatched entry; timeout-refund a paired-but-never-
+  finalized flip; walk-aways need no refund (validator fallback cast finalizes).
+- MATCHING BY SIDE: per-side FIFO queues keyed by stake; an entrant matches the oldest opposite-side entry
+  at equal stake (handles "5 want heads, 0 want tails" — they queue until tails arrive).
+- WALK-AWAY: a player who won't manage a secret supplies the well-known hash(0); its secret (zero) is
+  public so a validator can reveal/cast it for them -> flip still settles.
+- SETTLEMENT via the onCast callback: heat sets settings.provider=address(CoinFlip) + callAtChange=true, so
+  Random calls onCast(key, seed) back into the contract -> parity of seed picks winner -> pays pot. No
+  separate claim step; winner's incentive is simply to make cast happen.
+- v1 defaults: native tPLS only; seed-parity outcome (50/50); fee 0; 3 validator inputs; price-0 player +
+  validator preimages (only the escrowed wager moves value).
+
+VERIFIED ON-CHAIN ECONOMICS (the key unblock): Random.cast at line ~672-681 selects ONE participating
+provider via LibPRNG(seed).uniform(len) and credits them the whole `total` pot ON TOP of every provider's
+stake return (_flick, line 140). Wrote + ran a passing hardhat test asserting "winner takes the pot bonus"
+(exactly one provider nets `total`, rest get only stake back). Committed as 5368c48 in clone B (see repo
+note). This is the mechanism the coin flip rides on.
+
+ARTIFACTS COMMITTED (in msgboard repo):
+- Spec:  docs/superpowers/specs/2026-06-08-coin-flip-design.md  (commit 793a8e3)
+- Plan:  docs/superpowers/plans/2026-06-08-coin-flip-contract.md (commit 14c1780)
+The plan builds CoinFlip.sol test-first in 7 tasks: a load-bearing INTEGRATION SPIKE (Task 1, locks the
+exact ink/heat/onCast call shapes — DO NOT guess the player-preimage layout, the spike resolves it) ->
+entry escrow -> per-side FIFO matching -> dual-ink + heat on pairing -> onCast parity settlement ->
+cancel/stale recovery -> full-suite + ignition module. Execution mode chosen by user: SUBAGENT-DRIVEN (#1).
+
+REPO RECONCILIATION (IMPORTANT GOTCHA — sort before building):
+- THREE local "random" repos: A=~/Documents/gibsfinance/random (npm/ponder0.16, on branch update-engines
+  w/ my indexer port 7d14f13; NO hardhat installed), B=~/Documents/gibsfinance/github/random (pnpm,
+  ponder0.9; HAS the contracts toolchain — hardhat 2.22 + solc 0.8.25 cached; where the test + ops scripts
+  live), and random-ponder (a DIFFERENT remote, standalone ponder indexer — ignore for contracts).
+- After `git fetch`: origin/master ADVANCED to 3426727 ("Merge PR #4 from update-engines"). The CONTRACTS
+  (.sol) are UNCHANGED on master vs what I read (spec/plan still valid), but the TEST INFRA was refactored
+  heavily (Consumer.test.ts/Random.test.ts/utils.ts/expectations.ts all changed). So my pot-bonus test
+  5368c48 (written against B's OLD Feb-2025 test infra on base 9c3de11) is on a DIVERGENT local master and
+  will NOT rebase cleanly — it must be RE-APPLIED against current test infra.
+- My indexer port 7d14f13 is on origin/update-engines, NOT yet in master (PR #5 pending).
+
+NEXT STEPS (resume here):
+1. Get user's nod to STASH B's uncommitted non-contract changes (indexer-package edits + a console-import
+   removal in Random.sol — NOT mine, preserve via stash, don't discard). Untracked ops scripts stay.
+2. In B: create a clean `coinflip` branch off origin/master (3426727).
+3. RE-APPLY the "winner takes pot bonus" Random test against the CURRENT (refactored) Random.test.ts — the
+   committed 5368c48 was against old infra; redo it, don't cherry-pick (will conflict).
+4. Execute the plan SUBAGENT-DRIVEN, starting with the Task 1 integration spike; review after the spike
+   before Tasks 4-5 (the spike result feeds them).
+5. Later/optional: clean up redundant clone A; decide where the contract work ultimately pushes (a PR off
+   current master). Land indexer PR #5 separately.
+
+GOTCHAS: solc 0.8.25 is pre-cached at ~/Library/Caches/hardhat-nodejs/...macosx-amd64/ (hardhat's own
+downloader failed; the binary was placed manually, sha256-verified). useTSTORE=false on 943 (predates
+EIP-1153). Run contract tests with NODE_OPTIONS=--max-old-space-size=8192 node_modules/.bin/hardhat test.
+op/1Password idle-locks ~1-2 min mid-flow (commit signing returns "failed to fill whole buffer" / "agent
+returned an error" = vault locked; user Touch ID then re-run, NEVER --no-gpg-sign).
+
 ## INDEXER PORT TO SOURCE + ON-CHAIN CLEANUP (2026-06-08, task 1 DONE; 2 & 3 pending user)
 
 Picking up the three outstanding items: (1) port the Random:Ink + Start/Cast `.select()` fixes back to
