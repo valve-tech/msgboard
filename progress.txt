@@ -284,8 +284,30 @@ DECISIONS LOCKED (for the design doc):
     RoundState, calls game.decodeEntry), operator (ink->ARMED->diversity-checked heat->cast; diversity
     check lives here + on-chain), secrets/seed helpers (shared keccak/uniform; settle is only game-
     specific use). Seam: core = lifecycle+escrow+validator selection; game = the 4 pure methods.
-  NEXT sections to present: 3 = GameBase contract + selection-diversity check (Solidity); 4 = coin-flip
-  matching+settle; 5 = raffle round/commit-reveal/claim+settle; 6 = error handling/recovery; 7 = testing.
+  * Section 3 (GameBase contract + selection-diversity check, Solidity) PRESENTED (2026-06-09) ->
+    grounded in a fresh read of CoinFlip.sol + Random.heat (lines 347-428) + PreimageLocation.sol.
+    GameBase is ConsumerReceiver holds EXACTLY 5 shared pieces: (1) random ref + ctor; (2) native
+    escrow helpers _take/_pay/_refund; (3) onCast dispatch = key->instanceId reverse index + OnlyRandom
+    + AlreadyResolved guard -> abstract _settle(instanceId, seed); (4) _heatWithDiversity(validatorLocations)
+    = require required==locations.length (NO slack, so contributing set == passed set), assert >=N
+    distinct providers ALL in a trusted registry, then heat w/ settings.provider=this, callAtChange=true;
+    (5) refundStale timeout + onChop. Game-specific (stays in CoinFlip/Raffle): matching, _settle body,
+    entry structs. CONVERGED design DELETES from CoinFlip: _playerInkOffset, _playerLocation, WALK_AWAY_*,
+    IRandomInk import, ALL player-preimage inking -> the game contract no longer inks anything, only heats
+    validator pools + reads seed.
+    *** LOAD-BEARING NEW FINDING (verified by grep): core Random has NO provider registry/allowlist
+    ANYWHERE — `provider` in PreimageLocation.Info is just a caller-set address that section() hashes in
+    (so it IS the verifiable inker, but ANYONE can ink). => "N distinct providers" alone is SYBIL-DEFEATED
+    (one operator inks N self-controlled pools, knows all N secrets, grinds the 256-value draw offline).
+    The diversity defense is only sound against a TRUSTED REGISTRY with >=1 honest member. So GameBase MUST
+    own that registry. THREE OPTIONS surfaced to user: (A) owner/multisig-managed allowlist mapping
+    (RECOMMENDED v1, minimal surface, disclose ">=1 of N honest" in UI); (B) stake-bonded slashable
+    registry (more trustless, large new surface, YAGNI-> future hardening); (C) distinctness-only (REJECTED,
+    sybil-defeated). ALSO noted: heat is currently called by the matching PLAYER inside enterAndMatch, but
+    the converged design moves heat into an OPERATOR-driven arm step (reconcile in Section 4).
+    PENDING USER ANSWER: confirm GameBase 5-piece shape + pick registry option (A vs B).
+  NEXT sections to present: 4 = coin-flip matching+settle (incl. heat moving to operator arm step);
+  5 = raffle round/commit-reveal/claim+settle; 6 = error handling/recovery; 7 = testing.
   Then write spec doc, self-review, user review gate, writing-plans.
 
 MINOR OPENS to settle inline while writing: (a) canonical-param enforcement — UI nudge + on-chain
