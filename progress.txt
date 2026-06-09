@@ -242,7 +242,12 @@ DECISIONS LOCKED (for the design doc):
 - Entropy/UX: validator-only draw, entropy OUT OF PLAYER'S REACH (now a SECURITY requirement, not just
   UX); GameBase ENFORCES selection diversity + UI DISCLOSES ">=1 honest validator" trust. [SUPERSEDED:
   the advanced player-entropy opt-in is DROPPED as unsafe.]
-- Raffle mechanics: draw in [0..256] linear-closest wins; many guesses/round, each its own equal stake
+- RANGE CORRECTED (user): draw and guesses are in [1..256] = exactly 256 outcomes (NOT [0..256]=257,
+  my earlier off-by-one). Use [1..256] not [0..255]: avoids 0-means-unset ambiguity in stored guesses +
+  keeps protocol's no-zero convention. Off-chain reduction = 1 + uniform(256) over the seed. (The draw
+  value isn't itself a hash input, so the keccak-0 rule doesn't strictly bind it — but [1..256] is still
+  the right call for the reasons above.)
+- Raffle mechanics: draw in [1..256] linear-closest wins; many guesses/round, each its own equal stake
   (anti-spam economics); first-entrant params; period = evaluation checkpoint that ROLLS FORWARD until
   threshold M met (not a refund deadline); individual cancel = refund escape; NUDGE to canonical
   param presets (anti-fragmentation); player GUESS commit-reveal (hash(guess,salt)), non-reveal =
