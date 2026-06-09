@@ -268,14 +268,25 @@ DECISIONS LOCKED (for the design doc):
   * Settlement summary: commit hash(guess,salt,player) -> round fills -> validator draw [1..256] ->
     claim window, closest address-bound revealer takes pot (displacing farther/stale), non-revealers
     forfeit.
-- DESIGN PRESENTATION STARTED (brainstorming, in sections): Section 1 (architecture) presented & awaiting
-  user OK -> off-chain @gibs/games-core + @gibs/coinflip + @gibs/raffle + thin presentations under
-  examples/ (pnpm); on-chain GameBase is ConsumerReceiver (escrow + validator-only heat w/ enforced
-  selection diversity + onCast dispatch + cancel/refund-stale/chop), CoinFlip is GameBase, Raffle is
-  GameBase. NEXT sections to present: 2 = shared lifecycle + Game interface; 3 = GameBase contract +
-  selection-diversity check; 4 = coin-flip matching+settle; 5 = raffle round/commit-reveal/claim+settle;
-  6 = error handling/recovery; 7 = testing. Then write spec doc, self-review, user review gate,
-  writing-plans.
+- DESIGN PRESENTATION IN PROGRESS (brainstorming, in sections):
+  * Section 1 (architecture) PRESENTED -> off-chain @gibs/games-core + @gibs/coinflip + @gibs/raffle +
+    thin presentations under examples/ (pnpm); on-chain GameBase is ConsumerReceiver (escrow +
+    validator-only heat w/ enforced selection diversity + onCast dispatch + cancel/refund-stale/chop),
+    CoinFlip is GameBase, Raffle is GameBase. User said "keep going" (advance, not per-section gate).
+  * Section 2 (shared lifecycle + Game interface) PRESENTED -> ONE state machine for both games:
+    OPEN -> FILLING -> ARMED -> DRAWING -> SETTLED -> PAID/FORFEIT, with FILLING->ROLLED_OVER (under
+    threshold by deadline) and DRAWING->CHOPPED (secrets unrevealed at expiry -> refund). Game<TParams,
+    TEntry,TOutcome> interface = 4 methods + presets: parseParams, decodeEntry, canArm, settle. KEY
+    FAIRNESS-AS-TYPES POINT: settle(params, entries, seed: Hex) -> seed is an INPUT only, so a game
+    physically cannot route player data back into the seed. coinflip.settle = parity bit (seed & 1);
+    raffle.settle = 1+uniform(seed,256) in [1..256], closest |guess-draw| wins, ties by earliest commit,
+    only entries w/ valid revealed (guess,salt,player) commit score. Core provides reader (event->
+    RoundState, calls game.decodeEntry), operator (ink->ARMED->diversity-checked heat->cast; diversity
+    check lives here + on-chain), secrets/seed helpers (shared keccak/uniform; settle is only game-
+    specific use). Seam: core = lifecycle+escrow+validator selection; game = the 4 pure methods.
+  NEXT sections to present: 3 = GameBase contract + selection-diversity check (Solidity); 4 = coin-flip
+  matching+settle; 5 = raffle round/commit-reveal/claim+settle; 6 = error handling/recovery; 7 = testing.
+  Then write spec doc, self-review, user review gate, writing-plans.
 
 MINOR OPENS to settle inline while writing: (a) canonical-param enforcement — UI nudge + on-chain
 recommended-presets list vs hard whitelist; (b) equidistant tiebreak — earliest commit vs seed-selected
