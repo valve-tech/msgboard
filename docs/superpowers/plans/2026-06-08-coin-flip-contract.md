@@ -548,10 +548,13 @@ Implement `onCast(key, seed)`: look up the flip by key, compute the winner from 
       const [a, b] = ctx.signers
       const stake = viem.parseEther('1')
       const template = { ...pool.section, provider: ctx.coinFlip.address, price: 0n, offset: 0n, index: 0n }
-      // both players use hash(0) walk-away preimages so the secrets are public (zero)
-      const zeroPre = viem.keccak256(viem.zeroHash)
-      await testUtils.confirmTx(ctx, ctx.coinFlip.write.enterAndMatch([0, zeroPre, template, []], { value: stake, account: a.account }))
-      await testUtils.confirmTx(ctx, ctx.coinFlip.write.enterAndMatch([1, zeroPre, template, pool.locations], { value: stake, account: b.account }))
+      // both players use hash(1) walk-away preimages so the secrets are public (the non-zero
+      // value 1). A zero secret cannot settle — Random.cast treats bytes32(0) as "not supplied"
+      // (MISSING_SECRET), proven by the Task 1 spike — so the walk-away uses 1, not 0.
+      const walkAwaySecret = viem.padHex('0x01', { size: 32 }) // bytes32(uint256(1))
+      const walkAwayPre = viem.keccak256(walkAwaySecret)
+      await testUtils.confirmTx(ctx, ctx.coinFlip.write.enterAndMatch([0, walkAwayPre, template, []], { value: stake, account: a.account }))
+      await testUtils.confirmTx(ctx, ctx.coinFlip.write.enterAndMatch([1, walkAwayPre, template, pool.locations], { value: stake, account: b.account }))
       const [start] = await ctx.random.getEvents.Start()
       const key = start.args.key!
       // assemble the full selection (2 player zero-secrets + 3 validator secrets) and cast
@@ -559,7 +562,7 @@ Implement `onCast(key, seed)`: look up the flip by key, compute the winner from 
         { ...template, index: 0n }, { ...template, index: 1n },
       ]
       const selections = [...playerLocs, ...pool.locations]
-      const secrets = [viem.zeroHash, viem.zeroHash, ...pool.secrets.map((s) => s.secret)]
+      const secrets = [walkAwaySecret, walkAwaySecret, ...pool.secrets.map((s) => s.secret)]
       const publicClient = await ctx.hre.viem.getPublicClient()
       const before = { heads: await publicClient.getBalance({ address: a.account!.address }), tails: await publicClient.getBalance({ address: b.account!.address }) }
       await expectations.emit(ctx, ctx.random.write.cast([key, selections, secrets]), ctx.coinFlip, 'Settled')
@@ -706,7 +709,7 @@ git commit -m "feat(coinflip): ignition deployment module"
 
 ## Self-review notes (resolve during execution)
 
-- The Task 1 spike is load-bearing: the exact `ink`/`heat` preimage layout for the two freshly-inked player preimages must come from it, not from guessing. If the spike reveals the player preimages cannot share indices 0/1 of one pointer with the validator locations in a single `heat`, the fallback is to `heat` only the validator locations for entropy and `chain` the player preimages via `Consumer` (the reveal/undermine path) — this is the spec's first open question and Task 4 is where it gets resolved.
+- The Task 1 spike is load-bearing: the exact `ink`/`heat` preimage layout for the two freshly-inked player preimages must come from it, not from guessing. **RESOLVED by the spike (commit `310fcd8`):** the two player preimages ARE inked in one batch and share one pointer at `{provider: address(this), token: 0, price: 0, offset: 0}`, addressed by `index` 0 and 1; the validator preimages use a DIFFERENT provider so their `(offset, index)` slots don't collide. The combined `heat` of `[player0, player1, validator0..N]` succeeds with `settings.provider = address(this)` (the owner that receives `onCast`) and `callAtChange = true`. `cast` requires `info` order to match the heat selection order and `revealed[i]` to be positionally aligned (the contract casts directly; the `Consumer` chain path is not needed). The spike also found that the walk-away secret must be NON-ZERO (`1`), since `bytes32(0)` casts as `MISSING_SECRET` — see the corrected Task 5 test.
 - Stake matching is exact-equal native value. Variable stakes / an order book are out of scope (spec non-goal).
 - Fee is zero in this version; `payout = stake * 2`. A configurable fee is a later, additive task.
 - The validator-pool discovery is off-chain in this version (the matching caller passes `validatorLocations`); an on-chain validator registry is a follow-on once the node service exists.
