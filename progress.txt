@@ -360,9 +360,49 @@ DECISIONS LOCKED (for the design doc):
     with >=1 honest provider defeats grinding regardless of which of that provider's preimages is chosen,
     since the operator never knows the honest provider's secret. Owner/multisig sub-question is now MOOT
     (no on-chain registry to own).
-  NEXT sections to present: 4 = coin-flip matching+settle (incl. heat moving to operator arm step);
-  5 = raffle round/commit-reveal/claim+settle; 6 = error handling/recovery; 7 = testing.
-  Then write spec doc, self-review, user review gate, writing-plans.
+    *** REFINED 2026-06-09 (Section 4 fork answer pulled the owner BACK — supersedes "drop the owner key"
+    above): the user wants a TWO-LAYER validator model, NOT pure frontend-vouch:
+    LAYER 1 — UNIVERSE (owner-controlled, ON-CHAIN): a small owner-managed allowlist of eligible
+    validators (currently ~5). Owner (plain onlyOwner address for v1, behind a swappable interface ->
+    multisig later) adds/removes members. The CONTRACT vouches for the universe (a bounded, ~5-entry
+    version of Section 3's registry option A — not open-ended).
+    LAYER 2 — PER-INSTANCE SUBSET (declared at creation): each game instance declares WHICH of the
+    available validators it uses, as part of first-entrant params, fixed before anyone stakes. Frontend
+    nudges to a canonical subset (anti-fragmentation).
+    BINDING (_heatBound) now checks TWO things: (i) heated providers == the instance's declared subset
+    (stops operator bait-and-switch); (ii) declared subset is a SUBSET of the owner allowlist (stops
+    sybil validators even from a raw-contract caller who never touches the frontend).
+    NET: strictly stronger than pure frontend-vouch — EVERY caller (client or not) is guaranteed
+    validators drawn from the curated ~5, so safety reduces to ">=1 of the chosen subset honest" for
+    everyone. Frontend's job shrinks from "vouch for independence" to "nudge to a sane canonical subset."
+    So: IValidatorRegistry interface IS back (owner-managed allowlist behind it), owner = plain onlyOwner
+    v1. The earlier "DROP the owner key / registry options A/B" lines are SUPERSEDED by this.
+    STILL OPEN (minor): N = how many of the ~5 a default instance uses (subset size); land in spec.
+
+  SECTION 4 — COIN-FLIP MATCHING + SETTLE: PRESENTED + APPROVED 2026-06-09 (grounded in a fresh read of
+  the real CoinFlip.sol, 373 lines, gibsfinance/random/packages/contracts/contracts/).
+  DELETIONS (validator-only entropy removes ALL player-secret machinery): IRandomInk import + ink() call
+  (CoinFlip.sol:12-14,234); _playerInkOffset (:104-112,232,265); _playerLocation (:281-296); playerSection
+  (:192-194); WALK_AWAY_SECRET/PREIMAGE (:68-76); Entry.preimage (:86); Flip.preimageHeads/Tails (:43-44);
+  InvalidPreimage guard (:126-128). The game now inks NOTHING. Entry -> (player,side,stake,enteredAtBlock,
+  active); Flip drops the two preimage fields.
+  UNCHANGED (already correct): FIFO match by (stake,side) + MAX_QUEUE_SCAN tombstone cap (:147-165);
+  cancel; refundStale (STALE_BLOCKS); _settle parity (seed&1); onCast push + claim pull fallback; the
+  AlreadyResolved-before-transfer guard (no double payout).
+  KEY SIMPLIFICATION FOUND (resolves the "heat moves to operator arm step" TODO): under binding + the
+  owner-bounded universe, heat does NOT need to move to a separate operator step for coin-flip. The
+  matching player can still heat INSIDE enterAndMatch (one atomic tx) supplying validator locations,
+  because _heatBound pins providers to the declared subset (which is curated-independent, >=1 honest) ->
+  an adversarial matcher CANNOT grind the parity bit (never knows the honest validator's secret). No
+  liveness gap, one fewer tx. RAFFLE is different (draw fires at an M-commit checkpoint, no "second
+  entrant" completes it) so RAFFLE keeps an operator arm step. Asymmetry is natural, not a smell.
+  VALIDATOR-SET HOME (the Section 4 fork): PER-INSTANCE (match key becomes (stake, validatorSubsetHash);
+  first entrant declares the subset; nudge to canonical). Unifies with raffle: ONE GameBase mechanism
+  (declared params + _heatBound) serves both games. Chosen over per-deployment-immutable.
+  LIFECYCLE: OPEN (queued) -> ARMED (paired) -> DRAWING (heated) -> SETTLED.
+
+  NEXT sections to present: 5 = raffle round/commit-reveal/claim+settle; 6 = error handling/recovery;
+  7 = testing. Then write spec doc, self-review, user review gate, writing-plans.
 
 MINOR OPENS to settle inline while writing: (a) canonical-param enforcement — UI nudge + on-chain
 recommended-presets list vs hard whitelist; (b) equidistant tiebreak — earliest commit vs seed-selected
