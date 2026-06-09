@@ -2,6 +2,97 @@
 
 Updated: 2026-06-09
 
+## COIN-FLIP DUEL HARNESS — PHASE 1 RAN END-TO-END ON 943 ✅ (2026-06-09)
+
+GOAL (user): "a UI for 2 private keys to start dueling." Clarified scope: build BOTH a script
+harness first, then a web interface; run on PulseChain testnet v4 (chain 943).
+
+✅ THE DUEL SETTLED ON CHAIN. Two distinct mnemonic-derived wallets dueled and the pot moved to
+the parity-selected winner. The winning run:
+  - CoinFlip (shanghai) deployed: 0xff850f8ea1976f4685b32ea84f4bad7c49444cba (cached in
+    scripts/.coinflip-943.json). Core Random: 0x775AF72d62c85d2F7f0Bcc05BAa4Be0830087217.
+  - players: P0/heads 0x4979AaB0Dc2a1A35DE61Cd5B7C9167D0A0E568C9 (mnemonic acct 1),
+    P1/tails 0xF6a6cc018f9dDF42f138198D1cC8286F8F06Ba42 (mnemonic acct 2).
+  - enter-heads (queue) blk 24635066; enter-tails (pair+ink+heat) blk 24635068 → key
+    0x81bc53ac097de4b7a62d7cbf4489a75ea3078e96779158c1682b4ceb69d4ca1c; cast blk 24635069 →
+    seed 0x7e0237dd6d3affc8e2e02d70276c5ffb84b397946bad84e7c8c1b9e7194ad56d → ODD → TAILS won.
+  - Settled winner P1, payout 0.2 tPLS. Balances after: P0 ~0.104 (staked+lost), P1 ~0.304 (won).
+
+TWO BUGS FOUND + FIXED THIS RUN (both kept):
+1. GAS PRECHECK: PulseChain prevalidates an eth_call's balance against BLOCK-GAS-LIMIT * maxFeePerGas
+   + value when no explicit gas is given (~6.5 tPLS phantom requirement) → lightly-funded players
+   failed to even simulate. FIX in duel-943.ts: explicit gas caps on player calls (ENTER_HEADS_GAS
+   2M, ENTER_TAILS_GAS 6M) + fund headroom (maxFeePerGas * 8M). Account 0 (rich) was unaffected.
+2. MCOPY: viaIR + evmVersion 'cancun' emits the Cancun MCOPY opcode; 943 is pre-Cancun (supports
+   PUSH0/shanghai, rejects MCOPY/TSTORE) → enter-tails reverted "invalid opcode: MCOPY". FIX in
+   hardhat.config.ts: solidity.overrides['contracts/CoinFlip.sol'] -> evmVersion 'shanghai' (viaIR
+   + runs 1000 mirrored). Recompiled (only CoinFlip; "evm target: shanghai"). Core Random was
+   compiled cancun but happens not to emit MCOPY in its live paths — fragile, but it works.
+
+ORPHANED DUST (ignore or recover later): the FIRST (cancun) CoinFlip 0x1e898355cb95b9c524a30489f
+3934866ea425589 holds P0's 0.1 tPLS — that deploy's enter-heads succeeded (entry id 1) before
+enter-tails hit MCOPY. Recoverable via cancel(1) from P0. Testnet dust; not chased.
+
+VERIFIED + COMMITTED (clone B local master, still UNPUSHED, now 13 commits ahead of origin):
+- CoinFlip.test.ts: 20 passing with the shanghai override (no regression).
+- THREE duels ran on 943. Duels 1+2 produced the SAME seed — a harness flaw (makeSecret was
+  deterministic per address → identical secrets → identical seed → same winner). FIXED: duel-943.ts
+  now salts every secret with a per-run crypto-random RUN_SALT, so each flip yields an independent
+  seed. Duel 3 confirmed a fresh seed (0x8fd71bda…) and the other side (HEADS/player 0) winning.
+  LESSON (load-bearing for sub-project 2): the seed is a deterministic function of revealed secrets
+  (that is what makes it verifiable) — fairness REQUIRES secrets be unique + unpredictable per flip.
+  A production validator node must ink FRESH entropy every flip; never reuse a secret.
+- COMMITS: 4277081 fix(coinflip): build for pre-Cancun chains (hardhat.config shanghai override);
+  a6906d7 feat(coinflip): two-player duel harness on 943 (scripts/duel-943.ts + .gitignore for the
+  .coinflip-943.json deploy cache). Both signed. artifacts/ is gitignored. The prior entropy scripts
+  (demo-consume-943.ts etc) remain untracked by design — not bundled.
+
+NEXT (resume here):
+1. PHASE 2: the web interface (in progress — design pass starting). See original scope below.
+2. (deferred) push decision for clone B local master (13 ahead of origin, unpushed) + the still-
+   pending indexer PR #5.
+
+--- original Phase-1 plan (superseded by the success above) ---
+
+GOAL (user): "a UI for 2 private keys to start dueling." Clarified scope: build BOTH a script
+harness first, then a web interface; run on PulseChain testnet v4 (chain 943).
+
+THE DEPENDENCY REALITY (surfaced to user): two player keys are necessary but NOT sufficient.
+enterAndMatch(side, preimage, validatorLocations[]) also needs (a) CoinFlip DEPLOYED — it is not;
+core Random IS, at 0x775AF72d62c85d2F7f0Bcc05BAa4Be0830087217 on 943; (b) a validator entropy
+pool INKED at a price-0 section (heat forwards no value, so consumed preimages must be price 0);
+(c) someone to CAST within the 12-block request window (FLIP_DURATION=12). The script does all
+three in one run.
+
+DONE:
+- PLAN: docs/superpowers/plans/2026-06-09-coin-flip-duel-harness.md (msgboard).
+- SCRIPT: ~/Documents/gibsfinance/github/random/packages/contracts/scripts/duel-943.ts —
+  mirrors the proven demo-consume-943.ts pattern (op-read MNEMONIC, viem + pulsechainV4,
+  simulate-then-send, event parsing, DRY_RUN). Flow: deploy-or-reuse CoinFlip (caches address to
+  scripts/.coinflip-943.json) -> ink 3-preimage validator pool (price 0, duration 12) as account 0
+  -> derive players at account index 1 (heads) and 2 (tails) from the SAME funded mnemonic, fund
+  each with stake+gas -> P0 enters heads (queues), P1 enters tails (pairs+inks players+heats) ->
+  cast secrets in heat order [p0, p1, ...validators] as account 0 -> read seed parity + Settled,
+  print winner and balances. Env: STAKE_943 (def 0.1), RPC_943 (def g4mm4; override to valve.city
+  for the 12-block window), COINFLIP (reuse), VALIDATORS (def 3), WALK_AWAY=true (both players use
+  the public walk-away secret), DRY_RUN=true (simulate ink+match, stop before broadcast).
+- VERIFIED: no-MNEMONIC smoke test parses + loads artifacts + computes constants, fails at the
+  guard as designed. duel-943.ts produced ZERO tsc diagnostics (the new diagnostics flagged are
+  pre-existing stale-hardhat-viem-type noise in spike-oncast/debugB/utils/CoinFlip.test — the
+  documented TSC-vs-RUNTIME issue, not this script).
+
+NOT DONE / NEXT (resume here):
+1. RUN IT (needs user's 1Password approval; deploys a contract + spends testnet funds = gated on
+   user go-ahead). Recommended first run: DRY_RUN=true. Then full run:
+     MNEMONIC="$(op read 'op://gibs/randomness/recovery phrase')" npx tsx scripts/duel-943.ts
+   (run from packages/contracts). GOTCHA from prior sessions: 1Password signing/approval window is
+   short; keep auto-lock long for the run. WATCH the 12-block cast window if RPC is slow — override
+   RPC_943 to valve.city if g4mm4 lags.
+2. PHASE 2: the web interface (sub-project 3 first slice) — minimal, explicitly TESTNET-ONLY
+   "two private key" dev-harness page in the msgboard app, citation-rich (block, key, seed,
+   parity). NOT production UX (pasting keys is a dev affordance; production = wallet-connect +
+   the validator node service). Needs its own short design pass before building.
+
 ## COIN-FLIP SUB-PROJECT 1 (PERIPHERY CONTRACT) — BUILT, REVIEWED, MERGED LOCALLY (2026-06-09)
 
 DONE: CoinFlip.sol is fully implemented test-first, twice-reviewed (security-focused), and merged to
