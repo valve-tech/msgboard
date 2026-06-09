@@ -2,6 +2,71 @@
 
 Updated: 2026-06-09
 
+## GAMES PLATFORM — SLICE 1 APPROVED + RAFFLE ADDED (SCOPE C), MID-BRAINSTORM (2026-06-09)
+
+WHAT CHANGED: the user APPROVED the Slice 1 core spec
+(docs/superpowers/specs/2026-06-09-coinflip-core-design.md) and on top of it chose SCOPE C — design a
+SECOND game (a closest-guess RAFFLE) NOW, so the multi-game abstraction is validated against two games
+rather than one. So coin-flip is no longer the only target; we are designing a small GAMES PLATFORM.
+Visual companion is RUNNING but PARKED — user wants it ONLY for UI discussion, not flow/architecture.
+
+RAFFLE MECHANICS — CONFIRMED WITH USER THIS SESSION:
+- Scoring: entropy draws a number in a fixed range [0..256] (configurable; the seed reduced into
+  range). Player whose REVEALED guess is closest in LINEAR absolute distance wins the pot. Ties broken
+  deterministically. (NOT a fixed 256 target — the draw is the target; entropy is what makes it fair.)
+- Entries: a player may submit MANY guesses per round; EACH guess is its own ticket with its own equal
+  stake. Intentional economics (user's words): per-guess staking DISINCENTIVIZES spamming the number
+  space — extra tickets cost more than the marginal payout edge, so flooding is self-defeating.
+- Trigger / cadence: a player CREATES a game instance; the FIRST entrant defines its parameters
+  (stake, threshold M, range, period). The period (e.g. hourly) is an EVALUATION CHECKPOINT, NOT a
+  refund deadline: if M not met by the boundary, the round ROLLS FORWARD to the next period and keeps
+  waiting (funds stay escrowed, nobody kicked) until M have entered. Individual `cancel` for a refund
+  is the escape hatch (mirrors coin-flip's unmatched-entrant cancel). Effective trigger = the M-th
+  commit.
+- LIQUIDITY RULE (load-bearing): we must NUDGE everyone toward a SMALL SET OF CANONICAL PARAMETER
+  PRESETS ("easy buttons") so players concentrate into the SAME games. Fragmentation is the enemy — a
+  raffle needs M players to fill, so bespoke param tuples strand people. Likely: contract supports
+  parameterized games keyed by their param tuple; UI surfaces a few canonical tuples prominently +
+  an advanced/custom path. (Confirm enforcement: UI nudge + on-chain recommended-presets list vs hard
+  whitelist — OPEN.)
+
+TWO LAYERED COMMIT-REVEALS (key design insight, distinguishes raffle from coin-flip):
+  1. VALIDATOR/entropy commit-reveal = the existing ink(commit)->heat(consume)->cast(reveal->seed)
+     lifecycle. Produces the draw. Same as coin-flip.
+  2. PLAYER commit-reveal = each ticket commits hash(guess, salt) at entry; AFTER the seed is set,
+     contenders reveal (guess, salt), contract verifies the hash + computes distance. Ordering: commits
+     lock at threshold BEFORE heat; seed set by cast AFTER; reveals after seed (can't change a committed
+     guess). Non-reveal = forfeit (lost stake stays in pot) — only likely-winners bother to reveal
+     (gas), the closest REVEALER takes the pot. No validator fallback for player reveals (validators
+     don't know players' salts), unlike coin-flip's walk-away/validator-cast fallback.
+
+UNIFYING ABSTRACTION (why scope C works): both games = "join the open instance keyed by your
+parameters; when a fill condition is met, consume entropy; settle by a scoring rule."
+  - coin-flip: match into a PAIR by (side, stake); fill = 2 opposite sides; score = seed parity.
+  - raffle:    match into a SHARED ROUND by (stake, threshold, range, period); fill = M commits at a
+               checkpoint; score = closest linear distance to the draw.
+
+BRAINSTORM STATE (resume here): superpowers:brainstorming. Clarifying Qs done (scoring, entries,
+trigger). PENDING USER ANSWER: the on-chain code-sharing structure for two games —
+  Opt 1 (RECOMMENDED): shared BASE periphery contract owns the common machinery (stake escrow,
+        ink/heat/cast wiring to core Random, the onCast(key,seed) settlement callback, cancel/
+        refund-stale); CoinFlip & Raffle INHERIT it and add only their matching + scoring. On-chain
+        mirror of the off-chain games-core + per-game-module structure.
+  Opt 2: two independent contracts, share nothing on-chain (duplicates escrow/lifecycle/callback +
+        audit surface).
+  Opt 3: one generic parameterized game contract (rejected — YAGNI; the two games have genuinely
+        different state shapes: a Flip of 2 players vs a Round of N tickets).
+AFTER the user picks: present the consolidated games-platform design in sections (architecture, the
+games-core substrate + Game interface, the base contract + two game modules, the raffle data/commit-
+reveal/settlement flow, error handling, testing), get section approvals, then WRITE THE SPEC(S) and
+have the user review before writing-plans. Off-chain package decision from scope C: @gibs/games-core
+substrate + @gibs/coinflip + @gibs/raffle consumers, under examples/ in the gibsfinance/random repo
+(pnpm). Slice 1 spec's package names (@gibs/coinflip-core) will need reconciling to this.
+
+REMAINING OPEN Qs for the brainstorm: (a) canonical-params enforcement (UI nudge vs on-chain
+whitelist); (b) whether raffle gets its own spec doc or a combined games-platform spec + per-game
+specs; (c) exact tiebreak rule for equidistant guesses (earliest commit vs seed-selected among tied).
+
 ## COIN-FLIP PHASE 2 — ARCHITECTURE DECIDED + SLICE 1 SPEC'D, AWAITING USER SPEC REVIEW (2026-06-09)
 
 USER DIRECTION (this session): use REACT (not the existing Svelte msgboard UI); run on BOTH Anvil
