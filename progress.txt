@@ -252,6 +252,30 @@ DECISIONS LOCKED (for the design doc):
   threshold M met (not a refund deadline); individual cancel = refund escape; NUDGE to canonical
   param presets (anti-fragmentation); player GUESS commit-reveal (hash(guess,salt)), non-reveal =
   FORFEIT (not abort).
+- RAFFLE CLAIM/SCORING LAYER (user clarified) — guess coupled with a high-entropy RANDOM NUMBER (salt)
+  that only winners reveal, within a CLAIM PERIOD, lest they be "overwritten":
+  * Commitment = hash(guess, salt, PLAYER ADDRESS). Salt is LOAD-BEARING (256-value guess space => bare
+    hash(guess) trivially un-hidden by enumerating 256 hashes). ADDRESS-BINDING is a MUST-HAVE: reveal
+    tx exposes (guess,salt) in mempool; without it a front-runner copies + steals the claim.
+  * CRITICAL BOUNDARY: salt is COMMITMENT-ONLY — must NEVER feed the draw seed (else reintroduces the
+    eliminated stall/grind). Draw stays validator-only + pinned.
+  * Claim flow: validator draw cast (public) -> bounded CLAIM WINDOW -> contenders reveal (guess,salt);
+    losers won't bother (gas). "Overwritten" = a CLOSER revealer displaces the current provisional
+    winner; if the actual-closest never reveals in time, pot -> next-closest who DID.
+  * SECOND MUST-HAVE: guesses FROZEN at commit (pre-draw). Overwrite only changes WHICH already-
+    committed/revealed/address-bound guess holds the pot — NEVER injects a new/modified guess post-draw
+    (grind in disguise). Native to the game contract (scoring, not entropy) — no Consumer/undermine.
+  * Settlement summary: commit hash(guess,salt,player) -> round fills -> validator draw [1..256] ->
+    claim window, closest address-bound revealer takes pot (displacing farther/stale), non-revealers
+    forfeit.
+- DESIGN PRESENTATION STARTED (brainstorming, in sections): Section 1 (architecture) presented & awaiting
+  user OK -> off-chain @gibs/games-core + @gibs/coinflip + @gibs/raffle + thin presentations under
+  examples/ (pnpm); on-chain GameBase is ConsumerReceiver (escrow + validator-only heat w/ enforced
+  selection diversity + onCast dispatch + cancel/refund-stale/chop), CoinFlip is GameBase, Raffle is
+  GameBase. NEXT sections to present: 2 = shared lifecycle + Game interface; 3 = GameBase contract +
+  selection-diversity check; 4 = coin-flip matching+settle; 5 = raffle round/commit-reveal/claim+settle;
+  6 = error handling/recovery; 7 = testing. Then write spec doc, self-review, user review gate,
+  writing-plans.
 
 MINOR OPENS to settle inline while writing: (a) canonical-param enforcement — UI nudge + on-chain
 recommended-presets list vs hard whitelist; (b) equidistant tiebreak — earliest commit vs seed-selected
