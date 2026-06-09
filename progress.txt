@@ -46,17 +46,40 @@ parameters; when a fill condition is met, consume entropy; settle by a scoring r
   - raffle:    match into a SHARED ROUND by (stake, threshold, range, period); fill = M commits at a
                checkpoint; score = closest linear distance to the draw.
 
-BRAINSTORM STATE (resume here): superpowers:brainstorming. Clarifying Qs done (scoring, entries,
-trigger). PENDING USER ANSWER: the on-chain code-sharing structure for two games —
-  Opt 1 (RECOMMENDED): shared BASE periphery contract owns the common machinery (stake escrow,
-        ink/heat/cast wiring to core Random, the onCast(key,seed) settlement callback, cancel/
-        refund-stale); CoinFlip & Raffle INHERIT it and add only their matching + scoring. On-chain
-        mirror of the off-chain games-core + per-game-module structure.
-  Opt 2: two independent contracts, share nothing on-chain (duplicates escrow/lifecycle/callback +
-        audit surface).
-  Opt 3: one generic parameterized game contract (rejected — YAGNI; the two games have genuinely
-        different state shapes: a Flip of 2 players vs a Round of N tickets).
-AFTER the user picks: present the consolidated games-platform design in sections (architecture, the
+CONTRACT-LAYER FINDINGS (read the real contracts this session, in
+gibsfinance/github/random/packages/contracts/contracts/):
+- Consumer.sol = the protocol's REVEAL/UNDERMINE helper (chain a secret+preimage to a request, tell/
+  reveal later, undermine-after-expiry). NO escrow, NO matching, NO settlement. It is NOT a game base.
+- FundedConsumer.sol = a 15-line EMPTY STUB (holds consumer+random refs, payable ctor, zero logic).
+  The June-8 doc called CoinFlip "the fleshing-out of FundedConsumer" but in practice the stub is
+  UNUSED — CoinFlip does not extend it.
+- ConsumerReceiver.sol = abstract contract with the 3 callback hooks core Random calls back into a
+  consumer: onReverse, onCast, onChop. THIS is the real base layer, and CoinFlip already `is
+  ConsumerReceiver` — but it is ONLY the callback ABI (empty virtuals), no shared logic.
+- CoinFlip.sol = is ConsumerReceiver; composes Random by address; ALL reusable plumbing is INLINED
+  here (escrow Entry/stake, FIFO match queue, ink/heat wiring, _playerInkOffset bookkeeping, onCast->
+  _settle, claim, refundStale, OnlyRandom/AlreadyResolved guards, walk-away hash(1)).
+
+RESOLVED DIRECTION (Opt 1, refined & grounded in the code; AWAITING USER CONFIRM): extract a thin
+`GameBase is ConsumerReceiver` from CoinFlip's current internals; `CoinFlip is GameBase`, `Raffle is
+GameBase`. Keep Consumer.sol as the unrelated reveal helper. The base is scoped to EXACTLY: (1) random
+ref + ctor; (2) the ConsumerReceiver callback DISPATCH skeleton (key->instance reverse index,
+OnlyRandom guard, status/AlreadyResolved guard, route to a game-specific _settle); (3) native-token
+escrow helpers (take/pay/refund); (4) validator-pool heat + register-change-callback wiring; (5)
+cancel/refund-stale timeout pattern. Each game keeps its OWN matching, scoring, and preimage handling.
+WHY thinner than it looks: CoinFlip's player preimages ARE entropy (feed the seed; walk-away hash(1)).
+The raffle's player commit-reveal is a GUESS (hash(guess,salt)) — a SEPARATE scoring mechanism NOT
+wired into Random's ink; raffle entropy is VALIDATOR-ONLY. So the player-ink-offset code is
+CoinFlip-only and must NOT be forced into the base.
+FAIRNESS NUANCE TO CAPTURE IN SPEC: with validator-only raffle entropy, a validator inks/knows pool
+secrets ahead of time and can compute the seed at heat. Safe ONLY because player commits LOCK before
+heat (no guess insertable after) and everyone commits blind; relies on >=1 validator the colluding
+party doesn't control (multi-validator + undermine/expiry). Document the trust assumption; consider
+whether to fold a player entropy contribution in (probably not — keeps guess vs entropy clean).
+(Rejected earlier: Opt 2 two independent contracts = duplicates plumbing+audit; Opt 3 one generic
+parameterized contract = YAGNI, Flip-of-2 vs Round-of-N have different state shapes.)
+
+AFTER the user confirms the GameBase scoping: present the consolidated games-platform design in sections (architecture, the
 games-core substrate + Game interface, the base contract + two game modules, the raffle data/commit-
 reveal/settlement flow, error handling, testing), get section approvals, then WRITE THE SPEC(S) and
 have the user review before writing-plans. Off-chain package decision from scope C: @gibs/games-core
