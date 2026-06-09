@@ -151,13 +151,22 @@ contract, which:
 There is no separate claim step: settlement happens as a side effect of the cast. The
 winner's only job is to make the cast happen, which is exactly the incentive below.
 
-### The walk-away path (hash of zero)
+### The walk-away path (hash of one)
 
-A player who does not want to keep a secret supplies `hash(0)` as their preimage — the
-preimage of the publicly known zero secret. Because that secret is public, anyone (a
+A player who does not want to keep a secret supplies `hash(1)` as their preimage — the
+preimage of the publicly known secret `1`. Because that secret is public, anyone (a
 validator) can reveal it on the player's behalf. The flip therefore still finalizes and
 settles even after such a player has left. A player who supplies their own secret keeps the
 option to reveal first and claim; a walk-away player simply delegates that to the validators.
+
+> Note (resolved during the integration spike): the walk-away secret cannot be `0`. Core
+> `Random.cast` treats a revealed secret of `bytes32(0)` as "not supplied" and returns
+> `MISSING_SECRET`, so a zero secret never finalizes the seed. The walk-away therefore uses
+> the smallest non-zero public secret, `1` — `WALK_AWAY_SECRET = bytes32(uint256(1))`,
+> committed as `WALK_AWAY_PREIMAGE = keccak256` of that 32-byte value. Settlement also
+> requires every selected secret to be revealed (including both players'), so a walk-away
+> player's secret must be publicly revealable for a validator to finalize on their behalf —
+> which is exactly why the public, non-zero `1` is used.
 
 ### Incentives and the validator fallback
 
