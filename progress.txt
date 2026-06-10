@@ -6,7 +6,7 @@ Updated: 2026-06-09
 
 Executing the two plans via subagent-driven-development. The CONTRACT work lives in the
 gibsfinance/random repo on branch `games-platform` (pushed to origin). Stopped mid-run at the
-user's request to push everything; resume from Plan 1 Task 8.
+user's request to push everything; resume from Plan 1 Task 9.
 
 MACHINE NOTE (2026-06-09, resumed on a new machine): canonical local paths on THIS machine are
   - random   (contracts):        ~/Documents/gibs-finance/random      (branch games-platform)
@@ -23,7 +23,7 @@ PLAN 1 (on-chain, docs/superpowers/plans/2026-06-09-games-platform-contracts.md)
 - [x] Tasks 3-5 feat: GameBase — allowlist, escrow, bound heat, dispatch    (280ccbf) [14 tests]
 - [x] Task 6  refactor: CoinFlip on GameBase, validator-only entropy        (71dd317) [22 tests]
 - [x] Task 7  test: prove CoinFlip inks nothing                             (3b2a59e) [23 tests]
-- [ ] Task 8  Raffle: round model, commit, cancel
+- [x] Task 8  Raffle: round model, commit, cancel                           (c351745) [4 tests; full suite 127]
 - [ ] Task 9  Raffle: arm, draw recording, pull fallback
 - [ ] Task 10 Raffle: reveal, overwrite, tiebreak
 - [ ] Task 11 Raffle: finalise, fee, no-contest, per-ticket refund
@@ -40,6 +40,22 @@ flagged 1 critical Dependabot alert on valve-tech/msgboard (security/dependabot/
 convenient.
 
 EXECUTION NOTES for resuming:
+- TASK 8 (done, c351745, 2026-06-09 new machine) — three deviations from the plan text, all sound:
+  (1) Plan's Task 8 Raffle.sol omits `_settle`, but GameBase._settle is abstract and the fixture
+      DEPLOYS Raffle, so it must be concrete. Added a placeholder `_settle` that reverts; Task 9
+      REPLACES it (not "adds" — the plan says add, but a 2nd _settle would be a duplicate def).
+  (2) Plan's concentration test called getEvents.RoundOpened() twice with no filter and asserted
+      the 2nd .length==1; hardhat-viem getEvents is INCREMENTAL so that returns 0. Rewrote both
+      queries to scope by blockHash (repo convention, see utils.ts:160 and Task 9's Armed query):
+      first commit's block has 1 RoundOpened, second commit's block has 0. Contract was correct.
+  (3) Ignition module mirrors CoinFlip.ts (m.useModule(RandomModule)), not the plan's getParameter
+      form — the plan itself says "if CoinFlip uses a hardcoded/module Random, match that."
+  SIGNING on this box: random is under ~/Documents/gibs-finance/ where git falls back to the global
+  1Password op-ssh-sign, which is NOT installed here -> commit fails. All 7 prior games-platform
+  commits are sig:N (unsigned) as gibsfinancedev, so set `git config --local commit.gpgsign false`
+  in random and commit unsigned (already set). msgboard (under ~/Documents/valve-tech/) signs fine
+  as valvecitydev via includeIf. pnpm install (pnpm 11 vs repo's 9) dirties pnpm-lock.yaml +
+  pnpm-workspace.yaml (allowBuilds stub) — stashed, NOT committed; keep them out of task commits.
 - Tasks 3-5 were committed together (one "GameBase complete" commit) because the 1Password
   signing window kept lapsing mid-subagent and GameBase.sol is edited across all three. Per-task
   commits resumed once the vault stayed unlocked.
