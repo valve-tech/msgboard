@@ -2,6 +2,45 @@
 
 Updated: 2026-06-09
 
+## GAMES PLATFORM — SPEC APPROVED, PLANS WRITTEN (2026-06-09, latest)
+
+GATE PASSED: user APPROVED the games-platform spec
+(docs/superpowers/specs/2026-06-09-games-platform-design.md) at its review gate. Invoked the
+writing-plans skill and wrote TWO implementation plans (split along the spec's natural on/off-chain
+seam so each produces working, testable software on its own):
+- docs/superpowers/plans/2026-06-09-games-platform-contracts.md (ON-CHAIN: GameBase extract,
+  CoinFlip rework to validator-only entropy, Raffle, Hardhat tests + security invariants + value
+  conservation). 13 tasks, TDD, bite-sized.
+- docs/superpowers/plans/2026-06-09-games-platform-offchain.md (OFF-CHAIN: @gibs/games-core +
+  @gibs/coinflip + @gibs/raffle + e2e scripts + the cross-layer parity test + 943 manual gate).
+  10 tasks.
+
+KEY DISCOVERY while grounding the plans (read-before-write): the contract repo
+(gibsfinance/random/packages/contracts) is HARDHAT + viem + Mocha/Chai, NOT Foundry as the spec's
+testing section assumed. Surfaced to user; user chose "Hardhat now, Foundry later." Plans target
+Hardhat; spec testing section updated to match; native Foundry fuzz is a deferred follow-up.
+
+LOAD-BEARING GROUNDING captured in the plans (verified against the real code):
+- 943/shanghai compiler nuance: every deployed game contract needs evmVersion:'shanghai' override
+  (viaIR+cancun emits MCOPY which reverts on 943). CoinFlip.sol already has it; GameBase/Raffle/
+  harness need it added to hardhat.config overrides.
+- seed = keccak256(concat(revealed secrets)) [Random.sol:665] == lib/utils toSeed; off-chain
+  reduction must match exactly: coinflip seed&1, raffle 1+(seed%256). This is what the cross-layer
+  parity test guards.
+- onCast fires ONLY on a fully-formed seed; onChop ONLY when seed never formed (Random.sol:544).
+  => resolves spec's "no-contest minus chopped validators": if onCast fired, no chop happened, so
+  no-contest pot goes to the whole declared subset; onChop = liveness/refund path only.
+- _heatBound design: positional binding (locations[i].provider==subset[i], required==len, no slack)
+  + membership (each subset member allowlisted, re-checked at heat) + distinctness at declaration.
+  Validator preimages are inked under the validator's OWN address as provider (inkValidatorPool).
+- GameBase is abstract -> needs a contracts/test/GameBaseHarness.sol to unit-test internals.
+- Decisions made with defaults in the plan (flag if wrong): MIN_SUBSET=3, CLAIM_BLOCKS=100,
+  STALE_BLOCKS=200, feeBips default 0 (setFee caps at 100%), no on-chain preset whitelist.
+
+NEXT STEP: choose execution mode (subagent-driven recommended) and start Plan 1 Task 1. Plan 2
+depends on Plan 1's compiled artifacts, so do Plan 1 first. anvil (Foundry) needed for Plan 2's
+local e2e/parity tasks.
+
 ## GAMES PLATFORM — SLICE 1 APPROVED + RAFFLE ADDED (SCOPE C), MID-BRAINSTORM (2026-06-09)
 
 WHAT CHANGED: the user APPROVED the Slice 1 core spec
