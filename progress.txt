@@ -34,9 +34,12 @@ DEVIATIONS from the plan (both necessary, both committed):
    order would have left broken intermediate commits.
 
 943 GATE NOW AUTOMATED + CHAIN-AGNOSTIC (2026-06-10, HEAD 918f9d9):
-examples/games/e2e/scripts/parity-gate.ts (`pnpm gate`; CHAIN=<numeric chain id>, default 943,
-'local' aliases 31337; unknown chains need RPC + RANDOM_ADDRESS + EXPECTED_PROVIDER; per-chain
-deployment cache in scripts/.gate-deployments.json) does the whole gate — deploy CoinFlip+Raffle against live Random (address
+examples/games/e2e/scripts/parity-gate.ts (`pnpm gate`, HEAD 8ae6d0e). CHAIN takes a viem/chains
+export NAME case-insensitively (pulsechainV4, pulsechain, sepolia, foundry, ...), an alias
+(local/anvil/hardhat/dev -> 31337), or a numeric id; default 943. RPC defaults to the chain's
+public endpoint (override for the heat window); non-registry chains need RANDOM_ADDRESS +
+EXPECTED_PROVIDER; per-chain deployment cache in scripts/.gate-deployments.json. Does the whole
+gate — deploy CoinFlip+Raffle against live Random (address
 cache for re-runs), allowlist 3 mnemonic-derived validators, ink TWO price-0 preimages per
 validator (one per game; a preimage is one-shot — single-preimage pools made the raffle arm
 revert UnableToService after the duel consumed them), fund players with explicit gas caps,
