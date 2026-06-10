@@ -1,6 +1,42 @@
 # MsgBoard — Progress
 
-Updated: 2026-06-09
+Updated: 2026-06-10
+
+## GAMES PLATFORM — PLAN 2 (OFF-CHAIN) COMPLETE (2026-06-10, latest)
+
+Plan 2 (docs/superpowers/plans/2026-06-09-games-platform-offchain.md) executed end to end in
+gibsfinance/random branch `games-platform`, HEAD a3bcc17 (pushed). All 10 tasks done:
+
+- examples/games/{core,coinflip,raffle,e2e} pnpm workspace packages created
+  (pnpm-workspace.yaml gained `examples/**`; pnpm 11 also wrote an allowBuilds section —
+  esbuild/keccak/secp256k1 set to true — now committed with the lockfile).
+- @gibs/games-core: chains (31337 + 943), contract bindings off the hardhat artifacts,
+  secrets/seed reduction (seedFromSecrets, coinFlipOutcome, raffleDraw — bit-for-bit with the
+  contracts), Game<TParams,TEntry,TOutcome> interface (settle takes seed as input only),
+  lifecycle reader, operator helpers (inkPool, buildHeatLocations, castSeed).
+- @gibs/coinflip + @gibs/raffle: pure Game implementations; raffle tiebreak (closest, then
+  earliest commit block, then smallest ticket id) mirrors Raffle.reveal exactly.
+- e2e: deployLocal (Random + both games to anvil, allowlist + per-validator price-0 ink) and
+  the CROSS-LAYER PARITY TEST — a full on-chain raffle round on anvil; off-chain settle named
+  the same winning ticket the contract recorded. PASSES.
+- scripts/duel.ts + scripts/raffle.ts both print PARITY OK on fresh anvil runs.
+- examples/games/README.md runbook written, incl. the disclosed trust assumption ("safe as
+  long as at least one chosen validator is honest") and the 943 manual-gate procedure.
+- Tests: 12 vitest tests across the 4 packages, all passing; contracts suite re-run after the
+  workspace/lockfile changes: 161 hardhat tests still passing.
+
+DEVIATIONS from the plan (both necessary, both committed):
+1. viem mnemonicToAccount: plan used { accountIndex } for anvil accounts — that derives
+   m/44'/60'/N'/0/0 which anvil does NOT fund. Fixed to { addressIndex } (m/44'/60'/0'/0/N)
+   in deploy.ts, parity.test.ts, and both scripts.
+2. Task 7 (lifecycle/operator) was committed BEFORE Tasks 5/6: games-core's index.ts re-exports
+   those modules, so coinflip/raffle tests can't even import the core until they exist. Plan
+   order would have left broken intermediate commits.
+
+REMAINING (operator action, not automatable): the manual 943 run — deploy Raffle+CoinFlip
+against live Random 0x775AF72d62c85d2F7f0Bcc05BAa4Be0830087217, one duel + one raffle round
+inside the 12-block heat window, record addresses + output under "943 run log" in
+examples/games/README.md. Procedure documented there.
 
 ## GAMES PLATFORM — EXECUTION IN PROGRESS (subagent-driven, 2026-06-09, latest)
 
