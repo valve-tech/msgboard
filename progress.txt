@@ -4,6 +4,34 @@ Updated: 2026-06-10
 
 ## GAMES PLATFORM — PLAN 2 (OFF-CHAIN) COMPLETE (2026-06-10, latest)
 
+*** 943 LIVE GATE RUN: ALL PARITY CHECKS PASSED (2026-06-10, random HEAD b50447d) ***
+Run by the agent with op://valve/randomness (recovery phrase + seeds0 now in the valve vault).
+- CoinFlip 0x8d3a58d77d22636026066200f8868cd653ec2b2a, Raffle 0x33f506fafe4f05c8de9a07e1c8a7f73f50f1da36
+  against live Random 0x775AF72d62c85d2F7f0Bcc05BAa4Be0830087217 (g4mm4 public RPC; the valve
+  943 endpoint needs an API key we don't have wired).
+- Duel: cast landed 1 block after pairing (12-block window fine on live chain); tails won;
+  off-chain == on-chain ✓. Raffle: draw 73, ticket 3 won, finalised 0.3 v4PLS payout ✓.
+- Run log auto-appended to examples/games/README.md. Validators (funded mnemonic addressIndex
+  1-3): 0xAe96b074…, 0x2a638D71…, 0x0D3148A8…
+- WEB POOLS inked: 3 × 16 preimages at pool offset 2, deployBlock 24643476 (e2e/scripts/
+  943-deployment.json, committed). Secrets DERIVED from seeds0: validator i preimage j =
+  seeds0 HD account i*1000+j (scripts/seeds0.ts) — nothing stored, cast-watcher re-derives.
+- web/src/config.ts 943 entry FILLED; app verified reading live 943 in a browser.
+- NEW: e2e cast-watcher.ts (minimal always-on validator: polls Heated/Armed since deployBlock,
+  index k = k-th heat chronologically == the app's nextHeatLocations rule, casts in-window).
+  Currently running in the agent session only — DURABLE HOME NEEDED (the msgboard box).
+- GOTCHA fixed: importing from ink-pools.ts ran its main() on import (tsx executes module
+  top-level) -> stray duplicate pools (orphaned, harmless). Helper now in scripts/seeds0.ts.
+
+DEPLOYMENT TO games.msgboard.xyz (decided; in progress):
+- games.msgboard.xyz has NO DNS record yet; msgboard.xyz zone is Cloudflare (archive +
+  evm-943-entropy proxied to the box). NEEDED: proxied A record games -> 88.99.62.98.
+- Box key now in op://valve/"msgboard + faucet box". BUT outbound port 22 died network-wide
+  on the agent machine mid-session (valve-prod/indexer/github all timeout; github pushes go
+  via ssh.github.com:443). Box deploy pending port-22 recovery (probe running).
+- Production dist built WITHOUT src/generated/local.json (build picks it up if present —
+  always stash it for prod builds); tarball staged. Caddy block ready in the games README.
+
 PLAN 3 (WEB FRONT END) EXECUTED (2026-06-10, random HEAD 607774b, all 7 tasks): @gibs/games-web
 under examples/games/web (Vite + React 18 + viem-only, injected wallet, 4s event polling).
 - makePresets(subset) factories in @gibs/coinflip + @gibs/raffle (presets open item resolved);
