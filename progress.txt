@@ -7,7 +7,7 @@ Updated: 2026-06-09
 Executing the two plans via subagent-driven-development. The CONTRACT work lives in the
 gibsfinance/random repo on branch `games-platform` (pushed to origin). Stopped mid-run at the
 user's request to push everything. PLAN 1 IS NOW COMPLETE (all 13 tasks); next work is the
-security-review fix follow-ups (done, see below) or starting Plan 2 (off-chain). Branch HEAD: 62d796e.
+security-review fix + fuzz/invariant follow-ups (all done, see below) or starting Plan 2 (off-chain). Branch HEAD: d02618a.
 
 MACHINE NOTE (2026-06-09, resumed on a new machine): canonical local paths on THIS machine are
   - random   (contracts):        ~/Documents/gibs-finance/random      (branch games-platform)
@@ -45,8 +45,28 @@ HIGH/MEDIUM exploit met the >=8/10 bar. One real correctness defect found & FIXE
   Existing refundStale tests unaffected (they never cast). Added a regression test + chop-path
   liveness tests (Random.chop -> GameBase.onChop -> choppedInstance -> immediate refund) for BOTH
   games, plus GameBase.transferOwnership coverage (62d796e).
-FOUNDRY fuzz/invariant tests remain DEFERRED per the plan's toolchain decision (Hardhat now,
-Foundry later) — see the plan's "Deferred to a follow-up" section.
+FUZZING + INVARIANTS (done 2026-06-10, both toolchains per user request "both hh + foundry"):
+- Hardhat property-fuzz (bacf1c9): seeded-LCG loops, 40 rounds each. Raffle: random player counts,
+  guesses, stakes, reveal orders + ~20% withholders -> draw-in-range, winner-is-closest via an
+  off-chain tiebreak oracle, no-contest distribution, per-round value conservation. CoinFlip: random
+  seed parity + stake -> parity winner gets exactly 2*stake, no dust. Fresh fixture per iter (a real
+  arm/pair consumes inked preimages); fuzzed draws injected by pushing a seed through onCast.
+- FOUNDRY introduced alongside Hardhat (d02618a) — the previously-deferred native work. Scoped to
+  dodge the 943/shanghai landmine: packages/contracts/foundry.toml points src/test at test/foundry
+  so forge compiles ONLY the games' tstore-free graph (Random.sol/StorageSlot.sol use transient
+  storage and are never imported), evm_version=shanghai, solc/viaIR/optimizer mirror hardhat.config.
+  MockRandom (test/foundry/MockRandom.sol) stands in for core Random: heat mints a key without
+  consuming real preimages, pushCast/pushChop/setSeed deliver callbacks as the random address.
+  Tests (all green): Raffle fuzz 512 runs (draw range; winner-is-closest w/ tiebreak); Raffle
+  STATEFUL INVARIANT 256 runs x 64 depth = 16384 calls (handler drives randomized
+  commit/cancel/arm/draw/reveal/finalise/refund w/ ghost accounting -> value conservation
+  balance==in-out, and out<=in); CoinFlip fuzz 512 runs (parity winner 2*stake/no dust; fuzzed
+  regression that a seed-finalized flip can't be refundStale'd, only claimed).
+  SETUP on a fresh clone: `cd packages/contracts && forge install foundry-rs/forge-std` (forge-std
+  is gitignored under /lib like node_modules; forge-out/forge-cache also ignored). Run: `forge test`.
+TOTALS: Hardhat 161 passing (100% func coverage on the game contracts); Foundry 6 (4 fuzz @512 +
+2 invariants @16384 calls). Remaining defensive uncovered: Raffle.sol:256 (recordDraw fallback,
+unreachable since Raffle's onCast makes no failing external call).
 
 PLAN 2 (off-chain, docs/superpowers/plans/2026-06-09-games-platform-offchain.md): NOT STARTED.
   All 10 tasks remain. Needs `anvil` (Foundry) for the local e2e/parity tasks.
