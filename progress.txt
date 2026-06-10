@@ -24,6 +24,11 @@ PLAN 1 (on-chain, docs/superpowers/plans/2026-06-09-games-platform-contracts.md)
 PLAN 2 (off-chain, docs/superpowers/plans/2026-06-09-games-platform-offchain.md): NOT STARTED.
   All 10 tasks remain. Needs `anvil` (Foundry) for the local e2e/parity tasks.
 
+BOTH REPOS PUSHED: random `games-platform` -> github.com:gibsfinance/random (HEAD 9990b1f, which
+also adds an in-repo progress.txt on that branch summarizing this work for cross-machine pickup);
+msgboard master -> github.com:valve-tech/msgboard. GitHub flagged 1 critical Dependabot alert on
+valve-tech/msgboard (security/dependabot/1) — review when convenient.
+
 EXECUTION NOTES for resuming:
 - Tasks 3-5 were committed together (one "GameBase complete" commit) because the 1Password
   signing window kept lapsing mid-subagent and GameBase.sol is edited across all three. Per-task
