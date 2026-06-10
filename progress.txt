@@ -33,8 +33,10 @@ DEVIATIONS from the plan (both necessary, both committed):
    those modules, so coinflip/raffle tests can't even import the core until they exist. Plan
    order would have left broken intermediate commits.
 
-943 GATE NOW AUTOMATED (2026-06-10, HEAD 3aa0708): examples/games/e2e/scripts/run-943.ts
-(`pnpm run-943`) does the whole gate — deploy CoinFlip+Raffle against live Random (address
+943 GATE NOW AUTOMATED + CHAIN-AGNOSTIC (2026-06-10, HEAD 918f9d9):
+examples/games/e2e/scripts/parity-gate.ts (`pnpm gate`; CHAIN=<numeric chain id>, default 943,
+'local' aliases 31337; unknown chains need RPC + RANDOM_ADDRESS + EXPECTED_PROVIDER; per-chain
+deployment cache in scripts/.gate-deployments.json) does the whole gate — deploy CoinFlip+Raffle against live Random (address
 cache for re-runs), allowlist 3 mnemonic-derived validators, ink TWO price-0 preimages per
 validator (one per game; a preimage is one-shot — single-preimage pools made the raffle arm
 revert UnableToService after the duel consumed them), fund players with explicit gas caps,
@@ -44,8 +46,8 @@ Smoke-tested end to end via CHAIN=local on anvil (same code path): fresh run, re
 a reused Random (nonzero Ink-event pool offsets verified), and DRY_RUN all pass.
 GOTCHA: the Random-address override env var is RANDOM_ADDRESS, not RANDOM — shells
 special-case $RANDOM and silently mangle it.
-REMAINING (operator action): run it for real — MNEMONIC="$(op read ...)" RPC_943=<valve.city
-endpoint> pnpm run-943, from examples/games/e2e. The run log self-appends to the README.
+REMAINING (operator action): run it for real — MNEMONIC="$(op read ...)" RPC=<valve.city
+endpoint> pnpm gate, from examples/games/e2e. The run log self-appends to the README.
 
 ## GAMES PLATFORM — EXECUTION IN PROGRESS (subagent-driven, 2026-06-09, latest)
 
