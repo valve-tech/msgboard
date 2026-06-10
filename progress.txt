@@ -2,6 +2,41 @@
 
 Updated: 2026-06-09
 
+## GAMES PLATFORM — EXECUTION IN PROGRESS (subagent-driven, 2026-06-09, latest)
+
+Executing the two plans via subagent-driven-development. The CONTRACT work lives in the
+gibsfinance/random repo on branch `games-platform` (pushed to origin). Stopped mid-run at the
+user's request to push everything; resume from Plan 1 Task 8.
+
+PLAN 1 (on-chain, docs/superpowers/plans/2026-06-09-games-platform-contracts.md) — branch
+`games-platform` in ~/Documents/gibsfinance/github/random:
+- [x] Task 1  build: register GameBase/Raffle, shanghai overrides for 943   (eb1e6d8)
+- [x] Task 2  feat: IValidatorRegistry allowlist seam                       (f44ad63)
+- [x] Tasks 3-5 feat: GameBase — allowlist, escrow, bound heat, dispatch    (280ccbf) [14 tests]
+- [x] Task 6  refactor: CoinFlip on GameBase, validator-only entropy        (71dd317) [22 tests]
+- [x] Task 7  test: prove CoinFlip inks nothing                             (3b2a59e) [23 tests]
+- [ ] Task 8  Raffle: round model, commit, cancel
+- [ ] Task 9  Raffle: arm, draw recording, pull fallback
+- [ ] Task 10 Raffle: reveal, overwrite, tiebreak
+- [ ] Task 11 Raffle: finalise, fee, no-contest, per-ticket refund
+- [ ] Task 12 security-invariant tests
+- [ ] Task 13 value conservation + full-suite gate
+PLAN 2 (off-chain, docs/superpowers/plans/2026-06-09-games-platform-offchain.md): NOT STARTED.
+  All 10 tasks remain. Needs `anvil` (Foundry) for the local e2e/parity tasks.
+
+EXECUTION NOTES for resuming:
+- Tasks 3-5 were committed together (one "GameBase complete" commit) because the 1Password
+  signing window kept lapsing mid-subagent and GameBase.sol is edited across all three. Per-task
+  commits resumed once the vault stayed unlocked.
+- A shared-infra fix landed in test/expectations.ts (Task 3): revertedWithCustomError now extracts
+  revert hex from `.data` OR `.data.data` so newly-compiled custom errors decode. Sound; CoinFlip's
+  suite still green.
+- test/utils.ts gained `setUpValidators(ctx, game, count)` (allowlists+inks validators); the old
+  `inkValidatorPool` was removed (no remaining callers).
+- FOOTGUN confirmed: 1Password vault auto-locks during multi-minute subagent runs, breaking BOTH
+  commit signing AND git push (SSH agent). Keep it unlocked, or commit/push centrally right after
+  each subagent while the window is warm.
+
 ## GAMES PLATFORM — SPEC APPROVED, PLANS WRITTEN (2026-06-09, latest)
 
 GATE PASSED: user APPROVED the games-platform spec
