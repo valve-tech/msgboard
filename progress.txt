@@ -4,6 +4,23 @@ Updated: 2026-06-10
 
 ## GAMES PLATFORM — PLAN 2 (OFF-CHAIN) COMPLETE (2026-06-10, latest)
 
+TEST EXPANSION (2026-06-10, HEAD e2d71e0): off-chain suite grown 12 -> 30 tests, all passing.
+- Unit edge cases: draw boundaries (1 and 256, no wraparound), decodeEntry coercions
+  (numeric/string sides, loose raw records), parseParams rejections (zero/negative stake,
+  case-insensitive duplicate subsets, threshold/period), canArm boundaries (overfilled,
+  same-side, exactly-at-threshold), settle order-independence, settle throw on corrupt
+  entry set, buildHeatLocations (positional binding, case-insensitive offsets, canonical
+  heat settings), seed order-sensitivity.
+- Property sweeps: 256-seed reduction check (coinFlipOutcome/raffleDraw vs raw arithmetic);
+  100 random raffle rounds vs an independent brute-force sort reference (forced block ties,
+  ~75% reveal rate, no-contest cases).
+- e2e now proves BOTH games' cross-layer parity in vitest (coinflip-parity.test.ts added;
+  also asserts on-chain seed == seedFromSecrets). fileParallelism:false in e2e vitest config
+  (both files deploy from anvil account 0 — parallel files would race its nonce).
+UI STATUS: no UI exists yet — the only front ends are the CLI scripts (duel/raffle/gate).
+Web/terminal front ends are the NEXT PLAN (not yet written); presets:[] and the player-facing
+trust-assumption disclosure are waiting on it.
+
 Plan 2 (docs/superpowers/plans/2026-06-09-games-platform-offchain.md) executed end to end in
 gibsfinance/random branch `games-platform`, HEAD a3bcc17 (pushed). All 10 tasks done:
 
