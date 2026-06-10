@@ -6,7 +6,8 @@ Updated: 2026-06-09
 
 Executing the two plans via subagent-driven-development. The CONTRACT work lives in the
 gibsfinance/random repo on branch `games-platform` (pushed to origin). Stopped mid-run at the
-user's request to push everything; resume from Plan 1 Task 9.
+user's request to push everything. PLAN 1 IS NOW COMPLETE (all 13 tasks); next work is the
+security-review fix follow-ups (done, see below) or starting Plan 2 (off-chain). Branch HEAD: 62d796e.
 
 MACHINE NOTE (2026-06-09, resumed on a new machine): canonical local paths on THIS machine are
   - random   (contracts):        ~/Documents/gibs-finance/random      (branch games-platform)
@@ -24,11 +25,29 @@ PLAN 1 (on-chain, docs/superpowers/plans/2026-06-09-games-platform-contracts.md)
 - [x] Task 6  refactor: CoinFlip on GameBase, validator-only entropy        (71dd317) [22 tests]
 - [x] Task 7  test: prove CoinFlip inks nothing                             (3b2a59e) [23 tests]
 - [x] Task 8  Raffle: round model, commit, cancel                           (c351745) [4 tests; full suite 127]
-- [ ] Task 9  Raffle: arm, draw recording, pull fallback
-- [ ] Task 10 Raffle: reveal, overwrite, tiebreak
-- [ ] Task 11 Raffle: finalise, fee, no-contest, per-ticket refund
-- [ ] Task 12 security-invariant tests
-- [ ] Task 13 value conservation + full-suite gate
+- [x] Task 9  Raffle: arm, draw recording, pull fallback                     (52c1167) [7 tests]
+- [x] Task 10 Raffle: reveal, overwrite, tiebreak                            (155169e) [10 tests]
+- [x] Task 11 Raffle: finalise, fee, no-contest, per-ticket refund           (35055a8) [14 tests]
+- [x] Task 12 security-invariant tests                                       (c5f515e) [no-abort, draw indep, guess freeze, no sybil]
+- [x] Task 13 value conservation + full-suite gate + coverage gates          (0626fa7) [31 Raffle tests]
+PLAN 1 COMPLETE. Full suite 158 passing. Coverage: GameBase 100% stmts/funcs, CoinFlip 100%
+stmts/funcs, Raffle 98.8% stmts / 100% funcs (only Raffle.sol:256 — the recordDraw pull-fallback
+_settle line — uncovered; Raffle's onCast push makes no external transfer so it cannot fail,
+making that fallback unreachable in practice; left as documented defensive code).
+
+SECURITY REVIEW (2026-06-10, multi-agent review of GameBase/Raffle/CoinFlip): no confirmed
+HIGH/MEDIUM exploit met the >=8/10 bar. One real correctness defect found & FIXED:
+- CoinFlip.refundStale (173fcb1) gated a mutual refund only on status==Pending + stale timeout,
+  never checking the seed. Since Random.cast sets the seed before a revert-swallowing onCast push,
+  a flip can be seed-finalized-but-Pending; the old code let either party wait out the timeout and
+  unwind a DECIDED flip to a refund, escaping the outcome. Fixed to require seedMissing && (chopped
+  || stale), mirroring Raffle.refundTicket — a finalized flip is now resolvable only via claim.
+  Existing refundStale tests unaffected (they never cast). Added a regression test + chop-path
+  liveness tests (Random.chop -> GameBase.onChop -> choppedInstance -> immediate refund) for BOTH
+  games, plus GameBase.transferOwnership coverage (62d796e).
+FOUNDRY fuzz/invariant tests remain DEFERRED per the plan's toolchain decision (Hardhat now,
+Foundry later) — see the plan's "Deferred to a follow-up" section.
+
 PLAN 2 (off-chain, docs/superpowers/plans/2026-06-09-games-platform-offchain.md): NOT STARTED.
   All 10 tasks remain. Needs `anvil` (Foundry) for the local e2e/parity tasks.
 
