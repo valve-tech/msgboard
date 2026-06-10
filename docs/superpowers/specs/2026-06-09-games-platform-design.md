@@ -356,7 +356,12 @@ Two separate concerns that an earlier draft wrongly conflated:
 
 ## Testing
 
-- **Contract tests (Foundry).** `GameBase`: escrow; `_heatBound` binding and membership and the
+> Toolchain note (2026-06-09): the contract repository (`gibsfinance/random/packages/contracts`)
+> uses Hardhat with viem and Mocha/Chai, not Foundry. The tests below are written against that
+> existing toolchain; the intent (cross-layer parity, security invariants, value conservation) is
+> tool-independent. Native Foundry property/invariant fuzzing is deferred to a follow-up.
+
+- **Contract tests (Hardhat + viem + Mocha/Chai).** `GameBase`: escrow; `_heatBound` binding and membership and the
   no-slack `required` check, rejecting substituted or non-allowlisted providers; `onCast` dispatch
   with its guards; owner-only allowlist changes; `refundStale`; `onChop` recording the chop set.
   `CoinFlip`: matching and the tombstone-scan cap, `cancel`, heat-at-match bound to the subset,
@@ -370,9 +375,11 @@ Two separate concerns that an earlier draft wrongly conflated:
   validator secrets only and is independent of commits and salts; a guess-freeze test where a reveal
   with an altered guess reverts; an address-binding test where replaying another sender's guess and
   salt reverts; and a no-last-revealer-abort test that no player action can prevent settlement.
-- **Foundry invariant and fuzz.** Value conservation (the sum of stakes equals the sum of payouts,
-  fees, and refunds, with nothing stuck); draw uniformity over the range; the winner is always the
-  closest revealer; and status monotonicity.
+- **Invariant and conservation tests (Hardhat now; native Foundry fuzz deferred).** Value
+  conservation (the sum of stakes equals the sum of payouts, fees, and refunds, with nothing stuck);
+  draw uniformity over the range; the winner is always the closest revealer; and status
+  monotonicity. Expressed as Hardhat assertions plus targeted randomized loops in version one;
+  ported to native Foundry invariant/fuzz testing in a later follow-up once both games are stable.
 - **Off-chain tests (vitest).** The `Game` pure methods against known seeds (`coinflip.settle`
   parity; `raffle.settle` closest and earliest); parameter and entry round-trips; and the reader
   reconstructing state from events.
