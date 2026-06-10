@@ -8,8 +8,16 @@ Executing the two plans via subagent-driven-development. The CONTRACT work lives
 gibsfinance/random repo on branch `games-platform` (pushed to origin). Stopped mid-run at the
 user's request to push everything; resume from Plan 1 Task 8.
 
+MACHINE NOTE (2026-06-09, resumed on a new machine): canonical local paths on THIS machine are
+  - random   (contracts):        ~/Documents/gibs-finance/random      (branch games-platform)
+  - msgboard (specs/plans/this):  ~/Documents/valve-tech/github/msgboard
+Verified state after re-clone: games-platform @ 3b2a59e, `npx hardhat compile` clean (32 files),
+GameBase 14 passing + CoinFlip 23 passing. Historical path references further down this file
+(~/Documents/gibsfinance/github/random, ~/Documents/gibsfinance/random, the two-clone A/B notes)
+describe PRIOR machines and are left as-is for the record — use the paths above going forward.
+
 PLAN 1 (on-chain, docs/superpowers/plans/2026-06-09-games-platform-contracts.md) — branch
-`games-platform` in ~/Documents/gibsfinance/github/random:
+`games-platform` in ~/Documents/gibs-finance/random:
 - [x] Task 1  build: register GameBase/Raffle, shanghai overrides for 943   (eb1e6d8)
 - [x] Task 2  feat: IValidatorRegistry allowlist seam                       (f44ad63)
 - [x] Tasks 3-5 feat: GameBase — allowlist, escrow, bound heat, dispatch    (280ccbf) [14 tests]
