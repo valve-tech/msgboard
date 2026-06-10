@@ -33,10 +33,19 @@ DEVIATIONS from the plan (both necessary, both committed):
    those modules, so coinflip/raffle tests can't even import the core until they exist. Plan
    order would have left broken intermediate commits.
 
-REMAINING (operator action, not automatable): the manual 943 run — deploy Raffle+CoinFlip
-against live Random 0x775AF72d62c85d2F7f0Bcc05BAa4Be0830087217, one duel + one raffle round
-inside the 12-block heat window, record addresses + output under "943 run log" in
-examples/games/README.md. Procedure documented there.
+943 GATE NOW AUTOMATED (2026-06-10, HEAD 3aa0708): examples/games/e2e/scripts/run-943.ts
+(`pnpm run-943`) does the whole gate — deploy CoinFlip+Raffle against live Random (address
+cache for re-runs), allowlist 3 mnemonic-derived validators, ink TWO price-0 preimages per
+validator (one per game; a preimage is one-shot — single-preimage pools made the raffle arm
+revert UnableToService after the duel consumed them), fund players with explicit gas caps,
+run duel + full raffle, assert off-chain==on-chain parity at every settlement, wait out the
+100-block claim window, finalise, and append the run log to examples/games/README.md.
+Smoke-tested end to end via CHAIN=local on anvil (same code path): fresh run, re-run against
+a reused Random (nonzero Ink-event pool offsets verified), and DRY_RUN all pass.
+GOTCHA: the Random-address override env var is RANDOM_ADDRESS, not RANDOM — shells
+special-case $RANDOM and silently mangle it.
+REMAINING (operator action): run it for real — MNEMONIC="$(op read ...)" RPC_943=<valve.city
+endpoint> pnpm run-943, from examples/games/e2e. The run log self-appends to the README.
 
 ## GAMES PLATFORM — EXECUTION IN PROGRESS (subagent-driven, 2026-06-09, latest)
 
