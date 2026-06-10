@@ -4,6 +4,30 @@ Updated: 2026-06-10
 
 ## GAMES PLATFORM — PLAN 2 (OFF-CHAIN) COMPLETE (2026-06-10, latest)
 
+PLAN 3 (WEB FRONT END) EXECUTED (2026-06-10, random HEAD 607774b, all 7 tasks): @gibs/games-web
+under examples/games/web (Vite + React 18 + viem-only, injected wallet, 4s event polling).
+- makePresets(subset) factories in @gibs/coinflip + @gibs/raffle (presets open item resolved);
+  22 game-package tests.
+- Pure view-model layer, 19 vitest tests: coinflip lobby (FIFO pairing consumption), raffle
+  round phases (claim-deadline boundary: revealOpen AT deadline block, finalise after; stale
+  refund at armedAt+200), salt custody (localStorage + base64 backup import/export, manifest),
+  verify derivations (explicit MISMATCH state).
+- Screens: TrustBanner (acknowledge-to-play disclosure), CoinFlipScreen (presets, queue/pair
+  enter, cancel, VerifyPanel), RaffleScreen (commit w/ salt backup, arm, reveal, finalise,
+  per-ticket stale refund, load-seed-to-verify). UnableToService translated to "validators
+  need to ink new preimages". nextHeatLocations: preimage index = count of prior heats
+  (Heated + Armed) — each heat consumes one preimage per validator.
+- Dev harness: dev:seed (deploy + 16-preimage pools + seeded heads entry + 2/3 raffle round),
+  dev:cast (stand-in validator: casts outstanding keys at the right preimage index, reveals
+  seeded tickets, mine N), dev:walkthrough full (headless full loop, both parity asserts).
+- ACCEPTANCE: dev:walkthrough full PASSED on fresh anvil (flip preimage index 0, raffle index 1,
+  finalise paid winner; both verify-panel parities ✓). UI verified in a real browser via
+  Playwright: coin flip tab shows settled flip + "✓ MATCHES the on-chain result"; raffle tab
+  shows paid round (draw 226, ticket 2 leading+paid). Only console noise: missing favicon 404.
+  Browser-WALLET write path not exercised live (no wallet extension headless) — dev:walkthrough
+  sends the identical transactions; first human session with a real wallet should sanity-click
+  enter/commit/reveal once.
+
 PLAN 3 WRITTEN (2026-06-10): docs/superpowers/plans/2026-06-10-games-platform-frontend.md —
 the web front end (Vite + React + viem-only, no wagmi) as a thin shell over @gibs/games-core.
 7 tasks: preset FACTORIES makePresets(subset) in the game packages (resolves the parked
