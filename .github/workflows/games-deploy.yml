@@ -20,7 +20,7 @@ on:
         required: true
         default: recon
         type: choice
-        options: [recon, deploy, actors, site]
+        options: [recon, deploy, actors, site, logs]
 
 jobs:
   games:
@@ -50,6 +50,17 @@ jobs:
             [ -d /opt/msgboard/.git ] && echo "opt-msgboard-git: yes ($(git -C /opt/msgboard rev-parse --short HEAD 2>/dev/null))" || echo "opt-msgboard-git: no"
             ls /opt/msgboard/docker-compose.prod.yml /opt/msgboard/Dockerfile 2>/dev/null || true
             docker ps --format "{{.Names}} {{.Image}}" | grep -i "ui\|msgboard" || true
+          '
+
+      - name: actor logs (read-only)
+        if: inputs.mode == 'logs'
+        run: |
+          ssh -i ~/.ssh/box root@88.99.62.98 '
+            cd /opt/games-actors
+            for svc in $(docker compose ps --services); do
+              echo "===== $svc ====="
+              docker compose logs --tail 30 "$svc" 2>&1 | tail -30
+            done
           '
 
       - name: checkout msgboard source
