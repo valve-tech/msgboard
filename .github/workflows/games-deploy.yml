@@ -64,10 +64,10 @@ jobs:
             tar -C examples/games/web/dist -czf /tmp/games-web.tgz .
           else
             cd examples/games/e2e
-            npx esbuild scripts/cast-watcher.ts --bundle --platform=node --target=node22 --format=esm \
+            npx --yes esbuild@0.24.2 scripts/cast-watcher.ts --bundle --platform=node --target=node22 --format=esm \
               --banner:js="import { createRequire } from 'module'; const require = createRequire(import.meta.url);" \
               --outfile=/tmp/cast-watcher.mjs
-            npx esbuild scripts/player-bots.ts --bundle --platform=node --target=node22 --format=esm \
+            npx --yes esbuild@0.24.2 scripts/player-bots.ts --bundle --platform=node --target=node22 --format=esm \
               --banner:js="import { createRequire } from 'module'; const require = createRequire(import.meta.url);" \
               --outfile=/tmp/player-bots.mjs
             cp scripts/943-deployment.json /tmp/
