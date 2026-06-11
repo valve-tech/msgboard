@@ -120,7 +120,7 @@ jobs:
             npx --yes esbuild@0.24.2 scripts/player-bots.ts --bundle --platform=node --target=node22 --format=esm \
               --banner:js="import { createRequire } from 'module'; const require = createRequire(import.meta.url);" \
               --outfile=/tmp/player-bots.mjs
-            cp scripts/943-deployment.json /tmp/
+            cp scripts/*-deployment.json /tmp/
           fi
 
       - name: upload + caddy
@@ -192,10 +192,43 @@ jobs:
                 CONFIG: /app/943-deployment.json
               command: node player-bots.mjs
           EOF
+          # PulseChain mainnet actors ride along once a 369 deployment exists. Mainnet is
+          # deliberately SPARING: 6 h between self-initiated spends, generous vault floor
+          # (tables pause instead of draining), slower polling on the public RPC.
+          if [ -f /tmp/369-deployment.json ]; then
+            cat >> /tmp/actors-compose.yml <<'EOF'
+            cast-watcher-369:
+              image: node:22-alpine
+              restart: unless-stopped
+              working_dir: /app
+              volumes: [ "./:/app" ]
+              env_file: .env
+              environment:
+                CHAIN: "369"
+                CONFIG: /app/369-deployment.json
+                INTERVAL_MS: "30000"
+                VAULT_FLOOR: "5000"
+              command: node cast-watcher.mjs
+            player-bots-369:
+              image: node:22-alpine
+              restart: unless-stopped
+              working_dir: /app
+              volumes: [ "./:/app" ]
+              env_file: .env
+              environment:
+                CHAIN: "369"
+                CONFIG: /app/369-deployment.json
+                INTERVAL_MS: "900000"
+                SELF_PLAY_INTERVAL_MS: "21600000"
+                VAULT_FLOOR: "5000"
+                MAX_STAKE: "25"
+              command: node player-bots.mjs
+          EOF
+          fi
           umask 077
           printf 'MNEMONIC=%s\nSEEDS0=%s\n' "${{ secrets.RANDOMNESS_MNEMONIC }}" "${{ secrets.SEEDS0_MNEMONIC }}" > /tmp/actors.env
           ssh -i ~/.ssh/box root@88.99.62.98 'mkdir -p /opt/games-actors && chmod 700 /opt/games-actors'
-          scp -i ~/.ssh/box /tmp/cast-watcher.mjs /tmp/player-bots.mjs /tmp/943-deployment.json /tmp/actors-compose.yml root@88.99.62.98:/opt/games-actors/
+          scp -i ~/.ssh/box /tmp/cast-watcher.mjs /tmp/player-bots.mjs /tmp/*-deployment.json /tmp/actors-compose.yml root@88.99.62.98:/opt/games-actors/
           scp -i ~/.ssh/box /tmp/actors.env root@88.99.62.98:/opt/games-actors/.env
           rm -f /tmp/actors.env
           ssh -i ~/.ssh/box root@88.99.62.98 '
@@ -208,4 +241,5 @@ jobs:
             docker compose ps --format "{{.Name}} {{.State}}"
             docker compose logs --tail 3 cast-watcher | tail -3
             docker compose logs --tail 3 player-bots | tail -3
+            [ -f 369-deployment.json ] && docker compose logs --tail 3 cast-watcher-369 player-bots-369 2>/dev/null | tail -6 || true
           '
