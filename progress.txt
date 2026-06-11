@@ -36,6 +36,13 @@ first two checks read 0 — funds were in flight). Bring-up (random HEAD f8ac2dc
 - MSGBOARD TRAIL (user): cast-watcher posts a PoW-stamped notice per cast (category
   msgboard-games, e.g. "cast 0x… blk N chain 943") via @msgboard/sdk over the keyed
   endpoint (vk_demo is day-limited — that's why no notice landed in the first 30 min).
+  CATEGORY GOTCHA (fixed 300cece): sdk categoryHash KECCAKS plain-string categories but
+  passes 32-byte hex through — a plain 'msgboard-games' archived with category_text NULL
+  and the prefilled trail queries matched nothing (notices were on the board + archived,
+  just unfindable by text). Post with viem.stringToHex(name, {size:32}) like the spam
+  writers do. Early hashed-category notices remain orphaned under
+  0x3c265cd0bde50cdb…a69ca (harmless). Logs mode added to the workflow (mode=logs,
+  keyed-RPC paths redacted — public repo).
   'The record' on the games site + /#/games link a PREFILLED archive query
   (archive.msgboard.xyz/?query=…); mode=site idempotently patches the box graphiql
   index.html to honor ?query=.
