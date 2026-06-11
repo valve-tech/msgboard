@@ -4,6 +4,27 @@ Updated: 2026-06-10
 
 ## GAMES PLATFORM — PLAN 2 (OFF-CHAIN) COMPLETE (2026-06-10, latest)
 
+NEXT WORK QUEUE (user-requested 2026-06-11, NOT started — pick up here next session):
+1. SELL THE FAIRNESS STORY HARDER on games.msgboard.xyz: the strapline "provably fair ·
+   verify every draw" is too dry. Marketing-grade copy that (a) explains in one breath why
+   this beats a trust-me casino (validator entropy, client-side receipt verification, the
+   at-least-one-honest-validator guarantee), and (b) NAMES MSGBOARD — the venue runs on the
+   MsgBoard platform and that should be part of the pitch, not just the colophon. Think
+   hero/subhead treatment in the marquee area, maybe a short "how it works" strip.
+2. MSGBOARD HOME PAGE + DOCS: add a section about the games venue on msgboard.xyz itself
+   (homepage callout linking to games.msgboard.xyz) and a docs page (what it is, the trust
+   model, the verify-receipt feature, how draws work, testnet status). Find where the
+   msgboard.xyz frontend + docs live (packages/ in this repo? check packages/) — NOT yet
+   scouted.
+3. NO <select> TAGS on the games subdomain: replace the three native selects (chain picker,
+   stake preset pickers on both screens) with custom menus — a div-reveal click system
+   (styled dropdown: trigger button + absolutely-positioned options panel, click-outside to
+   close, keyboard/aria basics). Match the card-room theme (felt/brass). The side-picker
+   chips already follow this pattern; extend it.
+STATUS AT CONTEXT CLEAR: raffle round 1 fully revealed (draw 103, ticket 5 guess 122 leading),
+finalise expected ~block 24645384 (bots will call it); round 2 already drawn (draw=126);
+2 coin flips settled autonomously. Actors healthy on the box (/opt/games-actors).
+
 REBRAND (2026-06-11, random HEAD 9480644): the venue is MsgBoard/valve, gibs is the code
 author. Site is now "MsgBoard Games — provably fair"; colophon: "a MsgBoard venue · run by
 valve | randomness contracts by gibs.finance". localStorage namespace gibs-games -> 
