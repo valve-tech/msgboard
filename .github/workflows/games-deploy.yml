@@ -72,6 +72,15 @@ jobs:
             docker compose -f docker-compose.prod.yml up -d --no-deps ui
             sleep 5
             docker compose -f docker-compose.prod.yml ps ui --format "{{.Name}} {{.State}}"
+            # archive.msgboard.xyz graphiql: honor ?query=<urlencoded graphql> so the games
+            # site can deep-link a prefilled archive query (idempotent one-line patch)
+            G=/opt/msgboard/deploy/caddy/graphiql/index.html
+            if [ -f "$G" ] && grep -q "defaultQuery: defaultQuery," "$G"; then
+              sed -i "s/defaultQuery: defaultQuery,/defaultQuery: new URLSearchParams(location.search).get(\"query\") || defaultQuery,/" "$G"
+              echo "graphiql ?query= prefill patched"
+            else
+              grep -q "URLSearchParams" "$G" && echo "graphiql prefill already patched" || echo "graphiql page not found or unexpected — skipped"
+            fi
           '
 
       - name: site smoke
