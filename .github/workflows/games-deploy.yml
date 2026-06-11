@@ -59,7 +59,8 @@ jobs:
             cd /opt/games-actors
             for svc in $(docker compose ps --services); do
               echo "===== $svc ====="
-              docker compose logs --tail 30 "$svc" 2>&1 | tail -30
+              # public repo -> public logs: redact keyed RPC paths (viem errors embed full URLs)
+              docker compose logs --tail 30 "$svc" 2>&1 | sed -E "s#/rpc/[^/ ]+/evm#/rpc/<redacted>/evm#g" | tail -30
             done
           '
 
