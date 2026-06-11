@@ -19,11 +19,16 @@ Updated: 2026-06-11
   account 0, whose only on-chain role is now plain transfers. VAULT_FLOOR still reads the
   treasury. HD index map now: 0 treasury, 1-3 validators, 4-8 gate players, 10 watcher-ops,
   11 bots-ops, 20-22 bots.
-- EXPLORERS DECODE METHODS NOW: all six contracts submitted for Blockscout verification
-  (hardhat verify, customChains already in packages/contracts/hardhat.config.ts; Random
-  369 confirmed verified) + 51 new function/event signatures registered with
-  4byte.directory (28 were already known). GOTCHA: concurrent `npx hardhat verify` runs
-  contend on the project cache — run them SEQUENTIALLY.
+- EXPLORERS DECODE METHODS NOW: 369 trio VERIFIED via SOURCIFY (user: "369 is backed by
+  sourcify" — POST /server/v2/verify/369/<addr> with the build-info stdJsonInput +
+  compilerVersion 0.8.25+commit.b61c2a91 + contractIdentifier; all three exact_match,
+  scan.pulsechain.com shows source). Sourcify does NOT list 943 — testnet went through
+  Blockscout's own standard-input API (api/v2/smart-contracts/<addr>/verification/
+  via/standard-input); its verifier queue is SLOW — submitted, pending at session end.
+  51 new function/event signatures registered with 4byte.directory. GOTCHAS: hardhat
+  verify HANGS indefinitely on Blockscout (no HTTP timeout; orphans pile up holding the
+  cache lock — pkill before retrying); prefer the direct curl APIs. zsh does not
+  word-split unquoted vars in for-loops.
 
 ## GAMES VENUE — *** PULSECHAIN MAINNET LIVE *** + PAUSE-WHEN-DRY + MSGBOARD TRAIL (2026-06-11, earlier)
 
