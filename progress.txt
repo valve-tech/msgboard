@@ -4,6 +4,14 @@ Updated: 2026-06-10
 
 ## GAMES PLATFORM — PLAN 2 (OFF-CHAIN) COMPLETE (2026-06-10, latest)
 
+REBRAND (2026-06-11, random HEAD 9480644): the venue is MsgBoard/valve, gibs is the code
+author. Site is now "MsgBoard Games — provably fair"; colophon: "a MsgBoard venue · run by
+valve | randomness contracts by gibs.finance". localStorage namespace gibs-games -> 
+msgboard-games (no migration — zero real users at switch). @gibs/* package names KEPT (code
+authorship, lives in gibsfinance/random). Redeployed; live title verified.
+BOT ACTIVITY CONFIRMED on 943: first autonomous raffle commit at block 24645254, flip entry
++ 2 commits within ~15 min of actors starting. The system now self-generates history.
+
 UI REJIG + AUTONOMOUS ACTORS SHIPPED (2026-06-10/11, random HEAD 186f82d+dcf7106):
 - UI: card-room aesthetic (felt green + brass, Fraunces/Schibsted/Spline Sans Mono), trust
   disclosure now "House rules" — a <details> collapsible, open until acknowledged, re-revealable
