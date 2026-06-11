@@ -2,7 +2,54 @@
 
 Updated: 2026-06-11
 
-## GAMES VENUE — MANUAL STAKES, LIVE PROOF, MAINNET PREP (2026-06-11, later, latest)
+## GAMES VENUE — *** PULSECHAIN MAINNET LIVE *** + PAUSE-WHEN-DRY + MSGBOARD TRAIL (2026-06-11, latest)
+
+MAINNET (369) IS LIVE — user funded account 0 with 1,000,000 PLS (visible ~07:00 UTC; the
+first two checks read 0 — funds were in flight). Bring-up (random HEAD f8ac2dc):
+- CONTRACTS: Random 0x87fc31413534733a09df5dc5aa33b4dba1f64b61, CoinFlip
+  0x66bdacfdd918f9d4c29f0a7d26609912ab478f4d, Raffle 0x004564d44E6921FFA68936F44ae58988Cd146b10.
+  GATE PASSED (duel seed 0xc723…3a85 tails wins; raffle draw 147 ticket 2; both
+  off-chain == on-chain; finalised, run log in examples/games/README.md). Spend so far ≈4k PLS
+  incl. player-wallet float.
+- RPC GOTCHAS (mainnet): rpc.pulsechain.com ACCEPTED then never mined the deploy txs (nonce
+  stayed 0 — gate hung); g4mm4 mined everything but its load balancer flakes receipt polls
+  ("Timed out" on a tx that mined fine) AND fed the gate a PHANTOM receipt during a reorg —
+  gate printed Raffle at 0x47e9…fa5d (no code ever) while the real Raffle landed at the
+  nonce-2 CREATE address 0x0045…6b10. LESSON: after any mainnet deploy, verify code at the
+  CREATE address derived from (sender, nonce), don't trust the receipt's contractAddress.
+  Cure: the keyed valve fleet endpoint (op://valve/"valve city unlimited key", in gh secret
+  VALVE_RPC_KEY) — single backend, no lag; gate v4 ran clean over it.
+- WEB POOLS: 64 preimages/validator at offsets 4/2/2, deployBlock 26757758 (= pools' ink
+  block, the shared heat origin; the gate's bring-up games predate it on purpose);
+  e2e/scripts/369-deployment.json. Web config has the PulseChain entry
+  (scan.pulsechain.com/#, archive trail). Site redeployed; PulseChain verified in the
+  picker (icon) reading mainnet blocks.
+- SPARING CADENCE (user: "use it far more sparingly, say every 6hrs"): 369 actors run
+  INTERVAL_MS=900000 (15-min ticks), SELF_PLAY_INTERVAL_MS=21600000 (6 h between
+  self-initiated spends) — but humans are NEVER throttled: pairing a human flip entry or
+  filling a round a human sits in stays immediate. MAX_STAKE 25, VAULT_FLOOR 5000.
+- PAUSE-WHEN-DRY (user): per-chain VAULT_FLOOR — bots stop ALL spending (top-ups, entries,
+  commits, arms, finalises; reveals still recover stakes) when account 0 dips below it, and
+  resume on refill; watcher keeps casting (obligation) but stops inking new pools. Logged
+  as "tables paused/back open". Copy on the site + /#/games sells it as a MsgBoard
+  strength (coordination stays free while paused).
+- MSGBOARD TRAIL (user): cast-watcher posts a PoW-stamped notice per cast (category
+  msgboard-games, e.g. "cast 0x… blk N chain 943") via @msgboard/sdk over the keyed
+  endpoint (vk_demo is day-limited — that's why no notice landed in the first 30 min).
+  'The record' on the games site + /#/games link a PREFILLED archive query
+  (archive.msgboard.xyz/?query=…); mode=site idempotently patches the box graphiql
+  index.html to honor ?query=.
+- UI (user feedback): explainer tightened to 3 steps + supercharged-by-MsgBoard footer;
+  FLASHING FIXED — FlipCard/RoundCard were defined inside the screens, so every 4-s poll
+  remounted all cards and replayed the entry animation; hoisted to module level and DOM
+  identity verified stable across polls. /#/games gained "Where it runs" (mainnet +
+  testnet tables) and the mainnet hero line.
+- ACTORS: all four services up on the box (943 watcher+bots 90s; 369 watcher 30s + bots
+  15min/6h). 369 bots auto-top-up from account 0 (to 200 PLS each) on first spend.
+ABANDONED ON 369 (harmless, zero balances, just dead addresses): the phantom raffle
+0x47e9…fa5d (never existed) — three addValidator txs were burned against it pre-discovery.
+
+## GAMES VENUE — MANUAL STAKES, LIVE PROOF, MAINNET PREP (2026-06-11, earlier)
 
 User-directed round 2 (random HEAD 99fd6b7, msgboard HEAD e08b8f6, all three deploy modes
 triggered: deploy/site/actors):

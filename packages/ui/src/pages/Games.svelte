@@ -11,10 +11,11 @@
     { id: 'how-a-draw-works', label: 'How a draw works' },
     { id: 'why-fees-stay-low', label: 'Why fees stay low' },
     { id: 'verify-it-yourself', label: 'Verify it yourself' },
-    { id: 'testnet-status', label: 'Testnet status' },
+    { id: 'where-it-runs', label: 'Where it runs' },
   ]
 
   const explorer = 'https://scan.v4.testnet.pulsechain.com/#'
+  const explorerMain = 'https://scan.pulsechain.com/#'
   // prefilled archive query for the venue's settlement notices (category msgboard-games)
   const archiveTrail = `https://archive.msgboard.xyz/?query=${encodeURIComponent(
     '{\n  message_archive(\n    where: { chain_id: { _eq: 943 }, category_text: { _eq: "msgboard-games" } }\n    order_by: { first_seen_at: desc }\n    limit: 50\n  ) {\n    category_text\n    data_text\n    block_number\n    first_seen_at\n  }\n}',
@@ -23,6 +24,11 @@
     { label: 'CoinFlip', address: '0x8d3a58d77d22636026066200f8868cd653ec2b2a' },
     { label: 'Raffle (the numbers)', address: '0x33f506fafe4f05c8de9a07e1c8a7f73f50f1da36' },
     { label: 'Random (validator entropy)', address: '0x775AF72d62c85d2F7f0Bcc05BAa4Be0830087217' },
+  ]
+  const contractsMain = [
+    { label: 'CoinFlip', address: '0x66bdacfdd918f9d4c29f0a7d26609912ab478f4d' },
+    { label: 'Raffle (the numbers)', address: '0x004564d44E6921FFA68936F44ae58988Cd146b10' },
+    { label: 'Random (validator entropy)', address: '0x87fc31413534733a09df5dc5aa33b4dba1f64b61' },
   ]
 </script>
 
@@ -42,9 +48,9 @@
       MsgBoard <span class="bg-gradient-to-br from-amber-200 via-amber-400 to-orange-500 bg-clip-text text-transparent">Games</span>
     </h1>
     <p class="max-w-xl text-sm font-light text-gray-300 sm:text-lg">
-      A provably fair venue, supercharged by MsgBoard. Coin flips and a numbers game where every
-      draw can be re-checked in your own browser — no trust-me odds. Don't take this page's word
-      for it either: it just did the check, live, below.
+      A provably fair venue, supercharged by MsgBoard — live on PulseChain mainnet and testnet v4.
+      Coin flips and a numbers game where every draw can be re-checked in your own browser — no
+      trust-me odds. Don't take this page's word for it either: it just did the check, live, below.
     </p>
     <div class="flex flex-wrap items-center justify-center gap-3 pt-1">
       <a
@@ -159,11 +165,35 @@
       for reading it.
     </p>
 
-    <h2 id="testnet-status" class="scroll-mt-16">Testnet status</h2>
+    <h2 id="where-it-runs" class="scroll-mt-16">Where it runs</h2>
     <p>
-      The venue is live on <strong>PulseChain testnet v4</strong> (chain id 943) with test PLS — free play
-      money from the faucet, no real stakes. House bots keep the tables warm, so there is always action to
-      watch, pair against, and verify. The contracts:
+      <strong>PulseChain mainnet</strong> (chain id 369) — live with real PLS. The house bots here are
+      deliberately sparing (a self-initiated game roughly every six hours), but they always pair a waiting
+      human promptly; and when the chain's gas vault runs low the tables pause rather than drain. The
+      bring-up was verified the same way every game is: a full coin flip and raffle settled on chain with
+      off-chain parity checks. The mainnet contracts:
+    </p>
+    <table>
+      <thead>
+        <tr><th>Contract</th><th>Address</th></tr>
+      </thead>
+      <tbody>
+        {#each contractsMain as c}
+          <tr>
+            <td>{c.label}</td>
+            <td>
+              <a href={`${explorerMain}/address/${c.address}`} target="_blank" rel="noopener noreferrer">
+                <code>{c.address}</code>
+              </a>
+            </td>
+          </tr>
+        {/each}
+      </tbody>
+    </table>
+    <p>
+      <strong>PulseChain testnet v4</strong> (chain id 943) — free play money from the faucet, no real
+      stakes, and livelier bots, so there is always action to watch, pair against, and verify. The testnet
+      contracts:
     </p>
     <table>
       <thead>
