@@ -180,6 +180,7 @@ jobs:
               environment:
                 CHAIN: "943"
                 CONFIG: /app/943-deployment.json
+                MSGBOARD_RPC: "https://one.valve.city/rpc/${VALVE_RPC_KEY}/evm/943"
               command: node cast-watcher.mjs
             player-bots:
               image: node:22-alpine
@@ -208,6 +209,8 @@ jobs:
                 CONFIG: /app/369-deployment.json
                 INTERVAL_MS: "30000"
                 VAULT_FLOOR: "5000"
+                RPC: "https://one.valve.city/rpc/${VALVE_RPC_KEY}/evm/369"
+                MSGBOARD_RPC: "https://one.valve.city/rpc/${VALVE_RPC_KEY}/evm/369"
               command: node cast-watcher.mjs
             player-bots-369:
               image: node:22-alpine
@@ -222,11 +225,12 @@ jobs:
                 SELF_PLAY_INTERVAL_MS: "21600000"
                 VAULT_FLOOR: "5000"
                 MAX_STAKE: "25"
+                RPC: "https://one.valve.city/rpc/${VALVE_RPC_KEY}/evm/369"
               command: node player-bots.mjs
           EOF
           fi
           umask 077
-          printf 'MNEMONIC=%s\nSEEDS0=%s\n' "${{ secrets.RANDOMNESS_MNEMONIC }}" "${{ secrets.SEEDS0_MNEMONIC }}" > /tmp/actors.env
+          printf 'MNEMONIC=%s\nSEEDS0=%s\nVALVE_RPC_KEY=%s\n' "${{ secrets.RANDOMNESS_MNEMONIC }}" "${{ secrets.SEEDS0_MNEMONIC }}" "${{ secrets.VALVE_RPC_KEY }}" > /tmp/actors.env
           ssh -i ~/.ssh/box root@88.99.62.98 'mkdir -p /opt/games-actors && chmod 700 /opt/games-actors'
           scp -i ~/.ssh/box /tmp/cast-watcher.mjs /tmp/player-bots.mjs /tmp/*-deployment.json /tmp/actors-compose.yml root@88.99.62.98:/opt/games-actors/
           scp -i ~/.ssh/box /tmp/actors.env root@88.99.62.98:/opt/games-actors/.env
