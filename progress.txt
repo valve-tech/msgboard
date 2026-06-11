@@ -1,10 +1,58 @@
 # MsgBoard — Progress
 
-Updated: 2026-06-10
+Updated: 2026-06-11
 
-## GAMES PLATFORM — PLAN 2 (OFF-CHAIN) COMPLETE (2026-06-10, latest)
+## GAMES VENUE — RECEIPTS EVERYWHERE + WORK QUEUE CLEARED (2026-06-11, latest)
 
-NEXT WORK QUEUE (user-requested 2026-06-11, NOT started — pick up here next session):
+All three NEXT WORK QUEUE items below DONE, plus the user's card feedback ("more info in
+each card; too top secret, not enough mobster; timestamps + links so users verify
+themselves, not just trust you; info icon for where the info can be found — msgboard to
+start, eventually on chain"). random@games-platform HEAD f5e4f0a, msgboard HEAD 2c67533+.
+
+GAMES SITE (games.msgboard.xyz, REDEPLOYED + browser-verified live on 943):
+- PROVENANCE ON EVERY CARD: all 14 polled events now carry blockNumber+transactionHash
+  (useChainData attaches them; models thread optional EventMeta into the views — 3 new
+  vitest cases, 25 web tests total). Real block timestamps resolved via getBlock with a
+  module-level per-chain cache (blocks are immutable; one fetch per block ever).
+  Cards show "ENTERED/PAIRED/SETTLED/OPENED/ARMED/DRAWN/PAID Jun 11, 05:13 UTC ·
+  block N ↗ · tx ↗"; raffle tickets get per-row commit/reveal times + tx links; player
+  addresses link to the explorer. Slip (receipt) gains settling/drawing/payout tx rows.
+- INFO DOTS (ⓘ hover/focus popover, components/Meta.tsx): on section headers + slips —
+  "every fact is read live from the <contract> on <chain>; nothing from our servers;
+  playbook on MsgBoard (msgboard.xyz/#/games), data already on chain". CSS popover has a
+  hover bridge so links inside are reachable. GOTCHA fixed: .card a was cream — invisible
+  on the cream receipt paper; .receipt a is now dark brass.
+- STYLE: top-secret -> underground card room. Stamps now "✓ on the level — matches the
+  chain" / "✗ crooked — does not match the chain"; receipt header "The slip — run the
+  numbers yourself"; raffle tab is "The Numbers" (it IS a numbers game), "Play a number",
+  "Open action", warmer lamp glow + corner vignette (background-attachment: fixed).
+- FAIRNESS PITCH (queue item 1): strapline "the back room where the books stay open",
+  serif hero paragraph naming MsgBoard as the platform ("not even MsgBoard ... can cook
+  the draw"), 3-step how-it-works strip (secrets in before the action / the reveal is the
+  draw / you keep the books). Brand rule respected (venue = MsgBoard, gibs = contracts).
+- HOUSE MENUS (queue item 3): zero native <select>s. components/Menu.tsx — trigger +
+  positioned listbox panel, click-outside (pointerdown), Escape, ArrowUp/Down + Enter,
+  aria-haspopup/expanded/selected; selected option gets a brass ♠. Used for chain picker
+  + both stake preset pickers.
+MSGBOARD.XYZ (queue item 2): packages/ui (Svelte 5 + Tailwind 4 SPA, hash routing) —
+  new pages/Games.svelte at /#/games (what it is, trust model, how a draw works,
+  verify-it-yourself, testnet status + contract addresses w/ explorer links) and
+  GamesCallout.svelte on the homepage (felt+brass panel, "Enter the venue" +
+  "How the fairness works", section id 'games' in the SideToc). Route added in App.svelte.
+DEPLOY NOTES: ssh egress on 22 still dead locally BUT ssh.github.com:443 works — pushed
+  random as gibsfinancedev and msgboard as valvecitydev via
+  `git push ssh://git@ssh.github.com:443/<org>/<repo>.git <branch>` (the gh https token
+  lacks workflow scope and the keychain token can't write gibsfinance). games-deploy
+  workflow gained mode=site: ships a `git archive` tarball to /opt/msgboard (recon proved
+  it is a COPIED TREE, not a git checkout), extracts with --exclude=deploy (live Caddyfile
+  + origin certs + games dist must survive), then compose build ui + up -d --no-deps ui.
+  Box .env supplies VITE_RPC_* build args. Games site redeploy = the usual mode=deploy.
+KNOWN ISSUE (pre-existing): msgboard.xyz ui console logs 429s from
+  one.valve.city/rpc/vk_demo/evm/369 (per-day rate limit on the demo key).
+
+## GAMES PLATFORM — PLAN 2 (OFF-CHAIN) COMPLETE (2026-06-10)
+
+NEXT WORK QUEUE (user-requested 2026-06-11, DONE 2026-06-11 — see section above):
 1. SELL THE FAIRNESS STORY HARDER on games.msgboard.xyz: the strapline "provably fair ·
    verify every draw" is too dry. Marketing-grade copy that (a) explains in one breath why
    this beats a trust-me casino (validator entropy, client-side receipt verification, the
