@@ -15,6 +15,10 @@
   ]
 
   const explorer = 'https://scan.v4.testnet.pulsechain.com/#'
+  // prefilled archive query for the venue's settlement notices (category msgboard-games)
+  const archiveTrail = `https://archive.msgboard.xyz/?query=${encodeURIComponent(
+    '{\n  message_archive(\n    where: { chain_id: { _eq: 943 }, category_text: { _eq: "msgboard-games" } }\n    order_by: { first_seen_at: desc }\n    limit: 50\n  ) {\n    category_text\n    data_text\n    block_number\n    first_seen_at\n  }\n}',
+  )}`
   const contracts = [
     { label: 'CoinFlip', address: '0x8d3a58d77d22636026066200f8868cd653ec2b2a' },
     { label: 'Raffle (the numbers)', address: '0x33f506fafe4f05c8de9a07e1c8a7f73f50f1da36' },
@@ -132,6 +136,13 @@
       validators coordinate over <a href="#/">MsgBoard</a>, where a message costs a <strong>proof-of-work
       stamp</strong> instead of a fee — no gas, no token, no account. The entropy pipeline runs at near-zero
       overhead, so you aren't bled dry by fees to keep the games supplied with randomness.
+    </p>
+    <p>
+      Every settlement leaves a compact notice on the board (category <code>msgboard-games</code>) —
+      <a href={archiveTrail} target="_blank" rel="noopener noreferrer">browse the trail in the archive</a>.
+      And because the coordination layer is free, a chain whose gas vault runs dry doesn't break anything:
+      the tables on that chain simply <strong>pause</strong>, the validators keep talking on MsgBoard for
+      nothing, and play resumes the moment the vault is refilled.
     </p>
 
     <h2 id="verify-it-yourself" class="scroll-mt-16">Verify it yourself</h2>
