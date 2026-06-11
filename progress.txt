@@ -2,7 +2,47 @@
 
 Updated: 2026-06-11
 
-## GAMES VENUE — RECEIPTS EVERYWHERE + WORK QUEUE CLEARED (2026-06-11, latest)
+## GAMES VENUE — MANUAL STAKES, LIVE PROOF, MAINNET PREP (2026-06-11, later, latest)
+
+User-directed round 2 (random HEAD 99fd6b7, msgboard HEAD e08b8f6, all three deploy modes
+triggered: deploy/site/actors):
+- MANUAL AMOUNTS + PLAYER THRESHOLD: StakeInput (free-typed amount + 0.1/1/10 quick chips)
+  replaced both preset menus; raffle adds a players input (default 3, min 2; round keys on
+  stake+threshold+period+subset and the UI shows which filling round a ticket joins; flips
+  hint that pairing needs the EXACT stake and flag when an opponent waits at yours).
+- CHAIN ICONS in the picker menu (gib.show/image/<chainId>, skipped for local anvil).
+- COLLAPSIBLES (user): explainer is a dismissable <details> (localStorage
+  msgboard-games:pitch-collapsed); settled flips + finished raffle rounds collapse into
+  'The record' summary rows (count · paid out · last time); live action stays expanded.
+- BRANDING RULES (user, NEW — supersede the old 'gibs credited as author' rule):
+  (1) NO authorship credit anywhere — plain repo links only (contracts/msgboard);
+  (2) MsgBoard is NOT a 'platform' — say 'supercharged by MsgBoard' / 'a MsgBoard venue';
+  (3) sell the fee story: validators coordinate over MsgBoard, messages cost proof-of-work
+  stamps not gas, so fees don't bleed the odds (4th how-it-works step + /#/games section);
+  (4) mention anyone — a player or the house — can ink secrets and contribute randomness
+  (house rules + /#/games trust model).
+- /#/games SHOWS, NOT TELLS (user): GamesLiveProof.svelte reads Paired/Settled/Finalised
+  from 943 in the READER'S browser, recomputes the latest flip from the seed and stamps it
+  on the level with tx/block links, re-checks every 15 s; header shows venue totals.
+  Verified locally: it caught a flip settled seconds earlier and matched it.
+- BOTS HANDLE CUSTOM TABLES: player-bots now pair ANY open flip entry and fill ANY filling
+  round on the canonical subset up to MAX_STAKE (env, default 25), balance-aware
+  (stake + 1 gas cushion), sending the TARGET's stake; canonical 0.1 entries still seed
+  fresh action. Auto top-up raised 0.5->2 to 50->200. DIRECT TOP-UP DONE on 943: 250 tPLS
+  sent to each bot (now ~251 each; account 0 holds ~197.7M tPLS).
+- PULSECHAIN MAINNET (369) PREP: core registry knows 369 (viem pulsechain,
+  rpc.pulsechain.com, randomAddress undefined); parity gate gained DEPLOY_RANDOM=true for
+  first-time live-chain bring-up (Random bytecode ships in @gibs/random artifacts).
+  BLOCKED ON FUNDING: Random has NO code on 369 and account 0
+  (0xAF2b2118376b51eEcB58327526bc082aED3e4225) holds 0 PLS. Gas at ~759k beats means the
+  full bring-up (~30M gas: Random + CoinFlip + Raffle + pool inks) costs ~23k PLS; fund
+  ~50-100k PLS to account 0 for deploy + operating runway, then:
+    CHAIN=pulsechain DEPLOY_RANDOM=true EXPECTED_PROVIDER=0xAF2b2118376b51eEcB58327526bc082aED3e4225 \
+    MNEMONIC="$(op read 'op://valve/randomness/recovery phrase')" pnpm gate
+  then ink-pools for the web pools, add the 369 deployment to web config.ts, redeploy, and
+  run actors with CHAIN=369. Validator/bot funding on 369 comes from account 0 as on 943.
+
+## GAMES VENUE — RECEIPTS EVERYWHERE + WORK QUEUE CLEARED (2026-06-11, earlier)
 
 All three NEXT WORK QUEUE items below DONE, plus the user's card feedback ("more info in
 each card; too top secret, not enough mobster; timestamps + links so users verify
