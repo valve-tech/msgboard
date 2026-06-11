@@ -4,6 +4,33 @@ Updated: 2026-06-10
 
 ## GAMES PLATFORM — PLAN 2 (OFF-CHAIN) COMPLETE (2026-06-10, latest)
 
+UI REJIG + AUTONOMOUS ACTORS SHIPPED (2026-06-10/11, random HEAD 186f82d+dcf7106):
+- UI: card-room aesthetic (felt green + brass, Fraunces/Schibsted/Spline Sans Mono), trust
+  disclosure now "House rules" — a <details> collapsible, open until acknowledged, re-revealable
+  forever (ack state persists, "✓ acknowledged" chip). VerifyPanel restyled as a perforated
+  DRAW RECEIPT with a stamped verified/mismatch mark. Side picker chips, coin-spin animation
+  on pending flips. All 22 web tests + typecheck green; verified in browser incl. the
+  ack->collapse->re-open cycle.
+- POOL ROTATION: pools chain at base + n*poolSize; poolLocationFor in games-core (web model
+  re-exports; pools.test.ts bijection sweep). App heat locations + cast-watcher share the
+  formula; watcher AUTO-INKS pool n+1 when <8 slots remain (Random.pointer probe = idempotent).
+  SECRET_STRIDE raised 1000 -> 100_000. Fresh 64-preimage pools on 943: offsets 34/34/18
+  (per-provider bases absorb the orphan pools), deployBlock 24645214; config.ts updated;
+  site redeployed with new UI + pools.
+- PLAYER BOTS: e2e/scripts/player-bots.ts — stateless autonomous testnet players (3 bots,
+  addressIndex 20-22, auto top-up from account 0). Coin flip: pairs ANY waiting entry at the
+  0.1 preset (incl. humans — the site always finds a counterparty) else sometimes queues.
+  Raffle: fills the canonical round, arms at threshold+period, reveals own tickets
+  (guess/salt re-derived from seeds0 botKey + commit ordinal — restart-proof; commitment
+  cross-checked before reveal), finalises closed rounds. Open entries detected via the
+  contract's entries(id).active flag, not event heuristics.
+- ACTORS ON THE BOX: workflow mode=actors esbuild-bundles cast-watcher + player-bots into
+  single-file .mjs, ships to /opt/games-actors (isolated compose project, NOT the msgboard
+  stack; .env chmod 600 from gh secrets RANDOMNESS_MNEMONIC/SEEDS0_MNEMONIC), docker compose
+  up. VERIFIED RUNNING: games-actors-cast-watcher-1 + games-actors-player-bots-1 both up,
+  correct origin block + bot addresses in logs. Local session watcher stopped — the box owns
+  settlement now. Gotcha: esbuild isn't a workspace dep; workflow uses npx --yes esbuild@0.24.2.
+
 *** games.msgboard.xyz IS LIVE (2026-06-10) *** — 200, serving the games web app on 943.
 - DNS: user added the proxied record. Box access: key in op://valve/"msgboard + faucet box";
   op read CHOKES on '+' in item names (silently wrote an empty key file once — VALIDATE with
