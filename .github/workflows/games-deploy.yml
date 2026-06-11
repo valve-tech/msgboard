@@ -6,8 +6,11 @@
 # mode=deploy : build the web app from gibsfinance/random@games-platform, upload it to
 #               /var/www/games, install the games.msgboard.xyz Caddy site block if absent,
 #               validate, and reload. Idempotent.
-# mode=site   : redeploy msgboard.xyz itself — update the repo checkout at /opt/msgboard,
-#               rebuild the ui image, and recreate only the ui service.
+# mode=site   : redeploy msgboard.xyz itself — ship a source tarball of this repo to
+#               /opt/msgboard (a plain copied tree, NOT a git checkout — recon 2026-06-11),
+#               rebuild the ui image, and recreate only the ui service. deploy/ is excluded
+#               on extraction: the live Caddyfile (with the appended games block), origin
+#               certs, and the graphiql/games dist live there and must survive.
 name: games-deploy
 on:
   workflow_dispatch:
@@ -49,21 +52,26 @@ jobs:
             docker ps --format "{{.Names}} {{.Image}}" | grep -i "ui\|msgboard" || true
           '
 
+      - name: checkout msgboard source
+        if: inputs.mode == 'site'
+        uses: actions/checkout@v4
+
       - name: site (msgboard.xyz ui)
         if: inputs.mode == 'site'
         run: |
+          git archive --format=tar.gz -o /tmp/msgboard-src.tgz HEAD
+          scp -i ~/.ssh/box /tmp/msgboard-src.tgz root@88.99.62.98:/tmp/msgboard-src.tgz
           ssh -i ~/.ssh/box root@88.99.62.98 '
             set -e
             cd /opt/msgboard
-            test -d .git || { echo "/opt/msgboard is not a git checkout — site mode needs one"; exit 1; }
-            git fetch origin master
-            git reset --hard origin/master
-            COMPOSE=docker-compose.prod.yml
-            test -f "$COMPOSE" || COMPOSE=docker-compose.yml
-            docker compose -f "$COMPOSE" build ui
-            docker compose -f "$COMPOSE" up -d --no-deps ui
+            test -f docker-compose.prod.yml || { echo "/opt/msgboard does not look like the msgboard tree"; exit 1; }
+            # overwrite source in place; never touch deploy/ (live Caddyfile + certs + games dist) or .env
+            tar -xzf /tmp/msgboard-src.tgz --exclude="deploy" --exclude="deploy/*"
+            rm -f /tmp/msgboard-src.tgz
+            docker compose -f docker-compose.prod.yml build ui
+            docker compose -f docker-compose.prod.yml up -d --no-deps ui
             sleep 5
-            docker compose -f "$COMPOSE" ps ui --format "{{.Name}} {{.State}}"
+            docker compose -f docker-compose.prod.yml ps ui --format "{{.Name}} {{.State}}"
           '
 
       - name: site smoke
