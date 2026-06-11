@@ -1,0 +1,106 @@
+# Deploys the games web app (gibsfinance/random examples/games/web) to games.msgboard.xyz on
+# the msgboard box. Exists as a workflow because the box only accepts ssh (port 22) and the
+# operator machine's network may not allow outbound 22 — Actions runners always do.
+#
+# mode=recon  : read-only — print the box's Caddy layout so a deploy can match its conventions.
+# mode=deploy : build the web app from gibsfinance/random@games-platform, upload it to
+#               /var/www/games, install the games.msgboard.xyz Caddy site block if absent,
+#               validate, and reload. Idempotent.
+name: games-deploy
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: recon (read-only survey) or deploy
+        required: true
+        default: recon
+        type: choice
+        options: [recon, deploy]
+
+jobs:
+  games:
+    runs-on: ubuntu-latest
+    steps:
+      - name: ssh setup
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.MSGBOARD_SSH_KEY }}" > ~/.ssh/box
+          chmod 600 ~/.ssh/box
+          ssh-keyscan -t ed25519 88.99.62.98 >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: recon
+        if: inputs.mode == 'recon'
+        run: |
+          # public repo -> public logs: print only what the deploy step needs, no full config
+          ssh -i ~/.ssh/box root@88.99.62.98 '
+            CADDYFILE=$(find /etc/caddy /srv /root -maxdepth 4 -name Caddyfile 2>/dev/null | head -1)
+            echo "caddyfile-path: $CADDYFILE"
+            grep -c . "$CADDYFILE" | xargs echo "caddyfile-lines:"
+            grep -m1 -A2 "^msgboard.xyz" "$CADDYFILE" | grep -o "tls [^ ]* [^ ]*" || echo "no-tls-line-on-apex"
+            docker ps --format "{{.Names}}" | grep -i caddy || echo "caddy-not-docker"
+            systemctl is-active caddy 2>/dev/null || true
+            ls -d /var/www 2>/dev/null || echo "no-var-www"
+          '
+
+      - name: checkout games source
+        if: inputs.mode == 'deploy'
+        uses: actions/checkout@v4
+        with:
+          repository: gibsfinance/random
+          ref: games-platform
+          path: random
+
+      - name: build
+        if: inputs.mode == 'deploy'
+        run: |
+          cd random
+          corepack enable
+          corepack prepare pnpm@latest --activate
+          pnpm install
+          cd packages/contracts && npx hardhat compile && cd ../..
+          pnpm --filter @gibs/games-web build
+          tar -C examples/games/web/dist -czf /tmp/games-web.tgz .
+
+      - name: upload + caddy
+        if: inputs.mode == 'deploy'
+        run: |
+          scp -i ~/.ssh/box /tmp/games-web.tgz root@88.99.62.98:/tmp/games-web.tgz
+          ssh -i ~/.ssh/box root@88.99.62.98 '
+            set -e
+            mkdir -p /var/www/games
+            tar -C /var/www/games -xzf /tmp/games-web.tgz
+            rm /tmp/games-web.tgz
+            CADDYFILE=$(find /etc/caddy /srv /root -maxdepth 4 -name Caddyfile 2>/dev/null | head -1)
+            echo "caddyfile: $CADDYFILE"
+            if ! grep -q "games.msgboard.xyz" "$CADDYFILE"; then
+              # mirror the tls cert paths the existing msgboard.xyz block uses
+              CERT=$(grep -A3 "^msgboard.xyz" "$CADDYFILE" | grep -m1 "tls " || true)
+              cp "$CADDYFILE" "$CADDYFILE.bak.games"
+              {
+                echo ""
+                echo "games.msgboard.xyz {"
+                [ -n "$CERT" ] && echo "    $CERT" | sed "s/^ *//;s/^/    /" | head -1
+                echo "    encode gzip zstd"
+                echo "    root * /var/www/games"
+                echo "    try_files {path} /index.html"
+                echo "    file_server"
+                echo "}"
+              } >> "$CADDYFILE"
+            fi
+            if docker ps --format "{{.Names}}" | grep -qi caddy; then
+              C=$(docker ps --format "{{.Names}}" | grep -i caddy | head -1)
+              docker exec "$C" caddy validate --config /etc/caddy/Caddyfile
+              docker exec "$C" caddy reload --config /etc/caddy/Caddyfile
+            else
+              caddy validate --config "$CADDYFILE"
+              systemctl reload caddy
+            fi
+            echo DEPLOYED
+          '
+
+      - name: smoke
+        if: inputs.mode == 'deploy'
+        run: |
+          sleep 3
+          curl -sS -o /dev/null -w 'games.msgboard.xyz -> %{http_code}\n' https://games.msgboard.xyz
+          curl -sS https://games.msgboard.xyz | grep -o '<title>[^<]*</title>'
