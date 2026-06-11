@@ -33,13 +33,14 @@ jobs:
         run: |
           # public repo -> public logs: print only what the deploy step needs, no full config
           ssh -i ~/.ssh/box root@88.99.62.98 '
-            CADDYFILE=$(find /etc/caddy /srv /root -maxdepth 4 -name Caddyfile 2>/dev/null | head -1)
-            echo "caddyfile-path: $CADDYFILE"
-            grep -c . "$CADDYFILE" | xargs echo "caddyfile-lines:"
-            grep -m1 -A2 "^msgboard.xyz" "$CADDYFILE" | grep -o "tls [^ ]* [^ ]*" || echo "no-tls-line-on-apex"
-            docker ps --format "{{.Names}}" | grep -i caddy || echo "caddy-not-docker"
-            systemctl is-active caddy 2>/dev/null || true
-            ls -d /var/www 2>/dev/null || echo "no-var-www"
+            C=$(docker ps --format "{{.Names}}" | grep -i caddy | head -1)
+            echo "caddy-container: $C"
+            docker inspect "$C" --format "{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}"
+            docker inspect "$C" --format "compose-dir: {{index .Config.Labels \"com.docker.compose.project.working_dir\"}}"
+            HOSTCADDY=$(docker inspect "$C" --format "{{range .Mounts}}{{.Source}} {{.Destination}}{{println}}{{end}}" | awk "\$2 ~ /Caddyfile/ {print \$1}" | head -1)
+            echo "host-caddyfile: $HOSTCADDY"
+            [ -n "$HOSTCADDY" ] && grep -m1 -A2 "^msgboard.xyz" "$HOSTCADDY" | grep -o "tls [^ ]* [^ ]*" || true
+            [ -n "$HOSTCADDY" ] && grep -c "msgboard.xyz" "$HOSTCADDY" | xargs echo "msgboard-blocks:"
           '
 
       - name: checkout games source
