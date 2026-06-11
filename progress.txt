@@ -2,7 +2,30 @@
 
 Updated: 2026-06-11
 
-## GAMES VENUE — *** PULSECHAIN MAINNET LIVE *** + PAUSE-WHEN-DRY + MSGBOARD TRAIL (2026-06-11, latest)
+## GAMES VENUE — YOUR BOOK + TREASURY HYGIENE + VERIFIED CONTRACTS (2026-06-11, latest)
+
+(random HEAD 5dbf25a; site + actors redeployed)
+- YOUR BOOK (user): per-game section for the connected wallet — every flip/round they
+  PLAYED or VALIDATED (gold "you validated" tag), with won/taken stats in the summary.
+  model/participation.ts: validation is decidable only for the canonical subset (the chain
+  stores keccak(subset); can't reverse a custom one) — fine, the site only creates
+  canonical-subset games. FlipView gains subsetHash recovered from the consumed Entered
+  events (Paired doesn't carry it). 29 web tests.
+- TREASURY HYGIENE (user: "that is a treasury wallet, not supposed to be participating in
+  games" — they saw 0xb90b4a87 = Random.cast and 0x85db7594 = Raffle.arm from account 0):
+  cast-watcher now signs casts+inks from an OPS wallet (HD index 10 =
+  0xBEb4f4991d558258ac33c8b51Cabf5296C9Fb342), bots' arms/finalises from index 11
+  (DISTINCT signers — two processes sharing one would race nonces). Both auto-top-up from
+  account 0, whose only on-chain role is now plain transfers. VAULT_FLOOR still reads the
+  treasury. HD index map now: 0 treasury, 1-3 validators, 4-8 gate players, 10 watcher-ops,
+  11 bots-ops, 20-22 bots.
+- EXPLORERS DECODE METHODS NOW: all six contracts submitted for Blockscout verification
+  (hardhat verify, customChains already in packages/contracts/hardhat.config.ts; Random
+  369 confirmed verified) + 51 new function/event signatures registered with
+  4byte.directory (28 were already known). GOTCHA: concurrent `npx hardhat verify` runs
+  contend on the project cache — run them SEQUENTIALLY.
+
+## GAMES VENUE — *** PULSECHAIN MAINNET LIVE *** + PAUSE-WHEN-DRY + MSGBOARD TRAIL (2026-06-11, earlier)
 
 MAINNET (369) IS LIVE — user funded account 0 with 1,000,000 PLS (visible ~07:00 UTC; the
 first two checks read 0 — funds were in flight). Bring-up (random HEAD f8ac2dc):
