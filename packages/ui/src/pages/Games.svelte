@@ -2,11 +2,14 @@
   import Icon from '@iconify/svelte'
   import Footer from '../components/Footer.svelte'
   import SideToc from '../components/SideToc.svelte'
+  import GamesLiveProof from '../components/GamesLiveProof.svelte'
 
   const sections = [
+    { id: 'live-proof', label: 'Live proof' },
     { id: 'what-it-is', label: 'What it is' },
     { id: 'trust-model', label: 'The trust model' },
     { id: 'how-a-draw-works', label: 'How a draw works' },
+    { id: 'why-fees-stay-low', label: 'Why fees stay low' },
     { id: 'verify-it-yourself', label: 'Verify it yourself' },
     { id: 'testnet-status', label: 'Testnet status' },
   ]
@@ -35,8 +38,9 @@
       MsgBoard <span class="bg-gradient-to-br from-amber-200 via-amber-400 to-orange-500 bg-clip-text text-transparent">Games</span>
     </h1>
     <p class="max-w-xl text-sm font-light text-gray-300 sm:text-lg">
-      A provably fair venue running on MsgBoard. Coin flips and a numbers game where every draw
-      can be re-checked in your own browser — no trust-me odds.
+      A provably fair venue, supercharged by MsgBoard. Coin flips and a numbers game where every
+      draw can be re-checked in your own browser — no trust-me odds. Don't take this page's word
+      for it either: it just did the check, live, below.
     </p>
     <div class="flex flex-wrap items-center justify-center gap-3 pt-1">
       <a
@@ -56,20 +60,23 @@
 </div>
 
 <div class="mx-auto max-w-3xl px-4 py-12 text-slate-800 dark:text-gray-200">
+  <section id="live-proof" class="scroll-mt-16">
+    <GamesLiveProof />
+  </section>
+
   <article class="games-prose">
     <h2 id="what-it-is" class="scroll-mt-16">What it is</h2>
     <p>
       <a href="https://games.msgboard.xyz" target="_blank" rel="noopener noreferrer">games.msgboard.xyz</a>
-      is a small on-chain casino with two tables: a <strong>coin flip</strong> (pick a side, get paired with
-      an opponent at the same stake, winner takes the pot) and <strong>the numbers</strong> (a raffle: commit
-      a hidden guess from 1–256, the closest revealed guess to the draw takes the pot). It runs as a venue on
-      the MsgBoard platform — MsgBoard and valve run the show; the randomness contracts are by
-      <a href="https://github.com/gibsfinance/random" target="_blank" rel="noopener noreferrer">gibs.finance</a>.
+      is a small on-chain casino with two tables: a <strong>coin flip</strong> (pick a side and a stake, get
+      paired with an opponent at the same stake, winner takes the pot) and <strong>the numbers</strong> (a
+      raffle: set a ticket price and a player count, commit a hidden guess from 1–256, the closest revealed
+      guess to the draw takes the pot). The venue is run by valve and supercharged by MsgBoard.
     </p>
     <p>
       The point of the venue is the fairness story: <em>nobody can cook the draw</em> — not the house, not the
       player across the table, not MsgBoard, and not the website. Every game settles from validator entropy
-      with the receipts to prove it.
+      with the receipts to prove it — the block above is this page re-checking the latest one in your browser.
     </p>
 
     <h2 id="trust-model" class="scroll-mt-16">The trust model</h2>
@@ -84,6 +91,11 @@
       </li>
       <li>
         The contracts <strong>pin the validator set when you enter</strong>, so it cannot be swapped afterwards.
+      </li>
+      <li>
+        <strong>Anyone can contribute randomness.</strong> The validator set is open — a player, a stranger, or
+        even the house can ink secrets and join the entropy. Don't trust anybody on the list? Add yourself: if
+        the honest validator is <em>you</em>, the draw is safe for you by construction.
       </li>
       <li>
         The house never holds a secret that decides an outcome, and the website only reads the chain — it has
@@ -114,17 +126,26 @@
       until the draw lands, so nobody can snipe your number or front-run your reveal.
     </p>
 
+    <h2 id="why-fees-stay-low" class="scroll-mt-16">Why fees stay low</h2>
+    <p>
+      Keeping a validator network coordinated usually costs gas, and that cost leaks into the odds. Here the
+      validators coordinate over <a href="#/">MsgBoard</a>, where a message costs a <strong>proof-of-work
+      stamp</strong> instead of a fee — no gas, no token, no account. The entropy pipeline runs at near-zero
+      overhead, so you aren't bled dry by fees to keep the games supplied with randomness.
+    </p>
+
     <h2 id="verify-it-yourself" class="scroll-mt-16">Verify it yourself</h2>
     <p>
       Every settled game on the site comes with a <strong>slip</strong>: your browser re-computes the outcome
-      from the on-chain seed — using the same logic that the contracts run — and stamps the result
+      from the on-chain seed — the same math the contracts run — and stamps the result
       <em>on the level</em> if it matches what the chain paid out, or <em>crooked</em> if it doesn't. The
-      verification code runs client-side; you never have to take the site's word for it.
+      verification code runs client-side; you never have to take the site's word for it. The live block at the
+      top of this page is exactly that check, running against the venue's latest settled flip.
     </p>
     <p>
       Every card also carries its provenance: real block timestamps plus links to the exact transactions and
-      blocks on the public explorer. The source of record is the chain itself — this page (on MsgBoard) is
-      just the playbook for reading it.
+      blocks on the public explorer. The source of record is the chain itself — this page is just the playbook
+      for reading it.
     </p>
 
     <h2 id="testnet-status" class="scroll-mt-16">Testnet status</h2>
@@ -151,6 +172,10 @@
       </tbody>
     </table>
     <p>
+      Source:
+      <a href="https://github.com/gibsfinance/random" target="_blank" rel="noopener noreferrer">contracts</a>
+      ·
+      <a href="https://github.com/valve-tech/msgboard" target="_blank" rel="noopener noreferrer">msgboard</a>.
       Want to watch a draw settle right now?
       <a href="https://games.msgboard.xyz" target="_blank" rel="noopener noreferrer">Pull up a chair</a>.
     </p>

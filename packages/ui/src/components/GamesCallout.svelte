@@ -20,9 +20,10 @@
         MsgBoard <span class="bg-gradient-to-br from-amber-200 via-amber-400 to-orange-500 bg-clip-text text-transparent">Games</span>
       </h2>
       <p class="max-w-2xl text-gray-300">
-        A provably fair venue running on MsgBoard: coin flips and a numbers game settled by validator
-        entropy, never by the house. Every draw ships with a receipt your browser re-checks against the
-        chain — <em class="not-italic font-semibold text-amber-300">don't trust the table, audit it</em>.
+        A provably fair venue, supercharged by MsgBoard: coin flips and a numbers game settled by validator
+        entropy, never by the house — and the validators coordinate with proof-of-work stamps instead of
+        gas, so fees don't bleed the odds. Every draw ships with a receipt your browser re-checks against
+        the chain — <em class="not-italic font-semibold text-amber-300">don't trust the table, audit it</em>.
         Live on PulseChain testnet v4 with free test PLS.
       </p>
       <div class="flex flex-wrap items-center justify-center gap-3 pt-1">
