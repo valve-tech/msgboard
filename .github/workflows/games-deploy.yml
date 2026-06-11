@@ -68,34 +68,33 @@ jobs:
           scp -i ~/.ssh/box /tmp/games-web.tgz root@88.99.62.98:/tmp/games-web.tgz
           ssh -i ~/.ssh/box root@88.99.62.98 '
             set -e
-            mkdir -p /var/www/games
-            tar -C /var/www/games -xzf /tmp/games-web.tgz
-            rm /tmp/games-web.tgz
-            CADDYFILE=$(find /etc/caddy /srv /root -maxdepth 4 -name Caddyfile 2>/dev/null | head -1)
-            echo "caddyfile: $CADDYFILE"
+            # The caddy container only bind-mounts deploy/caddy/graphiql (-> /srv/graphiql), the
+            # Caddyfile, and the origin cert. Serving from a subdir of that mount avoids editing
+            # compose and recreating the container (which would briefly drop msgboard.xyz).
+            DEST=/opt/msgboard/deploy/caddy/graphiql/games
+            CADDYFILE=/opt/msgboard/deploy/caddy/Caddyfile
+            mkdir -p "$DEST.new"
+            tar -C "$DEST.new" -xzf /tmp/games-web.tgz
+            rm -rf "$DEST.old"
+            [ -d "$DEST" ] && mv "$DEST" "$DEST.old"
+            mv "$DEST.new" "$DEST"
+            rm -f /tmp/games-web.tgz
             if ! grep -q "games.msgboard.xyz" "$CADDYFILE"; then
-              # mirror the tls cert paths the existing msgboard.xyz block uses
-              CERT=$(grep -A3 "^msgboard.xyz" "$CADDYFILE" | grep -m1 "tls " || true)
               cp "$CADDYFILE" "$CADDYFILE.bak.games"
               {
                 echo ""
                 echo "games.msgboard.xyz {"
-                [ -n "$CERT" ] && echo "    $CERT" | sed "s/^ *//;s/^/    /" | head -1
-                echo "    encode gzip zstd"
-                echo "    root * /var/www/games"
-                echo "    try_files {path} /index.html"
-                echo "    file_server"
+                echo "	tls /etc/caddy/origin.pem /etc/caddy/origin.key"
+                echo "	encode gzip zstd"
+                echo "	# host path /opt/msgboard/deploy/caddy/graphiql/games (the existing bind mount)"
+                echo "	root * /srv/graphiql/games"
+                echo "	try_files {path} /index.html"
+                echo "	file_server"
                 echo "}"
               } >> "$CADDYFILE"
             fi
-            if docker ps --format "{{.Names}}" | grep -qi caddy; then
-              C=$(docker ps --format "{{.Names}}" | grep -i caddy | head -1)
-              docker exec "$C" caddy validate --config /etc/caddy/Caddyfile
-              docker exec "$C" caddy reload --config /etc/caddy/Caddyfile
-            else
-              caddy validate --config "$CADDYFILE"
-              systemctl reload caddy
-            fi
+            docker exec caddy caddy validate --config /etc/caddy/Caddyfile
+            docker exec caddy caddy reload --config /etc/caddy/Caddyfile
             echo DEPLOYED
           '
 
