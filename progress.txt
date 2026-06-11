@@ -4,6 +4,29 @@ Updated: 2026-06-10
 
 ## GAMES PLATFORM — PLAN 2 (OFF-CHAIN) COMPLETE (2026-06-10, latest)
 
+*** games.msgboard.xyz IS LIVE (2026-06-10) *** — 200, serving the games web app on 943.
+- DNS: user added the proxied record. Box access: key in op://valve/"msgboard + faucet box";
+  op read CHOKES on '+' in item names (silently wrote an empty key file once — VALIDATE with
+  ssh-keygen -y) — use op item get by ID + json ssh_formats.openssh instead.
+- Local port-22 egress died mid-session (everything: github, valve boxes, msgboard box), so
+  deployment went through GitHub Actions: .github/workflows/games-deploy.yml in THIS repo
+  (workflow_dispatch, mode=recon|deploy; secret MSGBOARD_SSH_KEY). Runner builds
+  gibsfinance/random@games-platform (hardhat compile + pnpm build), scps the dist, appends the
+  Caddy block, validates + reloads INSIDE the caddy container.
+- Box layout (recon via docker inspect): caddy runs in docker, compose at /opt/msgboard,
+  host Caddyfile /opt/msgboard/deploy/caddy/Caddyfile, origin cert /etc/caddy/origin.{pem,key}
+  (covers subdomains). NO general web root mount — the dist lives INSIDE the existing bind
+  mount at /opt/msgboard/deploy/caddy/graphiql/games -> /srv/graphiql/games (deliberate hack:
+  a new mount would recreate the container and blip msgboard.xyz; clean up to a proper mount
+  next time the stack restarts anyway). Deploys are atomic (.new -> mv) and idempotent.
+- Verified in a real browser: only PulseChain testnet v4 offered, live block height, trust
+  banner with the 3 real validators + explorer links, empty lobby. Re-deploy any time with:
+  gh workflow run games-deploy -f mode=deploy --repo valve-tech/msgboard
+REMAINING: (1) cast-watcher currently runs only in the agent session — needs a durable home
+(the box; e.g. a small compose service or systemd unit running e2e cast-watcher with
+MNEMONIC+SEEDS0 — without it, flips/arms on 943 go stale after 12 blocks and refund);
+(2) a human browser-wallet click-through of the live site (enter a flip end to end).
+
 *** 943 LIVE GATE RUN: ALL PARITY CHECKS PASSED (2026-06-10, random HEAD b50447d) ***
 Run by the agent with op://valve/randomness (recovery phrase + seeds0 now in the valve vault).
 - CoinFlip 0x8d3a58d77d22636026066200f8868cd653ec2b2a, Raffle 0x33f506fafe4f05c8de9a07e1c8a7f73f50f1da36
