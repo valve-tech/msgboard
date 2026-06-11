@@ -9,12 +9,14 @@
   import Docs from '../components/Docs.svelte'
   import UseCases from '../components/UseCases.svelte'
   import JoinNetwork from '../components/JoinNetwork.svelte'
+  import GamesCallout from '../components/GamesCallout.svelte'
   import SideToc from '../components/SideToc.svelte'
 
   const sections = [
     { id: 'overview', label: 'Overview' },
     { id: 'try-it', label: 'Try it' },
     { id: 'use-cases', label: 'Use cases' },
+    { id: 'games', label: 'Games' },
     { id: 'api', label: 'API' },
     { id: 'network', label: 'Network' },
     { id: 'compare', label: 'Compare' },
@@ -32,6 +34,7 @@
   </FullScreen>
 </section>
 <section id="use-cases" class="scroll-mt-16"><UseCases /></section>
+<section id="games" class="scroll-mt-16"><GamesCallout /></section>
 <section id="api" class="scroll-mt-16"><Docs /></section>
 <section id="network" class="scroll-mt-16"><JoinNetwork /></section>
 <section id="compare" class="scroll-mt-16"><ProtocolComparison /></section>

@@ -6,16 +6,18 @@
 # mode=deploy : build the web app from gibsfinance/random@games-platform, upload it to
 #               /var/www/games, install the games.msgboard.xyz Caddy site block if absent,
 #               validate, and reload. Idempotent.
+# mode=site   : redeploy msgboard.xyz itself — update the repo checkout at /opt/msgboard,
+#               rebuild the ui image, and recreate only the ui service.
 name: games-deploy
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: recon (read-only survey) or deploy
+        description: recon (read-only survey), deploy, actors, or site
         required: true
         default: recon
         type: choice
-        options: [recon, deploy, actors]
+        options: [recon, deploy, actors, site]
 
 jobs:
   games:
@@ -41,7 +43,38 @@ jobs:
             echo "host-caddyfile: $HOSTCADDY"
             [ -n "$HOSTCADDY" ] && grep -m1 -A2 "^msgboard.xyz" "$HOSTCADDY" | grep -o "tls [^ ]* [^ ]*" || true
             [ -n "$HOSTCADDY" ] && grep -c "msgboard.xyz" "$HOSTCADDY" | xargs echo "msgboard-blocks:"
+            # site-mode prerequisites: is /opt/msgboard a git checkout with the prod compose file?
+            [ -d /opt/msgboard/.git ] && echo "opt-msgboard-git: yes ($(git -C /opt/msgboard rev-parse --short HEAD 2>/dev/null))" || echo "opt-msgboard-git: no"
+            ls /opt/msgboard/docker-compose.prod.yml /opt/msgboard/Dockerfile 2>/dev/null || true
+            docker ps --format "{{.Names}} {{.Image}}" | grep -i "ui\|msgboard" || true
           '
+
+      - name: site (msgboard.xyz ui)
+        if: inputs.mode == 'site'
+        run: |
+          ssh -i ~/.ssh/box root@88.99.62.98 '
+            set -e
+            cd /opt/msgboard
+            test -d .git || { echo "/opt/msgboard is not a git checkout — site mode needs one"; exit 1; }
+            git fetch origin master
+            git reset --hard origin/master
+            COMPOSE=docker-compose.prod.yml
+            test -f "$COMPOSE" || COMPOSE=docker-compose.yml
+            docker compose -f "$COMPOSE" build ui
+            docker compose -f "$COMPOSE" up -d --no-deps ui
+            sleep 5
+            docker compose -f "$COMPOSE" ps ui --format "{{.Name}} {{.State}}"
+          '
+
+      - name: site smoke
+        if: inputs.mode == 'site'
+        run: |
+          sleep 3
+          curl -sS -o /dev/null -w 'msgboard.xyz -> %{http_code}\n' https://msgboard.xyz
+          curl -sS https://msgboard.xyz | grep -o '<title>[^<]*</title>'
+          # the games page + callout ride in the SPA bundle; confirm the bundle mentions them
+          ASSET=$(curl -sS https://msgboard.xyz | grep -o 'assets/index-[^"]*\.js' | head -1)
+          curl -sS "https://msgboard.xyz/$ASSET" | grep -c "games.msgboard.xyz" | xargs echo "bundle games refs:"
 
       - name: checkout games source
         if: inputs.mode == 'deploy' || inputs.mode == 'actors'
