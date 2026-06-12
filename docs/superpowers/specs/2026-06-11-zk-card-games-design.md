@@ -282,7 +282,11 @@ Following the `examples/games/*` pattern (pnpm workspace, `@gibs/*` names):
 
 ## Open items
 
-- Spike outcome (SDK choice + measured budgets) — lands as an addendum to this spec.
+- Spike outcome (SDK choice + measured budgets) — RESOLVED 2026-06-12, see
+  `2026-06-12-zk-cards-sdk-spike-addendum.md`: Zypher zshuffle (uzkge, pinned commit),
+  Manta disqualified, Geometry priced as fallback. Carries two sign-off items
+  (shuffle budget ≤ 5 s → ≤ 12 s; GPL-3.0 posture) and two pre-mainnet blockers
+  (SRS provenance regeneration; license clarification with upstream).
 - Chess-clock parameters (per-response blocks, dispute bond if any) — proposed during contract
   design from 943 block-time data; the spec fixes the mechanism, not the numbers.
 - Ring-table spec (catalog entry 8) — written only when its turn arrives.
