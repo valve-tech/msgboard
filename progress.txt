@@ -1,8 +1,34 @@
 # MsgBoard — Progress
 
-Updated: 2026-06-11
+Updated: 2026-06-12
 
-## ZK CARD GAMES SPEC + HOMEPAGE COPY (2026-06-11, latest)
+## ZK CARDS ENGINE EXECUTED (2026-06-12, latest)
+
+(random 2bd81e3; plan docs/superpowers/plans/2026-06-12-zk-cards-engine.md, subagent-driven)
+- @gibs/zk-cards-core (examples/games/zk-core, 40 tests): cards codec; elgamal masked deck +
+  chaum-pedersen share proofs (noble secp256k1, NON-deprecated 1.9.x APIs: Pt.Fn.ORDER,
+  randomSecretKey); MaskedDeckProvider seam + v0 AttestedElGamalDeck (real hiding/share
+  soundness; shuffle = SIGNATURE-attested, not ZK — SNARK provider replaces it);
+  EIP-712 ChannelState signing (TEST_DOMAIN placeholder, contracts plan pins real domain);
+  Channel co-sign machine (conservation, nonce, tableId pinned, uint64/uint8 bounds,
+  finalize bound to pending-proposal hash — review-hardened); hash-chained own-send
+  Transcript (fromJSON RE-DERIVES head); LocalTransport w/ fault injection; dispute
+  evidence (anchored w/ tableId + transcriptHead).
+- @gibs/hilo-war (examples/games/hilo-war, 24 tests): pure rules (ante IN state, terminal
+  guard, showdown input validation, pot zeroed on decisive ends — all review-hardened) +
+  two-client session driver (keygen/double-shuffle/genesis co-sign; private deals via
+  withheld own-shares; simultaneous salted bets applied in SEAT ORDER — hashGameState is
+  key-order sensitive, cost a debug cycle; fold path sends NO reveal shares; settle splits
+  war carry, odd unit to A; peer seq monotonicity + pending-rejection map for poisoned
+  kinds). Adversarial suite: garbage shares, stall→dispute evidence, stale-state replay,
+  identity-shuffle war-carry determinism, session pipelining (table N+1 while N unsettled),
+  27-flip reshuffle conservation.
+- GOTCHA (test): corrupting the LAST byte of a 65-byte sig is corrupting v — yParity-0 sigs
+  still recover the same signer ~50% of runs. Corrupt a byte of r instead.
+- Engine runs on AttestedElGamalDeck pending the SDK spike (Zypher vs Manta zkShuffle);
+  NEXT: spike addendum, then contracts plan (ZkTable + HiLoWarRules + verifiers).
+
+## ZK CARD GAMES SPEC + HOMEPAGE COPY (2026-06-11)
 
 - ZK CARD GAMES DESIGN SPEC written, reviewed section-by-section with user, committed:
   docs/superpowers/specs/2026-06-11-zk-card-games-design.md (cf35d0a). Mental-poker rails
