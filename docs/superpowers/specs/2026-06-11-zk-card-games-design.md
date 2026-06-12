@@ -117,7 +117,9 @@ forever.
 
 The stack is chosen by a **time-boxed spike** (budget: two days) comparing Zypher's zk-shuffle SDK
 and Manta's zkShuffle on: license; audit status; browser WASM proving time for a 52-card shuffle
-(budget: ≤ 5 s on a mid laptop) and per-share proving (budget: ≤ 100 ms); Solidity verifier gas;
+(budget: ≤ 5 s on a mid laptop — AMENDED 2026-06-12 with user sign-off to ≤ 12 s on an M1-class
+machine, absorbed at hand boundaries; see the spike addendum) and per-share proving
+(budget: ≤ 100 ms); Solidity verifier gas;
 and a clean deploy on PulseChain (both stacks use BN254 pairing precompiles, which PulseChain
 inherits from Ethereum, so no precompile risk is expected — the spike confirms on 943). The spike
 lands behind a fixed `MaskedDeck` interface in `@gibs/zk-cards-core` so nothing else waits on the
@@ -284,8 +286,9 @@ Following the `examples/games/*` pattern (pnpm workspace, `@gibs/*` names):
 
 - Spike outcome (SDK choice + measured budgets) — RESOLVED 2026-06-12, see
   `2026-06-12-zk-cards-sdk-spike-addendum.md`: Zypher zshuffle (uzkge, pinned commit),
-  Manta disqualified, Geometry priced as fallback. Carries two sign-off items
-  (shuffle budget ≤ 5 s → ≤ 12 s; GPL-3.0 posture) and two pre-mainnet blockers
+  Manta disqualified, Geometry priced as fallback. Both sign-off items APPROVED
+  2026-06-12: shuffle budget amended ≤ 5 s → ≤ 12 s (bound above), GPL-3.0 posture
+  accepted (non-commercial venue; revisit if monetized). Two pre-mainnet blockers remain
   (SRS provenance regeneration; license clarification with upstream).
 - Chess-clock parameters (per-response blocks, dispute bond if any) — proposed during contract
   design from 943 block-time data; the spec fixes the mechanism, not the numbers.

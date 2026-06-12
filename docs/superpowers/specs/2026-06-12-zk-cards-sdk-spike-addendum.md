@@ -1,9 +1,13 @@
 # Spec addendum: SNARK shuffle stack selection (SDK spike outcome)
 
 Date: 2026-06-12
-Status: spike complete; recommendation recorded. Two items need sign-off before
-they bind: (1) the shuffle-budget amendment (≤ 5 s → ≤ 12 s, absorbed at hand
-boundaries), (2) the GPL-3.0 license posture for shipped wasm + verifiers.
+Status: SIGNED OFF 2026-06-12. Both items approved by the user the same day:
+(1) the shuffle-budget amendment (≤ 5 s → ≤ 12 s, absorbed at hand boundaries)
+now binds — the parent spec is amended; (2) GPL-3.0 posture accepted ("we are
+not making any money off of this") — shipping GPL-compatible is fine for the
+venue as it stands. The upstream license-contradiction clarification stays a
+pre-mainnet item, and the GPL posture must be revisited if the platform ever
+monetizes.
 Companion to `2026-06-11-zk-card-games-design.md` (resolves its "Spike outcome"
 open item). All numbers
 measured on Apple M1 / macOS 26.5.1 / Node v24.15.0, WASM in Node as the
