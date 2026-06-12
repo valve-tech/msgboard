@@ -2,7 +2,26 @@
 
 Updated: 2026-06-11
 
-## GAMES VENUE — YOUR BOOK + TREASURY HYGIENE + VERIFIED CONTRACTS (2026-06-11, latest)
+## ZK CARD GAMES SPEC + HOMEPAGE COPY (2026-06-11, latest)
+
+- ZK CARD GAMES DESIGN SPEC written, reviewed section-by-section with user, committed:
+  docs/superpowers/specs/2026-06-11-zk-card-games-design.md (cf35d0a). Mental-poker rails
+  (Barnett-Smart masked deck, SDK via 2-day spike: Zypher zk-shuffle vs Manta zkShuffle,
+  arkworks fallback) + heads-up state-channel tables (3 txs/session: create/join/settle;
+  in-round turns at message speed per user constraint; SESSION PIPELINING required — new
+  table/shuffle never waits on prior settle confirming). Relay = untrusted fast pipe in
+  packages/relayer; MsgBoard mirror = permanent record (32-byte-hex categories). NO
+  validator entropy — deck order is the players' joint shuffle (new trust model, hence new
+  contract family ZkTable + per-game rules contracts, NOT GameBase). Catalog of 9 games
+  rated; build order Hi-Lo War -> heads-up hold'em -> house blackjack; ring poker deferred
+  to its own spec. First build Hi-Lo War = "Kuhn poker in War clothing" (private deal,
+  simultaneous raise/hold commits, hidden folds, war-pot ties). User approved all sections;
+  spec awaiting user read-through, then writing-plans.
+- HOMEPAGE COPY (user): softened the absolute PoW claim in SalesPitch.svelte — "keeps the
+  board spam-free" -> "regulates what gets on the board" (eef25e8). Site redeployed via
+  games-deploy mode=site (run 27386849996) and VERIFIED live in the served bundle.
+
+## GAMES VENUE — YOUR BOOK + TREASURY HYGIENE + VERIFIED CONTRACTS (2026-06-11)
 
 (random HEAD 5dbf25a; site + actors redeployed)
 - YOUR BOOK (user): per-game section for the connected wallet — every flip/round they
@@ -382,7 +401,7 @@ special-case $RANDOM and silently mangle it.
 REMAINING (operator action): run it for real — MNEMONIC="$(op read ...)" RPC=<valve.city
 endpoint> pnpm gate, from examples/games/e2e. The run log self-appends to the README.
 
-## GAMES PLATFORM — EXECUTION IN PROGRESS (subagent-driven, 2026-06-09, latest)
+## GAMES PLATFORM — EXECUTION IN PROGRESS (subagent-driven, 2026-06-09)
 
 Executing the two plans via subagent-driven-development. The CONTRACT work lives in the
 gibsfinance/random repo on branch `games-platform` (pushed to origin). Stopped mid-run at the
