@@ -2,7 +2,18 @@
 
 Updated: 2026-06-12
 
-## SDK SPIKE COMPLETE — ZYPHER ZSHUFFLE SELECTED (2026-06-12, latest)
+## SPIKE SIGN-OFF RECORDED (2026-06-12, latest)
+
+- USER SIGNED OFF both blocking items from the SDK spike addendum: (1) shuffle proving
+  budget amended ≤ 5 s → ≤ 12 s (M1-class, absorbed at hand boundaries — design spec
+  budget line updated); (2) GPL-3.0 posture ACCEPTED — "we are not making any money off
+  of this"; revisit if the platform ever monetizes. Addendum status flipped to SIGNED OFF.
+- Pre-mainnet blockers UNCHANGED: regenerate KZG SRS from a public ceremony; clarify the
+  npm-MIT/source-GPL/Solidity-UNLICENSED contradiction with Zypher upstream; no audits.
+- Zypher zshuffle decision now BINDS. Next: contracts plan (ZkTable + HiLoWarRules +
+  pinned-uzkge verifiers, calldata-shaped wrapper like the spike's Harness.sol).
+
+## SDK SPIKE COMPLETE — ZYPHER ZSHUFFLE SELECTED (2026-06-12)
 
 (addendum docs/superpowers/specs/2026-06-12-zk-cards-sdk-spike-addendum.md; bench code +
 README in ~/Documents/gibs-finance/spike-zk-shuffle/ on this box, NOT committed)
