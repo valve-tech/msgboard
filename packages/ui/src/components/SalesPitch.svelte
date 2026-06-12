@@ -39,7 +39,7 @@
     </div>
     <h3 class="text-2xl font-semibold mb-4 text-slate-800 dark:text-gray-100">Paid in Work</h3>
     <p class="text-base leading-relaxed text-slate-600 dark:text-gray-300">
-      You mint a proof-of-work <span class="font-medium text-emerald-600 dark:text-emerald-400">stamp</span> for each message — that stamp is what keeps the board spam-free.
+      You mint a proof-of-work <span class="font-medium text-emerald-600 dark:text-emerald-400">stamp</span> for each message — that stamp regulates what gets on the board.
     </p>
   </div>
 </div>
