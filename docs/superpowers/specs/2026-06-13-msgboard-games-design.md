@@ -72,7 +72,16 @@ A state is valid only when carrying both signatures (player + house). Money move
 ### 4.2 Randomness — participant commit-reveal (v1)
 No on-chain randomness. The house pre-commits a **server-seed hash chain**: it draws `seed_N`, computes `h_i = H(h_{i+1})` down to `h_0`, and publishes `h_0` as `rngCommit` in the opening state. Per round it reveals the next `seed_i` in reverse; each reveal verifies against the previously-published hash, so the house cannot retroactively choose a seed. The player contributes a **client seed** + per-round nonce. The round result is `keccak256(serverSeed, clientSeed, nonce)` mapped by the game's rules. Because the server seed for a round is committed before the player's client seed is fixed and the client seed is unknown to the house when it commits the chain, neither side can grind a small-output result — the same property the beacon spec proves it needs, achieved here between the two participants without a validator. The house reveals consumed server seeds (per round or at settle) so the player verifies fairness exactly as on `morbius.io`.
 
-### 4.3 Deferred entropy upgrades
+### 4.3 Session keys — in-memory signing, no per-turn wallet popups
+A co-signed `SessionState` per round would mean a wallet-signature popup per round if signed by the user's main wallet — fatal to instant play. Instead each side signs with an **in-memory session key** (a fresh ephemeral keypair held in the tab, never the main wallet key), the standard delegated-signing-key pattern:
+
+- At session open the user authorizes the session key **once** with a single wallet signature/tx: *"session key K may act for me at table T, up to escrow E, until expiry X."* Thereafter every per-round co-signature is produced by K automatically — no popup, instant.
+- On-chain, settlement/dispute verify signatures against the **authorized session key**, and the one-time wallet authorization binds it. A leaked session key risks only that session's escrow/expiry window, never the wallet.
+- The house signs with its own hot session key (the signer ≠ settler split, §14). The wallet only reappears for principal-moving actions: the open authorization and settlement (which the relayer can sponsor, §7).
+
+This is already latent in the rails: `ZkTable` separates the channel signing key from the wallet (`keyA`/`keyB`, set via a `channelKey` at create/join), and `HouseChannel.open` records the authorized session key the same way. In the off-chain substrate the player/house `Signer` is just `{ address, signTypedData/signMessage }`, so an in-memory key (e.g. viem `privateKeyToAccount`) is a drop-in signer — the substrate needs no special support; the authorization + on-chain key-binding live in the settlement plan and the UI's one-time "authorize session key" step.
+
+### 4.4 Deferred entropy upgrades
 A MsgBoard-sourced or validator-beacon entropy input is reachable later behind the same per-round seed interface (e.g., fold a board-derived value into the round hash) without changing the session model. Out of scope for v1 by explicit decision.
 
 ## 5. Games and rules modules
