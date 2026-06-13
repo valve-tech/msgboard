@@ -2,7 +2,41 @@
 
 Updated: 2026-06-13
 
-## ZK CARDS CONTRACTS EXECUTED (2026-06-13, latest)
+## MSGBOARD GAMES — PLAN 1 (SESSION + BROADCAST SUBSTRATE) EXECUTED (2026-06-13, latest)
+
+(random repo, branch games-platform, commits 45e0121..6c0447a — HEAD 6c0447a; plan
+docs/superpowers/plans/2026-06-13-msgboard-games-session-substrate.md; subagent-driven.
+NOTE: these random-repo commits are NOT yet pushed — this session's ssh-agent is locked;
+push games-platform from a live shell.)
+- New package @gibs/msgboard-games (examples/games/msgboard-games): the OFF-CHAIN broadcast/
+  session substrate for instant player-vs-house games. 35 vitest tests green, typecheck clean,
+  demo runs both games and verifies each transcript from scratch. NO on-chain code (settlement
+  is Plan 2). Built on the design spec 2026-06-13-msgboard-games-design.md.
+- Pieces: SessionState (EIP-712, hash/sign/verify); server-seed hash-chain RNG
+  (buildSeedChain/verifyReveal/roundRandom, pre-committed head + reveal-against-prior-link);
+  Game seam + Dice (mult=99/target, target 54.50%→1.81×) and Limbo (winChance=99/target,
+  target 5×→19.80%) — morbius-matched, all bigint fixed-point; Transport (in-memory
+  LocalTransport + thin MsgBoardTransport over @msgboard/sdk, per-table categoryHash);
+  hash-chained retained Transcript; HouseSession two-party driver + verifyFinishedSession
+  (re-verifies chain links, envelope sigs, seed reveals, recomputed outcomes, AND both EIP-712
+  co-signatures from the transcript JSON alone — the §2 "ephemeral board, retained evidence"
+  property).
+- Reviews: deep code-review of the session driver (APPROVED) caught that co-sigs lived only in
+  an in-memory Map → now embedded in OPEN/ROUND envelope bodies and verified on replay (closed
+  a real §2 gap). Final whole-package review: READY-TO-MERGE.
+- Plan bugs caught + fixed during execution (plan doc annotated): (1) rng.ts/test need `!` on
+  indexed access under noUncheckedIndexedAccess (the flag was wrongly dropped, then restored);
+  (2) gameStateHash must be keccak256(encodeRound(...)) — a bytes32 — not the 128-byte
+  encodeRound output; (3) Limbo upper-bound target guard added for symmetry with Dice.
+- Open follow-ups (non-blocking, per final review): constrain Game<TParams extends
+  Record<string, bigint>> so serializeParams/deserializeParams are type-safe before a non-bigint
+  param game is added; the live MsgBoard posting path needs the SDK PoW (doPoW) step before
+  addMessage (out of scope for the substrate; wire it when a live multi-machine run is built).
+- Spec amended this session: §4.3 added — in-memory session keys (one wallet authorization, no
+  per-turn popups; the channel-key-≠-wallet pattern already in ZkTable). NEXT: Plan 2 (settlement
+  seam + optimistic + escrowed backends).
+
+## ZK CARDS CONTRACTS EXECUTED (2026-06-13)
 
 (random repo, branch games-platform, plan docs/superpowers/plans/2026-06-12-zk-cards-contracts.md;
 contracts work bf4624e..f38fa5b — HEAD f38fa5b. NOTE: local commits NOT yet pushed — this
