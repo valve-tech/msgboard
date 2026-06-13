@@ -1257,3 +1257,13 @@ git commit -m "feat(msgboard-games): demo script + README; substrate complete (d
 - **Type consistency:** `SessionState` field names/order match between the header tuple, `SESSION_STATE_TYPES`, `sessionState.ts`, and `session.ts`. `Game.settleRound` returns `RoundOutcome { playerDelta, win, multiplierX100 }` and is consumed with those exact names in `session.ts` and the verifier. `gameId` 1=dice / 2=limbo consistent across `dice.ts`, `limbo.ts`, and the header. `Transport` interface identical across `transport.ts`, `LocalTransport`, and `MsgBoardTransport`.
 - **MsgBoard SDK risk isolated to Task 8** with an explicit inspect-first step; the rest of the package has no `@msgboard/sdk` dependency, so the substrate and games are fully testable regardless of the live board.
 - **Fixed-point/no-floats:** all Dice/Limbo math is bigint in hundredths; reference values (`181`, `198`, `1980`) are hand-checked against the morbius screenshots in the test assertions.
+
+## Execution corrections (applied during build, 2026-06-13)
+
+Three fixes were applied while executing this plan; the committed code (random `45e0121..6c0447a`) is correct, and this section records the deltas vs the task code above so a re-run matches:
+
+1. **Task 3 — `noUncheckedIndexedAccess`.** The package `tsconfig.json` keeps `"noUncheckedIndexedAccess": true` (as Task 1 sets it). Under it, variable array indexing yields `T | undefined`, so `rng.ts` line `seeds[i] = keccak256(seeds[i + 1])` needs `seeds[i + 1]!`, and `rng.test.ts` needs `!` on `chain.seeds[i]`, `chain.seeds[i - 1]`, `chain.seeds[1]`, `chain.seeds[2]`. (The flag must NOT be dropped.)
+2. **Task 9 — `gameStateHash`.** `encodeRound(...)` returns a multi-word ABI encoding (128 bytes), not a `bytes32`. `playRound` must set `gameStateHash = keccak256(this.cfg.game.encodeRound(...))`. Additionally, the per-round co-signatures are embedded in the OPEN/ROUND envelope bodies (`sigs: { player, house }`), and `verifyFinishedSession` takes `domain` in its `VerifyContext`, cross-checks `rngCommit` against the OPEN body, reconstructs each `SessionState`, and verifies both EIP-712 co-signatures — so the retained transcript alone proves mutual consent (spec §2). The `stateHash` body field from the task code is replaced by the embedded `sigs`.
+3. **Limbo upper bound.** `limbo.settleRound` also rejects `targetX100 > 99_000_000n` (`MAX_TARGET = ONE_MINUS_EDGE_X100 * U_SPACE`), symmetric with Dice's `MAX_TARGET`.
+
+Non-blocking follow-ups (final review): constrain `Game<TParams extends Record<string, bigint>>` for type-safe param (de)serialization before adding a non-bigint-param game; wire the SDK PoW (`doPoW`) step into the live MsgBoard posting path when a multi-machine run is built.
