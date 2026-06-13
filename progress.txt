@@ -1,8 +1,48 @@
 # MsgBoard — Progress
 
-Updated: 2026-06-12
+Updated: 2026-06-13
 
-## SPIKE SIGN-OFF RECORDED (2026-06-12, latest)
+## ZK CARDS CONTRACTS EXECUTED (2026-06-13, latest)
+
+(random repo, branch games-platform, plan docs/superpowers/plans/2026-06-12-zk-cards-contracts.md;
+contracts work bf4624e..f38fa5b — HEAD f38fa5b. NOTE: local commits NOT yet pushed — this
+session's ssh-agent was locked ("communication with agent failed"); push games-platform from
+a live shell: git push ssh://git@ssh.github.com:443/gibsfinance/random.git games-platform)
+- ZkTable (packages/contracts/contracts/zk/): game-agnostic two-party state-channel card
+  table — escrow + EIP-712 co-signed ChannelState verification + the dispute machine. Honest
+  path is 3 tx (create/join/settle), never pays proof gas. Delegates transition legality to a
+  per-table IGameRules chosen at create (no owner, no registry — joiner accepts by joining).
+  Disputes answered by higher-nonce co-signed state, demanded move (rules-validated), or
+  demanded reveal share (Groth16 snark-reveal ONLY — RevealVerifier; CP-DL on-chain banned at
+  15.6M gas). Chess clock RESOLVED: creator-set clockBlocks, bounds 30..60480 (~5min..~1wk),
+  default 360, no dispute bond v1 (forfeit-of-pot is the deterrent). Solady EIP712 (OZ 5.6's
+  Strings->Bytes uses MCOPY; 943 is pre-cancun).
+- HiLoWarRules (game id 1): pure mirror of @gibs/hilo-war applyMove, consulted only by the
+  dispute machine. TS module is normative; parity fuzz is the arbiter.
+- Vendored uzkge verifiers @ pinned 2ae729db (contracts/vendor/uzkge/, VENDOR.md records the
+  pin/GPL-3.0 posture/pre-mainnet blockers) + calldata-shaped ShuffleVerifier52 wrapper
+  (1.57M gas vs the demo's 2.09M+4.76M staging). The pin is a consensus constant.
+- JSON-hash debt PAID: @gibs/hilo-war hashGameState now abi-encodes the canonical 16-field
+  HiLoState tuple (encoding.ts); @gibs/zk-cards-core entryDigest is abi-structured
+  (recomputable on-chain); makeDomain(chainId, addr) pins the real EIP-712 domain
+  ("ZkTable","1"). Both sides parity-tested against the Solidity.
+- TASKS 10+11 (this session): ZkCards ignition module (6 contracts, smoke-deployed on hardhat,
+  ~11.6M one-time gas) + contracts README "ZK cards contracts" section (78637bc). Foundry 1.6's
+  table-test feature was misclassifying ZkTable's `tables(bytes32)` public getter as a
+  fixtureless table test — fixed by anchored no_match_contract='^ZkTable$' in the default
+  profile (f38fa5b); the production contract has no real foundry tests (suites are
+  ZkTableFuzzTest/ZkTableInvariantTest/ZkTableHandler).
+- VERIFICATION (2026-06-13): contracts hardhat 275 passing; foundry default 22 passing (7
+  suites); foundry zk profile (ShuffleVerifier52) 4 passing. TS: zk-core 47 passing + typecheck
+  clean; hilo-war 30 passing + typecheck clean. e2e parity harness is node-gated (needs a live
+  anvil at 127.0.0.1:8545 — raffle/coinflip integration, NOT zk-cards scope); confirmed nothing
+  imports the old JSON hashes (clean grep), typecheck clean. Everything green except the
+  node-gated e2e harness (precondition, not a regression).
+- NOT in this plan (later plans): Zypher wasm MaskedDeckProvider adapter, relay/mirror, web UI,
+  bots, 943/369 deploys. NEXT after the push: recreate the game(s) from the user's reference
+  video (IMG_2259.MP4) in contracts + games.msgboard.xyz UI.
+
+## SPIKE SIGN-OFF RECORDED (2026-06-12)
 
 - USER SIGNED OFF both blocking items from the SDK spike addendum: (1) shuffle proving
   budget amended ≤ 5 s → ≤ 12 s (M1-class, absorbed at hand boundaries — design spec

@@ -290,6 +290,11 @@ Following the `examples/games/*` pattern (pnpm workspace, `@gibs/*` names):
   2026-06-12: shuffle budget amended ≤ 5 s → ≤ 12 s (bound above), GPL-3.0 posture
   accepted (non-commercial venue; revisit if monetized). Two pre-mainnet blockers remain
   (SRS provenance regeneration; license clarification with upstream).
-- Chess-clock parameters (per-response blocks, dispute bond if any) — proposed during contract
-  design from 943 block-time data; the spec fixes the mechanism, not the numbers.
+- Chess-clock parameters (per-response blocks, dispute bond if any) — RESOLVED 2026-06-13,
+  see `docs/superpowers/plans/2026-06-12-zk-cards-contracts.md` (design decision 1). The
+  creator sets `clockBlocks` per table at `create`, bounded `MIN_CLOCK_BLOCKS = 30`
+  (~5 min at 943's ~10 s blocks) to `MAX_CLOCK_BLOCKS = 60480` (~1 week); suggested client
+  default 360 (~1 hour). No dispute bond in v1 — forfeit of the disputed pot is the
+  griefing deterrent. Implemented and tested in `ZkTable` (BadClock guard + chess-clock
+  forfeit path).
 - Ring-table spec (catalog entry 8) — written only when its turn arrives.

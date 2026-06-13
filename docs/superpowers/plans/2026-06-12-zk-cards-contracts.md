@@ -1037,7 +1037,7 @@ Write these as concrete tests (decode returned bytes with viem `decodeAbiParamet
 
 - [ ] **Step 3: Run** — `cd packages/contracts && npx hardhat test test/HiLoWarRules.test.ts` → green after fixes.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add contracts/zk/HiLoWarRules.sol test/HiLoWarRules.test.ts
@@ -1507,7 +1507,7 @@ git commit -m "test(contracts): foundry fuzz + escrow-conservation invariants fo
 - Create: `packages/contracts/ignition/modules/ZkCards.ts`
 - Modify: `packages/contracts/README.md` (if present — else the contracts section of the repo README; check first)
 
-- [ ] **Step 1: Write the module** (mirror the style of `ignition/modules/CoinFlip.ts` — read it first):
+- [x] **Step 1: Write the module** (mirror the style of `ignition/modules/CoinFlip.ts` — read it first):
 
 ```ts
 import { buildModule } from '@nomicfoundation/hardhat-ignition/modules'
@@ -1526,14 +1526,14 @@ export default buildModule('ZkCards', (m) => {
 })
 ```
 
-- [ ] **Step 2: Smoke-deploy on the hardhat network**
+- [x] **Step 2: Smoke-deploy on the hardhat network**
 
 Run: `cd packages/contracts && npx hardhat ignition deploy ignition/modules/ZkCards.ts`
 Expected: six deploys succeed. (943/369 deploys are the NEXT plan — do not deploy anywhere real here.)
 
-- [ ] **Step 3: Document.** Add a short "ZK cards contracts" section wherever this package documents its contract families (check for `packages/contracts/README.md`): the ZkTable/IGameRules/HiLoWarRules split, the vendored-verifier pin + VENDOR.md pointer, the snark-reveal-only dispute rule, the clock bounds, and that the EIP-712 domain is `("ZkTable", "1", chainId, zkTableAddress)` consumed off-chain via `makeDomain`.
+- [x] **Step 3: Document.** Add a short "ZK cards contracts" section wherever this package documents its contract families (check for `packages/contracts/README.md`): the ZkTable/IGameRules/HiLoWarRules split, the vendored-verifier pin + VENDOR.md pointer, the snark-reveal-only dispute rule, the clock bounds, and that the EIP-712 domain is `("ZkTable", "1", chainId, zkTableAddress)` consumed off-chain via `makeDomain`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add ignition/modules/ZkCards.ts README.md
@@ -1544,7 +1544,7 @@ git commit -m "feat(contracts): ZkCards ignition module + docs"
 
 ### Task 11: Full verification + records
 
-- [ ] **Step 1: Full test sweep**
+- [x] **Step 1: Full test sweep**
 
 ```bash
 cd ~/Documents/gibs-finance/random/packages/contracts && npm run test && forge test
@@ -1562,7 +1562,7 @@ cd ~/Documents/gibs-finance/random
 git push ssh://git@ssh.github.com:443/gibsfinance/random.git games-platform
 ```
 
-- [ ] **Step 3: Update the design spec's open item** (msgboard repo): in `docs/superpowers/specs/2026-06-11-zk-card-games-design.md` "Open items", mark the chess-clock item RESOLVED with the chosen mechanism (creator-set `clockBlocks`, bounds 30–60480, suggested default 360, no dispute bond in v1) and a pointer to this plan.
+- [x] **Step 3: Update the design spec's open item** (msgboard repo): in `docs/superpowers/specs/2026-06-11-zk-card-games-design.md` "Open items", mark the chess-clock item RESOLVED with the chosen mechanism (creator-set `clockBlocks`, bounds 30–60480, suggested default 360, no dispute bond in v1) and a pointer to this plan.
 
 - [ ] **Step 4: Append the progress entry** (msgboard `progress.txt`, newest-first section at top): contracts plan executed — ZkTable/HiLoWarRules/vendored-verifier summary, parity-fuzz + invariant status, the JSON-hash debt paid (entryDigest abi-structured; hashGameState abi-encoded), commit hashes for both repos. Commit + push msgboard (`master`, signed, ssh over 443).
 
