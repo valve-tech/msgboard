@@ -2,7 +2,64 @@
 
 Updated: 2026-06-13
 
-## MSGBOARD GAMES — PLAN 1 (SESSION + BROADCAST SUBSTRATE) EXECUTED (2026-06-13, latest)
+## MSGBOARD GAMES — PLAN 2 (SETTLEMENT SEAM + OPTIMISTIC + ESCROWED) EXECUTED (2026-06-13, latest)
+
+(random repo, branch games-platform, commits 971dcef..d8c67bc on top of Plan 1's 6c0447a —
+HEAD d8c67bc; plan docs/superpowers/plans/2026-06-13-msgboard-games-settlement.md; subagent-driven,
+fresh implementer + spec + code-quality review per task, final holistic review = READY TO MERGE.
+NOTE: random-repo commits NOT yet pushed — push games-platform from a live shell.)
+- On-chain settlement for the Plan-1 sessions, under two interchangeable signature-adjudicated
+  backends (design spec 2026-06-13-msgboard-games-design.md §6.1/§6.2/§10/§12). Both pay out the
+  co-signed balances directly — they never recompute a round, so NO on-chain game-rules mirror in
+  this plan (that's the ZK plan, §13 plan 5).
+- Contracts (packages/contracts/contracts/games/, solc 0.8.25 viaIR shanghai, Solady EIP712/ECDSA/
+  SafeTransferLib/ERC20/Ownable, mirroring ZkTable):
+  - SessionState.sol — on-chain mirror of the Plan-1 EIP-712 tuple + abstract SessionStateEIP712
+    base (domain "MsgBoardGames"/"1"); the deferred Plan-1 TS<->Solidity stateDigest parity test now
+    landed (test/SessionStateSig.test.ts).
+  - Chips.sol — mintable ERC20 unit of account.
+  - HouseBankroll.sol (optimistic, §6.1) — shared deposit keyed by the session signing key, settle
+    (open+final, 4 sigs) moves only the net delta, INCREMENTAL baseline (re-settle at a higher nonce
+    moves only the increment — fixed a double-settlement value-loss bug caught in review), highest-
+    nonce-wins, both-sigs-required.
+  - HouseChannel.sol (escrowed, §6.2) — house pre-funds a pool; player open(OpenTerms, houseSig)
+    escrows own chips + reserves house escrow (one player tx, house authorizes off-chain); cooperative
+    settle from escrow (terminal, no double-pay); dispute/respondWithState/resolveTimeout chess-clock
+    forfeit (ZkTable pattern minus deck/pot/rules); payout to the opening wallet.
+  - Ignition module MsgBoardGames.ts (deploys all three; dry-run deploy verified).
+- Off-chain @gibs/msgboard-settle (examples/games/msgboard-settle): the Settlement seam; replaySession
+  (reconstructs open+final co-signed states from a retained transcript ALONE, re-verifying chain links,
+  seed reveals, recomputed outcomes, AND both EIP-712 co-sigs at every nonce — the §2 ephemerality
+  property; throws on tamper); OptimisticSettlement/EscrowedSettlement viem-calldata builders;
+  signOpenTerms + OPEN_TERMS_TYPES (field order matches OpenTermsLib.TYPEHASH).
+- Tests all green: Foundry 21 (SessionStateDigest 2, Chips 3, HouseBankroll 7, HouseChannel 9),
+  Hardhat 3 (SessionState parity 1, E2E 2 — off-chain HouseSession played then settled on-chain under
+  BOTH backends from transcript.toJSON() alone), msgboard-settle vitest 6 + typecheck, Plan-1
+  substrate 35 still green.
+- Scoping decisions (in the plan + READMEs): backends adjudicate by signature not rules (no on-chain
+  rules mirror here); optimistic deposits keyed by session key (wallet-bound SessionAuth is a noted
+  follow-up; escrowed binds payout to the opening wallet for the hard guarantee); dispute is co-signed-
+  state + chess-clock only. Dev-only workspace cycle (settle imports @gibs/random artifacts; contracts
+  devDeps settle for the E2E) — resolved by build-before-test. NEXT: Plan 3 (async settlement relayer).
+
+## MSGBOARD COSIGN SDK — DESIGN SPEC DRAFTED (2026-06-13, awaiting user spec review)
+
+(msgboard repo; spec docs/superpowers/specs/2026-06-13-msgboard-cosign-sdk-design.md, committed 2bf0845.
+Brainstormed this session; sub-project 1 of a 2-part effort. NOT yet planned/implemented — pending the
+user's spec review before writing-plans.)
+- @msgboard/cosign — a generic signature-share SDK: rotating day-bucketed category keys
+  (keccak256('namespace:scope:isoDate')) + a canonical ABI SignatureRecord codec + post/read/aggregate
+  over a board client + a pluggable multisig adapter (verify/order/owner-reads). First adapter targets
+  Wonderland's multisig, shipping STUBBED. Pure board+crypto (two-store model); no chain writes.
+- Sub-project 2 (separate spec, not yet written): the cosign ARCHIVIST — a hosted service like
+  archive.msgboard.xyz but a NARROW, structured, short-window (7-day rolling) self-hostable working-set
+  index: imports cosign's keys + codec, multi-category source + decoding/filtering sink + SQLite store
+  + an HTTP domain query API, with registry-enumerated category tracking (teams × last-7-days). Cold-
+  start fallback to archive.msgboard.xyz and on-board team discovery are deferred. Differentiator vs
+  archive.msgboard.xyz: selective (not catch-all), structured decode (not text-only), validated-at-
+  ingest, tight retention, self-hostable SQLite.
+
+## MSGBOARD GAMES — PLAN 1 (SESSION + BROADCAST SUBSTRATE) EXECUTED (2026-06-13)
 
 (random repo, branch games-platform, commits 45e0121..6c0447a — HEAD 6c0447a; plan
 docs/superpowers/plans/2026-06-13-msgboard-games-session-substrate.md; subagent-driven.
