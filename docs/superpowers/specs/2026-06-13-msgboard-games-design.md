@@ -18,7 +18,7 @@ Two things are being shown off, deliberately:
 1. **MsgBoard as a direct broadcast bus** — you publish your own step (a ZK input, a turn's result, or a signature proving intent) and the whole world can see and act on it, with no relay deciding delivery.
 2. **ZK proofs** — both for hidden-state games and as a settlement *compressor* that lets one proof settle a whole batch of rounds trustlessly.
 
-The same game can settle under one of three interchangeable trust models — chosen per session by **what the house has in its coffers** and **what the user is willing to do** — behind a single settlement seam.
+The same game can settle under one of three interchangeable trust models — chosen per session by **the trust, privacy, and effort the user wants** (and whether the house chooses to lock escrow) — behind a single settlement seam.
 
 ## 2. Two stores, different trust assumptions; cryptography is king (load-bearing)
 
@@ -45,7 +45,8 @@ This section governs the rest of the design. The platform does not push one stre
 ### Non-goals (this design)
 - On-chain or MsgBoard-sourced randomness in v1 — randomness is participant commit-reveal ("just the players involved"); a board/beacon entropy source is a later upgrade (§4.3).
 - Treating MsgBoard as durable storage, a mempool replacement, or an ordering oracle.
-- Matchmaking/lobby UX beyond canonical presets, spectating, tournaments, ERC-20 stakes, and a governance multisig (native token + plain owner in v1, behind swappable interfaces as the existing specs do).
+- Matchmaking/lobby UX beyond canonical presets, spectating, tournaments, and a governance multisig (plain owner in v1, behind swappable interfaces as the existing specs do).
+- Chip tokenomics — peg, supply policy, cross-chain value, mint/faucet authority. Chips are a mintable per-chain ERC20 *unit of account* here; how they acquire and hold value is a separate decision.
 - Re-implementing the validator-beacon games; they coexist unchanged.
 
 ## 4. The session and state model (game-agnostic)
@@ -92,7 +93,7 @@ The existing card games (Hi-Lo War; Poker/Blackjack later) are the hidden-state 
 
 ## 6. The settlement seam (the variable)
 
-A single interface; three implementations selectable per session. Selection is a function of **house coffers** (how much, if anything, the house can lock) and **user willingness** (trust/gas/effort the player accepts). The session's `settlementMode` records the choice.
+A single interface; three implementations selectable per session. **Chips are a mintable per-chain ERC20 accounting unit** (the platform can mint to pay), so house solvency and per-session max-exposure are *not* what picks the mode — `stake × max-multiplier` is never a capital constraint. Selection is purely a **trust / UX / privacy** choice (and "what the user is willing to do"): optimistic for instant-and-trusting, escrowed for trustless-within-escrow, ZK for private and/or unilateral. The session's `settlementMode` records the choice. (What gives chips their *value* — peg, supply policy, tokenomics — is out of scope here per §3; this design treats chips as the unit of account.)
 
 ```ts
 interface Settlement {
@@ -103,16 +104,21 @@ interface Settlement {
 }
 ```
 
-### 6.1 Optimistic (thin coffers / trusting user)
-No *per-table* escrow, but not no backing: the player holds a **shared deposited balance** in the House bankroll (deposited once, drawn against by many sessions), and the house holds its bankroll — so a player can never lose more than deposited and the house can never owe more than its bankroll. Player and house exchange co-signed round receipts (broadcast on the board, retained locally). The settlement worker (or either party) submits the latest co-signed net delta to the bankroll, which pays the net between the two balances. Two safety rules carry it: both-signatures-required, and **highest-co-signed-nonce-wins** (a party submitting a stale favorable state is overridden by the counterparty's retained higher-nonce state). What "optimistic" gives up vs §6.2 is the *per-table forfeit clock* — there is no on-chain timer forcing a stalled session closed, so the residual exposure is settlement *timing* and reliance on bankroll solvency, not principal. Suited to small stakes and the demo path; the purest MsgBoard story. House coffers needed: only the standing bankroll, no per-table lock.
+### 6.1 Optimistic (no per-table lock / trusting user)
+No *per-table* escrow, but not no backing: the player holds a **shared deposited balance** in the House bankroll (deposited once, drawn against by many sessions) so a player can never lose more than deposited. Player and house exchange co-signed round receipts (broadcast on the board, retained locally). The settlement worker (or either party) submits the latest co-signed net delta to the bankroll, which pays the net between the two balances. Two safety rules carry it: both-signatures-required, and **highest-co-signed-nonce-wins** (a party submitting a stale favorable state is overridden by the counterparty's retained higher-nonce state). What "optimistic" gives up vs §6.2 is the *per-table forfeit clock* — there is no on-chain timer forcing a stalled session closed, so the residual exposure is settlement *timing* and reliance on the house actually paying (it can mint, so this is a willingness-to-honor trust, not a solvency one), never the player's principal. Suited to small stakes and the demo path; the purest MsgBoard story.
 
-### 6.2 Escrowed channel (house has coffers / user wants a guarantee)
-A `HouseChannel` contract: both sides escrow at `open`; play is co-signed states; `settle` submits the final both-signed state and pays from escrow; `dispute` lets either party post **its retained** latest co-signed state and, where the game requires it, the demanded revealed server-seed, with a chess-clock forfeit of the disputed amount on non-response (the `ZkTable` dispute pattern, minus the shuffle machinery). Trustless within the escrowed amount. House coffers needed: per-table escrow.
+### 6.2 Escrowed channel (per-table lock / user wants a guarantee)
+A `HouseChannel` contract: both sides escrow at `open`; play is co-signed states; `settle` submits the final both-signed state and pays from escrow; `dispute` lets either party post **its retained** latest co-signed state and, where the game requires it, the demanded revealed server-seed, with a chess-clock forfeit of the disputed amount on non-response (the `ZkTable` dispute pattern, minus the shuffle machinery). Trustless within the escrowed amount — the player needs no trust that the house will pay, since the funds are already locked. The house locks per-table escrow (cheap, since it can mint the chips it locks).
 
-### 6.3 ZK-proven (showcase ZK / hidden state / batched trustless settle)
+### 6.3 ZK-proven (showcase ZK / hidden state / private + unilateral RNG)
 Two uses of one corner:
 - **Hidden-state games (cards):** settle through the **existing `ZkTable` rails** — the shuffle/reveal verifiers and `IGameRules` already shipped. No new contract; Hi-Lo War is the worked example, Poker/Blackjack are future `IGameRules`.
-- **RNG batched settlement:** a **batch-validity proof** attests "these N co-signed rounds, against server-seed chain head `rngCommit` and the players' client seeds, net to delta D, with every revealed seed consistent with the chain" — so the bankroll settles a whole batch with **one** proof and no per-round signature replay on-chain. Verified by a Groth16 verifier (the vendored uzkge Groth16 path is the reuse candidate; the circuit itself is new work and is the heaviest single piece of this spec). This is both the "really cool ZK" showcase and the strongest async-settle compressor.
+- **RNG batch-validity proof.** One circuit, verified by the **vendored Plonk verifier** (universal KZG setup — no per-circuit ceremony; the SRS-provenance pre-mainnet blocker in VENDOR.md is shared with the card games and resolved once, not per circuit). The circuit proves: *from a committed opening balance, a sequence of N rounds — each a fair draw `result = f(serverSeed_i, clientSeed_i, nonce_i)` against the pre-committed server-seed chain head `rngCommit`, every stake/payout obeying the game rules — nets to delta D.* Its three jobs are selectable public-input configurations of this one circuit (all three pursued):
+  1. **Privacy** — publish only `D` (or the final balance); keep per-round stakes/results/trajectory private. Fairness moves from publicly-recomputed to proven-in-circuit (the trade that makes this a mode, not the default).
+  2. **Unilateral trustless settle** — because `rngCommit` is pre-committed, post-checkpoint outcomes are fixed by data the house already bound itself to plus the player's committed client seed; the proof stands in for the house's missing final signature, so a party settles the true final balance without counterparty cooperation.
+  3. **Fairness-of-sequence** — one verification attests the whole session obeyed the committed chain (no off-chain seed, every reveal chain-consistent, every payout rule-correct); this is what makes (1) and (2) sound.
+
+  This is the "really cool ZK" showcase and the strongest exit guarantee. The circuit is the heaviest single piece of this spec (sequenced last, §13 plan 5).
 
 ## 7. Async settlement relayer
 
@@ -147,7 +153,7 @@ As with the current games work, this spans both repos; `progress.txt` in the msg
 
 - **Board ephemerality (§2).** No path reads a needed artifact back from the board. Every party persists its transcript; settle/dispute use the retained copy. A board outage stalls new coordination only.
 - **Counterparty stall.** Escrowed: chess-clock forfeit on the disputed amount. Optimistic: the worker (or the party) settles the latest co-signed state; an un-signed proposed step is simply never money. ZK: a batch settles what was co-signed; an unfinished round is excluded.
-- **House under-settlement.** Escrowed/ZK: impossible within escrow / proof — the contract pays from the signed state. Optimistic: bounded by bankroll solvency and caught by public signed evidence; mitigated by keeping optimistic stakes small (disclosed).
+- **House under-settlement.** Escrowed/ZK: impossible within escrow / proof — the contract pays from the signed state. Optimistic: the residual trust is that the house honors (mints to pay) the player's retained co-signed balance; a refusal is publicly and cryptographically evidenced, and the player can switch to escrowed/ZK for any session it wants a hard guarantee on. Disclosed in the per-mode trust notice.
 - **Player repudiation of a loss.** The player's signature on the prior state is retained by the house; settlement submits it. A player who stops signing forfeits only the ability to start new rounds, not escrowed balances.
 - **Server-seed grinding.** Defeated by the pre-committed hash chain + the player's later client seed (§4.2); a reveal inconsistent with the chain is rejected at verify/dispute.
 - **Conservation.** Every backend checks `balancePlayer + balanceHouse == escrow/bankroll debit` at settle; the dispute/settle status guard makes double-payout impossible (the `ZkTable` status-before-transfer rule).
@@ -174,13 +180,19 @@ As with the current games work, this spans both repos; `progress.txt` in the msg
 2. **Settlement seam + optimistic + escrowed.** The `Settlement` interface; House bankroll (optimistic) and `HouseChannel` (escrowed) contracts + dispute/forfeit; settle Dice/Limbo under both. Conservation and parity tests.
 3. **Async settlement relayer.** The `@msgboard/relayer` composition: land/settle, replace-by-fee + nonce window, sign/gas nudges, parallel sessions.
 4. **Remaining games.** Plinko, Keno, then Mines (stateful — its own rules mirror + reveal-sequence dispute).
-5. **ZK-proven RNG backend.** The batch-settlement circuit + Groth16 verifier wiring; the heaviest piece, sequenced last and independently. (Card games already occupy the ZK corner via `ZkTable`.)
+5. **ZK-proven RNG backend.** The one batch-validity circuit (privacy / unilateral-settle / fairness-of-sequence via selectable public inputs) wired to the **vendored Plonk verifier**; the heaviest piece, sequenced last and independently. (Card games already occupy the ZK corner via `ZkTable`.)
 6. **Web UI.** The five games in `examples/games/web`, parallel-session surface, settlement-status indicators, per-mode trust disclosure, provably-fair verify panel.
 
-## 14. Open items carried into the plans
+## 14. Decisions and remaining open items
 
-- House-coffers policy: the rule that maps (stake, game volatility, max payout) → which settlement mode is offered, and the per-mode escrow/bankroll sizing.
-- House edge constants per game and whether they are owner-adjustable (default fixed, disclosed).
-- Server-seed chain length / rotation cadence per session (how many rounds before a fresh chain head must be committed).
-- The exact batch-proof public-input layout and whether the vendored uzkge Groth16 verifier is reused as-is or a fresh verifying key is generated for the RNG circuit (interacts with the uzkge pre-mainnet SRS-provenance blocker).
-- Whether the House signer is co-located with the async worker or a separate always-online service (it can be either; affects ops, not safety).
+Resolved in review (2026-06-13):
+- **Settlement-mode driver:** chips are a mintable per-chain ERC20, so exposure/solvency does not gate the choice; mode is a trust/UX/privacy decision (§6). Any MAX_WIN is a game-rules knob, not a solvency requirement.
+- **House edge:** a term of the opening co-signed state the player signs (house publishes defaults); no owner-adjustable global, no mid-life mutation.
+- **Server-seed rotation:** the stake.com pattern — published server-seed hash, player-set client seed, per-bet nonce, rotate on demand/per-session with reveal-on-rotation (old seed revealed so past bets become verifiable); chain length bounded by a max nonce per server seed.
+- **ZK verifier + jobs:** the **vendored Plonk verifier** (universal setup, no per-circuit ceremony); one RNG batch-validity circuit exposing all three jobs — privacy, unilateral trustless settle, fairness-of-sequence (§6.3).
+- **House signer vs settler:** roles separate (the signer authorizes play within house policy; settling is permissionless — anyone, including the player, can run it), co-located in v1 if convenient; safety does not depend on the split.
+
+Still open (carried into the plans):
+- The exact RNG batch-proof public-input layout and per-game witness encoding (interacts with the shared uzkge SRS-provenance pre-mainnet blocker — regenerated from a public ceremony once, for both the card and RNG circuits).
+- Whether privacy mode also encrypts in-flight board messages (commitments instead of plaintext steps) or only hides at settlement — the board-fairness-vs-privacy trade of §6.3 job 1.
+- Per-game rule constants (edge defaults, paytables, Mines grid/limits) — pinned when each game's rules module is built.
