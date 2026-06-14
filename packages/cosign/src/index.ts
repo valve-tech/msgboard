@@ -36,4 +36,19 @@ export {
   makeSafeAdapter,
   buildSignatureBlob,
   buildExecTransactionArgs,
+  recoverEffectiveSigner,
+  verifyErc1271Against,
 } from './adapters/safe.js'
+export {
+  type Safe4337UserOp,
+  type Safe4337AdapterConfig,
+  SAFE_OP_TYPEHASH,
+  SAFE4337_DOMAIN_SEPARATOR_TYPEHASH,
+  safe4337DomainSeparator,
+  safe4337OperationDigest,
+  safe4337OperationData,
+  encodeSafe4337Meta,
+  decodeSafe4337Meta,
+  makeSafe4337Adapter,
+  buildSafe4337Signature,
+} from './adapters/safe4337.js'
