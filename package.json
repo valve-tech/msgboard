@@ -11,7 +11,8 @@
     "packages/indexer",
     "packages/ui",
     "packages/sponsor",
-    "packages/examples"
+    "packages/examples",
+    "packages/cosign"
   ],
   "scripts": {
     "docker:build": "docker compose build",
