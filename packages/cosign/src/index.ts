@@ -52,3 +52,19 @@ export {
   makeSafe4337Adapter,
   buildSafe4337Signature,
 } from './adapters/safe4337.js'
+export {
+  type PackedUserOp,
+  type OwnableMeta,
+  type RhinestoneOwnableConfig,
+  type OwnablePublicClient,
+  OWNABLE_VALIDATOR_ADDRESS,
+  OWNABLE_VALIDATOR_RUNTIME,
+  OWNABLE_VALIDATOR_ABI,
+  EIP1271_SUCCESS,
+  userOpHash,
+  encodeStatelessData,
+  encodeOwnableMeta,
+  decodeOwnableMeta,
+  makeRhinestoneOwnableAdapter,
+  buildOwnableSignature,
+} from './adapters/rhinestone.js'
