@@ -12,11 +12,11 @@ import {
   concat,
   toHex,
   size,
-  slice,
 } from 'viem'
 import type { SignatureRecord } from '../record.js'
 import { SCHEME } from '../record.js'
 import type { CosignAdapter } from './adapter.js'
+import { splitSig, sortDedupBySigner } from './_ecdsa.js'
 
 /**
  * The Safe transaction tuple that is EIP-712-signed and carried in SignatureRecord.meta.
@@ -366,32 +366,14 @@ export function makeSafeAdapter(config: SafeAdapterConfig): CosignAdapter {
   }
 
   function order(records: SignatureRecord[]): SignatureRecord[] {
-    // Sort by record.signer, NOT by re-recovering: aggregate runs verify (which asserts
-    // recovered === record.signer for EOA records) before order, so record.signer IS the
-    // effective signer; for erc1271 records record.signer is the contract owner by definition.
-    // This keeps order pure + synchronous, matching CosignAdapter.order (records) => records.
-    const seen = new Set<string>()
-    const deduped: SignatureRecord[] = []
-    for (const r of records) {
-      const key = getAddress(r.signer).toLowerCase()
-      if (seen.has(key)) continue
-      seen.add(key)
-      deduped.push(r)
-    }
-    return deduped.sort((a, b) => {
-      const av = BigInt(getAddress(a.signer))
-      const bv = BigInt(getAddress(b.signer))
-      return av < bv ? -1 : av > bv ? 1 : 0
-    })
+    // Shared strictly-ascending-by-signer sort + dedup (see _ecdsa.ts). The Safe blob's
+    // GS026 strict-ascending requirement is satisfied by this exact ordering. record.signer IS
+    // the effective signer: aggregate runs verify (which asserts recovered === record.signer for
+    // EOA records) before order; for erc1271 records record.signer is the contract owner.
+    return sortDedupBySigner(records)
   }
 
   return { verify, order, owners, threshold }
-}
-
-/** Splits a 65-byte ECDSA signature into r (32) ‖ s (32) ‖ v (1). */
-function splitSig(sig: Hex): { r: Hex; s: Hex; v: number } {
-  if (size(sig) !== 65) throw new Error(`expected 65-byte signature, got ${size(sig)} bytes`)
-  return { r: slice(sig, 0, 32), s: slice(sig, 32, 64), v: Number(BigInt(slice(sig, 64, 65))) }
 }
 
 /**
