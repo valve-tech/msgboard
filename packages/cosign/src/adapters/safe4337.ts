@@ -6,6 +6,8 @@ import {
   keccak256,
   slice,
   isAddressEqual,
+  encodePacked,
+  concat,
 } from 'viem'
 import type { SignatureRecord } from '../record.js'
 import { SCHEME } from '../record.js'
@@ -15,6 +17,7 @@ import {
   recoverEffectiveSigner,
   verifyErc1271Against,
   makeSafeAdapter,
+  buildSignatureBlob,
 } from './safe.js'
 
 /**
@@ -335,4 +338,22 @@ export function makeSafe4337Adapter(config: Safe4337AdapterConfig): CosignAdapte
   }
 
   return { verify, order, owners, threshold }
+}
+
+/**
+ * Assembles the `userOp.signature` blob the Safe4337Module expects:
+ *   abi.encodePacked(uint48 validAfter, uint48 validUntil) ‖ signatures
+ * where `signatures` is the strictly-ascending v-byte blob the Safe adapter's `buildSignatureBlob`
+ * produces (REUSED, not duplicated). The module strips the 12-byte prefix and forwards `signatures`
+ * to the Safe's checkSignatures. `validAfter`/`validUntil` MUST equal the values bound into the
+ * signed digest (SafeOp fields 11/12), or validation fails.
+ */
+export function buildSafe4337Signature(
+  ordered: SignatureRecord[],
+  validAfter: number,
+  validUntil: number,
+): Hex {
+  const prefix = encodePacked(['uint48', 'uint48'], [validAfter, validUntil])
+  const signatures = buildSignatureBlob(ordered)
+  return concat([prefix, signatures])
 }
