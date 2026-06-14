@@ -270,13 +270,14 @@ const ISIGNATURE_VALIDATOR_ABI = [
 ] as const
 
 /**
- * The effective signer address for a record under a given digest:
+ * The effective signer address for a record under its digest. DIGEST-AGNOSTIC — it recovers
+ * over `record.digest`, so any adapter (Safe, Safe4337Module, …) reuses it unchanged:
  * - EIP712: ecrecover over the digest.
  * - ECDSA (eth_sign): recover over the personal-message-prefixed digest.
- * - EIP1271: the record.signer (the contract owner) as-is.
- * Throws on a malformed signature (errors propagate).
+ * - EIP1271: record.signer (the contract owner) as-is.
+ * Throws on a malformed signature (the caller maps the throw to a `false` verdict).
  */
-async function effectiveSigner(record: SignatureRecord): Promise<Hex> {
+export async function recoverEffectiveSigner(record: SignatureRecord): Promise<Hex> {
   if (record.scheme === SCHEME.EIP712) {
     return recoverAddress({ hash: record.digest, signature: record.signature })
   }
@@ -286,6 +287,26 @@ async function effectiveSigner(record: SignatureRecord): Promise<Hex> {
   }
   // EIP1271 contract owner.
   return getAddress(record.signer)
+}
+
+/**
+ * Calls a contract owner's LEGACY EIP-1271 validator `isValidSignature(bytes data, bytes sig)`
+ * and returns whether it yields the magic `0x20c13b0b`. The `dataPreimage` is injected so the
+ * Safe adapter passes the Safe-tx pre-image and the Safe4337Module adapter passes the SafeOp
+ * operationData pre-image — the ONLY thing that differs between the two backends. Errors propagate.
+ */
+export async function verifyErc1271Against(
+  publicClient: SafePublicClient,
+  record: SignatureRecord,
+  dataPreimage: Hex,
+): Promise<boolean> {
+  const magic = (await publicClient.readContract({
+    address: record.signer,
+    abi: ISIGNATURE_VALIDATOR_ABI,
+    functionName: 'isValidSignature',
+    args: [dataPreimage, record.signature],
+  })) as Hex
+  return magic.toLowerCase() === EIP1271_MAGIC_VALUE
 }
 
 /**
@@ -326,7 +347,7 @@ export function makeSafeAdapter(config: SafeAdapterConfig): CosignAdapter {
     // EOA paths: recover, require recovered === claimed signer, require membership.
     let recovered: Hex
     try {
-      recovered = await effectiveSigner(record)
+      recovered = await recoverEffectiveSigner(record)
     } catch {
       return false // malformed signature is "definitively invalid", not an infra error
     }
@@ -341,13 +362,7 @@ export function makeSafeAdapter(config: SafeAdapterConfig): CosignAdapter {
     // 0x19 ‖ 0x01 ‖ domainSeparator ‖ safeTxHash, whose keccak256 == record.digest.
     const { safeTx, safe: metaSafe, chainId: metaChainId } = decodeSafeMeta(record.meta)
     const data = safeTransactionData(safeTx, metaChainId, metaSafe)
-    const magic = (await publicClient.readContract({
-      address: record.signer,
-      abi: ISIGNATURE_VALIDATOR_ABI,
-      functionName: 'isValidSignature',
-      args: [data, record.signature],
-    })) as Hex
-    return magic.toLowerCase() === EIP1271_MAGIC_VALUE
+    return verifyErc1271Against(publicClient, record, data)
   }
 
   function order(records: SignatureRecord[]): SignatureRecord[] {
