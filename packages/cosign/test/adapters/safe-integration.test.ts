@@ -124,6 +124,8 @@ describe.runIf(() => anvilAvailable)('Safe v1.4.1 integration (real checkNSignat
       address: f.safe,
       abi: SAFE_READ_ABI,
       functionName: 'execTransaction',
+      account: f.walletClient.account!,
+      chain: f.walletClient.chain,
       args: args as never,
     })
     const receipt = await f.publicClient.waitForTransactionReceipt({ hash })
