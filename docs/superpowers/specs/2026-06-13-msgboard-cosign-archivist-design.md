@@ -1,186 +1,102 @@
-# MsgBoard cosign archivist — Selective, Decoded, Short-Window Signature Archive (Design Spec)
+# MsgBoard cosign archive — Stateless Decoded Query Route over Board + archive.msgboard.xyz (Design Spec)
 
 Date: 2026-06-13
 Status: Draft for review
 
 Related:
-- **`@msgboard/cosign` SDK** — `docs/superpowers/specs/2026-06-13-msgboard-cosign-sdk-design.md` (sub-project 1). The archivist **imports** the SDK's `keys` (rotating day-bucketed category keys `keccak256('namespace:scope:isoDate')`, `keysForWindow`) and `record` (the canonical `SignatureRecord` ABI codec `(bytes32 digest, address signer, bytes signature, uint8 scheme, bytes meta)`) as the single source of truth, and uses a `CosignAdapter` for ingest validation.
-- **msgboard two-store model** — see the cosign games design spec §2 (chain = sybil-resistant + permanent; board = zero-cost PoW-gated broadcast; *cryptography is king, independent of the store*). A co-signature is self-authenticating, so it lives on the ephemeral board; the archivist is a **structured read-side index** over that board traffic.
-- **`packages/history`** (`archive.ts`, `server.ts`) and **`packages/relayer`** (`relayer.ts`, `types.ts`, `sinks/postgres-archive.ts`, `sources/msgboard-content.ts`, `examples/archivist.ts`) — the existing archive core, the `archive.msgboard.xyz` HTTP server, and the relayer pipeline this service is built on.
+- **`@msgboard/cosign` SDK** — `docs/superpowers/specs/2026-06-13-msgboard-cosign-sdk-design.md` (sub-project 1). The route is **essentially the SDK's read-side functions wrapped in HTTP.** It imports `keys` (`keysForWindow(namespace, scope, days, now?)`, `currentKey`), `record` (the `SignatureRecord` ABI codec `(bytes32 digest, address signer, bytes signature, uint8 scheme, bytes meta)` with `decodeRecord` that **throws** on junk), and the client helpers `readSignatures(board, {namespace, scope, days, now?})`, `groupByDigest(records)`, and `aggregate(records, adapter)`. A `CosignAdapter` (`verify` / `order` / `owners?` / `threshold?`) supplies validation + ordering.
+- **`packages/history`** — `archive.ts` (`createArchive` → `Archive.query(filter)`, the `archive.msgboard.xyz` storage core) and `server.ts` (`archiveServer` → the public read-only HTTP server, `/health` + `/messages`). The cosign route is **added to this history server** as a new cosign-aware endpoint group; the long-tail fallback reads the existing archive's `query()`.
+- **msgboard two-store model** — chain = sybil-resistant + permanent; board = zero-cost PoW-gated broadcast; *cryptography is king, independent of the store*. A co-signature is self-authenticating, so it lives on the ephemeral board. **The board (live recent traffic) + `archive.msgboard.xyz` (long tail) ARE the storage.** This route is a decoded, validated, aggregated **VIEW** over that data — not a new store.
 
 ---
 
 ## 1. Summary
 
-The **cosign archivist** is a standalone, hosted service — `cosign-archive.msgboard.xyz` in spirit, deployed exactly like `archive.msgboard.xyz` — that maintains a **tight, decoded, queryable index of co-signature artifacts** broadcast on the board. It is not a catch-all mirror: it tracks only a **registry-enumerated set of teams**, expanded into concrete rotating category hashes over a **7-day window**, decodes each message's `data` through the cosign `SignatureRecord` codec into queryable columns, **drops invalid records at ingest**, and serves a **domain-aware HTTP query API** (signatures-for-a-digest, owners-who-signed, aggregate-ready set).
+The **cosign archive** is a **stateless query route**, not a service. It owns no database, runs no daemon, prunes nothing, and adds nothing to the relayer. On each request it: resolves the target rotating categories for `{team(s)} × {last N days}` (from a registry team-file, via the cosign `keysForWindow`), **fetches** those categories from the board (live recent) with fallback to `archive.msgboard.xyz` (`history`'s `query()`) for older days, **decodes** each entry via the cosign `record` codec (skipping junk), **validates** via a `CosignAdapter.verify` (dropping invalid), then `groupByDigest` / `aggregate`s and returns.
 
-Architecturally it is **"the history server parameterized by a filter + a decoder + tight retention + a domain query API."** It reuses the `history`/`relayer` lineage wholesale, contributing three small reusable additions back to the relayer (a multi-category source, a filtering/decoding sink wrapper, and a SQLite sink) plus a thin service package that wires the team-file registry, daemon, and query server together.
+The board already holds the last ~N days of traffic live, and `archive.msgboard.xyz` holds the long tail — so a stateless route can serve everything by fetching on demand. The route is therefore "the cosign SDK's `readSignatures` / `groupByDigest` / `aggregate`, wrapped in HTTP and scoped by a team-file." No dedicated DB, no daemon, no prune, no SQLite, no relayer additions in v1.
 
-You run it globally for users (broad team-file); users self-host their own (narrow team-file, SQLite, tiny footprint). `archive.msgboard.xyz` remains the long-tail catch-all; this is the **hot working-set index** for active multisig coordination.
+The heavy **stateful filtered-archive** of the prior design (relayer pipeline + filtering/decoding sink + SQLite/Postgres sink + prune daemon) is **deferred** to an optional persistent cache (§11) that you add only if per-query fetch+decode proves too slow, or you need offline/air-gapped operation, very large windows, or multi-tenant persistence. That cache would materialize exactly the same decoded rows this route computes on the fly.
 
 ## 2. Goals / non-goals
 
 **Goals**
-- **Selective coverage** — track only categories enumerated by a registry (team-file × rolling window), not all board traffic.
-- **Reduce + enrich** — decode `data` via the cosign codec into `digest`/`signer`/`signature`/`scheme` columns, and drop non-matching / invalid records at ingest.
-- **Tight rolling retention** — 7-day working set, self-pruning, mirroring the cosign key window.
-- **Pluggable store** — SQLite (default; self-host) + Postgres (scale), mirroring the existing `history`/`postgresArchiveSink` shape.
-- **Domain-aware HTTP query API** — beyond by-category/since/until: sigs-for-digest, owners-who-signed, aggregate-ready set.
-- **Reusable relayer/history additions** that stand alone and are independently tested.
+- **Stateless** — serve cosign queries with no local store, no daemon, no prune. The board + `archive.msgboard.xyz` are the storage.
+- **A decoded, validated, aggregated VIEW** — wrap the cosign SDK's `readSignatures` / `groupByDigest` / `aggregate` in a domain-aware HTTP API: signatures-for-a-digest, owners-who-signed, and the headline **aggregate-ready** ordered `{signer,signature}[]`.
+- **Scoped by a registry team-file** — the hosted route serves a known `(namespace, scope)` set so it can validate and bound requests; self-hosters point it at their own scope.
+- **Co-located with `archive.msgboard.xyz`** — mounted on the existing `history` server, reusing its conventions (`/health`, JSON, loopback-default bind, `token`-gated non-loopback, 10 s timeouts) and its `query()` for the long-tail fallback.
 
 **Non-goals (this spec)**
+- **A stateful filtered-archive cache** — relayer pipeline, filtering/decoding sink, SQLite/Postgres sink, prune daemon. **Deferred** (§11).
+- **Cold-start hydration** — moot; there is no local DB to cold-start. The relevant trade is the route's dependency on board/archive availability *at query time* (§9).
 - **On-board discovery of unknown teams** — Registry v1 is an explicit team-file. Deferred.
-- **Cold-start hydration fallback** to `archive.msgboard.xyz` when the local DB is empty/stale. Deferred.
-- **Encryption of in-flight records.** Deferred (board records are public by the two-store model).
-- **Multi-tenant control plane** (tenant registry, provisioning). v1 is one config-driven service (one team-file → one DB namespace); the control plane is an additive later layer.
+- **Encryption of in-flight records** — board records are public by the two-store model. Deferred.
+- **Multi-tenant control plane** — tenant registry, provisioning. Deferred.
 - **On-chain execution / aggregation submission** — handled by the SDK's consumers, out of scope.
 
-## 3. The two-store fit & the key architectural constraint
+## 3. Why a route, not a service
 
-### 3.1 Two-store fit
-Co-signatures live on the **board** (zero reader cost, PoW sender cost only); they are binding because of the signature, not the store. The archivist never writes to the board or chain — it is a **pure read-side index** that watches board traffic, decodes it, and answers structured queries. The chain is touched only indirectly: the `CosignAdapter.verify` may make read-only owner-set/threshold calls during ingest validation.
+The prior design built a standalone stateful service: a relayer that polled the registry categories, a filtering/decoding sink that validated and enriched, a SQLite/Postgres archive that stored the decoded rows, a prune daemon on a 7-day window, and an HTTP server querying that DB. That is a lot of moving parts to maintain a *copy* of data that already exists in two places.
 
-### 3.2 The key architectural constraint: filter at the SOURCE/SINK layer, NOT the `condition` hook
+**The board + `archive.msgboard.xyz` already are the store.** By the two-store model, a co-signature is binding because of the signature, not where it sits, and cosign records broadcast to the board at ~zero reader cost. The board node holds the recent rolling window live (it serves `msgboard_content` per category), and `archive.msgboard.xyz` mirrors the long tail (it serves `Archive.query`). Between them, every cosign record in any reasonable window is already retrievable on demand.
 
-This is the load-bearing design decision and the reason for two of the three reusable additions.
+So the v1 archive is best expressed as a **stateless VIEW**: fetch the relevant categories, decode them through the cosign codec, validate through the adapter, aggregate, return. This is precisely what the cosign SDK's `readSignatures` → `groupByDigest` → `aggregate` already do in-process; the route is those calls behind HTTP, scoped by a team-file, with an archive fallback for older days.
 
-In the relayer tick pipeline (`relayer.ts`, `handleItem`), **the sink records UNCONDITIONALLY, before `condition` runs**:
+**Cost / benefit vs a cache.** A stateless route trades a small per-request fetch+decode cost for the elimination of an entire stateful subsystem (no DB to provision, migrate, back up; no daemon to keep alive; no prune to tune; no cold-start; no drift between the cache and the source of truth). The common case — a 7-day window for one team, a handful of rotating categories, each a small set of small records — is cheap to fetch and decode per request, especially with the board covering the recent window without touching the archive at all. You pay the route's cost only on the request path, and only for the categories actually asked for, rather than continuously polling and storing everything in the team-file. The cache (§11) buys back the per-request cost *if and when* it actually bites (large windows, offline operation, hot multi-tenant load) — and when it does, it materializes the very same decoded rows this route computes, so adding it is additive, not a rewrite.
 
-```ts
-private async handleItem(item: T, report: TickReport, ctx: RelayerContext): Promise<void> {
-  await this.recordItem(item, report, ctx)        // sink.record — ALWAYS, first
-  const eligible = await this.isEligible(item, ctx) // condition + dedup — AFTER
-  if (!eligible.proceed) { ... return }
-  report.eligible += 1
-  await this.actOnItem(item, report, ctx)         // action — gated
-}
-```
+YAGNI: v1 ships the route; everything stateful is deferred until a concrete need appears.
 
-`RelayerSink` confirms this in its own contract:
+## 4. Architecture & components
 
-```ts
-/** Unconditional recording for history/observability. Long retention. Runs in BOTH modes. */
-export type RelayerSink<T> = {
-  record(item: T, context: RelayerContext): Promise<void>
-  prune?(): Promise<void>
-}
-```
+### 4.1 Proposed home: a cosign endpoint group on the `@msgboard/history` server
 
-and `RelayerCondition` gates only the **action**, not the archive:
+**Decision: add the cosign route as a new endpoint group inside `@msgboard/history`'s `server.ts`, behind an opt-in `cosign` option on `archiveServer` — not a separate package, in v1.**
 
-```ts
-/** Decides whether a candidate should be acted on, beyond dedup. */
-export type RelayerCondition<T> = (item: T, context: RelayerContext) => boolean | Promise<boolean>
-```
+Rationale:
+- The long-tail fallback reads `archive.query()` — the very `Archive` the history server already holds. Co-locating means the fallback is a direct in-process call, no second deployment, no cross-service hop.
+- The route reuses the history server's exact conventions wholesale: `respond()` JSON helper, `/health`, the `127.0.0.1`-default bind, the non-loopback-requires-`token` guard, the `Authorization: Bearer` check, and the 10 s `headersTimeout` / `requestTimeout`. Mounting on the same `createServer` handler inherits all of it for free.
+- It is genuinely small: a category resolver + a board client + the cosign SDK + an adapter. It does not warrant its own package, deployment, or release cadence in v1.
 
-The `moderation-flagger.ts` example documents the same gotcha in prose: *"sink.record runs before the condition in the standard tick pipeline."*
+The route is gated by a `cosign?` option so the plain `archive.msgboard.xyz` deployment is unchanged when the option is absent. When present, the same server answers both `/messages` (raw archive) and `/cosign/...` (decoded cosign view).
 
-**Consequence:** we cannot use `condition` to keep the archive clean — by the time `condition` runs, the row is already written. Filtering and enrichment must therefore happen **upstream of (or inside) the sink**:
+**Deferred alternative.** If the route later needs to ship and version independently of the history server (e.g. self-hosters who don't run the full archive), it can be extracted into a thin **`@msgboard/cosign-archive`** package that exports a request handler mountable on any `node:http` server — including the history server. The §11 cache, if built, would naturally live in that package too. v1 does not do this; it is noted only so the endpoint-group boundary is drawn cleanly enough to extract later.
 
-1. **At the source** — only poll the registry-enumerated categories, so most off-topic traffic never enters the pipeline (`categories?: string[]` on `msgboardContentSource`).
-2. **Inside the sink** — a `filteringSink` / `decodingSink` wrapper that decodes + `verify`s each item and either writes an **enriched** row or **drops** it, before delegating to the underlying store.
+### 4.2 What the route depends on
 
-The `condition` hook stays unused by the archivist (its action is a `noopAction`); all selectivity lives in the source + sink.
+- **`@msgboard/cosign`** — `keysForWindow` (category resolution), `decodeRecord` (decode), `readSignatures` / `groupByDigest` / `aggregate` (the read-side helpers), and the `CosignAdapter` type. This is the single source of truth for the key scheme and the record codec.
+- **A board client** (`@msgboard/sdk`'s `MsgBoardClient`, or the cosign SDK's minimal `BoardClient`) — `content({ category })` per resolved category, for the live recent window.
+- **The history `Archive`** — `archive.query({ category, since, until, ... })` for the long-tail fallback (older days).
+- **A `CosignAdapter`** — for `verify` (validation) and `order` / `threshold?` (aggregate ordering + readiness). `kind: "none"` accepts every decodable record (no chain reads).
 
-## 4. Components & units
+The route does **not** depend on `@msgboard/relayer`. There is no source, sink, condition, daemon, or prune in v1.
 
-A new service package plus three reusable additions to existing packages.
+### 4.3 Component modules (within the history server's cosign group)
 
-**Proposed package name: `@msgboard/cosign-archivist`** at `packages/cosign-archivist`. Deps: `@msgboard/cosign` (keys + record + adapter seam), `@msgboard/relayer` (pipeline + the new source/sink), `@msgboard/history` (storage core), `@msgboard/sdk` (`RPCMessage`, board client), `viem`. Optional: `better-sqlite3` (or `node:sqlite`) for the SQLite store; `pg` for Postgres. Dev: `vitest`, `typescript`, `@types/node`. ESM, `src/index.ts` entry, tests in `test/`. Mirrors existing package conventions.
+These are functions, not a package tree — small enough to live in one or two files (`server.ts` plus a `cosign-route.ts` helper) inside `@msgboard/history`:
 
-### 4.1 Reusable additions to `@msgboard/relayer` (Plan 1)
+- **`teamFile`** — load + validate the registry team-file JSON (§5); default `windowDays`, resolve adapter selector. `loadTeamFile(path): TeamFile`.
+- **`resolveCategories`** — given the team-file (or a single `(namespace, scope)`) and `now`, expand `{teams} × {last N UTC days}` into concrete category hashes via the cosign `keysForWindow`. Computed per request (cheap; no caching needed, but cacheable by isoDay if profiling demands).
+- **`fetchRecords`** — for the resolved categories, read from the board (recent) with `archive.query()` fallback for older days (§8), decode each entry via `decodeRecord` (skip throws), validate via `adapter.verify` (drop false, drop+log on throw). Returns `SignatureRecord[]` with provenance. This is effectively `readSignatures` extended with the archive fallback and adapter-validation at fetch time.
+- **the cosign request handler** — parse `:namespace` / `:scope` / `:digest` / `?days`, call the above, `groupByDigest` / `aggregate`, shape the JSON response (§6). Mounted into the history `createServer` handler alongside `/messages`.
 
-**(a) Multi-category source — `categories?: string[]` on `msgboardContentSource`.**
-Today the source supports exactly one category or all:
+## 5. The registry team-file (Registry v1)
 
-```ts
-export type MsgboardContentSourceOptions = {
-  /** A category name (zero-padded to bytes32) or bytes32 hex. Omit to watch all categories. */
-  category?: string
-}
-```
-
-Responsibility: poll a *set* of explicit category hashes (the registry-expanded `{teams} × {7 days}`). New shape (additive, backward-compatible):
-
-```ts
-export type MsgboardContentSourceOptions = {
-  category?: string          // unchanged — single category
-  categories?: string[]      // NEW — explicit set of category names/hexes
-  // category + categories are mutually exclusive; omit both to watch all
-}
-```
-
-Behavior: when `categories` is set, normalize each via the existing `toCategoryHex` and poll each (`client.content({ category })` per hash), flattening results. The set is **supplied per tick by the registry** (it changes as the UTC day rolls), so the source accepts a `categories` resolver as well as a static array — see §4.2 registry. Single-category and all-categories paths are unchanged.
-
-**(b) `filteringSink` / `decodingSink` — gate + enrich before the underlying store.**
-A `RelayerSink<RPCMessage>` wrapper. Responsibility: for each item, run a **decode + validate** step that returns either an enriched payload (write it) or a drop signal (skip it), then delegate to an inner sink. Interface:
-
-```ts
-export type DecodeResult<Row> = { keep: true; row: Row } | { keep: false; reason: string }
-
-export type DecodingSinkOptions<Row> = {
-  decode(message: RPCMessage, ctx: RelayerContext): Promise<DecodeResult<Row>> | DecodeResult<Row>
-  inner: RelayerSink<Row>   // receives only kept, enriched rows
-}
-
-export const decodingSink = <Row>(opts: DecodingSinkOptions<Row>): RelayerSink<RPCMessage> => ({
-  record: async (message, ctx) => {
-    const r = await opts.decode(message, ctx)
-    if (!r.keep) { ctx.logger('archivist: drop (%s)', r.reason); return }
-    await opts.inner.record(r.row, ctx)
-  },
-  prune: opts.inner.prune,
-})
-```
-
-This is the place the cosign codec + adapter `verify` plug in. It honors the §3.2 constraint: filtering happens **inside the sink's `record`**, so a dropped item is never written. `prune` passes straight through to the inner store. Generic over `Row` so it is reusable beyond cosign.
-
-**(c) `sqliteArchiveSink` — a SQLite mirror of `postgresArchiveSink`.**
-A `RelayerSink` backed by a SQLite-flavored archive, mirroring the Postgres one:
-
-```ts
-export const postgresArchiveSink = (options): RelayerSink<RPCMessage> & {
-  migrate(): Promise<void>
-  query(filter: ArchiveQuery): Promise<ArchivedMessage[]>
-} => { ... }
-```
-
-`sqliteArchiveSink` exposes the same `migrate`/`prune`/`query`/`record` surface against a SQLite file (or `:memory:`). It can either (i) take a SQLite-backed `Queryable` and reuse `createArchive` from `@msgboard/history` if its SQL is dialect-portable, or (ii) ship a thin `createSqliteArchive` in `@msgboard/history` mirroring `createArchive` with SQLite DDL (`AUTOINCREMENT`-free PK, `INTEGER` timestamps, `julianday`/epoch-based prune instead of `now() - INTERVAL`). Given `archive.ts` uses Postgres-specific SQL (`TIMESTAMPTZ`, `now() - INTERVAL`, `ILIKE`, `DO $$`), **(ii) is the cleaner path**: add `createSqliteArchive` next to `createArchive`, sharing the `Archive` type and `tryDecodeText`, with SQLite DDL/prune. The cosign-specific columns (§7) are added by the decoding sink's row shape, not by the base archive.
-
-### 4.2 The `@msgboard/cosign-archivist` service package (Plans 2 & 3)
-
-- **`src/team-file.ts`** — load + validate the registry team-file JSON (§5). Responsibility: parse, default `windowDays = 7`, validate store/chain/adapter selectors. Exposes `loadTeamFile(path): TeamFile`.
-- **`src/registry.ts`** — registry expansion. Responsibility: given a `TeamFile` and `now`, expand `{teams} × {last windowDays UTC days}` into concrete category hashes via the cosign `keysForWindow(namespace, scope, days, now)`. Exposes `expandCategories(teamFile, now?): Hex[]`, regenerated as the UTC day rolls (recomputed each tick, or cached by isoDay). Handles the `multisig:*` wildcard ("all teams in my file") as "expand every listed team."
-- **`src/decode.ts`** — the cosign decode/verify step wired into `decodingSink`. Responsibility: `decodeRecord(message.data)` (skip on throw), run `adapter.verify(record)` (drop on false), map to the enriched archive row (`digest`, `signer`, `signature`, `scheme`, `meta`, plus base `hash`/`category`/`chain_id`/`first_seen_at`). Exposes `cosignDecode(adapter): DecodeResult-producer`.
-- **`src/store.ts`** — store selection. Responsibility: from `store.kind`, build `sqliteArchiveSink` or `postgresArchiveSink` with cosign columns + 7-day retention. Returns the chosen sink + its `query` surface.
-- **`src/daemon.ts`** — daemon wiring. Responsibility: build the `Relayer<RPCMessage>` with `mode: 'observe'` (an archivist never acts), `source = msgboardContentSource({ categories: () => registry.expandCategories(teamFile) })`, `sink = decodingSink({ decode: cosignDecode(adapter), inner: chosenArchiveSink })`, `action = noopAction()`, `key = (m) => m.hash`, and a `pruneEveryTicks` tuned to the 7-day window. Calls `migrate()` once, then `relayer.start()`.
-- **`src/query.ts`** — the domain query layer over the store (§6). Responsibility: `signaturesForDigest`, `ownersWhoSigned`, `aggregateReady`, plus generic `byCategory`. Pure SQL over the cosign columns.
-- **`src/server.ts`** — the HTTP domain query server (§6), modeled on `history/server.ts` (`/health`, JSON responses, loopback-default bind, `token`-gated non-loopback, 10 s timeouts) but with cosign endpoints.
-- **`src/index.ts`** — re-exports the service entry + the query/server builders.
-
-## 5. The team-file JSON (Registry v1)
-
-A **non-encrypted JSON file** the operator points the service at. The global instance's file lists all served teams; self-hosters use a narrower file. Schema:
+A **non-encrypted JSON file** the operator points the route at. It defines which `(namespace, scope)` / teams the hosted route is willing to serve, so the route can scope and validate incoming requests (reject unknown scopes, bound the window, select the adapter). Self-hosters point it at their own scope. It is **the same team-file concept as the prior design**, but it now scopes a stateless route rather than configuring a daemon's coverage — there is no `store` block (no store) and no prune cadence.
 
 ```jsonc
 {
   "version": 1,
   "namespace": "cosign",          // cosign key namespace (matches how teams post)
-  "windowDays": 7,                 // rolling window; default 7
-  "teams": [                       // scopes to expand; "*" / "multisig:*" = all listed
+  "windowDays": 7,                 // default/clamp for the rolling window; default 7
+  "teams": [                       // scopes the route serves; "*" / "multisig:*" = all listed
     { "scope": "wonderland",        "label": "Wonderland multisig" },
     { "scope": "1:0xSAFE...",       "label": "Safe on mainnet" }
   ],
-  "chain": {                       // board node to watch
+  "chain": {                       // board node to read from
     "chainId": 943,
     "rpcUrl": "https://rpc.testnet.msgboard.xyz"
   },
-  "store": {                       // pluggable store
-    "kind": "sqlite",             // "sqlite" | "postgres"
-    "sqlite": { "path": "./cosign-archive.db" },
-    "postgres": { "connectionString": "postgres://..." }  // when kind=postgres
-  },
-  "adapter": {                     // ingest-validation adapter selection
+  "adapter": {                     // validation/ordering adapter selection
     "kind": "wonderland",         // resolves to a CosignAdapter; "none" = accept all decodable
     "config": { "multisig": "0xSAFE...", "chainId": 1 }
   }
@@ -188,163 +104,162 @@ A **non-encrypted JSON file** the operator points the service at. The global ins
 ```
 
 Notes:
-- `teams[].scope` is the cosign `scope` (per the SDK, e.g. team name or `${chainId}:${safeAddress}`); paired with `namespace`, it feeds `keysForWindow`.
-- `windowDays` ties retention (§8) to coverage — they are the same number.
-- `adapter.kind: "none"` is the unvalidated default for teams without a built adapter (Wonderland ships stubbed in the SDK; `verify` throwing surfaces as a drop-with-reason, not a crash — see §9).
-- One team-file → one DB namespace = one service instance (single-tenant v1).
+- `teams[].scope` is the cosign `scope` (per the SDK, e.g. team name or `${chainId}:${safeAddress}`); paired with `namespace`, it feeds `keysForWindow`. A request for a `(namespace, scope)` not in `teams` (and not covered by a `"*"` entry) is rejected.
+- `windowDays` bounds the request `?days` param (a request asking for more is clamped, so the route can't be made to sweep an unbounded window).
+- `adapter.kind: "none"` is the unvalidated default for teams without a built adapter (Wonderland ships stubbed in the SDK; a `verify` that throws surfaces as a drop-with-reason, not a crash — see §9).
+- The hosted instance ships a broad team-file (all served teams); a self-hoster ships a narrow one (their scope only).
 
-## 6. HTTP domain query API
+## 6. HTTP API
 
-Modeled on `history/server.ts` conventions: `GET /health` → `{ ok: true }`; JSON bodies; binds `127.0.0.1` by default; a non-loopback bind **requires** `token` (else refuses to start); `Authorization: Bearer <token>` enforced when set; 10 s header/request timeouts. Domain endpoints (all read-only, scoped to the 7-day window):
+Mounted on the history server, inheriting its conventions (`/health` → `{ ok: true }`; JSON bodies; `127.0.0.1`-default bind; non-loopback bind **requires** `token`; `Authorization: Bearer <token>` enforced when set; 10 s timeouts). All cosign endpoints are read-only and domain-aware. They follow `history/server.ts`'s style — a `GET` method + pathname match, `URLSearchParams` parsing with unparseable values ignored, the `respond(res, status, body)` helper, try/catch → 500 on failure.
+
+Path shape: `/cosign/:namespace/:scope/...`. The `(namespace, scope)` pair is validated against the team-file (404/403 if unknown).
 
 | Endpoint | Params | Response |
 |---|---|---|
-| `GET /health` | — | `{ ok: true }` |
-| `GET /signatures` | `digest` (bytes32, required), `chainId?`, `scheme?`, `limit?`, `offset?` | `{ signatures: SignatureRow[] }` — all records for a digest |
-| `GET /owners` | `digest` (required), `chainId?` | `{ owners: Hex[], count: number }` — distinct signers for a digest |
-| `GET /aggregate-ready` | `digest` (required), `chainId?`, `threshold?` | `{ digest, signers: {signer,signature,scheme}[], count, threshold?, ready: boolean }` — ordered, dedup-by-signer set; `ready` = count ≥ threshold (threshold from adapter or param) |
-| `GET /records` | generic: `category?` (hex/decoded), `chainId?`, `signer?`, `since?`, `until?`, `limit?` (≤1000), `offset?` | `{ records: SignatureRow[] }` — by-category/signer/time, newest first |
+| `GET /health` | — | `{ ok: true }` (shared with the archive server) |
+| `GET /cosign/:namespace/:scope/signatures` | `days?` (clamped to `windowDays`), `chainId?`, `scheme?`, `limit?`, `offset?` | `{ signatures: SignatureRecordView[] }` — all decoded valid records in the window |
+| `GET /cosign/:namespace/:scope/digest/:digest` | `chainId?` | `{ digest, signatures: SignatureRecordView[], signers: Hex[], count }` — all signatures for a digest + who signed |
+| `GET /cosign/:namespace/:scope/digest/:digest/aggregate` | `chainId?`, `threshold?` | `{ digest, signers: { signer, signature, scheme }[], count, threshold?, ready }` — the **aggregate-ready** ordered, dedup-by-signer set; `ready = count ≥ threshold` (threshold from the adapter or the param) |
+| `GET /cosign/:namespace/:scope/owners` *(optional passthrough)* | — | `{ owners: Hex[], threshold }` — from `adapter.owners?()` / `adapter.threshold?()` when the adapter implements them; 501 when `kind: "none"` or unimplemented |
 
-`SignatureRow` response shape (mirrors `ArchivedMessage` + cosign columns):
+`SignatureRecordView` (the decoded record + provenance):
 
 ```jsonc
 {
-  "hash": "0x...", "chain_id": 943,
+  "digest": "0x...", "signer": "0x...", "signature": "0x...", "scheme": 0, "meta": "0x...",
   "category": "0x...", "category_text": "cosign:wonderland:2026-06-13",
-  "digest": "0x...", "signer": "0x...", "signature": "0x...", "scheme": 0,
-  "meta": "0x...", "first_seen_at": "2026-06-13T12:00:00Z"
+  "source": "board" | "archive"          // where this record was fetched from
 }
 ```
 
-`/aggregate-ready` is the headline endpoint: it returns exactly what an executor needs (ordered `{signer,signature}` set) without the caller re-reading the board — the archivist has already decoded, validated, and (optionally) ordered via the adapter.
+`/cosign/:ns/:scope/digest/:digest/aggregate` is the **headline endpoint**: it returns exactly what an executor needs — the ordered `{ signer, signature }` set, already decoded, validated, and ordered by the adapter — without the caller re-reading the board or running the codec themselves. It is `groupByDigest(records).get(digest)` → `aggregate(thatGroup, adapter)` behind one GET.
 
-## 7. Database schema
-
-Mirror `message_archive` (base provenance columns) **plus** the cosign-decoded columns. One table, e.g. `cosign_signature`:
-
-| Column | Source | Notes |
-|---|---|---|
-| `hash` | `RPCMessage.hash` | part of PK |
-| `chain_id` | tick context `chain.id` | part of PK |
-| `category` | `RPCMessage.category` | the rotating bytes32 hash |
-| `category_text` | `tryDecodeText(category)` | e.g. `cosign:wonderland:2026-06-13` |
-| `digest` | `record.digest` | **indexed** — bytes32 the signature covers |
-| `signer` | `record.signer` | **indexed** — address |
-| `signature` | `record.signature` | the signature bytes |
-| `scheme` | `record.scheme` | uint8 (ECDSA/EIP1271/EIP712) |
-| `meta` | `record.meta` | bytes |
-| `first_seen_at` | insert time | **indexed** — drives prune + time queries |
-
-PK `(hash, chain_id)` (idempotent on re-ingest, matching the existing archive). Indexes for the domain queries:
-- `(digest, chain_id)` — `/signatures`, `/owners`, `/aggregate-ready`.
-- `(signer)` — `/records?signer=`.
-- `(first_seen_at)` and `(chain_id, first_seen_at)` — prune + time-range.
-- `(category)` — `/records?category=`.
-
-The base provenance columns and `tryDecodeText` come straight from `@msgboard/history`; the cosign columns are added by the decoding sink's row shape. SQLite uses `INTEGER`/epoch timestamps; Postgres uses `TIMESTAMPTZ` — same logical schema, dialect-specific DDL.
-
-## 8. Data flow
+## 7. Data flow
 
 ```
-board (rotating cosign categories)
-  │  registry.expandCategories(teamFile, now)   ← {teams} × {last 7 UTC days} via keysForWindow
+request: GET /cosign/cosign/wonderland/digest/0xDEAD/aggregate?days=7
+  │
   ▼
-msgboardContentSource({ categories })           ← polls ONLY the enumerated hashes  [§4.1a]
-  │  RPCMessage[]
+validate (namespace, scope) against team-file; clamp days ≤ windowDays   [§5]
+  │
   ▼
-Relayer tick (mode: observe, action: noop)
-  │  sink.record() runs UNCONDITIONALLY          ← so filtering lives in the sink  [§3.2]
+resolveCategories(namespace, scope, days, now)                          [§4.3]
+  │   = keysForWindow → {scope} × {today + prior days-1 UTC days} hashes
   ▼
-decodingSink({ decode: cosignDecode(adapter), inner })   [§4.1b]
-  │  decodeRecord(data)  → throws? DROP (malformed)
-  │  adapter.verify()    → false?  DROP (invalid)        → otherwise enrich row
+fetchRecords(categories)                                                [§4.3, §8]
+  │   for each category:
+  │     recent days → board.content({ category })            (live)
+  │     older days  → archive.query({ category, since, until })  (fallback)
+  │   for each entry:
+  │     decodeRecord(data) → throws? SKIP (junk)
+  │     adapter.verify()   → false?  DROP (invalid)
+  │                          throws? DROP+LOG (verify-errored)
   ▼
-sqliteArchiveSink | postgresArchiveSink          ← store, 7-day prune  [§4.1c, §7]
+groupByDigest(records).get(digest)                                      [cosign SDK]
+  │
   ▼
-HTTP domain query API                            ← /signatures /owners /aggregate-ready /records  [§6]
+aggregate(group, adapter)  → ordered, dedup-by-signer { signer, signature }[]
+  │
+  ▼
+respond 200 { digest, signers, count, threshold?, ready }              [§6]
 ```
 
-The registry set is recomputed per tick (cheap; cached by isoDay), so when the UTC day rolls, today's new category enters the polled set automatically and the oldest day ages out of both coverage and retention.
+Everything happens on the request path; nothing is stored. When the UTC day rolls, `keysForWindow` simply yields today's new category and drops the oldest — no prune, because nothing persists.
 
-## 9. Retention & prune
+## 8. Reading from board vs `archive.msgboard.xyz`
 
-- **7-day rolling window**, equal to `windowDays`. Pruning reuses the relayer cadence: `pruneEveryTicks` (default 30 in `relayer.ts`) triggers `sink.prune()`, which deletes rows older than the window. With a 15 s interval, prune runs roughly every ~7.5 min — fine for a 7-day window.
-- SQLite prune: `DELETE FROM cosign_signature WHERE first_seen_at < :cutoff` (epoch cutoff = `now − windowDays`). Postgres prune mirrors `archive.ts`: `DELETE ... WHERE first_seen_at < now() - INTERVAL '<windowDays> days'`.
-- Coverage and retention share the same number: a row's category leaves the polled set and its age crosses the prune threshold together, so the index never holds rows for categories it no longer watches.
+The resolved category set spans `windowDays` UTC days. The split:
 
-## 10. Error handling & recovery
+- **Recent days → the board.** The board node holds the live rolling window and serves `content({ category })` per category. **For the common 7-day window, the board alone covers it** — a board's retention comfortably exceeds a week — so a typical request never touches the archive at all.
+- **Older days → `archive.msgboard.xyz` (the history `query()`).** Only when the requested window reaches past the board's live retention does the route fall back to `archive.query({ category, since, until })` for those older days. Because the route is co-located with the archive (§4.1), this is an in-process call.
 
-- **Board outage / RPC error during poll** — the relayer loop already catches per-tick errors (`loop()` logs `tick failed` and continues); the next tick retries. No special handling needed; the daemon is resilient by inheritance.
-- **Malformed `data`** — `decodeRecord` **throws**; the decode step catches and returns `{ keep: false, reason: 'undecodable' }`. The open board guarantees junk under a category, so this is expected and silent-at-info-level (logged via `ctx.logger`).
-- **Invalid signature** — `adapter.verify` returns false → `{ keep: false, reason: 'verify-failed' }` → dropped. The DB holds only valid artifacts.
-- **Adapter `verify` *error*** (e.g. RPC failure, or the stubbed Wonderland adapter throwing `not implemented`) — distinguished from a clean `false`. Per the SDK's stance (verify errors *propagate*, not silently "invalid"), the decode step treats a thrown error as a **transient drop with a distinct reason** (`verify-errored`) and logs it, rather than recording an unvalidated row. It does **not** crash the tick. (For `adapter.kind: "none"`, verify is skipped and every decodable record is kept.)
-- **Store failure on `record`** — propagates out of `sink.record`; the relayer's `runOnce`/`loop` catches it as a tick failure and retries next tick. Idempotent PK `(hash, chain_id)` makes retry safe.
-- **Empty / stale DB at startup** — served as empty results. Cold-start hydration from `archive.msgboard.xyz` is **deferred** (§2); the key scheme makes it additive (re-fetch the window's categories, replay through the same decoding sink).
+Window logic: derive each category's UTC day from the `keysForWindow` expansion; for days within the board's known retention, read from the board; for days older than that, read from the archive. The board's retention boundary is a configured value (conservative default well under the board's actual retention, so we never miss records by trusting the board too long). Records fetched from each source are tagged `source: "board" | "archive"` in the response. A digest's signatures may legitimately span both sources; they're merged before `groupByDigest`.
 
-## 11. Testing
+Make the fallback explicit but note it is the exception, not the rule: the headline 7-day-window case is board-only.
 
-**Unit**
-- *Registry / source category-expansion* — `expandCategories` returns `{teams} × {windowDays}` hashes matching `keysForWindow`; rolls correctly across a UTC day boundary; `multisig:*` expands all listed teams. `msgboardContentSource({ categories })` polls each hash and flattens; single/all paths unchanged.
-- *Decoding/filtering sink keep/drop/enrich* — fake inner sink + fake adapter: a valid record is enriched and forwarded; undecodable junk is dropped (`undecodable`); a record failing `verify` is dropped (`verify-failed`); a `verify` that throws is dropped (`verify-errored`) without crashing; `prune` passes through.
-- *SQLite sink record/prune/query* — `:memory:` DB: `record` inserts enriched rows (idempotent on `(hash,chain_id)`); `prune` removes rows older than `windowDays`; `query` filters by digest/signer/category/time, newest first, bounded ≤1000.
-- *Domain query endpoints* — over a seeded store: `/signatures?digest=` returns all sigs; `/owners?digest=` returns distinct signers; `/aggregate-ready` returns ordered dedup-by-signer set with correct `ready` vs threshold; `/records` generic filters; `/health`; auth (401 without token on non-loopback); param coercion.
+## 9. Error handling
 
-**Integration**
-- *End-to-end* — post a cosign signature through the SDK (`postSignature`) onto a fake/local board under today's rotating category; run one archivist tick (`runOnce`) with the real `expandCategories` source + real `decodingSink(cosignDecode(fakeAdapter))` + real `sqliteArchiveSink`; assert the row lands enriched, then query it back via `/signatures` and `/aggregate-ready`. Confirms the codec is the single source of truth (post-side and archive-side decode agree).
+- **Board unreachable / RPC error during fetch** — surfaces per-category. The route can either fail the request (`502`, `{ ok: false, error }`) or, for a multi-category fetch, return partial results with a `warnings` field naming the categories that failed; **v1 fails the request with a clear error** (a partial aggregate could mislead an executor into thinking a digest lacks signatures it actually has). This is the central trade vs a cache: the stateless route depends on board/archive availability *at query time*, where a cache would have served the last-known rows. Noted as the explicit cost of statelessness (§3).
+- **Archive unreachable (fallback path)** — same handling; if older days can't be fetched, fail with an error naming the unavailable source rather than silently returning a short window.
+- **Malformed `data` (junk under a category)** — `decodeRecord` **throws**; the fetch step catches and **skips** the entry (`undecodable`). The open board guarantees junk under any category, so this is expected and silent-at-info-level (logged, not surfaced).
+- **Invalid signature** — `adapter.verify` returns false → the record is **dropped**. The response holds only valid artifacts.
+- **Adapter `verify` *error*** (RPC failure, or the stubbed Wonderland adapter throwing `not implemented`) — distinguished from a clean `false`. Per the SDK's stance (verify errors *propagate*, not silently "invalid"), the route drops the record with a distinct reason (`verify-errored`) and logs it, and does not crash the request. With `adapter.kind: "none"`, verify is skipped and every decodable record is kept.
+- **Unknown `(namespace, scope)`** — not in the team-file → `404`/`403` (`{ ok: false, error: 'unknown scope' }`).
+- **`days` over `windowDays`** — clamped to `windowDays` (not an error), so the route can't be driven to sweep an unbounded window.
+- **Bad `digest` / params** — coerced like `history/server.ts` (`URLSearchParams`, unparseable ignored); a missing required `:digest` → `404` route miss.
 
-No live chain needed for the core; adapter contract-reads are exercised when the real Wonderland adapter is built (fork/mock), per the SDK spec.
+## 10. Testing
+
+**Unit** (no live chain, no DB):
+- *Category resolution* — `resolveCategories(namespace, scope, days, now)` returns `{scope} × {days}` hashes matching the cosign `keysForWindow`; rolls correctly across a UTC day boundary; honors the `windowDays` clamp; rejects scopes absent from the team-file.
+- *Fetch + decode + validate + aggregate over a fake board* — a fake board client returns fixtures for the resolved categories **including junk** (an entry whose `data` makes `decodeRecord` throw) **and an invalid record** (one whose `adapter.verify` returns false), plus several valid records across two digests. Assert: junk is skipped; the invalid record is dropped; a `verify` that *throws* is dropped (`verify-errored`) without failing the request; valid records survive; `groupByDigest` groups them; `aggregate` returns the ordered dedup-by-signer set; `ready` is correct vs the threshold.
+- *Board-vs-archive window split* — with a fake board (recent days) and a fake `Archive.query` (older days), a window straddling the board-retention boundary fetches recent days from the board and older days from the archive, merges, and tags `source` correctly.
+- *HTTP shape* — `/health`; `/cosign/:ns/:scope/signatures`, `/digest/:digest`, `/digest/:digest/aggregate`, optional `/owners`; auth (401 without token on non-loopback); param coercion; unknown-scope 404; `days` clamp.
+
+**Integration:**
+- *Post via cosign → query the route → get aggregate-ready back* — post one or more cosign signatures through the SDK (`postSignature`) onto a fake/local board under today's rotating category for a known team; stand up the history server with the `cosign` option pointed at that board + a `kind: "none"` (or fake) adapter and a team-file containing the team; `GET /cosign/cosign/<team>/digest/<digest>/aggregate` and assert the response is the aggregate-ready ordered `{signer,signature}[]`. This confirms the cosign codec is the single source of truth (post-side and route-side decode agree) end to end, with no store in the loop.
+
+## 11. Deferred: optional persistent cache
+
+The prior design's stateful subsystem is **deferred**, not deleted — it becomes an optional cache you add only when the stateless route's per-request cost actually bites. **When you'd add it:**
+
+- **Per-query fetch+decode is too slow** — very hot endpoints, or large fan-out across many teams, where re-fetching and re-decoding on every request dominates latency.
+- **Offline / air-gapped operation** — a deployment that must answer cosign queries without reaching the board or `archive.msgboard.xyz` at request time (the §9 availability trade made unacceptable).
+- **Very large windows** — windows far past the board's live retention, where the archive-fallback fan-out per request is expensive enough to be worth materializing once.
+- **Multi-tenant persistence** — a hosted instance serving many teams that wants durable, indexed, cross-restart state rather than recomputing per request.
+
+**What it would be** — exactly the prior design, demoted to an optional layer behind the same route:
+- The three reusable relayer/history additions move here (out of v1): a **multi-category source** (`categories?: string[]` on `msgboardContentSource`), a **filtering/decoding sink** (`decodingSink` — decode + `adapter.verify`, keep/enrich or drop, before delegating to an inner store; honoring that the relayer's `sink.record` runs unconditionally before `condition`, so filtering must live in the sink, not the `condition` hook), and a **`sqliteArchiveSink`** mirroring `postgresArchiveSink` (likely via a new `createSqliteArchive` next to `createArchive`, since `archive.ts` SQL is Postgres-specific: `TIMESTAMPTZ`, `now() - INTERVAL`, `ILIKE`, `DO $$`).
+- A daemon (relayer in `observe`/noop mode, prune on the `windowDays` cadence) that polls the registry categories, decodes + validates through the sink, and writes the decoded rows into the cache store.
+- **The cache materializes the same decoded rows the route computes on the fly** (`digest`, `signer`, `signature`, `scheme`, `meta`, plus provenance) — so the HTTP route's handlers serve from the cache when present and fall back to live fetch when not. Adding the cache is therefore additive: same endpoints, same response shapes, same codec; the route just reads materialized rows instead of recomputing.
+- Cold-start is then a real concern for the cache (an empty cache replays the window's categories through the same decoding path to hydrate) — but it is *the cache's* concern, not v1's.
+
+Also deferred (unchanged): on-board discovery of unknown teams (registry v2); encryption of in-flight records; multi-tenant control plane (tenant registry, provisioning).
 
 ## 12. Differentiation vs `archive.msgboard.xyz`
 
-| Axis | `archive.msgboard.xyz` (`@msgboard/history`) | cosign archivist (`@msgboard/cosign-archivist`) |
-|---|---|---|
-| **Coverage** | catch-everything (`msgboardContentSource()` — all categories) | selective — registry team-file × 7-day window, explicit category set |
-| **Retention** | ~365 days (long-tail mirror) | 7-day rolling working set |
-| **Decode** | UTF-8 text → `data_text` (`tryDecodeText`) | structured — cosign codec → `digest`/`signer`/`signature`/`scheme`/`meta` columns |
-| **Query** | raw rows + substring `contains` (`/messages`) | domain-aware — `/signatures`, `/owners`, `/aggregate-ready`, `/records` |
-| **Validation** | stores verbatim (junk and all) | drops invalid at ingest (adapter `verify`); DB holds only valid artifacts |
-| **Host** | one public Postgres, queried remotely | SQLite default, self-hostable, tight local footprint (Postgres for scale) |
+The cosign archive is now a **decoded, cosign-aware VIEW/route on top of the same data** the archive serves — not a separate store. The table contrasts the *raw archive* with the *cosign route over it*:
 
-They are complementary ends of a scope/retention/structure spectrum, sharing the `history`/`relayer` lineage.
+| Axis | `archive.msgboard.xyz` (`@msgboard/history`, `/messages`) | cosign route (`/cosign/...` on the same server) |
+|---|---|---|
+| **What it is** | a store — durable Postgres mirror of board traffic | a **stateless VIEW** — no store; fetches board + archive per request |
+| **Coverage** | catch-everything (all categories) | selective — team-file `(namespace, scope)` × window, resolved per request |
+| **Source of data** | its own Postgres table | the **board** (recent) + this same archive's `query()` (long tail) |
+| **Decode** | UTF-8 text → `data_text` (`tryDecodeText`) | structured — cosign codec → `digest`/`signer`/`signature`/`scheme`/`meta` |
+| **Query** | raw rows + substring `contains` (`/messages`) | domain-aware — `/signatures`, `/digest/:digest`, `/digest/:digest/aggregate`, `/owners` |
+| **Validation** | stores verbatim (junk and all) | drops junk (codec) + invalid (adapter `verify`) at read time |
+| **State** | stateful (table, prune, retention) | **stateless** (computed per request; optional cache deferred, §11) |
+
+They are complementary: the archive is the durable substrate; the cosign route is a decoded, validated, aggregated lens onto the board + that substrate, sharing the `history` server and its `query()`.
 
 ## 13. Decomposition into sequenced plans
 
-This is sizable; split into three plans plus deferred work.
+**Plan 1 (v1) — The stateless cosign route** (in `@msgboard/history`)
+- `teamFile` (load/validate; no store block), `resolveCategories` (via cosign `keysForWindow`), `fetchRecords` (board read + `archive.query()` fallback + `decodeRecord` skip-junk + `adapter.verify` drop-invalid), and the cosign request handler.
+- Mount the cosign endpoint group on `archiveServer` behind a `cosign?` option, reusing `respond`, the bind/`token` guard, and the timeouts.
+- Unit tests (category resolution; fetch+decode+validate+aggregate over a fake board with junk + invalid fixtures; board-vs-archive window split; HTTP shape) + the post-via-cosign → query-the-route integration test.
 
-**Plan 1 — Reusable relayer/history bits** (`@msgboard/relayer`, `@msgboard/history`)
-- `categories?: string[]` (+ resolver form) on `msgboardContentSource`; backward-compatible.
-- `decodingSink` / `filteringSink` generic wrapper.
-- `createSqliteArchive` in `@msgboard/history` + `sqliteArchiveSink` in `@msgboard/relayer`, mirroring `createArchive` / `postgresArchiveSink`.
-- Unit tests for each. These ship value independently of the cosign service.
-
-**Plan 2 — The archivist service** (`@msgboard/cosign-archivist`)
-- `team-file.ts` (load/validate), `registry.ts` (expansion via `keysForWindow`), `decode.ts` (cosign decode + adapter verify → row), `store.ts` (store selection + cosign columns + retention), `daemon.ts` (relayer wiring, observe + noop + prune cadence).
-- Unit tests (expansion, decode keep/drop/enrich) + the end-to-end integration test into SQLite.
-
-**Plan 3 — The HTTP domain query API** (`@msgboard/cosign-archivist`)
-- `query.ts` (domain SQL) + `server.ts` (endpoints, auth, timeouts) modeled on `history/server.ts`.
-- Endpoint unit tests.
-
-**Deferred (explicit follow-ups, not in the above plans):**
-- Cold-start hydration fallback to `archive.msgboard.xyz` when the local DB is empty/stale.
-- On-board discovery of unknown teams (registry v2).
-- Encryption of in-flight records.
-- Multi-tenant control plane (tenant registry, provisioning) — additive over the single-tenant v1.
+**Deferred — the optional persistent cache** (§11; its own follow-up spec/plan when triggered)
+- The three reusable relayer/history additions (multi-category source, decoding/filtering sink, `sqliteArchiveSink` / `createSqliteArchive`).
+- The cache daemon (relayer in observe/noop + prune) and route-reads-from-cache wiring.
+- Cache cold-start hydration.
 
 ## 14. Open items
 
-- **SQLite driver choice** — `better-sqlite3` (sync, mature) vs `node:sqlite` (built-in, newer). Affects the `Queryable` adapter shape for `createSqliteArchive`. Pin in Plan 1.
-- **Registry recompute cadence** — per-tick vs isoDay-cached. Leaning isoDay-cached (recompute only when `isoDay(now)` changes); confirm in Plan 2.
-- **Adapter resolution** — how `adapter.kind` strings map to `CosignAdapter` instances (registry of built adapters); Wonderland is stubbed in the SDK, so `"wonderland"` resolves to the stub and every record drops as `verify-errored` until the real adapter lands. `"none"` is the working default.
-- **Ordering in `/aggregate-ready`** — whether to apply `adapter.order` (needs a built adapter) or return signer-sorted when adapter is `"none"`. Pin with the first real adapter.
+- **Board retention boundary** — the configured cutoff that decides "recent (board) vs older (archive)" per day (§8). Pin a conservative default (well inside the board's real retention) in Plan 1; ideally derive it from the board's `status` rather than hard-coding.
+- **Partial-failure policy** — v1 fails the whole request when any category fetch errors (§9). Confirm whether a `warnings`-with-partial-results mode is ever wanted for the multi-team `signatures` endpoint (it is not for `aggregate`).
+- **Ordering in `aggregate`** — whether to apply `adapter.order` (needs a built adapter) or return signer-sorted when adapter is `"none"`. Pin with the first real adapter.
+- **Adapter resolution** — how `adapter.kind` strings map to `CosignAdapter` instances; Wonderland is stubbed in the SDK, so `"wonderland"` resolves to the stub and every record drops as `verify-errored` until the real adapter lands. `"none"` is the working default.
 - **`scope` / `namespace` convention** — must match exactly how teams post via the SDK (`('cosign', team)` vs `('multisig', '${chainId}:${safeAddress}')`); inherited as an open item from the SDK spec §9.
+- **Extract-to-package threshold** — when (if ever) to pull the route into a standalone `@msgboard/cosign-archive` (§4.1 deferred alternative). Not in v1.
 
 ---
 
 ### Self-review
 
-- *Placeholder scan* — no TODO/TBD/`<...>` placeholders left in the body; template angle-brackets in the subtitle line resolved to a concrete subtitle.
-- *Internal consistency* — `windowDays` = retention = coverage (7) is stated consistently (§5, §8, §9, §12); the §3.2 "filter at source/sink not condition" constraint is the stated reason for additions (a) and (b) in §4.1 and is reflected in the §8 data-flow note that `sink.record` runs unconditionally; column set in §7 matches the `SignatureRow` response in §6 and the decode mapping in §4.2/§10.
-- *Scope* — deferred items (cold-start hydration, discovery, encryption, multi-tenant) are kept out of the three plans and listed once in §2, §10, and §13; YAGNI respected (no speculative features).
-- *Grounding* — real interfaces quoted from the codebase: `RelayerSink`, `RelayerCondition` (types.ts), `handleItem` ordering (relayer.ts), `postgresArchiveSink` shape (postgres-archive.ts), `MsgboardContentSourceOptions` (msgboard-content.ts), `message_archive` schema + prune SQL (archive.ts), server conventions (server.ts).
-- *Ambiguity* — the one genuinely undecided knob (SQLite via shared `createArchive` vs a new `createSqliteArchive`) is resolved inline in §4.1c (favor `createSqliteArchive` because `archive.ts` SQL is Postgres-specific) and surfaced again as Open Item §14 for the driver choice. No other unresolved forks remain in the design.
+- *Placeholder scan* — no TODO/TBD/`<...>` placeholders left in the body; the title subtitle is concrete. Path/route names are real (`/cosign/:namespace/:scope/...`, `/messages`, `/health`).
+- *Architecture consistency* — the "stateless route, board+archive are the store" thesis is stated once in §1/§3 and reflected throughout: no store in §4 (deps exclude `@msgboard/relayer`), no `store` block in §5, computed-per-request in §6/§7, board-vs-archive split in §8, statelessness as the §9 availability trade and the §12 "State" row, and the demoted stateful design isolated in §11. The headline `aggregate` endpoint is consistent across §1, §6, §7, §10, §12.
+- *Scope / YAGNI* — v1 is the route only (§13 Plan 1); every stateful piece (relayer source/sink, SQLite, prune, daemon, cold-start) is in §11/§13-deferred, not v1. Discovery, encryption, multi-tenant remain deferred.
+- *Grounding* — real interfaces quoted/referenced: `archiveServer` conventions and the `respond`/`parseQuery`/`/health`/`/messages` style + bind/token guard + 10 s timeouts (`history/server.ts`); `Archive.query(ArchiveQuery)` and the Postgres-specific SQL that motivates a separate SQLite path (`history/archive.ts`); the cosign SDK's `readSignatures(board, {namespace, scope, days})` / `groupByDigest` / `aggregate(records, adapter)` / `keysForWindow` / `decodeRecord` (throws on junk) and the `CosignAdapter` seam (cosign SDK spec §4); board `content({ category })` (`@msgboard/sdk`).
+- *Ambiguity* — the one real architectural fork (endpoint-group-on-history-server vs standalone package) is resolved inline in §4.1 (group on the history server for v1, because the archive fallback is in-process and the conventions are inherited) and surfaced again as Open Item §14 (extract threshold). The board-retention boundary is the other knob, resolved as a conservative configured default in §8 and pinned in §14. No other unresolved forks remain.
