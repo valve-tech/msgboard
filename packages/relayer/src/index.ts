@@ -36,5 +36,10 @@ export { sendValueAction } from './actions/send-value.js'
 export { webhookAction } from './actions/webhook.js'
 export { noopAction } from './actions/noop.js'
 
+export { repricingAction } from './actions/repricing.js'
+export type { RepricingActionOptions, SubmitRequest } from './actions/repricing.js'
+export { createPendingTxTracker } from './stores/pending-tx.js'
+export type { PendingTxTracker, PendingTx, PendingTxTrackerOptions, TxFees } from './stores/pending-tx.js'
+
 export { httpQueueSource } from './sources/http-queue.js'
 export type { HttpQueueSource, HttpQueueSourceOptions } from './sources/http-queue.js'
