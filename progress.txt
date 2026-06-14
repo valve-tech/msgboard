@@ -1,6 +1,73 @@
 # MsgBoard — Progress
 
-Updated: 2026-06-13
+Updated: 2026-06-14
+
+## MSGBOARD GAMES — PLAN 3 (ASYNC SETTLEMENT RELAYER) EXECUTED (2026-06-14, latest)
+
+(CROSS-REPO. plan docs/superpowers/plans/2026-06-13-msgboard-games-settlement-relayer.md.
+TDD per task, fakes only — no anvil/RPC; driven through Relayer.runOnce(). Both repos
+committed to master, unsigned, no Co-Authored-By. The msgboard commits are NOT pushed
+here — the controller pushes after review. The random repo CANNOT push from this env
+(ssh publickey denied) — the user pushes it.)
+
+Engine primitive (msgboard packages/relayer, master, commits d0bbc3c..a63ac50 on top of
+d134769):
+- NEW src/stores/pending-tx.ts — createPendingTxTracker / PendingTxTracker: per-nonce
+  in-flight tx state (claim within a bounded window, recordSubmission, isStale, bumpFees
+  with a +12.5% RBF floor, markMined). Generic — knows nothing about games. (5 tests)
+- NEW src/actions/repricing.ts — repricingAction<T>: a RelayerAction WRAPPER that owns
+  nonce assignment + replace-by-fee, delegating "build+send one tx at this nonce/fee" to a
+  caller-supplied submit fn. describe() pure (observe-safe); re-tick of the same item RBFs
+  the SAME nonce; window-full defers (ok:false), never drops. (5 tests)
+- This is the literal "nonce-window / repricing Action wrapper" the relayer spec deferred
+  to its §13. Exported from src/index.ts. npm test = 16 files / 62 tests pass; npm run
+  build emits dist/ clean (dist/actions/repricing.js + dist/stores/pending-tx.js present).
+- Placed in the ENGINE (not the worker) because it is game-agnostic and reusable by any
+  live relayer (cross-chain mirror, sponsor, future settler). Will publish in the next
+  @msgboard/* version bump (> 0.0.31).
+
+Worker composition (random repo examples/games/msgboard-settle-relayer,
+@gibs/msgboard-settle-relayer, master, commits 1d6b844..8b36020):
+- NEW package: depends on published @msgboard/relayer ^0.0.31 (same mechanism the games
+  pkgs use for @msgboard/sdk ^0.0.31), workspace @gibs/msgboard-settle + @gibs/msgboard-games.
+- src/settleReadySource.ts — RelayerSource<SettleJob>: an injected provider reports
+  sessions; keeps only those with >=1 co-signed ROUND; one independent job per session
+  (parallel-safe). (3 tests)
+- src/settleAction.ts — RelayerAction<SettleJob>: per job calls
+  settlement.buildSettle(transcriptJson) (Optimistic = 6 args open/final/4 sigs; Escrowed
+  = 3 args) which replays + re-verifies the transcript and THROWS on tamper, then submits
+  via the injected submitter, wrapped by the engine's repricingAction (nonce window + RBF).
+  A build-throw becomes ok:false with nothing submitted. (3 tests)
+- src/nudges.ts — detectNudges: pure, emit-only sign-next-state / top-up-gas reminders;
+  no signer, no tx in scope. (4 tests)
+- src/worker.ts — makeSettlementRelayer(cfg): assembles a Relayer<SettleJob> + a default
+  viem simulate->write submitter; observe-by-default. (4 tests)
+- test/safety.test.ts — the load-bearing suite (spec §7/§10): observe-by-default does
+  nothing; only signed states submitted (both co-sigs verify); tampered transcript refused
+  (no tx); failing submitter delays but a later tick re-lands (no censorship); two workers
+  build identical calldata (only power is WHEN). (5 tests)
+- pnpm test = 5 files / 19 tests pass; pnpm typecheck clean.
+
+CROSS-REPO VERSIONING (Plan 3 Task 1): the published @msgboard/relayer 0.0.31 already
+exports Relayer / RelayerAction / RelayerContext / RelayerMode / RelayerNode (imported
+directly), but NOT the new repricing primitive (repricingAction / createPendingTxTracker /
+PendingTxTracker / TxFees) — those were added to the engine in this plan and are not
+published yet. Per the plan's documented fallback, the worker provides those four symbols
+via a LOCAL SHIM src/repricing-local.ts (a byte-for-byte mirror of the engine primitive)
+flagged `// TODO(plan3): delete once @msgboard/relayer republishes`. settleAction.ts /
+worker.ts import the primitive from the shim and everything else from @msgboard/relayer.
+When the engine republishes (> 0.0.31): delete repricing-local.ts and switch those imports
+back; makeSettlementRelayer's public API is identical either way.
+
+Deviation (noted): the games packages' tsconfig sets noUncheckedIndexedAccess: true, so the
+plan's verbatim test code (mock.calls[0][0], args[1], jobs[0]) does not pass tsc --noEmit
+as written. Minimal correct fix applied: typed the vi.fn submit mocks with SettleSubmitRequest
+and added non-null assertions (!) on the index accesses. Behavior unchanged; all 19 worker
+tests still pass and typecheck is clean.
+
+Open items carried forward: the real board-watching `provider` wiring + the on-chain
+land/RBF e2e test belong to the §13 plan-6 web/e2e work; the unilateral/ZK settle path is
+§13 plan 5. No new contract / no on-chain settlement code in Plan 3 (off-chain worker only).
 
 ## MSGBOARD GAMES — PLAN 2 (SETTLEMENT SEAM + OPTIMISTIC + ESCROWED) EXECUTED (2026-06-13, latest)
 
