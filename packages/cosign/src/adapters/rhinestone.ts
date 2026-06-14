@@ -152,3 +152,131 @@ export function decodeOwnableMeta(meta: Hex): OwnableMeta {
     chainId: Number(chainId),
   }
 }
+
+/** The minimal read-only client surface the adapter needs (a viem PublicClient satisfies it). */
+export interface OwnablePublicClient {
+  readContract(args: {
+    address: Hex
+    abi: readonly unknown[]
+    functionName: string
+    args?: readonly unknown[]
+  }): Promise<unknown>
+}
+
+/** Config: one instance is pinned to one (chainId, validator, account). */
+export interface RhinestoneOwnableConfig {
+  publicClient: OwnablePublicClient
+  /** The OwnableValidator module address (defaults to the canonical address). */
+  validator?: Hex
+  /** The ERC-7579 smart-account address — the getOwners/threshold storage key. */
+  account: Hex
+  /** Chain id (binds the userOpHash domain). */
+  chainId: number
+}
+
+/** Minimal OwnableValidator ABI — only the reads the adapter calls (keyed by account). */
+export const OWNABLE_VALIDATOR_ABI = [
+  { type: 'function', name: 'getOwners', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ type: 'address[]' }] },
+  { type: 'function', name: 'threshold', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ type: 'uint256' }] },
+  { type: 'function', name: 'ownerCount', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ type: 'uint256' }] },
+  {
+    type: 'function', name: 'validateSignatureWithData', stateMutability: 'view',
+    inputs: [{ name: 'hash', type: 'bytes32' }, { name: 'signature', type: 'bytes' }, { name: 'data', type: 'bytes' }],
+    outputs: [{ type: 'bool' }],
+  },
+  {
+    type: 'function', name: 'isValidSignatureWithSender', stateMutability: 'view',
+    inputs: [{ name: 'sender', type: 'address' }, { name: 'hash', type: 'bytes32' }, { name: 'data', type: 'bytes' }],
+    outputs: [{ type: 'bytes4' }],
+  },
+] as const
+
+/** ERC-7579 isValidSignatureWithSender success magic. */
+export const EIP1271_SUCCESS = '0x1626ba7e' as const
+
+/**
+ * Recovers the effective signer for a record. For mode-1 (4337) records the validator wraps the
+ * userOpHash with the EIP-191 prefix before recovery (ECDSA.toEthSignedMessageHash), so we recover
+ * over the prefixed message; for mode-0 (raw-hash) records we recover over the raw digest. Both
+ * are plain v∈{27,28} ECDSA on the wire. Throws on a malformed signature.
+ */
+async function effectiveSigner(record: SignatureRecord): Promise<Hex> {
+  let mode = 0
+  if (record.meta && record.meta !== '0x') {
+    try {
+      mode = decodeOwnableMeta(record.meta).mode
+    } catch {
+      mode = 0
+    }
+  }
+  if (mode === 1) {
+    // 4337: the owner personal-signed the raw userOpHash; recover over the EIP-191 message.
+    return recoverMessageAddress({ message: { raw: record.digest }, signature: record.signature })
+  }
+  // raw-hash (stateless / 1271): plain ECDSA over the raw digest.
+  return recoverAddress({ hash: record.digest, signature: record.signature })
+}
+
+/**
+ * The Rhinestone OwnableValidator CosignAdapter (threshold-of-EOAs). Verifies one owner's ECDSA
+ * signature over the appropriate digest + confirms membership via getOwners(account); orders
+ * records strictly-ascending + deduped and concatenates the 65-byte words validateUserOp /
+ * validateSignatureWithData / isValidSignatureWithSender consume.
+ */
+export function makeRhinestoneOwnableAdapter(config: RhinestoneOwnableConfig): CosignAdapter {
+  const { publicClient, account } = config
+  const validator = config.validator ?? OWNABLE_VALIDATOR_ADDRESS
+
+  async function owners(): Promise<Hex[]> {
+    const result = (await publicClient.readContract({
+      address: validator,
+      abi: OWNABLE_VALIDATOR_ABI,
+      functionName: 'getOwners',
+      args: [account],
+    })) as readonly Hex[]
+    return result.map((a) => getAddress(a))
+  }
+
+  async function threshold(): Promise<number> {
+    const result = (await publicClient.readContract({
+      address: validator,
+      abi: OWNABLE_VALIDATOR_ABI,
+      functionName: 'threshold',
+      args: [account],
+    })) as bigint
+    return Number(result)
+  }
+
+  async function isOwner(addr: Hex): Promise<boolean> {
+    const set = await owners()
+    return set.some((o) => isAddressEqual(o, addr))
+  }
+
+  async function verify(record: SignatureRecord): Promise<boolean> {
+    let recovered: Hex
+    try {
+      recovered = await effectiveSigner(record)
+    } catch {
+      return false // malformed signature = definitively invalid, not infra error
+    }
+    if (!isAddressEqual(recovered, record.signer)) return false
+    return isOwner(recovered) // RPC errors here PROPAGATE
+  }
+
+  function order(records: SignatureRecord[]): SignatureRecord[] {
+    return sortDedupBySigner(records)
+  }
+
+  return { verify, order, owners, threshold }
+}
+
+/**
+ * Concatenates ordered records' verbatim 65-byte {r}{s}{v} words into the signature blob the
+ * validator's recoverNSignatures parses. Pass the output of adapter.order. This IS the
+ * userOp.signature (4337) and the `signature` arg of validateSignatureWithData / data of
+ * isValidSignatureWithSender. No v adjustment, no offset tails (EOA owners only).
+ */
+export function buildOwnableSignature(orderedRecords: SignatureRecord[]): Hex {
+  if (orderedRecords.length === 0) return '0x'
+  return concat(orderedRecords.map((r) => eoaWord(r.signature)))
+}
