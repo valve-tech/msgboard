@@ -4,7 +4,7 @@
 
 ## Goal
 
-Ship `@msgboard/cosign` (sub-project 1): a small, dependency-light SDK for sharing **co-signature artifacts** — generic `(digest, signer, signature, scheme, meta)` records — over MsgBoard, bucketed under **rotating, day-granular UTC category keys**. It is app-agnostic; a pluggable **adapter** encodes a specific multisig's verify/order/owner-read rules. The first adapter (Wonderland) ships as an intentional **STUB** (interface + seam only). Zero chain writes; pure board + crypto.
+Ship `@msgboard/cosign` (sub-project 1): a small, dependency-light SDK for sharing **co-signature artifacts** — generic `(digest, signer, signature, scheme, meta)` records — over MsgBoard, bucketed under **rotating, day-granular UTC category keys**. It is app-agnostic; a pluggable **adapter** encodes a specific multisig's verify/order/owner-read rules. This package ships the generic core plus the pluggable **`CosignAdapter` interface only** — **no concrete adapter, no stub**. First-class adapters are separate deliverables that live with their targets (the Multisigner adapter in the multisigner spec; a real, first-class Wonderland adapter in its own dedicated spec/plan). Zero chain writes; pure board + crypto.
 
 The deliverable is the foundation layer that two consumers build on: a team's own post/read/aggregate tooling, and the **cosign archivist** (sub-project 2) which imports this package's `keys.ts` key scheme and `record.ts` codec verbatim.
 
@@ -32,10 +32,10 @@ caller's signing tooling
    ordered { signer, signature }[]   (handed to team's existing execute path — out of scope)
             ▲
             │ verify / order / owners? / threshold?
-   src/adapters/wonderland.ts  (STUB — throws 'wonderland adapter: not implemented')
+   src/adapters/adapter.ts  (CosignAdapter INTERFACE — concrete adapters live in their own specs)
 ```
 
-`keys.ts` and `record.ts` are pure (no I/O). `client.ts` depends only on an abstract `BoardClient` interface — never on `MsgBoardClient` directly — so it is fully testable with a fake board. Adapters are the only place chain reads may happen (read-only); the shipped Wonderland adapter does none yet (stub).
+`keys.ts` and `record.ts` are pure (no I/O). `client.ts` depends only on an abstract `BoardClient` interface — never on `MsgBoardClient` directly — so it is fully testable with a fake board. This package ships only the `CosignAdapter` **interface**; concrete adapters (the only place read-only chain reads may happen) are separate deliverables in their own packages/specs.
 
 ## Tech Stack
 
@@ -96,16 +96,15 @@ All paths relative to `packages/cosign/`.
 | `tsconfig.json` | TS build config (NodeNext, strict), copied from `packages/relayer`. |
 | `vitest.config.ts` | Includes `test/**/*.test.ts`. |
 | `README.md` | What it is, the canonical encodings, and the `MsgBoardClient → BoardClient` wrapper example. |
-| `src/index.ts` | Public surface: re-exports `keys`, `record`, `client`, `adapters/adapter`, `adapters/wonderland`. |
+| `src/index.ts` | Public surface: re-exports `keys`, `record`, `client`, `adapters/adapter` (the interface). No concrete adapter. |
 | `src/keys.ts` | Rotating-key scheme: `isoDay`, `categoryKey`, `currentKey`, `keysForWindow`. Pure. |
 | `src/record.ts` | `SignatureRecord` type, `SCHEME` enum, `RECORD_ABI` tuple, `encodeRecord`, `decodeRecord`. Pure. |
 | `src/client.ts` | `BoardClient` interface, `PostSignatureArgs`/`ReadSignaturesArgs`, `postSignature`, `readSignatures`, `groupByDigest`, `aggregate`. Depends only on `BoardClient` + adapter interface. |
-| `src/adapters/adapter.ts` | `CosignAdapter` interface (the seam). |
-| `src/adapters/wonderland.ts` | `WonderlandAdapterConfig` shape + `wonderlandAdapter(config)` STUB (every method throws `not implemented`), with a documented TODO of the intended chain reads. |
+| `src/adapters/adapter.ts` | `CosignAdapter` interface (the seam) — the only adapter artifact in this package. |
 | `test/keys.test.ts` | keys: determinism, UTC rotation across a boundary (fixed dates), window length/contents, namespace/scope sensitivity, `days < 1` throws. |
 | `test/record.test.ts` | record: round-trip per scheme incl. empty meta; `decodeRecord` throws on garbage. |
 | `test/client.test.ts` | client: post path, read path with a junk entry skipped + dedupe, `groupByDigest`, `aggregate` filter+order — all with a fake `BoardClient` + fake adapter. |
-| `test/adapters/wonderland.test.ts` | asserts every stub method throws `not implemented` (locks the seam). |
+| `test/adapters/adapter.test.ts` | type-level / compile check that a fake adapter satisfies `CosignAdapter` and drives `aggregate` (locks the interface shape). |
 
 ---
 
@@ -586,7 +585,7 @@ git commit -m "feat(cosign): record.ts — canonical SignatureRecord ABI codec +
 
 **Goal:** post/read/aggregate over an abstract `BoardClient`, plus `groupByDigest`. Fully testable with a fake board and fake adapter. Depends on `keys.ts` (Task 2), `record.ts` (Task 3), and the adapter interface (defined inline-compatible here; the interface file lands in Task 5 and `client.ts` imports it then — see note).
 
-> **Ordering note:** `aggregate` needs the `CosignAdapter` type. To keep tasks independent and tests green, Task 4 defines `client.ts` importing `CosignAdapter` from `./adapters/adapter.js`, and Task 5 creates that file. To make Task 4 self-contained for its own RED→GREEN, we create the tiny `adapters/adapter.ts` interface file as the **first step of Task 4** (it is pure type, no behavior), then build `client.ts` against it. Task 5 then only adds the Wonderland stub + its test. (This is a minor, deliberate resequencing of the suggested breakdown so every task compiles on its own.)
+> **Ordering note:** `aggregate` needs the `CosignAdapter` type. To keep Task 4 self-contained for its own RED→GREEN, we create the tiny `adapters/adapter.ts` interface file as the **first step of Task 4** (it is pure type, no behavior), then build `client.ts` against it. Task 5 adds a small dedicated test that a fake adapter satisfies the interface and drives `aggregate`. This package ships **no** concrete adapter — first-class adapters (Multisigner; a real Wonderland adapter) are separate deliverables in their own specs/packages.
 
 ### 4.1 Create the adapter interface (type-only seam) — `packages/cosign/src/adapters/adapter.ts`
 
@@ -881,153 +880,81 @@ git commit -m "feat(cosign): client.ts — post/read/group/aggregate over a Boar
 
 ---
 
-## Task 5 — `adapters/wonderland.ts` (intentional STUB)
+## Task 5 — Lock the `CosignAdapter` interface (compile + drive test)
 
-**Goal:** Lock the adapter seam with a documented Wonderland stub whose every method throws `wonderland adapter: not implemented`. This is the spec'd deliverable, **not** a placeholder — §4/§9 of the spec keep Wonderland's contract specifics open; the stub holds the shape so a future implementer cannot silently ship a half-wired adapter.
+**Goal:** Verify the `CosignAdapter` interface (already created in Task 4.1) is well-formed: a fake adapter satisfies it and drives `aggregate`. This package ships the **interface only** — **no concrete adapter, no stub**. First-class adapters are separate deliverables that live with their targets (the Multisigner adapter is specced in the multisigner spec; a real, first-class Wonderland adapter — real + tested against their actual contract — gets its own dedicated spec/plan once the contract/ABI is known).
 
-> `adapters/adapter.ts` already exists (created in Task 4.1). This task only adds the Wonderland stub + its test.
+> `adapters/adapter.ts` already exists (the `CosignAdapter` interface, created in Task 4.1). The `aggregate` fake-adapter behavior is already covered in Task 4's `client.test.ts`. This task adds a small, focused test that a fake adapter is assignable to `CosignAdapter` and works through `aggregate` — a type-level/compile check that locks the interface shape. If you consider this fully covered by Task 4's `aggregate` tests, this task is satisfied by that coverage and you may skip the extra file; otherwise add the test below.
 
-### 5.1 RED — `packages/cosign/test/adapters/wonderland.test.ts`
+### 5.1 RED — `packages/cosign/test/adapters/adapter.test.ts`
 
 ```ts
 import { describe, expect, it } from 'vitest'
 import type { Hex } from 'viem'
 import { SCHEME, type SignatureRecord } from '../../src/record.js'
-import { wonderlandAdapter } from '../../src/adapters/wonderland.js'
+import type { CosignAdapter } from '../../src/adapters/adapter.js'
+import { aggregate } from '../../src/client.js'
 
-const config = {
-  multisig: `0x${'ab'.repeat(20)}` as Hex,
-  chainId: 1,
-  publicClient: {},
-}
-
-const record: SignatureRecord = {
+const signer = (n: string): Hex => `0x${n.repeat(40).slice(0, 40)}` as Hex
+const sig = `0x${'33'.repeat(65)}` as Hex
+const rec = (signerAddr: Hex): SignatureRecord => ({
   digest: `0x${'11'.repeat(32)}` as Hex,
-  signer: `0x${'22'.repeat(20)}` as Hex,
-  signature: `0x${'33'.repeat(65)}` as Hex,
+  signer: signerAddr,
+  signature: sig,
   scheme: SCHEME.ECDSA,
   meta: '0x',
-}
+})
 
-describe('wonderlandAdapter (STUB)', () => {
-  it('returns an adapter object exposing the full seam', () => {
-    const adapter = wonderlandAdapter(config)
-    expect(typeof adapter.verify).toBe('function')
-    expect(typeof adapter.order).toBe('function')
-    expect(typeof adapter.owners).toBe('function')
-    expect(typeof adapter.threshold).toBe('function')
+describe('CosignAdapter interface', () => {
+  it('a fake adapter satisfies the interface and drives aggregate', async () => {
+    // Type-level lock: this object must be assignable to CosignAdapter.
+    const adapter: CosignAdapter = {
+      verify: async (record) => record.signer !== signer('2'),
+      order: (records) => [...records].sort((a, b) => (a.signer < b.signer ? -1 : 1)),
+      owners: async () => [signer('1'), signer('3')],
+      threshold: async () => 2,
+    }
+    const out = await aggregate([rec(signer('3')), rec(signer('2')), rec(signer('1'))], adapter)
+    expect(out.map((o) => o.signer)).toEqual([signer('1'), signer('3')])
   })
 
-  it('verify throws not implemented', async () => {
-    await expect(wonderlandAdapter(config).verify(record)).rejects.toThrow(
-      'wonderland adapter: not implemented',
-    )
-  })
-
-  it('order throws not implemented', () => {
-    expect(() => wonderlandAdapter(config).order([record])).toThrow(
-      'wonderland adapter: not implemented',
-    )
-  })
-
-  it('owners throws not implemented', async () => {
-    await expect(wonderlandAdapter(config).owners!()).rejects.toThrow(
-      'wonderland adapter: not implemented',
-    )
-  })
-
-  it('threshold throws not implemented', async () => {
-    await expect(wonderlandAdapter(config).threshold!()).rejects.toThrow(
-      'wonderland adapter: not implemented',
-    )
+  it('the optional owners/threshold methods may be omitted', async () => {
+    const minimal: CosignAdapter = {
+      verify: async () => true,
+      order: (records) => records,
+    }
+    const out = await aggregate([rec(signer('1'))], minimal)
+    expect(out).toHaveLength(1)
   })
 })
 ```
 
-Run — must fail (no `src/adapters/wonderland.ts`):
+Run — must fail until `client.ts`/`adapter.ts` exist (both land in Task 4):
 
 ```bash
-npm run test --workspace=packages/cosign -- wonderland
+npm run test --workspace=packages/cosign -- adapter
 ```
 
-**Expected:** import-resolution failure for `../../src/adapters/wonderland.js` (RED).
+**Expected:** if run before Task 4, an import-resolution failure (RED). After Task 4 the test compiles and passes — the value here is the explicit type-level assertion that a fake adapter is assignable to `CosignAdapter` and the optional methods are genuinely optional.
 
-### 5.2 GREEN — `packages/cosign/src/adapters/wonderland.ts`
+### 5.2 GREEN
 
-```ts
-import type { Hex } from 'viem'
-import type { SignatureRecord } from '../record.js'
-import type { CosignAdapter } from './adapter.js'
-
-/**
- * Configuration for the Wonderland multisig adapter.
- * `publicClient` is intentionally `unknown` here: the real implementation will narrow it to a
- * viem `PublicClient` once Wonderland's contract/ABI is pinned (spec §9). Kept loose so the
- * seam shape is fixed without committing to a viem version's client type.
- */
-export interface WonderlandAdapterConfig {
-  /** The Wonderland multisig contract address. */
-  multisig: Hex
-  /** The chain id the multisig lives on. */
-  chainId: number
-  /** A read-only chain client (viem PublicClient) — typed `unknown` until the adapter is built. */
-  publicClient: unknown
-}
-
-const NOT_IMPLEMENTED = 'wonderland adapter: not implemented'
-
-/**
- * STUB Wonderland adapter — intentional, per spec §4/§9. Every method throws until Wonderland's
- * contract specifics are provided. This locks the {@link CosignAdapter} seam so a future
- * implementer cannot forget to wire it.
- *
- * TODO (when Wonderland's contract/ABI is pinned — spec §9):
- *  - owners():    read the owner set from `multisig` via `publicClient.readContract` (getOwners()).
- *  - threshold(): read the signing threshold via `publicClient.readContract` (getThreshold()).
- *  - verify():    recover the signer from `record.signature` over `record.digest` per `record.scheme`
- *                 (ECDSA ecrecover; EIP1271 isValidSignature staticcall; EIP712 typed-data recover)
- *                 and assert membership in owners(). RPC/recovery errors PROPAGATE (spec §6) —
- *                 never coerced to `false`.
- *  - order():     return records in the multisig's required submission order (e.g. owners ascending).
- *  - Pin the `scope` convention (team name vs `${chainId}:${safeAddress}`) and the per-scheme
- *    `meta` schema at the same time (spec §9).
- */
-export function wonderlandAdapter(config: WonderlandAdapterConfig): CosignAdapter {
-  // Reference config so it is part of the locked signature (and not flagged unused).
-  void config
-  return {
-    async verify(_record: SignatureRecord): Promise<boolean> {
-      throw new Error(NOT_IMPLEMENTED)
-    },
-    order(_records: SignatureRecord[]): SignatureRecord[] {
-      throw new Error(NOT_IMPLEMENTED)
-    },
-    async owners(): Promise<Hex[]> {
-      throw new Error(NOT_IMPLEMENTED)
-    },
-    async threshold(): Promise<number> {
-      throw new Error(NOT_IMPLEMENTED)
-    },
-  }
-}
-```
-
-> `noUnusedParameters` is on in `tsconfig.json`; the `_`-prefixed params and `void config` keep tsc happy while preserving the real signatures. The methods deliberately match `CosignAdapter` exactly so swapping in a real body later is a drop-in.
+No new source is required — the `CosignAdapter` interface already lives in `src/adapters/adapter.ts` (Task 4.1). This task is GREEN once the test above passes against that interface. **Do not** add any concrete adapter here; concrete adapters are out of scope for this package.
 
 ### 5.3 Run & verify
 
 ```bash
-npm run test --workspace=packages/cosign -- wonderland
+npm run test --workspace=packages/cosign -- adapter
 npm run build --workspace=packages/cosign
 ```
 
-**Expected:** `wonderland.test.ts` passes; `tsc` clean (proves the stub satisfies `CosignAdapter` and the strict-unused flags).
+**Expected:** `adapter.test.ts` passes; `tsc` clean (proves the interface compiles and a fake satisfies it).
 
 ### 5.4 Commit
 
 ```bash
-git add packages/cosign/src/adapters/wonderland.ts packages/cosign/test/adapters/wonderland.test.ts
-git commit -m "feat(cosign): wonderland.ts — intentional STUB locking the adapter seam"
+git add packages/cosign/test/adapters/adapter.test.ts
+git commit -m "test(cosign): lock CosignAdapter interface — fake adapter drives aggregate"
 ```
 
 ---
@@ -1061,8 +988,9 @@ export {
   aggregate,
 } from './client.js'
 export type { CosignAdapter } from './adapters/adapter.js'
-export { type WonderlandAdapterConfig, wonderlandAdapter } from './adapters/wonderland.js'
 ```
+
+> Only the `CosignAdapter` **interface** is re-exported. This package ships no concrete adapter; first-class adapters (Multisigner; a real Wonderland adapter) are separate deliverables that export their own factories from their own packages/specs.
 
 ### 6.2 Delete the obsolete smoke test and its constant
 
@@ -1083,8 +1011,10 @@ Generic **signature-share** SDK over [MsgBoard](https://github.com/valve-tech/ms
 aggregate co-signature artifacts — `(digest, signer, signature, scheme, meta)` records — bucketed under
 **rotating, day-granular UTC category keys** so the working set stays small and self-pruning.
 
-App-agnostic. A pluggable **adapter** encodes a specific multisig's verify/order/owner-read rules. The first
-adapter (Wonderland) ships as an intentional **stub**. Pure board + crypto: **no chain writes**.
+App-agnostic. A pluggable **adapter** encodes a specific multisig's verify/order/owner-read rules. This package
+ships the generic core plus the `CosignAdapter` **interface only** — **no concrete adapter**. First-class
+adapters are separate deliverables that live with their targets (a Multisigner adapter; a real, first-class
+Wonderland adapter in its own spec). Pure board + crypto: **no chain writes**.
 
 ## Canonical encodings (law — downstream tooling mirrors these)
 
@@ -1100,12 +1030,12 @@ adapter (Wonderland) ships as an intentional **stub**. Pure board + crypto: **no
 import { MsgBoardClient } from '@msgboard/sdk'
 import {
   type BoardClient,
+  type CosignAdapter,
   SCHEME,
   postSignature,
   readSignatures,
   groupByDigest,
   aggregate,
-  wonderlandAdapter,
 } from '@msgboard/cosign'
 
 // Wrap the real, lower-level MsgBoardClient into cosign's BoardClient seam.
@@ -1131,15 +1061,16 @@ await postSignature(board, {
   record: { digest, signer, signature, scheme: SCHEME.ECDSA, meta: '0x' },
 })
 
-// Read the rolling 7-day window, group by digest, and aggregate via an adapter.
+// Read the rolling 7-day window, group by digest, and aggregate via your adapter.
 const records = await readSignatures(board, { namespace: 'cosign', scope: 'acme-team', days: 7 })
 const forDigest = groupByDigest(records).get(digest) ?? []
-const ordered = await aggregate(forDigest, wonderlandAdapter({ multisig, chainId: 1, publicClient }))
+const ordered = await aggregate(forDigest, myAdapter) // myAdapter satisfies CosignAdapter
 // `ordered` is `{ signer, signature }[]` — hand to your existing execute path (out of scope here).
 ```
 
-> `wonderlandAdapter` is a **stub** today: its methods throw `wonderland adapter: not implemented`
-> until Wonderland's contract specifics are pinned. Supply your own `CosignAdapter` to aggregate now.
+> This package ships the `CosignAdapter` **interface** only — supply a concrete adapter to aggregate.
+> First-class adapters are separate deliverables: a minimal Multisigner adapter (its own spec) and a real,
+> first-class Wonderland adapter (its own dedicated spec/plan, real + tested against their actual contract).
 
 ## API
 
@@ -1147,7 +1078,7 @@ const ordered = await aggregate(forDigest, wonderlandAdapter({ multisig, chainId
 - `record`: `SignatureRecord`, `SCHEME`, `RECORD_ABI`, `encodeRecord`, `decodeRecord` (decode throws on junk).
 - `client`: `BoardClient`, `postSignature`, `readSignatures` (skips undecodable junk, dedupes by data),
   `groupByDigest`, `aggregate` (filters by `adapter.verify`, applies `adapter.order`; verify errors propagate).
-- `adapters`: `CosignAdapter` (the seam), `wonderlandAdapter` (stub).
+- `adapters`: `CosignAdapter` (the seam — interface only; concrete adapters are separate deliverables).
 ````
 
 ### 6.4 Full sweep
@@ -1161,7 +1092,7 @@ npm run build --workspace=packages/sdk && npm run build --workspace=packages/cos
 ```
 
 **Expected:**
-- `vitest run`: `Test Files  4 passed (4)` (keys, record, client, adapters/wonderland), all tests green.
+- `vitest run`: `Test Files  4 passed (4)` (keys, record, client, adapters/adapter), all tests green.
 - `tsc` for cosign: clean, `dist/index.{js,d.ts}` regenerated with the new re-exports.
 - SDK + cosign sequential build: clean (proves `@msgboard/sdk` types resolve from cosign).
 
@@ -1183,12 +1114,12 @@ git commit -m "feat(cosign): wire index re-exports + README; drop scaffold smoke
 - [ ] §4 `keys.ts`: `isoDay`, `categoryKey` = `keccak256(toBytes('ns:scope:isoDate'))`, `currentKey`, `keysForWindow` (today + prior `days-1`, `days>=1`) — Task 2.
 - [ ] §4 `record.ts`: `SignatureRecord` interface, `SCHEME` enum, canonical tuple order, `encodeRecord`/`decodeRecord` (decode throws) — Task 3.
 - [ ] §4 `client.ts`: minimal `BoardClient` (`addMessage({category,data})` / `content({category})`), `postSignature`, `readSignatures` (skip junk, dedupe by `keccak256(data)`), `groupByDigest`, `aggregate` (verify-filter + order) — Task 4.
-- [ ] §4 `adapters/adapter.ts`: `CosignAdapter` (verify/order/owners?/threshold?) — Task 4.1.
-- [ ] §4 `adapters/wonderland.ts`: STUB `wonderlandAdapter(config)` throwing `not implemented`, documented config + TODO — Task 5.
-- [ ] §4 `index.ts` re-exports all units — Task 6.
+- [ ] §4 `adapters/adapter.ts`: `CosignAdapter` (verify/order/owners?/threshold?) — the only adapter artifact in this package — Task 4.1; interface locked by a fake-adapter compile/drive test — Task 5.
+- [ ] §4 no concrete adapter / no stub ships here; first-class adapters (Multisigner; a real Wonderland adapter) are separate deliverables in their own specs — Task 5.
+- [ ] §4 `index.ts` re-exports the core units + the `CosignAdapter` interface (no concrete adapter) — Task 6.
 - [ ] §6 error handling: decode throws; read skips junk but never drops well-formed; `keysForWindow` throws on `days<1`; `postSignature` surfaces board errors; `adapter.verify` errors propagate — Tasks 2/3/4 (tests assert each).
-- [ ] §7 testing: keys determinism/UTC-rotation/window/sensitivity; record round-trip per scheme incl. empty meta + garbage throws; client post/read+junk+dedupe/group/aggregate; wonderland stub throws — Tasks 2-5.
-- [ ] §2 zero chain writes; pure board + crypto — no chain calls in any shipped code (Wonderland stub does none).
+- [ ] §7 testing: keys determinism/UTC-rotation/window/sensitivity; record round-trip per scheme incl. empty meta + garbage throws; client post/read+junk+dedupe/group/aggregate; `CosignAdapter` interface locked via a fake adapter — Tasks 2-5.
+- [ ] §2 zero chain writes; pure board + crypto — no chain calls in any shipped code (no concrete adapter ships here).
 - [ ] now-injectable API for deterministic tests (`isoDay`/`currentKey`/`keysForWindow`/`postSignature`/`readSignatures` all take `now?: Date`) — Tasks 2, 4. No `Date.now()` or `Math.random()` in any assertion.
 
 ### Placeholder scan
@@ -1199,15 +1130,15 @@ git commit -m "feat(cosign): wire index re-exports + README; drop scaffold smoke
   grep -rnE 'TODO|FIXME|placeholder|similar to above|\.\.\.$' packages/cosign/src
   ```
 
-  **Expected:** the only `TODO` match is the **intentional, documented** Wonderland TODO block in `src/adapters/wonderland.ts` (spec §9 deliverable). No other placeholders. `COSIGN_VERSION` / `smoke.test.ts` are removed in Task 6.
+  **Expected:** **no** `TODO`/placeholder matches in `src/` — this package ships the core + the `CosignAdapter` interface only, with no stub or concrete adapter. `COSIGN_VERSION` / `smoke.test.ts` are removed in Task 6.
 
 ### Type consistency between tasks
 
 - `Hex` from `viem` is the single hex type throughout.
-- `SignatureRecord` (Task 3) is the exact shape consumed by `client.ts` (Task 4), `adapter.ts` (Task 4.1), and `wonderland.ts` (Task 5) — same five fields, `scheme: number`.
+- `SignatureRecord` (Task 3) is the exact shape consumed by `client.ts` (Task 4) and `adapter.ts` (Task 4.1) — same five fields, `scheme: number`.
 - `categoryKey`/`currentKey`/`keysForWindow` signatures defined in Task 2 are called with identical signatures in Task 4's `client.ts` and tests.
 - `BoardClient.addMessage({category,data})` / `content({category})` (Task 4) match the fake in `client.test.ts` and the README wrapper around the real `MsgBoardClient` (whose own `addMessage`/`content` differ — bridged in the README, never in `src/`).
-- `CosignAdapter` (Task 4.1) is implemented by the Wonderland stub (Task 5) and consumed by `aggregate` (Task 4) with one signature.
+- `CosignAdapter` (Task 4.1) is locked by a fake-adapter compile/drive test (Task 5) and consumed by `aggregate` (Task 4) with one signature. No concrete adapter implements it in this package.
 - `Content` / `RPCMessage` types imported from `@msgboard/sdk` in `client.ts` + `client.test.ts` are the repo's real types (`Content = { [cat: Hex]: RPCMessage[] }`, `RPCMessage.data: Hex`).
 
 ### Reconciliation log (real SDK vs spec assumptions)
@@ -1225,4 +1156,4 @@ This plan is ready to execute. Two options:
 - **Subagent-driven (recommended for isolation):** dispatch each task (1→6, in order — they are sequential by dependency) to a fresh implementer subagent using `superpowers:subagent-driven-development`, with a review checkpoint after each task's commit. Each task is self-contained (its own RED→GREEN→commit) and leaves the suite green, so a reviewer can verify incrementally.
 - **Inline:** execute here, task by task, pausing after each commit for review per `superpowers:executing-plans`.
 
-Either way: enforce the TDD discipline (RED first, watch it fail for the right reason, then GREEN), run the exact commands shown, and confirm the expected output before committing. Do **not** start a real Wonderland adapter implementation — the stub is the spec'd deliverable for this sub-project (its real body is gated on spec §9 open items).
+Either way: enforce the TDD discipline (RED first, watch it fail for the right reason, then GREEN), run the exact commands shown, and confirm the expected output before committing. Do **not** implement any concrete adapter in this package — this sub-project ships the generic core + the `CosignAdapter` interface only. First-class adapters are separate deliverables: the Multisigner adapter (multisigner spec) and a real, first-class Wonderland adapter (its own dedicated spec/plan, gated on the exact Wonderland contract/ABI — spec §9).

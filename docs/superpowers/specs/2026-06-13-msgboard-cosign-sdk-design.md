@@ -9,7 +9,7 @@ Related:
 
 ## 1. Summary
 
-`@msgboard/cosign` is a small SDK for sharing **co-signature artifacts** — generic `(digest, signer, signature)` records — over MsgBoard, bucketed under **rotating, time-bucketed category keys** so a working set stays small and self-pruning. It is app-agnostic; a pluggable **adapter** encodes a specific multisig's verification + ordering rules. The first adapter targets **Wonderland's multisig** and ships **stubbed** (interface + seam only). No on-chain execution; adapters may make read-only chain calls to verify owners/threshold.
+`@msgboard/cosign` is a small SDK for sharing **co-signature artifacts** — generic `(digest, signer, signature)` records — over MsgBoard, bucketed under **rotating, time-bucketed category keys** so a working set stays small and self-pruning. It is app-agnostic; a pluggable **adapter** encodes a specific multisig's verification + ordering rules. This package ships the generic signature-share **core** plus the pluggable **`CosignAdapter` interface only** — **no concrete adapter**. Concrete adapters (Wonderland — a real, first-class adapter — and the minimal Multisigner) are **separate deliverables with their own specs**, not part of this package's first cut. No on-chain execution; adapters may make read-only chain calls to verify owners/threshold.
 
 This is the foundation layer (**sub-project 1**). Two consumers build on it: a team's own tooling (post/read/aggregate signatures), and the **cosign archivist** service (sub-project 2) which imports cosign's key scheme + record codec to maintain a tight, structured, queryable archive.
 
@@ -19,14 +19,14 @@ This is the foundation layer (**sub-project 1**). Two consumers build on it: a t
 - Deterministic **rotating category keys**: `keccak256('namespace:scope:isoDate')`, day-granular UTC, plus a rolling-window helper.
 - A canonical, ABI-encoded **`SignatureRecord` codec** — the single source of truth shared by posters, readers, and the archivist.
 - **post / read / aggregate** over any `@msgboard/sdk` board client.
-- A pluggable **adapter** seam (verify / order / owner-reads) so multisig backends plug in; Wonderland stubbed.
+- A pluggable **adapter** seam — the `CosignAdapter` **interface** (verify / order / owner-reads) so multisig backends plug in. Concrete adapters live with their targets (separate specs), not in this package.
 - Zero chain writes; pure board + crypto.
 
 **Non-goals (this spec)**
 - On-chain execution (building/submitting the multisig tx) — out of scope; aggregated sigs are handed to existing tooling.
 - The archivist service, its HTTP query API, and the SQLite/filtering sink — **sub-project 2** (§8).
 - Discovery of unknown teams; encryption of in-flight records — later.
-- A full Wonderland adapter implementation — **stubbed** here (interface + TODO seam).
+- **Any concrete adapter implementation.** This package ships the `CosignAdapter` **interface** only. First-class adapters are separate deliverables: the minimal Multisigner adapter is specced in the multisigner spec, and the Wonderland adapter (a real, first-class adapter, real + tested against their actual contract) gets its own dedicated spec/plan once the contract/ABI is known.
 
 ## 3. The two-store fit (why this is board-only)
 
@@ -57,12 +57,11 @@ Small, focused files:
   - `groupByDigest(records: SignatureRecord[]): Map<Hex, SignatureRecord[]>`.
   - `aggregate(records, adapter): Promise<{ signer: Hex; signature: Hex }[]>` — keep records where `await adapter.verify(record)` is true, then `adapter.order(...)`.
 
-- **`src/adapters/adapter.ts`** — the seam.
+- **`src/adapters/adapter.ts`** — the seam (the **only** adapter artifact in this package).
   - `interface CosignAdapter { verify(record: SignatureRecord): Promise<boolean>; order(records: SignatureRecord[]): SignatureRecord[]; owners?(): Promise<Hex[]>; threshold?(): Promise<number> }`.
+  - Concrete adapter implementations import this interface and live in their own packages/specs (the Multisigner adapter in the multisigner spec; a real, first-class Wonderland adapter in its own dedicated spec/plan). This package ships **no** concrete adapter and **no** stub.
 
-- **`src/adapters/wonderland.ts`** — **STUB** (intentional). `wonderlandAdapter(config: { multisig: Hex; chainId: number; publicClient: unknown }): CosignAdapter` whose `verify`/`order`/`owners`/`threshold` throw `new Error('wonderland adapter: not implemented')` with a documented TODO describing the intended owner-set/threshold reads and signer-recovery checks. Locks the seam without committing to Wonderland's contract specifics (an open item, §9).
-
-- **`src/index.ts`** — re-exports `keys`, `record`, `client`, `adapters/adapter`, `adapters/wonderland`.
+- **`src/index.ts`** — re-exports `keys`, `record`, `client`, `adapters/adapter` (the interface). No concrete adapter is exported.
 
 ## 5. Data flow
 
@@ -80,9 +79,9 @@ Signer's tooling → `postSignature(board, { namespace:'cosign', scope:team, rec
 - **keys**: determinism; UTC day rotation across a date boundary; window-set length + contents; namespace/scope sensitivity.
 - **record**: encode/decode round-trip for each `scheme` incl. empty `meta`; `decodeRecord` throws on garbage.
 - **client**: `postSignature` calls `addMessage` under `currentKey` with the encoded data (fake board); `readSignatures` fetches the window categories, decodes, and dedupes (fake board returning fixtures incl. one junk entry that is skipped); `groupByDigest` groups; `aggregate` filters by a fake adapter's `verify` and applies its `order`.
-- **adapter**: a fake adapter drives `aggregate`; the Wonderland stub asserts each method throws `not implemented` (locks the seam so a future implementer can't forget to replace it).
+- **adapter**: a fake adapter (satisfying the `CosignAdapter` interface) drives `aggregate` — filtering by its `verify` and applying its `order`. The interface itself is exercised at the type level / via the fake; no concrete adapter ships here.
 
-No chain needed for the core; adapter contract-reads are tested when the real Wonderland adapter is built (fork/mock).
+No chain needed for the core; concrete adapters' contract-reads are tested in their own specs/packages (the Multisigner adapter, and the real Wonderland adapter when it is built — fork/mock).
 
 ## 8. Relationship to the cosign archivist (sub-project 2 — separate spec)
 
@@ -101,7 +100,7 @@ The archivist imports `keys.ts` (the rolling tracked-category set, registry-enum
 
 ## 9. Open items (carried to the spec/plan)
 
-- **Wonderland multisig specifics** — contract/ABI, owner-set + threshold reads, signer-recovery semantics. The adapter is stubbed until these are provided.
-- **`scope` convention for multisig** — team name vs `${chainId}:${safeAddress}`; pinned when the Wonderland adapter is built.
+- **Wonderland adapter** — a dedicated, real first-class adapter is a committed follow-up (its own spec/plan); blocked only on the exact Wonderland multisig contract/ABI + chain/address (owner-set + threshold reads, signer-recovery semantics). Not part of this package.
+- **`scope` convention for multisig** — team name vs `${chainId}:${safeAddress}`; pinned when the first concrete adapter is built.
 - **`meta` schema per scheme** — pinned with the first real adapter.
 - **Discovery (on-board umbrella) + archive.msgboard.xyz cold-start fallback** — deferred; the key scheme is designed so both are additive.
