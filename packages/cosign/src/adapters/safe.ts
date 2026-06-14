@@ -4,7 +4,14 @@ import {
   decodeAbiParameters,
   hashTypedData,
   keccak256,
+  recoverAddress,
+  recoverMessageAddress,
+  isAddressEqual,
+  getAddress,
 } from 'viem'
+import type { SignatureRecord } from '../record.js'
+import { SCHEME } from '../record.js'
+import type { CosignAdapter } from './adapter.js'
 
 /**
  * The Safe transaction tuple that is EIP-712-signed and carried in SignatureRecord.meta.
@@ -185,4 +192,178 @@ export function decodeSafeMeta(meta: Hex): { safeTx: SafeTx; safe: Hex; chainId:
     safe,
     chainId: Number(chainId),
   }
+}
+
+/**
+ * The minimal read-only client surface the adapter needs. A viem `PublicClient` satisfies it;
+ * tests pass a fake with a stubbed `readContract`. Errors PROPAGATE (per cosign SDK §6).
+ */
+export interface SafePublicClient {
+  readContract(args: {
+    address: Hex
+    abi: readonly unknown[]
+    functionName: string
+    args?: readonly unknown[]
+  }): Promise<unknown>
+}
+
+/** Config for the Safe adapter. One instance is pinned to one (chainId, safe). */
+export interface SafeAdapterConfig {
+  publicClient: SafePublicClient
+  /** The Safe (proxy) address — also the EIP-712 verifyingContract. */
+  safe: Hex
+  /** The chain id — binds the digest's domain. */
+  chainId: number
+}
+
+/** Minimal Safe ABI fragment — only the read functions the adapter calls. */
+export const SAFE_ABI = [
+  { type: 'function', name: 'getOwners', stateMutability: 'view', inputs: [], outputs: [{ type: 'address[]' }] },
+  { type: 'function', name: 'getThreshold', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
+  {
+    type: 'function',
+    name: 'isOwner',
+    stateMutability: 'view',
+    inputs: [{ name: 'owner', type: 'address' }],
+    outputs: [{ type: 'bool' }],
+  },
+  {
+    type: 'function',
+    name: 'getTransactionHash',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'to', type: 'address' },
+      { name: 'value', type: 'uint256' },
+      { name: 'data', type: 'bytes' },
+      { name: 'operation', type: 'uint8' },
+      { name: 'safeTxGas', type: 'uint256' },
+      { name: 'baseGas', type: 'uint256' },
+      { name: 'gasPrice', type: 'uint256' },
+      { name: 'gasToken', type: 'address' },
+      { name: 'refundReceiver', type: 'address' },
+      { name: '_nonce', type: 'uint256' },
+    ],
+    outputs: [{ type: 'bytes32' }],
+  },
+] as const
+
+/** The legacy EIP-1271 magic value: bytes4(keccak256("isValidSignature(bytes,bytes)")). */
+export const EIP1271_MAGIC_VALUE = '0x20c13b0b' as const
+
+/** ABI fragment for the LEGACY EIP-1271 interface Safe's checkNSignatures uses for v==0 owners. */
+const ISIGNATURE_VALIDATOR_ABI = [
+  {
+    type: 'function',
+    name: 'isValidSignature',
+    stateMutability: 'view',
+    inputs: [
+      { name: '_data', type: 'bytes' },
+      { name: '_signature', type: 'bytes' },
+    ],
+    outputs: [{ type: 'bytes4' }],
+  },
+] as const
+
+/**
+ * The effective signer address for a record under a given digest:
+ * - EIP712: ecrecover over the digest.
+ * - ECDSA (eth_sign): recover over the personal-message-prefixed digest.
+ * - EIP1271: the record.signer (the contract owner) as-is.
+ * Throws on a malformed signature (errors propagate).
+ */
+async function effectiveSigner(record: SignatureRecord): Promise<Hex> {
+  if (record.scheme === SCHEME.EIP712) {
+    return recoverAddress({ hash: record.digest, signature: record.signature })
+  }
+  if (record.scheme === SCHEME.ECDSA) {
+    // eth_sign: viem applies "\x19Ethereum Signed Message:\n32" ‖ digest internally.
+    return recoverMessageAddress({ message: { raw: record.digest }, signature: record.signature })
+  }
+  // EIP1271 contract owner.
+  return getAddress(record.signer)
+}
+
+/**
+ * The concrete Gnosis Safe CosignAdapter (v1.3.0 / v1.4.1). Verifies a single owner's
+ * signature over the SafeTx digest per Safe's v-byte scheme + confirms membership, and
+ * orders records into the strictly-ascending blob `checkNSignatures` accepts.
+ */
+export function makeSafeAdapter(config: SafeAdapterConfig): CosignAdapter {
+  const { publicClient, safe } = config
+
+  async function owners(): Promise<Hex[]> {
+    const result = (await publicClient.readContract({
+      address: safe,
+      abi: SAFE_ABI,
+      functionName: 'getOwners',
+    })) as readonly Hex[]
+    return result.map((a) => getAddress(a))
+  }
+
+  async function threshold(): Promise<number> {
+    const result = (await publicClient.readContract({
+      address: safe,
+      abi: SAFE_ABI,
+      functionName: 'getThreshold',
+    })) as bigint
+    return Number(result)
+  }
+
+  async function isOwner(addr: Hex): Promise<boolean> {
+    const set = await owners()
+    return set.some((o) => isAddressEqual(o, addr))
+  }
+
+  async function verify(record: SignatureRecord): Promise<boolean> {
+    if (record.scheme === SCHEME.EIP1271) {
+      return verifyErc1271(record)
+    }
+    // EOA paths: recover, require recovered === claimed signer, require membership.
+    let recovered: Hex
+    try {
+      recovered = await effectiveSigner(record)
+    } catch {
+      return false // malformed signature is "definitively invalid", not an infra error
+    }
+    if (!isAddressEqual(recovered, record.signer)) return false
+    return isOwner(recovered)
+  }
+
+  async function verifyErc1271(record: SignatureRecord): Promise<boolean> {
+    // Membership first (cheap, and a non-owner can never count regardless of the 1271 result).
+    if (!(await isOwner(record.signer))) return false
+    // Rebuild the exact `data` pre-image Safe passes to isValidSignature(bytes,bytes):
+    // 0x19 ‖ 0x01 ‖ domainSeparator ‖ safeTxHash, whose keccak256 == record.digest.
+    const { safeTx, safe: metaSafe, chainId: metaChainId } = decodeSafeMeta(record.meta)
+    const data = safeTransactionData(safeTx, metaChainId, metaSafe)
+    const magic = (await publicClient.readContract({
+      address: record.signer,
+      abi: ISIGNATURE_VALIDATOR_ABI,
+      functionName: 'isValidSignature',
+      args: [data, record.signature],
+    })) as Hex
+    return magic.toLowerCase() === EIP1271_MAGIC_VALUE
+  }
+
+  function order(records: SignatureRecord[]): SignatureRecord[] {
+    // Sort by record.signer, NOT by re-recovering: aggregate runs verify (which asserts
+    // recovered === record.signer for EOA records) before order, so record.signer IS the
+    // effective signer; for erc1271 records record.signer is the contract owner by definition.
+    // This keeps order pure + synchronous, matching CosignAdapter.order (records) => records.
+    const seen = new Set<string>()
+    const deduped: SignatureRecord[] = []
+    for (const r of records) {
+      const key = getAddress(r.signer).toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      deduped.push(r)
+    }
+    return deduped.sort((a, b) => {
+      const av = BigInt(getAddress(a.signer))
+      const bv = BigInt(getAddress(b.signer))
+      return av < bv ? -1 : av > bv ? 1 : 0
+    })
+  }
+
+  return { verify, order, owners, threshold }
 }
