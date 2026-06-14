@@ -2,7 +2,7 @@ import { http } from 'viem'
 import { pulsechainV4 } from 'viem/chains'
 import { describe, expect, it, vi } from 'vitest'
 import { Relayer } from '../../src/relayer.js'
-import { repricingAction } from '../../src/actions/repricing.js'
+import { repricingAction, type SubmitRequest } from '../../src/actions/repricing.js'
 import { createPendingTxTracker } from '../../src/stores/pending-tx.js'
 import type { RelayerConfig } from '../../src/types.js'
 
@@ -34,7 +34,7 @@ describe('repricingAction', () => {
   })
 
   it('first execute claims a nonce and submits once at the initial fee', async () => {
-    const submit = vi.fn(async () => ({ hash: '0xfeed' }))
+    const submit = vi.fn(async (_req: SubmitRequest<Job>) => ({ hash: '0xfeed' }))
     const tracker = createPendingTxTracker({ windowSize: 4, baseNonce: 7 })
     const action = repricingAction<Job>({
       tracker,
@@ -52,7 +52,7 @@ describe('repricingAction', () => {
 
   it('replace-by-fee: a stale pending nonce is resubmitted at a higher fee', async () => {
     let now = 0
-    const submit = vi.fn(async () => ({ hash: '0x1' }))
+    const submit = vi.fn(async (_req: SubmitRequest<Job>) => ({ hash: '0x1' }))
     const tracker = createPendingTxTracker({ windowSize: 4, baseNonce: 0, now: () => now })
     const action = repricingAction<Job>({
       tracker, describe: () => 'x', submit,
