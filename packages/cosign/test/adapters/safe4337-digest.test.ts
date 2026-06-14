@@ -113,8 +113,8 @@ describe('safe4337OperationDigest', () => {
           1_000_000_000n, // unpackHigh128(gasFees)
           2_000_000_000n, // unpackLow128(gasFees)
           keccak256(userOp.paymasterAndData),
-          BigInt(validAfter),
-          BigInt(validUntil),
+          validAfter,
+          validUntil,
           entryPoint,
         ],
       ),
@@ -156,8 +156,8 @@ describe('safe4337OperationDigest', () => {
         maxPriorityFeePerGas: 1_000_000_000n,
         maxFeePerGas: 2_000_000_000n,
         paymasterAndData: userOp.paymasterAndData,
-        validAfter: BigInt(validAfter),
-        validUntil: BigInt(validUntil),
+        validAfter,
+        validUntil,
         entryPoint,
       },
     })

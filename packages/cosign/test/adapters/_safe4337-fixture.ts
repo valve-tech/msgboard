@@ -42,6 +42,8 @@ export async function deploySafe4337Fixture(ownerPks: Hex[], threshold: number):
     abi: moduleAbi,
     bytecode: moduleBytecode,
     args: [ENTRYPOINT_V07],
+    account: fx.walletClient.account!,
+    chain: fx.walletClient.chain,
   })
   const moduleReceipt = await fx.publicClient.waitForTransactionReceipt({ hash: moduleDeployHash })
   const module = moduleReceipt.contractAddress as Address
@@ -84,6 +86,8 @@ export async function deploySafe4337Fixture(ownerPks: Hex[], threshold: number):
     address: fx.safe,
     abi: SAFE_EXEC_ABI,
     functionName: 'execTransaction',
+    account: fx.walletClient.account!,
+    chain: fx.walletClient.chain,
     args: [
       safeTx.to,
       safeTx.value,
