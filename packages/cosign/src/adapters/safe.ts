@@ -403,7 +403,9 @@ export function buildSignatureBlob(ordered: SignatureRecord[]): Hex {
       staticWords.push(concat([sr, ss, toHex(v + 4, { size: 1 })]))
     } else {
       // EIP1271: r = left-padded owner, s = current tail offset, v = 0.
-      const rField = pad(getAddress(r.signer), { size: 32 })
+      // Safe reads r as address(uint160(uint256(r))) — case-insensitive; lowercase the
+      // address bytes so the blob word is canonical/deterministic (not EIP-55 mixed case).
+      const rField = pad(getAddress(r.signer).toLowerCase() as Hex, { size: 32 })
       const sField = toHex(BigInt(tailOffset), { size: 32 })
       staticWords.push(concat([rField, sField, toHex(0, { size: 1 })]))
       const lenWord = toHex(BigInt(size(r.signature)), { size: 32 })
