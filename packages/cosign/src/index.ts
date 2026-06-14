@@ -20,3 +20,20 @@ export {
   aggregate,
 } from './client.js'
 export type { CosignAdapter } from './adapters/adapter.js'
+export {
+  type SafeTx,
+  type SafeAdapterConfig,
+  type SafePublicClient,
+  SAFE_ABI,
+  SAFE_TX_TYPEHASH,
+  DOMAIN_SEPARATOR_TYPEHASH,
+  EIP1271_MAGIC_VALUE,
+  safeDomain,
+  safeTransactionDigest,
+  safeTransactionData,
+  encodeSafeMeta,
+  decodeSafeMeta,
+  makeSafeAdapter,
+  buildSignatureBlob,
+  buildExecTransactionArgs,
+} from './adapters/safe.js'
