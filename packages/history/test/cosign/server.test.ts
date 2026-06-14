@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { type Hex, keccak256, toHex } from 'viem'
-import { type BoardClient, type CosignAdapter, type SignatureRecord, postSignature } from '@msgboard/cosign'
+import {
+  type BoardClient,
+  type CosignAdapter,
+  type SignatureRecord,
+  postSignature,
+} from '@msgboard/cosign'
 import type { Content, RPCMessage } from '@msgboard/sdk'
 import { archiveServer, type ArchiveServer } from '../../src/server.js'
 
@@ -94,21 +99,40 @@ describe('archiveServer with cosign option (integration)', () => {
   it('post via cosign SDK → query the route → aggregate-ready set comes back', async () => {
     const board = memoryBoard()
     // post two signatures for the same digest under today's rotating category
-    await postSignature(board, { namespace: 'cosign', scope: 'wonderland', record: rec(addr(1)), now: NOW })
-    await postSignature(board, { namespace: 'cosign', scope: 'wonderland', record: rec(addr(2)), now: NOW })
+    await postSignature(board, {
+      namespace: 'cosign',
+      scope: 'wonderland',
+      record: rec(addr(1)),
+      now: NOW,
+    })
+    await postSignature(board, {
+      namespace: 'cosign',
+      scope: 'wonderland',
+      record: rec(addr(2)),
+      now: NOW,
+    })
 
     const { base } = startWithCosign(board)
-    const res = await get(`${base}/cosign/cosign/wonderland/digest/${digest}/aggregate?days=7&threshold=2`)
+    const res = await get(
+      `${base}/cosign/cosign/wonderland/digest/${digest}/aggregate?days=7&threshold=2`,
+    )
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.count).toBe(2)
     expect(body.ready).toBe(true)
-    expect(body.signers.map((s: { signer: Hex }) => s.signer).sort()).toEqual([addr(1), addr(2)].sort())
+    expect(body.signers.map((s: { signer: Hex }) => s.signer).sort()).toEqual(
+      [addr(1), addr(2)].sort(),
+    )
   })
 
   it('signatures endpoint returns the decoded window', async () => {
     const board = memoryBoard()
-    await postSignature(board, { namespace: 'cosign', scope: 'wonderland', record: rec(addr(1)), now: NOW })
+    await postSignature(board, {
+      namespace: 'cosign',
+      scope: 'wonderland',
+      record: rec(addr(1)),
+      now: NOW,
+    })
     const { base } = startWithCosign(board)
     const res = await get(`${base}/cosign/cosign/wonderland/signatures?days=7`)
     expect((await res.json()).signatures).toHaveLength(1)
@@ -128,9 +152,10 @@ describe('archiveServer with cosign option (integration)', () => {
   it('cosign endpoints honor the bearer token', async () => {
     const { base } = startWithCosign(memoryBoard(), 'secret')
     expect((await get(`${base}/cosign/cosign/wonderland/signatures`)).status).toBe(401)
-    expect((await get(`${base}/cosign/cosign/wonderland/signatures`, { Authorization: 'Bearer secret' })).status).toBe(
-      200,
-    )
+    expect(
+      (await get(`${base}/cosign/cosign/wonderland/signatures`, { Authorization: 'Bearer secret' }))
+        .status,
+    ).toBe(200)
   })
 })
 

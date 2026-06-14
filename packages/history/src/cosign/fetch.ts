@@ -1,5 +1,10 @@
 import { type Hex, keccak256 } from 'viem'
-import { type BoardClient, type CosignAdapter, type SignatureRecord, decodeRecord } from '@msgboard/cosign'
+import {
+  type BoardClient,
+  type CosignAdapter,
+  type SignatureRecord,
+  decodeRecord,
+} from '@msgboard/cosign'
 import type { Archive } from '../archive.js'
 import type { ResolvedCategory } from './categories.js'
 
@@ -38,7 +43,15 @@ const dayMs = 24 * 60 * 60 * 1000
  * request rather than returning a misleadingly-short window — the §9 statelessness trade).
  */
 export const fetchRecords = async (args: FetchRecordsArgs): Promise<CosignRecordView[]> => {
-  const { categories, board, archive, boardRetentionDays, adapter, now = new Date(), categoryText } = args
+  const {
+    categories,
+    board,
+    archive,
+    boardRetentionDays,
+    adapter,
+    now = new Date(),
+    categoryText,
+  } = args
   const today = Math.floor(now.getTime() / dayMs)
 
   const seen = new Set<Hex>()
@@ -54,7 +67,10 @@ export const fetchRecords = async (args: FetchRecordsArgs): Promise<CosignRecord
       const content = await board.content({ category: cat.category })
       datas = (content[cat.category] ?? []).map((m) => m.data).filter((d): d is Hex => Boolean(d))
     } else {
-      if (!archive) throw new Error(`fetchRecords: archive required for older day ${cat.isoDay} but none provided`)
+      if (!archive)
+        throw new Error(
+          `fetchRecords: archive required for older day ${cat.isoDay} but none provided`,
+        )
       const rows = await archive.query({ category: cat.category, limit: 1000 })
       datas = rows.map((r) => r.data).filter((d): d is Hex => Boolean(d)) as Hex[]
     }

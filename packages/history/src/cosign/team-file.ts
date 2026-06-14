@@ -46,9 +46,12 @@ const DEFAULT_WINDOW_DAYS = 7
  */
 export const loadTeamFile = (source: string | TeamFileInput): TeamFile => {
   const raw: TeamFileInput =
-    typeof source === 'string' ? (JSON.parse(readFileSync(source, 'utf8')) as TeamFileInput) : source
+    typeof source === 'string'
+      ? (JSON.parse(readFileSync(source, 'utf8')) as TeamFileInput)
+      : source
 
-  if (raw.version !== 1) throw new Error(`loadTeamFile: unsupported version ${raw.version} (expected 1)`)
+  if (raw.version !== 1)
+    throw new Error(`loadTeamFile: unsupported version ${raw.version} (expected 1)`)
   if (typeof raw.namespace !== 'string' || raw.namespace.length === 0)
     throw new Error('loadTeamFile: namespace is required')
   if (!Array.isArray(raw.teams) || raw.teams.length === 0)
@@ -76,5 +79,14 @@ export const loadTeamFile = (source: string | TeamFileInput): TeamFile => {
     return Math.min(floored, windowDays)
   }
 
-  return { version: 1, namespace, windowDays, teams, chain: raw.chain, adapter: raw.adapter, resolve, clampDays }
+  return {
+    version: 1,
+    namespace,
+    windowDays,
+    teams,
+    chain: raw.chain,
+    adapter: raw.adapter,
+    resolve,
+    clampDays,
+  }
 }
