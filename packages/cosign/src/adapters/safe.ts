@@ -8,6 +8,11 @@ import {
   recoverMessageAddress,
   isAddressEqual,
   getAddress,
+  pad,
+  concat,
+  toHex,
+  size,
+  slice,
 } from 'viem'
 import type { SignatureRecord } from '../record.js'
 import { SCHEME } from '../record.js'
@@ -366,4 +371,67 @@ export function makeSafeAdapter(config: SafeAdapterConfig): CosignAdapter {
   }
 
   return { verify, order, owners, threshold }
+}
+
+/** Splits a 65-byte ECDSA signature into r (32) ‖ s (32) ‖ v (1). */
+function splitSig(sig: Hex): { r: Hex; s: Hex; v: number } {
+  if (size(sig) !== 65) throw new Error(`expected 65-byte signature, got ${size(sig)} bytes`)
+  return { r: slice(sig, 0, 32), s: slice(sig, 32, 64), v: Number(BigInt(slice(sig, 64, 65))) }
+}
+
+/**
+ * Builds the final `signatures` blob from records already in strictly-ascending order
+ * (the output of `adapter.order`). EOA records contribute one 65-byte static word.
+ * EIP-1271 records contribute a static word `{r=left-pad32(owner)}{s=offset}{v=0}` plus a
+ * dynamic tail `{uint256 len}{contractSignature}`; the static `s` is back-patched to the tail's
+ * byte offset from the start of the blob (Safe GS021–GS023 bounds, GS024 validity).
+ */
+export function buildSignatureBlob(ordered: SignatureRecord[]): Hex {
+  const count = ordered.length
+  const staticLen = count * 65
+  const staticWords: Hex[] = []
+  const tails: Hex[] = []
+  let tailOffset = staticLen // first tail starts right after the static region
+
+  for (const r of ordered) {
+    if (r.scheme === SCHEME.EIP712) {
+      const { r: sr, s: ss, v } = splitSig(r.signature)
+      staticWords.push(concat([sr, ss, toHex(v, { size: 1 })]))
+    } else if (r.scheme === SCHEME.ECDSA) {
+      // eth_sign: Safe's v>30 branch does ecrecover(prefixed, v-4). Wallet gives v∈{27,28}, so +4.
+      const { r: sr, s: ss, v } = splitSig(r.signature)
+      staticWords.push(concat([sr, ss, toHex(v + 4, { size: 1 })]))
+    } else {
+      // EIP1271: r = left-padded owner, s = current tail offset, v = 0.
+      const rField = pad(getAddress(r.signer), { size: 32 })
+      const sField = toHex(BigInt(tailOffset), { size: 32 })
+      staticWords.push(concat([rField, sField, toHex(0, { size: 1 })]))
+      const lenWord = toHex(BigInt(size(r.signature)), { size: 32 })
+      tails.push(concat([lenWord, r.signature]))
+      tailOffset += 32 + size(r.signature)
+    }
+  }
+  return concat([...staticWords, ...tails])
+}
+
+/**
+ * Produces the positional arguments for `execTransaction(to, value, data, operation,
+ * safeTxGas, baseGas, gasPrice, gasToken, refundReceiver, signatures)`. The caller submits.
+ */
+export function buildExecTransactionArgs(
+  ordered: SignatureRecord[],
+  safeTx: SafeTx,
+): readonly [Hex, bigint, Hex, number, bigint, bigint, bigint, Hex, Hex, Hex] {
+  return [
+    safeTx.to,
+    safeTx.value,
+    safeTx.data,
+    safeTx.operation,
+    safeTx.safeTxGas,
+    safeTx.baseGas,
+    safeTx.gasPrice,
+    safeTx.gasToken,
+    safeTx.refundReceiver,
+    buildSignatureBlob(ordered),
+  ]
 }
