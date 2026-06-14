@@ -1,6 +1,6 @@
 {
   "name": "@msgboard/history",
-  "version": "0.0.31",
+  "version": "0.0.32",
   "description": "Historical archive for the msgboard board: durable storage and an HTTP query API",
   "repository": "github:valve-tech/msgboard",
   "author": "MsgBoard",
@@ -40,8 +40,8 @@
     "dist/"
   ],
   "dependencies": {
-    "@msgboard/cosign": "^0.0.31",
-    "@msgboard/sdk": "^0.0.31",
+    "@msgboard/cosign": "^0.0.32",
+    "@msgboard/sdk": "^0.0.32",
     "viem": "^2.25.0"
   },
   "peerDependencies": {
