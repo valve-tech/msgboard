@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { loadTeamFile, type TeamFile } from '../../src/cosign/team-file.js'
+import { loadTeamFile, type TeamFileInput } from '../../src/cosign/team-file.js'
 
-const VALID: TeamFile = {
+const VALID: TeamFileInput = {
   version: 1,
   namespace: 'cosign',
   windowDays: 7,
