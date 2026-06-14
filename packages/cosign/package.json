@@ -42,6 +42,9 @@
     "viem": "^2.25.0"
   },
   "devDependencies": {
+    "@safe-global/safe-contracts": "1.4.1",
+    "@safe-global/safe-deployments": "^1.37.0",
+    "prool": "^0.0.16",
     "typescript": "^5.8.2",
     "vitest": "^3.1.1"
   }
