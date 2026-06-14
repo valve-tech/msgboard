@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { type Hex, keccak256, toHex } from 'viem'
-import { type BoardClient, type CosignAdapter, type SignatureRecord, encodeRecord } from '@msgboard/cosign'
+import {
+  type BoardClient,
+  type CosignAdapter,
+  type SignatureRecord,
+  encodeRecord,
+} from '@msgboard/cosign'
 import type { Content } from '@msgboard/sdk'
 import { matchCosignRoute } from '../../src/cosign/router.js'
 import { handleCosignRequest, type CosignDeps } from '../../src/cosign/handler.js'
@@ -113,7 +118,12 @@ describe('handleCosignRequest', () => {
     const route = matchCosignRoute(`/cosign/cosign/wonderland/digest/${digest}/aggregate`)!
     const r = await handleCosignRequest(route, new URLSearchParams('threshold=2'), deps(board))
     expect(r.status).toBe(200)
-    const body = r.body as { signers: { signer: Hex; signature: Hex }[]; count: number; threshold: number; ready: boolean }
+    const body = r.body as {
+      signers: { signer: Hex; signature: Hex }[]
+      count: number
+      threshold: number
+      ready: boolean
+    }
     expect(body.count).toBe(2)
     expect(body.threshold).toBe(2)
     expect(body.ready).toBe(true)

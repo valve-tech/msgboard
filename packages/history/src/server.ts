@@ -40,7 +40,10 @@ export type ArchiveServer = {
 
 const respond = (res: ServerResponse, status: number, body: unknown): void => {
   const json = JSON.stringify(body)
-  res.writeHead(status, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(json) })
+  res.writeHead(status, {
+    'Content-Type': 'application/json',
+    'Content-Length': Buffer.byteLength(json),
+  })
   res.end(json)
 }
 
@@ -122,7 +125,10 @@ export const archiveServer = (options: ArchiveServerOptions): ArchiveServer => {
         const messages = await options.archive.query(parseQuery(url.searchParams))
         return respond(res, 200, { messages })
       } catch (error) {
-        return respond(res, 500, { ok: false, error: error instanceof Error ? error.message : 'query failed' })
+        return respond(res, 500, {
+          ok: false,
+          error: error instanceof Error ? error.message : 'query failed',
+        })
       }
     }
 
@@ -152,6 +158,7 @@ export const archiveServer = (options: ArchiveServerOptions): ArchiveServer => {
   server.listen(port, host)
 
   return {
-    close: () => new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve()))),
+    close: () =>
+      new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve()))),
   }
 }

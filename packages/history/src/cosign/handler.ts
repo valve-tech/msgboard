@@ -64,7 +64,10 @@ export const handleCosignRequest = async (
       const [owners, threshold] = await Promise.all([adapter.owners(), adapter.threshold()])
       return { status: 200, body: { owners, threshold } }
     } catch (error) {
-      return { status: 502, body: { ok: false, error: error instanceof Error ? error.message : 'owners failed' } }
+      return {
+        status: 502,
+        body: { ok: false, error: error instanceof Error ? error.message : 'owners failed' },
+      }
     }
   }
 
@@ -84,7 +87,10 @@ export const handleCosignRequest = async (
     })
   } catch (error) {
     // Board/archive unavailable at query time — fail loudly (§9), do not return a short window.
-    return { status: 502, body: { ok: false, error: error instanceof Error ? error.message : 'fetch failed' } }
+    return {
+      status: 502,
+      body: { ok: false, error: error instanceof Error ? error.message : 'fetch failed' },
+    }
   }
 
   try {
@@ -125,6 +131,9 @@ export const handleCosignRequest = async (
       },
     }
   } catch (error) {
-    return { status: 500, body: { ok: false, error: error instanceof Error ? error.message : 'cosign query failed' } }
+    return {
+      status: 500,
+      body: { ok: false, error: error instanceof Error ? error.message : 'cosign query failed' },
+    }
   }
 }

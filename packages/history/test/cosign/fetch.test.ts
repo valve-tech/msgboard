@@ -45,7 +45,8 @@ const boardRows = (datas: Hex[]) =>
 /** A fake board returning canned content keyed by category. */
 const fakeBoard = (byCategory: Record<Hex, Hex[]>): BoardClient => ({
   addMessage: async () => '0x',
-  content: async ({ category }) => ({ [category]: boardRows(byCategory[category] ?? []) }) as Content,
+  content: async ({ category }) =>
+    ({ [category]: boardRows(byCategory[category] ?? []) }) as Content,
 })
 
 /** A fake archive returning canned rows keyed by category. */
@@ -79,7 +80,13 @@ describe('fetchRecords', () => {
     const valid = encodeRecord(rec(digestA, addr(1)))
     const junk = '0xdeadbeef' as Hex // decodeRecord throws on this
     const board = fakeBoard({ [cat]: [valid, junk, valid] }) // duplicate `valid` → deduped
-    const out = await fetchRecords({ categories: cats, board, boardRetentionDays: 30, adapter: acceptAll, now: NOW })
+    const out = await fetchRecords({
+      categories: cats,
+      board,
+      boardRetentionDays: 30,
+      adapter: acceptAll,
+      now: NOW,
+    })
     expect(out).toHaveLength(1)
     expect(out[0].digest).toBe(digestA)
     expect(out[0].source).toBe('board')
@@ -91,8 +98,17 @@ describe('fetchRecords', () => {
     const good = encodeRecord(rec(digestA, addr(1)))
     const bad = encodeRecord(rec(digestA, addr(2)))
     const board = fakeBoard({ [cat]: [good, bad] })
-    const rejectAddr2: CosignAdapter = { verify: async (r) => r.signer !== addr(2), order: (r) => r }
-    const out = await fetchRecords({ categories: cats, board, boardRetentionDays: 30, adapter: rejectAddr2, now: NOW })
+    const rejectAddr2: CosignAdapter = {
+      verify: async (r) => r.signer !== addr(2),
+      order: (r) => r,
+    }
+    const out = await fetchRecords({
+      categories: cats,
+      board,
+      boardRetentionDays: 30,
+      adapter: rejectAddr2,
+      now: NOW,
+    })
     expect(out.map((r) => r.signer)).toEqual([addr(1)])
   })
 
@@ -109,7 +125,13 @@ describe('fetchRecords', () => {
       },
       order: (r) => r,
     }
-    const out = await fetchRecords({ categories: cats, board, boardRetentionDays: 30, adapter: throwsOn9, now: NOW })
+    const out = await fetchRecords({
+      categories: cats,
+      board,
+      boardRetentionDays: 30,
+      adapter: throwsOn9,
+      now: NOW,
+    })
     expect(out.map((r) => r.signer)).toEqual([addr(1)]) // the throwing one is dropped, not propagated
   })
 
@@ -152,7 +174,13 @@ describe('fetchRecords', () => {
       },
     }
     await expect(
-      fetchRecords({ categories: cats, board, boardRetentionDays: 30, adapter: acceptAll, now: NOW }),
+      fetchRecords({
+        categories: cats,
+        board,
+        boardRetentionDays: 30,
+        adapter: acceptAll,
+        now: NOW,
+      }),
     ).rejects.toThrow(/rpc down/)
   })
 

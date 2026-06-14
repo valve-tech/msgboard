@@ -21,7 +21,8 @@ export const matchCosignRoute = (pathname: string): CosignRoute | null => {
   if (!namespace || !scope) return null
 
   // /cosign/:ns/:scope/signatures
-  if (parts.length === 4 && parts[3] === 'signatures') return { kind: 'signatures', namespace, scope }
+  if (parts.length === 4 && parts[3] === 'signatures')
+    return { kind: 'signatures', namespace, scope }
   // /cosign/:ns/:scope/owners
   if (parts.length === 4 && parts[3] === 'owners') return { kind: 'owners', namespace, scope }
   // /cosign/:ns/:scope/digest/:digest
