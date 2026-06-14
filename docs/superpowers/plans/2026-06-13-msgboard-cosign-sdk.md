@@ -4,7 +4,7 @@
 
 ## Goal
 
-Ship `@msgboard/cosign` (sub-project 1): a small, dependency-light SDK for sharing **co-signature artifacts** — generic `(digest, signer, signature, scheme, meta)` records — over MsgBoard, bucketed under **rotating, day-granular UTC category keys**. It is app-agnostic; a pluggable **adapter** encodes a specific multisig's verify/order/owner-read rules. This package ships the generic core plus the pluggable **`CosignAdapter` interface only** — **no concrete adapter, no stub**. First-class adapters are separate deliverables that live with their targets (the Multisigner adapter in the multisigner spec; a real, first-class Wonderland adapter in its own dedicated spec/plan). Zero chain writes; pure board + crypto.
+Ship `@msgboard/cosign` (sub-project 1): a small, dependency-light SDK for sharing **co-signature artifacts** — generic `(digest, signer, signature, scheme, meta)` records — over MsgBoard, bucketed under **rotating, day-granular UTC category keys**. It is app-agnostic; a pluggable **adapter** encodes a specific multisig's verify/order/owner-read rules. **This plan (the SDK-core plan) ships the generic core plus the pluggable `CosignAdapter` interface only** — no concrete adapter is built here. Concrete adapters are **not** separate packages: they ship in **this** package's `src/adapters/` and are built by **follow-up plans** (the first is the Gnosis Safe adapter — its own spec `2026-06-13-msgboard-cosign-safe-adapter-design.md` → its own plan adds `src/adapters/safe.ts`). cosign is a coordination/aggregation layer for **existing** off-chain-signature-aggregation multisig tools; we do **not** build our own multisig. Zero chain writes; pure board + crypto.
 
 The deliverable is the foundation layer that two consumers build on: a team's own post/read/aggregate tooling, and the **cosign archivist** (sub-project 2) which imports this package's `keys.ts` key scheme and `record.ts` codec verbatim.
 
@@ -32,10 +32,10 @@ caller's signing tooling
    ordered { signer, signature }[]   (handed to team's existing execute path — out of scope)
             ▲
             │ verify / order / owners? / threshold?
-   src/adapters/adapter.ts  (CosignAdapter INTERFACE — concrete adapters live in their own specs)
+   src/adapters/adapter.ts  (CosignAdapter INTERFACE — concrete adapters ship in src/adapters/ via follow-up plans, Safe first)
 ```
 
-`keys.ts` and `record.ts` are pure (no I/O). `client.ts` depends only on an abstract `BoardClient` interface — never on `MsgBoardClient` directly — so it is fully testable with a fake board. This package ships only the `CosignAdapter` **interface**; concrete adapters (the only place read-only chain reads may happen) are separate deliverables in their own packages/specs.
+`keys.ts` and `record.ts` are pure (no I/O). `client.ts` depends only on an abstract `BoardClient` interface — never on `MsgBoardClient` directly — so it is fully testable with a fake board. **This plan ships only the `CosignAdapter` interface.** Concrete adapters (the only place read-only chain reads may happen) ship in this same package's `src/adapters/`, built by follow-up plans (the Safe adapter first) — not separate packages.
 
 ## Tech Stack
 
@@ -585,7 +585,7 @@ git commit -m "feat(cosign): record.ts — canonical SignatureRecord ABI codec +
 
 **Goal:** post/read/aggregate over an abstract `BoardClient`, plus `groupByDigest`. Fully testable with a fake board and fake adapter. Depends on `keys.ts` (Task 2), `record.ts` (Task 3), and the adapter interface (defined inline-compatible here; the interface file lands in Task 5 and `client.ts` imports it then — see note).
 
-> **Ordering note:** `aggregate` needs the `CosignAdapter` type. To keep Task 4 self-contained for its own RED→GREEN, we create the tiny `adapters/adapter.ts` interface file as the **first step of Task 4** (it is pure type, no behavior), then build `client.ts` against it. Task 5 adds a small dedicated test that a fake adapter satisfies the interface and drives `aggregate`. This package ships **no** concrete adapter — first-class adapters (Multisigner; a real Wonderland adapter) are separate deliverables in their own specs/packages.
+> **Ordering note:** `aggregate` needs the `CosignAdapter` type. To keep Task 4 self-contained for its own RED→GREEN, we create the tiny `adapters/adapter.ts` interface file as the **first step of Task 4** (it is pure type, no behavior), then build `client.ts` against it. Task 5 adds a small dedicated test that a fake adapter satisfies the interface and drives `aggregate`. **This plan builds no concrete adapter** — concrete adapters ship in this same package's `src/adapters/` via follow-up plans (the Gnosis Safe adapter first, its own spec → its own plan adding `src/adapters/safe.ts`).
 
 ### 4.1 Create the adapter interface (type-only seam) — `packages/cosign/src/adapters/adapter.ts`
 
@@ -882,7 +882,7 @@ git commit -m "feat(cosign): client.ts — post/read/group/aggregate over a Boar
 
 ## Task 5 — Lock the `CosignAdapter` interface (compile + drive test)
 
-**Goal:** Verify the `CosignAdapter` interface (already created in Task 4.1) is well-formed: a fake adapter satisfies it and drives `aggregate`. This package ships the **interface only** — **no concrete adapter, no stub**. First-class adapters are separate deliverables that live with their targets (the Multisigner adapter is specced in the multisigner spec; a real, first-class Wonderland adapter — real + tested against their actual contract — gets its own dedicated spec/plan once the contract/ABI is known).
+**Goal:** Verify the `CosignAdapter` interface (already created in Task 4.1) is well-formed: a fake adapter satisfies it and drives `aggregate`. **This plan builds the interface only** — no concrete adapter, no stub. Concrete adapters ship in this same package's `src/adapters/` via follow-up plans (the Gnosis Safe adapter first — its own spec `2026-06-13-msgboard-cosign-safe-adapter-design.md` → its own plan adding `src/adapters/safe.ts`; the full roadmap + non-fits live in the cosign SDK spec §9).
 
 > `adapters/adapter.ts` already exists (the `CosignAdapter` interface, created in Task 4.1). The `aggregate` fake-adapter behavior is already covered in Task 4's `client.test.ts`. This task adds a small, focused test that a fake adapter is assignable to `CosignAdapter` and works through `aggregate` — a type-level/compile check that locks the interface shape. If you consider this fully covered by Task 4's `aggregate` tests, this task is satisfied by that coverage and you may skip the extra file; otherwise add the test below.
 
@@ -990,7 +990,7 @@ export {
 export type { CosignAdapter } from './adapters/adapter.js'
 ```
 
-> Only the `CosignAdapter` **interface** is re-exported. This package ships no concrete adapter; first-class adapters (Multisigner; a real Wonderland adapter) are separate deliverables that export their own factories from their own packages/specs.
+> Only the `CosignAdapter` **interface** is re-exported by this plan. Concrete adapters ship in this same package's `src/adapters/` via follow-up plans (the Safe adapter first); those plans will extend this re-export list with the adapter factories they add.
 
 ### 6.2 Delete the obsolete smoke test and its constant
 
@@ -1011,10 +1011,11 @@ Generic **signature-share** SDK over [MsgBoard](https://github.com/valve-tech/ms
 aggregate co-signature artifacts — `(digest, signer, signature, scheme, meta)` records — bucketed under
 **rotating, day-granular UTC category keys** so the working set stays small and self-pruning.
 
-App-agnostic. A pluggable **adapter** encodes a specific multisig's verify/order/owner-read rules. This package
-ships the generic core plus the `CosignAdapter` **interface only** — **no concrete adapter**. First-class
-adapters are separate deliverables that live with their targets (a Multisigner adapter; a real, first-class
-Wonderland adapter in its own spec). Pure board + crypto: **no chain writes**.
+App-agnostic. A pluggable **adapter** encodes a specific multisig's verify/order/owner-read rules. cosign is a
+coordination/aggregation layer for **existing** off-chain-signature-aggregation multisig tools — it does **not**
+build its own multisig. The generic core plus the `CosignAdapter` interface land first; **concrete adapters ship
+in this same package's `src/adapters/`** (the Gnosis Safe adapter first; full roadmap + non-fits in the cosign SDK
+spec). Pure board + crypto: **no chain writes**.
 
 ## Canonical encodings (law — downstream tooling mirrors these)
 
@@ -1068,9 +1069,9 @@ const ordered = await aggregate(forDigest, myAdapter) // myAdapter satisfies Cos
 // `ordered` is `{ signer, signature }[]` — hand to your existing execute path (out of scope here).
 ```
 
-> This package ships the `CosignAdapter` **interface** only — supply a concrete adapter to aggregate.
-> First-class adapters are separate deliverables: a minimal Multisigner adapter (its own spec) and a real,
-> first-class Wonderland adapter (its own dedicated spec/plan, real + tested against their actual contract).
+> The core + `CosignAdapter` **interface** land first — supply a concrete adapter to aggregate.
+> Concrete adapters ship in this same package's `src/adapters/` (the Gnosis Safe adapter first — its own
+> spec/plan; full roadmap + non-fits in the cosign SDK spec §9).
 
 ## API
 
@@ -1078,7 +1079,7 @@ const ordered = await aggregate(forDigest, myAdapter) // myAdapter satisfies Cos
 - `record`: `SignatureRecord`, `SCHEME`, `RECORD_ABI`, `encodeRecord`, `decodeRecord` (decode throws on junk).
 - `client`: `BoardClient`, `postSignature`, `readSignatures` (skips undecodable junk, dedupes by data),
   `groupByDigest`, `aggregate` (filters by `adapter.verify`, applies `adapter.order`; verify errors propagate).
-- `adapters`: `CosignAdapter` (the seam — interface only; concrete adapters are separate deliverables).
+- `adapters`: `CosignAdapter` (the seam — interface lands first; concrete adapters ship in `src/adapters/` via follow-up plans, Safe first).
 ````
 
 ### 6.4 Full sweep
@@ -1115,7 +1116,7 @@ git commit -m "feat(cosign): wire index re-exports + README; drop scaffold smoke
 - [ ] §4 `record.ts`: `SignatureRecord` interface, `SCHEME` enum, canonical tuple order, `encodeRecord`/`decodeRecord` (decode throws) — Task 3.
 - [ ] §4 `client.ts`: minimal `BoardClient` (`addMessage({category,data})` / `content({category})`), `postSignature`, `readSignatures` (skip junk, dedupe by `keccak256(data)`), `groupByDigest`, `aggregate` (verify-filter + order) — Task 4.
 - [ ] §4 `adapters/adapter.ts`: `CosignAdapter` (verify/order/owners?/threshold?) — the only adapter artifact in this package — Task 4.1; interface locked by a fake-adapter compile/drive test — Task 5.
-- [ ] §4 no concrete adapter / no stub ships here; first-class adapters (Multisigner; a real Wonderland adapter) are separate deliverables in their own specs — Task 5.
+- [ ] §4 no concrete adapter / no stub built in this plan; concrete adapters ship in this same package's `src/adapters/` via follow-up plans (the Gnosis Safe adapter first) — Task 5.
 - [ ] §4 `index.ts` re-exports the core units + the `CosignAdapter` interface (no concrete adapter) — Task 6.
 - [ ] §6 error handling: decode throws; read skips junk but never drops well-formed; `keysForWindow` throws on `days<1`; `postSignature` surfaces board errors; `adapter.verify` errors propagate — Tasks 2/3/4 (tests assert each).
 - [ ] §7 testing: keys determinism/UTC-rotation/window/sensitivity; record round-trip per scheme incl. empty meta + garbage throws; client post/read+junk+dedupe/group/aggregate; `CosignAdapter` interface locked via a fake adapter — Tasks 2-5.
@@ -1156,4 +1157,4 @@ This plan is ready to execute. Two options:
 - **Subagent-driven (recommended for isolation):** dispatch each task (1→6, in order — they are sequential by dependency) to a fresh implementer subagent using `superpowers:subagent-driven-development`, with a review checkpoint after each task's commit. Each task is self-contained (its own RED→GREEN→commit) and leaves the suite green, so a reviewer can verify incrementally.
 - **Inline:** execute here, task by task, pausing after each commit for review per `superpowers:executing-plans`.
 
-Either way: enforce the TDD discipline (RED first, watch it fail for the right reason, then GREEN), run the exact commands shown, and confirm the expected output before committing. Do **not** implement any concrete adapter in this package — this sub-project ships the generic core + the `CosignAdapter` interface only. First-class adapters are separate deliverables: the Multisigner adapter (multisigner spec) and a real, first-class Wonderland adapter (its own dedicated spec/plan, gated on the exact Wonderland contract/ABI — spec §9).
+Either way: enforce the TDD discipline (RED first, watch it fail for the right reason, then GREEN), run the exact commands shown, and confirm the expected output before committing. Do **not** implement any concrete adapter in **this** plan — this sub-project ships the generic core + the `CosignAdapter` interface only. Concrete adapters ship in this same package's `src/adapters/` via follow-up plans: the **Gnosis Safe adapter first** (its own spec `2026-06-13-msgboard-cosign-safe-adapter-design.md` → its own plan adding `src/adapters/safe.ts`), then the rest of the roadmap (Safe4337Module, Rhinestone, ZeroDev-weighted, Ambire) — full roadmap + documented non-fits in the cosign SDK spec §9.

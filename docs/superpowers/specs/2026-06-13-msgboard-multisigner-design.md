@@ -1,7 +1,9 @@
 # MsgBoard Multisigner — Minimal Bootstrap Multisig + Easy-Button Deploy + cosign Adapter (Design Spec)
 
+> **STATUS: SHELVED (2026-06-13).** Superseded by the decision to NOT build our own multisig and instead support existing off-chain-signature-aggregation multisig tools via cosign adapters (see the cosign SDK spec's adapter roadmap and the Safe adapter spec `2026-06-13-msgboard-cosign-safe-adapter-design.md`). Retained for reference (the EIP-712 multisig + adapter patterns here are useful if we ever revisit), but NOT a current deliverable.
+
 Date: 2026-06-13
-Status: Draft for review
+Status: Shelved
 
 Related:
 - `docs/superpowers/specs/2026-06-13-msgboard-cosign-sdk-design.md` — the `@msgboard/cosign` SDK. That package ships the generic core + the `CosignAdapter` **interface** only (no concrete adapter); concrete adapters are separate deliverables. Multisigner is **one** concrete `CosignAdapter` (the Wonderland adapter — a real, first-class adapter — is another, in its own spec), and Multisigner's EIP-712 transaction digest **is** the `SignatureRecord.digest` that cosign shares and aggregates.
