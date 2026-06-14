@@ -5,7 +5,17 @@ import {
   hashTypedData,
   keccak256,
   slice,
+  isAddressEqual,
 } from 'viem'
+import type { SignatureRecord } from '../record.js'
+import { SCHEME } from '../record.js'
+import type { CosignAdapter } from './adapter.js'
+import {
+  type SafePublicClient,
+  recoverEffectiveSigner,
+  verifyErc1271Against,
+  makeSafeAdapter,
+} from './safe.js'
 
 /**
  * EntryPoint v0.7 PackedUserOperation — the subset of fields the SafeOp digest depends on.
@@ -253,4 +263,76 @@ export function decodeSafe4337Meta(meta: Hex): {
     validAfter: Number(validAfter),
     validUntil: Number(validUntil),
   }
+}
+
+/** Config for the Safe4337Module adapter. One instance is pinned to one (chainId, safe, module). */
+export interface Safe4337AdapterConfig {
+  publicClient: SafePublicClient
+  /** The Safe (proxy) address — the userOp.sender; owners()/threshold() read THIS. */
+  safe: Hex
+  /** The Safe4337Module address — the EIP-712 verifyingContract for the operation digest. */
+  module: Hex
+  /** The chain id — binds the digest's domain. */
+  chainId: number
+}
+
+/**
+ * The concrete Safe4337Module CosignAdapter (module v0.3.0, EntryPoint v0.7). A thin variant of
+ * the Safe adapter: owners/threshold read the Safe; the v-byte scheme, ascending order, EIP-1271
+ * offset-tail blob, and deferral to the Safe's checkSignatures are identical — the ONLY difference
+ * is the digest is the module's SafeOp operation hash, so verify recovers over THAT digest and the
+ * 1271 path passes the SafeOp operationData pre-image. The userOp.signature framing (validity-window
+ * prefix) is assembled by buildSafe4337Signature.
+ */
+export function makeSafe4337Adapter(config: Safe4337AdapterConfig): CosignAdapter {
+  const { publicClient, safe } = config
+
+  // owners()/threshold() read the SAFE. Reuse the Safe adapter (it is pinned to the Safe address);
+  // its `order` is digest-agnostic, so we delegate to it too.
+  const safeAdapter = makeSafeAdapter({ publicClient, safe, chainId: config.chainId })
+
+  async function owners(): Promise<Hex[]> {
+    return safeAdapter.owners!()
+  }
+
+  async function threshold(): Promise<number> {
+    return safeAdapter.threshold!()
+  }
+
+  async function isOwner(addr: Hex): Promise<boolean> {
+    const set = await owners()
+    return set.some((o) => isAddressEqual(o, addr))
+  }
+
+  async function verify(record: SignatureRecord): Promise<boolean> {
+    if (record.scheme === SCHEME.EIP1271) {
+      return verifyErc1271(record)
+    }
+    // EOA paths: recover over the 4337 operation digest (recoverEffectiveSigner is digest-agnostic).
+    let recovered: Hex
+    try {
+      recovered = await recoverEffectiveSigner(record)
+    } catch {
+      return false // malformed signature is "definitively invalid", not an infra error
+    }
+    if (!isAddressEqual(recovered, record.signer)) return false
+    return isOwner(recovered)
+  }
+
+  async function verifyErc1271(record: SignatureRecord): Promise<boolean> {
+    // Membership first (cheap; a non-owner can never count regardless of the 1271 result).
+    if (!(await isOwner(record.signer))) return false
+    // Rebuild the exact `data` pre-image the module passes to isValidSignature(bytes,bytes):
+    // 0x19 ‖ 0x01 ‖ domainSeparator(module) ‖ safeOpStructHash, whose keccak256 == record.digest.
+    const { userOp, module, entryPoint, chainId, validAfter, validUntil } = decodeSafe4337Meta(record.meta)
+    const data = safe4337OperationData(userOp, module, entryPoint, chainId, validAfter, validUntil)
+    return verifyErc1271Against(publicClient, record, data)
+  }
+
+  // order is digest-agnostic — delegate to the Safe adapter's strictly-ascending sort + dedup.
+  function order(records: SignatureRecord[]): SignatureRecord[] {
+    return safeAdapter.order(records)
+  }
+
+  return { verify, order, owners, threshold }
 }
