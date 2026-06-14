@@ -1,6 +1,6 @@
 {
   "name": "@msgboard/sdk",
-  "version": "0.0.31",
+  "version": "0.0.32",
   "description": "MsgBoard client SDK for the msgboard_ JSON-RPC module",
   "repository": "github:valve-tech/msgboard",
   "author": "MsgBoard",
@@ -59,7 +59,7 @@
     "vitest": "^3.1.1"
   },
   "dependencies": {
-    "@msgboard/core": "^0.0.31",
+    "@msgboard/core": "^0.0.32",
     "bn.js": "^5.2.1",
     "debug": "^4.4.0",
     "elliptic": "^6.6.1",
