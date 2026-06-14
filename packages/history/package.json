@@ -39,6 +39,7 @@
     "dist/"
   ],
   "dependencies": {
+    "@msgboard/cosign": "^0.0.31",
     "@msgboard/sdk": "^0.0.31",
     "viem": "^2.25.0"
   },
