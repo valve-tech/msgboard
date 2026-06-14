@@ -1,5 +1,13 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { Archive, ArchiveQuery } from './archive.js'
+import { type CosignDeps, handleCosignRequest } from './cosign/handler.js'
+import { matchCosignRoute } from './cosign/router.js'
+import { loadTeamFile, type TeamFile, type TeamFileInput } from './cosign/team-file.js'
+
+export type CosignOption = Omit<CosignDeps, 'teamFile'> & {
+  /** The registry team-file: a loaded TeamFile, a raw object, or a JSON path. */
+  teamFile: TeamFile | TeamFileInput | string
+}
 
 export type ArchiveServerOptions = {
   /** The archive to serve. */
@@ -17,6 +25,12 @@ export type ArchiveServerOptions = {
    * `Authorization: Bearer <token>` receive a 401.
    */
   token?: string
+  /**
+   * Opt-in cosign endpoint group. When present, the same server answers
+   * `/cosign/:namespace/:scope/...` (decoded cosign view) alongside `/messages`.
+   * Absent → the server is unchanged (only `/health` + `/messages`).
+   */
+  cosign?: CosignOption
 }
 
 export type ArchiveServer = {
@@ -84,6 +98,17 @@ export const archiveServer = (options: ArchiveServerOptions): ArchiveServer => {
   const authorized = (req: IncomingMessage): boolean =>
     !options.token || req.headers['authorization'] === `Bearer ${options.token}`
 
+  const cosignDeps: CosignDeps | undefined = options.cosign
+    ? {
+        ...options.cosign,
+        archive: options.cosign.archive ?? options.archive, // default the fallback to this server's archive
+        teamFile:
+          typeof options.cosign.teamFile === 'string' || !('resolve' in options.cosign.teamFile)
+            ? loadTeamFile(options.cosign.teamFile as string | TeamFileInput)
+            : (options.cosign.teamFile as TeamFile),
+      }
+    : undefined
+
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', `http://${host}:${port}`)
 
@@ -98,6 +123,22 @@ export const archiveServer = (options: ArchiveServerOptions): ArchiveServer => {
         return respond(res, 200, { messages })
       } catch (error) {
         return respond(res, 500, { ok: false, error: error instanceof Error ? error.message : 'query failed' })
+      }
+    }
+
+    if (cosignDeps && req.method === 'GET') {
+      const route = matchCosignRoute(url.pathname)
+      if (route) {
+        if (!authorized(req)) return respond(res, 401, { ok: false, error: 'unauthorized' })
+        try {
+          const result = await handleCosignRequest(route, url.searchParams, cosignDeps)
+          return respond(res, result.status, result.body)
+        } catch (error) {
+          return respond(res, 500, {
+            ok: false,
+            error: error instanceof Error ? error.message : 'cosign query failed',
+          })
+        }
       }
     }
 
