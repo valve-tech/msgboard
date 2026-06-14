@@ -93,7 +93,9 @@ export const handleCosignRequest = async (
     }
 
     const digest = route.digest as Hex
-    const group = groupByDigest(records).get(digest) ?? []
+    // groupByDigest preserves the exact CosignRecordView objects passed in (it is generic over
+    // SignatureRecord), so the views' provenance fields survive — narrow the type back to the view.
+    const group = (groupByDigest(records).get(digest) ?? []) as CosignRecordView[]
 
     if (route.kind === 'digest') {
       const signers = group.map((r) => r.signer)
