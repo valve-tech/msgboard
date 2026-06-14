@@ -49,9 +49,12 @@ jobs:
 
       - run: npm ci
 
-      # build in dependency order (core <- sdk <- history <- relayer); hardhat ships its tsc output
+      # build in dependency order (core <- sdk <- cosign <- history <- relayer); hardhat ships its tsc output.
+      # cosign builds before history because history imports @msgboard/cosign at runtime (its types are
+      # needed for history's tsc to resolve the module).
       - run: npm run build --workspace @msgboard/core
       - run: npm run build --workspace @msgboard/sdk
+      - run: npm run build --workspace @msgboard/cosign
       - run: npm run build --workspace @msgboard/history
       - run: (cd packages/hardhat && npx tsc)
       - run: npm run build --workspace @msgboard/relayer
@@ -59,8 +62,9 @@ jobs:
       # No NODE_AUTH_TOKEN: authentication is OpenID Connect. Provenance is automatic.
       - name: Publish public @msgboard/* (idempotent)
         run: |
-          # @msgboard/history is published before @msgboard/relayer, which depends on it.
-          for entry in "@msgboard/core:packages/core" "@msgboard/sdk:packages/sdk" "@msgboard/history:packages/history" "@msgboard/hardhat:packages/hardhat" "@msgboard/relayer:packages/relayer"; do
+          # Dependency order: @msgboard/cosign is published before @msgboard/history (which depends on
+          # it at runtime), and @msgboard/history before @msgboard/relayer (which depends on it).
+          for entry in "@msgboard/core:packages/core" "@msgboard/sdk:packages/sdk" "@msgboard/cosign:packages/cosign" "@msgboard/history:packages/history" "@msgboard/hardhat:packages/hardhat" "@msgboard/relayer:packages/relayer"; do
             pkg="${entry%%:*}"
             dir="${entry##*:}"
             ver=$(node -p "require('./$dir/package.json').version")
