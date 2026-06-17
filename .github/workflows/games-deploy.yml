@@ -132,6 +132,25 @@ jobs:
             npx --yes esbuild@0.24.2 scripts/player-bots.ts --bundle --platform=node --target=node22 --format=esm \
               --banner:js="import { createRequire } from 'module'; const require = createRequire(import.meta.url);" \
               --outfile=/tmp/player-bots.mjs
+            # session-bots: off-chain session games (dice/limbo/plinko/keno/mines/hilo) played headless
+            # with random strategies. They post lifecycle notices (open/settle) to the shared lobby
+            # category games.msgboard.xyz:lobby:943 — real, node-accepted activity. (The HouseSession
+            # seed chain is still in-process; the board footprint is real.)
+            npx --yes esbuild@0.24.2 scripts/session-bots.ts --bundle --platform=node --target=node22 --format=esm \
+              --banner:js="import { createRequire } from 'module'; const require = createRequire(import.meta.url);" \
+              --outfile=/tmp/session-bots.mjs
+            # pow-worker is a worker_threads grinder that mints the PoW stamp via the NATIVE Rust addon
+            # (@gibs/pow-grinder) off the main loop — ~1-2s posts vs ~55s in JS. Build the linux addon;
+            # keep it EXTERNAL in the bundle (a .node can't be bundled) — it ships as a node_modules
+            # package below so the bundle's `import '@gibs/pow-grinder'` resolves at runtime. (ubuntu-
+            # latest ships cargo; rust toolchain required.)
+            ( cd ../pow-grinder && cargo build --release --features napi && bash scripts/copy-native.sh )
+            npx --yes esbuild@0.24.2 scripts/pow-worker.ts --bundle --platform=node --target=node22 --format=esm \
+              --external:@gibs/pow-grinder \
+              --banner:js="import { createRequire } from 'module'; const require = createRequire(import.meta.url);" \
+              --outfile=/tmp/pow-worker.mjs
+            mkdir -p /tmp/node_modules/@gibs/pow-grinder
+            cp ../pow-grinder/index.js ../pow-grinder/package.json ../pow-grinder/pow-grinder.linux-*.node /tmp/node_modules/@gibs/pow-grinder/
             cp scripts/*-deployment.json /tmp/
           fi
 
@@ -204,6 +223,20 @@ jobs:
                 CHAIN: "943"
                 CONFIG: /app/943-deployment.json
               command: node player-bots.mjs
+            session-bots:
+              # off-chain session games (dice/limbo/plinko/keno/mines/hilo-war) played with random
+              # strategies + realistic think-delays. In-process today (no 943/MsgBoard footprint) —
+              # proves the loops + timing; goes testnet-visible once a real transport is wired.
+              image: node:22-alpine
+              restart: unless-stopped
+              working_dir: /app
+              volumes: [ "./:/app" ]
+              env_file: .env
+              environment:
+                CHAIN: "943"
+                CONFIG: /app/943-deployment.json
+                GAMES: "dice,limbo,plinko,keno,mines,hilo"
+              command: node session-bots.mjs
           EOF
           # PulseChain mainnet actors ride along once a 369 deployment exists. Mainnet is
           # deliberately SPARING: 6 h between self-initiated spends, generous vault floor
@@ -244,7 +277,10 @@ jobs:
           umask 077
           printf 'MNEMONIC=%s\nSEEDS0=%s\nVALVE_RPC_KEY=%s\n' "${{ secrets.RANDOMNESS_MNEMONIC }}" "${{ secrets.SEEDS0_MNEMONIC }}" "${{ secrets.VALVE_RPC_KEY }}" > /tmp/actors.env
           ssh -i ~/.ssh/box root@88.99.62.98 'mkdir -p /opt/games-actors && chmod 700 /opt/games-actors'
-          scp -i ~/.ssh/box /tmp/cast-watcher.mjs /tmp/player-bots.mjs /tmp/*-deployment.json /tmp/actors-compose.yml root@88.99.62.98:/opt/games-actors/
+          scp -i ~/.ssh/box /tmp/cast-watcher.mjs /tmp/player-bots.mjs /tmp/session-bots.mjs /tmp/pow-worker.mjs /tmp/*-deployment.json /tmp/actors-compose.yml root@88.99.62.98:/opt/games-actors/
+          # the native PoW grinder addon as a resolvable node_modules package (pow-worker imports it)
+          ssh -i ~/.ssh/box root@88.99.62.98 'rm -rf /opt/games-actors/node_modules/@gibs/pow-grinder'
+          scp -r -i ~/.ssh/box /tmp/node_modules root@88.99.62.98:/opt/games-actors/
           scp -i ~/.ssh/box /tmp/actors.env root@88.99.62.98:/opt/games-actors/.env
           rm -f /tmp/actors.env
           ssh -i ~/.ssh/box root@88.99.62.98 '
@@ -257,5 +293,6 @@ jobs:
             docker compose ps --format "{{.Name}} {{.State}}"
             docker compose logs --tail 3 cast-watcher | tail -3
             docker compose logs --tail 3 player-bots | tail -3
+            docker compose logs --tail 3 session-bots | tail -3
             [ -f 369-deployment.json ] && docker compose logs --tail 3 cast-watcher-369 player-bots-369 2>/dev/null | tail -6 || true
           '
