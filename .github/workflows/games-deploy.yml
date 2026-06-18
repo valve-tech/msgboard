@@ -133,7 +133,7 @@ jobs:
             docker exec caddy caddy reload --config /etc/caddy/Caddyfile
             sleep 6
             docker compose -f docker-compose.prod.yml ps games-indexer-943 --format '{{.Name}} {{.State}}'
-            docker compose -f docker-compose.prod.yml logs --tail 60 games-indexer-943 2>&1 | tail -60
+            docker compose -f docker-compose.prod.yml logs --tail 60 games-indexer-943 2>&1 | sed -E 's#/rpc/[^/ ]+/evm#/rpc/<redacted>/evm#g; s#postgres://[^@ ]*@#postgres://<redacted>@#g' | tail -60
           "
 
       - name: games-indexer smoke

@@ -1,9 +1,8 @@
 import { createConfig } from 'ponder'
-import { http, type Abi } from 'viem'
-// Named `{ abi }` import from the FULL hardhat artifact — the same pattern the entropy indexer uses
-// (a default import of a bare array doesn't register events in Ponder's bundler).
-import { abi as coinFlipAbi } from './abis/CoinFlip.json'
-import { abi as raffleAbi } from './abis/Raffle.json'
+import { http } from 'viem'
+// `as const` abis (abis.ts) so Ponder derives the event-name types and the registry is populated —
+// a generic `as Abi` cast erases the events and `ponder.on('CoinFlip:Entered')` fails at runtime.
+import { coinFlipAbi, raffleAbi } from './abis'
 
 // Vendored, self-contained snapshot (mirrors deploy/random-indexer): the CoinFlip + Raffle ABIs are
 // bundled in ./abis so the image builds with no workspace deps. Source of truth for the indexer logic
@@ -22,13 +21,13 @@ export default createConfig({
   contracts: {
     CoinFlip: {
       network: 'pulsechainV4',
-      abi: coinFlipAbi as unknown as Abi,
+      abi: coinFlipAbi,
       address: COIN_FLIP,
       startBlock: START_BLOCK,
     },
     Raffle: {
       network: 'pulsechainV4',
-      abi: raffleAbi as unknown as Abi,
+      abi: raffleAbi,
       address: RAFFLE,
       startBlock: START_BLOCK,
     },
