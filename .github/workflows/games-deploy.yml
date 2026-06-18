@@ -73,6 +73,11 @@ jobs:
                 [ -f "$f" ] && { echo "--- $f ---"; sed -E "s/((PASSWORD|KEY|SECRET|TOKEN|URL|DSN)[^=:]*[=:])[^ ]*/\1<redacted>/Ig; s#/rpc/[^/ ]+/evm#/rpc/<redacted>/evm#g" "$f"; }
               done
             fi
+            echo "=== the vendored random-indexer source (ponder version + config + Dockerfile) ==="
+            GID=/opt/msgboard/deploy/random-indexer
+            for f in "$GID/package.json" "$GID/ponder.config.ts" "$GID/Dockerfile" "$GID/ponder.schema.ts"; do
+              [ -f "$f" ] && { echo "--- $f ---"; sed -E "s/((PASSWORD|KEY|SECRET|TOKEN|URL|DSN)[^=:]*[=:])[^ ]*/\1<redacted>/Ig; s#/rpc/[^/ ]+/evm#/rpc/<redacted>/evm#g" "$f" | head -60; }
+            done
             echo "=== Caddy block fronting the indexer (entropy domain) ==="
             CF=/opt/msgboard/deploy/caddy/Caddyfile
             grep -niE "entropy|indexer|ponder|42069" "$CF" 2>/dev/null | head
