@@ -121,21 +121,10 @@ jobs:
             # pin this index's schema (PONDER_RPC_URL_943 + POSTGRES_PASSWORD already in .env for the entropy indexer)
             grep -q '^GAMES_943_SCHEMA=' .env && sed -i \"s/^GAMES_943_SCHEMA=.*/GAMES_943_SCHEMA=$SCHEMA/\" .env || echo \"GAMES_943_SCHEMA=$SCHEMA\" >> .env
             docker compose -f docker-compose.prod.yml up -d --build games-indexer-943
-            # Caddy: games-943.msgboard.xyz -> the indexer (idempotent; validate before reload)
-            CF=/opt/msgboard/deploy/caddy/Caddyfile
-            if ! grep -q 'games-943.msgboard.xyz' \"\$CF\"; then
-              cp \"\$CF\" \"\$CF.bak.gamesidx\"
-              {
-                echo ''
-                echo 'games-943.msgboard.xyz {'
-                echo '	tls /etc/caddy/origin.pem /etc/caddy/origin.key'
-                echo '	encode gzip'
-                echo '	reverse_proxy games-indexer-943:42069'
-                echo '}'
-              } >> \"\$CF\"
-            fi
-            docker exec caddy caddy validate --config /etc/caddy/Caddyfile
-            docker exec caddy caddy reload --config /etc/caddy/Caddyfile
+            # Caddy: serve the indexer at games.msgboard.xyz/games-indexer/* (games-943 has no public
+            # DNS). The script backs up + validates + healthchecks + auto-rolls-back, so it cannot
+            # leave the live games site broken. Idempotent.
+            bash /opt/msgboard/deploy/games-indexer/install-caddy-route.sh
             sleep 6
             docker compose -f docker-compose.prod.yml ps games-indexer-943 --format '{{.Name}} {{.State}}'
             docker compose -f docker-compose.prod.yml logs --tail 60 games-indexer-943 2>&1 | sed -E 's#/rpc/[^/ ]+/evm#/rpc/<redacted>/evm#g; s#postgres://[^@ ]*@#postgres://<redacted>@#g' | tail -60
@@ -145,7 +134,7 @@ jobs:
         if: inputs.mode == 'games-indexer'
         run: |
           sleep 5
-          curl -sS -o /dev/null -w 'games-943.msgboard.xyz -> %{http_code}\n' https://games-943.msgboard.xyz || true
+          curl -sS -o /dev/null -w 'games.msgboard.xyz/games-indexer/health -> %{http_code}\n' https://games.msgboard.xyz/games-indexer/health || true
 
       - name: site (msgboard.xyz ui)
         if: inputs.mode == 'site'
