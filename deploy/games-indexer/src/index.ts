@@ -24,25 +24,22 @@ const store = (game: 'coinflip' | 'raffle', name: string) => async ({ event, con
     .onConflictDoNothing()
 }
 
-// The abis are imported as generic Abi, so Ponder can't derive the event-name union at the type level
-// (the names are valid at RUNTIME — registration reads the abi value). Cast `on` to a loose signature.
-// IMPORTANT: bind to `ponder` — `ponder.on` is a method that does `this.fns.push(...)`, so a detached
-// `const on = ponder.on` loses its receiver and throws "Cannot read properties of undefined (reading 'fns')".
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const on = ponder.on.bind(ponder) as unknown as (name: string, handler: (arg: any) => unknown) => void
+// Register each event directly on `ponder` (same pattern as the box's random-indexer). Call it as a
+// METHOD — `ponder.on(...)` — never via a detached alias: `ponder.on` does `this.fns.push(...)`, so
+// `const on = ponder.on; on(...)` loses its receiver and throws "Cannot read ... 'fns'". The `as const`
+// abis (./abis) give Ponder the event-name union, so these string literals type-check with no cast.
+ponder.on('CoinFlip:Entered', store('coinflip', 'Entered'))
+ponder.on('CoinFlip:Cancelled', store('coinflip', 'Cancelled'))
+ponder.on('CoinFlip:Paired', store('coinflip', 'Paired'))
+ponder.on('CoinFlip:Heated', store('coinflip', 'Heated'))
+ponder.on('CoinFlip:Settled', store('coinflip', 'Settled'))
 
-on('CoinFlip:Entered', store('coinflip', 'Entered'))
-on('CoinFlip:Cancelled', store('coinflip', 'Cancelled'))
-on('CoinFlip:Paired', store('coinflip', 'Paired'))
-on('CoinFlip:Heated', store('coinflip', 'Heated'))
-on('CoinFlip:Settled', store('coinflip', 'Settled'))
-
-on('Raffle:RoundOpened', store('raffle', 'RoundOpened'))
-on('Raffle:Committed', store('raffle', 'Committed'))
-on('Raffle:TicketCancelled', store('raffle', 'TicketCancelled'))
-on('Raffle:Armed', store('raffle', 'Armed'))
-on('Raffle:Drawn', store('raffle', 'Drawn'))
-on('Raffle:Revealed', store('raffle', 'Revealed'))
-on('Raffle:Finalised', store('raffle', 'Finalised'))
-on('Raffle:NoContest', store('raffle', 'NoContest'))
-on('Raffle:TicketRefunded', store('raffle', 'TicketRefunded'))
+ponder.on('Raffle:RoundOpened', store('raffle', 'RoundOpened'))
+ponder.on('Raffle:Committed', store('raffle', 'Committed'))
+ponder.on('Raffle:TicketCancelled', store('raffle', 'TicketCancelled'))
+ponder.on('Raffle:Armed', store('raffle', 'Armed'))
+ponder.on('Raffle:Drawn', store('raffle', 'Drawn'))
+ponder.on('Raffle:Revealed', store('raffle', 'Revealed'))
+ponder.on('Raffle:Finalised', store('raffle', 'Finalised'))
+ponder.on('Raffle:NoContest', store('raffle', 'NoContest'))
+ponder.on('Raffle:TicketRefunded', store('raffle', 'TicketRefunded'))
