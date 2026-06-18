@@ -1,7 +1,9 @@
 import { createConfig } from 'ponder'
 import { http, type Abi } from 'viem'
-import coinFlipAbi from './abis/CoinFlip.json'
-import raffleAbi from './abis/Raffle.json'
+// Named `{ abi }` import from the FULL hardhat artifact — the same pattern the entropy indexer uses
+// (a default import of a bare array doesn't register events in Ponder's bundler).
+import { abi as coinFlipAbi } from './abis/CoinFlip.json'
+import { abi as raffleAbi } from './abis/Raffle.json'
 
 // Vendored, self-contained snapshot (mirrors deploy/random-indexer): the CoinFlip + Raffle ABIs are
 // bundled in ./abis so the image builds with no workspace deps. Source of truth for the indexer logic
