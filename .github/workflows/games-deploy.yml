@@ -16,11 +16,11 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: recon (read-only survey), deploy, actors, site, or indexer-recon
+        description: recon, deploy, actors, site, indexer-recon, or games-indexer
         required: true
         default: recon
         type: choice
-        options: [recon, deploy, actors, site, logs, indexer-recon]
+        options: [recon, deploy, actors, site, logs, indexer-recon, games-indexer]
 
 jobs:
   games:
@@ -92,8 +92,55 @@ jobs:
           '
 
       - name: checkout msgboard source
-        if: inputs.mode == 'site'
+        if: inputs.mode == 'site' || inputs.mode == 'games-indexer'
         uses: actions/checkout@v4
+
+      - name: games-indexer (deploy the CoinFlip+Raffle ponder indexer alongside the entropy one)
+        if: inputs.mode == 'games-indexer'
+        run: |
+          set -e
+          # ship the updated prod compose (with the games-indexer-943 service) + the vendored indexer
+          tar -czf /tmp/gi.tgz docker-compose.prod.yml deploy/games-indexer
+          scp -i ~/.ssh/box /tmp/gi.tgz root@88.99.62.98:/tmp/gi.tgz
+          # a fresh Postgres schema per (re)index, like the entropy indexer — avoids "schema already
+          # used by a different app" on a rebuild. epoch seconds keeps it monotonic + unique.
+          SCHEMA="games_943_$(date +%s)"
+          ssh -i ~/.ssh/box root@88.99.62.98 "
+            set -e
+            cd /opt/msgboard
+            tar -xzf /tmp/gi.tgz   # overwrites docker-compose.prod.yml + deploy/games-indexer in place
+            rm -f /tmp/gi.tgz
+            # dedicated 'games' database on the shared msgboard-postgres (idempotent)
+            docker exec msgboard-postgres psql -U msgboard-postgres -tc \"SELECT 1 FROM pg_database WHERE datname='games'\" | grep -q 1 \
+              || docker exec msgboard-postgres psql -U msgboard-postgres -c 'CREATE DATABASE games'
+            # pin this index's schema (PONDER_RPC_URL_943 + POSTGRES_PASSWORD already in .env for the entropy indexer)
+            grep -q '^GAMES_943_SCHEMA=' .env && sed -i \"s/^GAMES_943_SCHEMA=.*/GAMES_943_SCHEMA=$SCHEMA/\" .env || echo \"GAMES_943_SCHEMA=$SCHEMA\" >> .env
+            docker compose -f docker-compose.prod.yml up -d --build games-indexer-943
+            # Caddy: games-943.msgboard.xyz -> the indexer (idempotent; validate before reload)
+            CF=/opt/msgboard/deploy/caddy/Caddyfile
+            if ! grep -q 'games-943.msgboard.xyz' \"\$CF\"; then
+              cp \"\$CF\" \"\$CF.bak.gamesidx\"
+              {
+                echo ''
+                echo 'games-943.msgboard.xyz {'
+                echo '	tls /etc/caddy/origin.pem /etc/caddy/origin.key'
+                echo '	encode gzip'
+                echo '	reverse_proxy games-indexer-943:42069'
+                echo '}'
+              } >> \"\$CF\"
+            fi
+            docker exec caddy caddy validate --config /etc/caddy/Caddyfile
+            docker exec caddy caddy reload --config /etc/caddy/Caddyfile
+            sleep 6
+            docker compose -f docker-compose.prod.yml ps games-indexer-943 --format '{{.Name}} {{.State}}'
+            docker compose -f docker-compose.prod.yml logs --tail 8 games-indexer-943 2>&1 | tail -8
+          "
+
+      - name: games-indexer smoke
+        if: inputs.mode == 'games-indexer'
+        run: |
+          sleep 5
+          curl -sS -o /dev/null -w 'games-943.msgboard.xyz -> %{http_code}\n' https://games-943.msgboard.xyz || true
 
       - name: site (msgboard.xyz ui)
         if: inputs.mode == 'site'

@@ -1,6 +1,11 @@
 networks:
   msgboard:
     driver: bridge
+  # Shared cross-app network. This Caddy joins it so it can reach co-located apps'
+  # containers (e.g. bridge-sponsor-web) by name. Created on the box by either app's deploy
+  # (`docker network create edge`); declared external so compose does not try to own it.
+  edge:
+    external: true
 
 volumes:
   postgres-data:
@@ -34,6 +39,10 @@ services:
       - ./deploy/caddy/origin.key:/etc/caddy/origin.key:ro
       # GraphiQL explorer static page served at archive.msgboard.xyz
       - ./deploy/caddy/graphiql:/srv/graphiql:ro
+      # Shared edge mounts (box-level, outside any repo tree so neither app's rsync --delete
+      # can wipe them): co-located apps' site fragments and their origin certs.
+      - /opt/edge/sites-enabled:/etc/caddy/sites-enabled:ro
+      - /opt/edge/certs:/etc/caddy/certs:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
@@ -42,6 +51,7 @@ services:
       - hasura
     networks:
       - msgboard
+      - edge
 
   ui:
     container_name: ui
@@ -189,6 +199,27 @@ services:
       DATABASE_URL: postgres://msgboard-postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@msgboard-postgres:5432/entropy
       PONDER_RPC_URL_943: ${PONDER_RPC_URL_943:?PONDER_RPC_URL_943 must be set (one.valve.city/rpc/<key>/evm/943)}
       PONDER_SCHEMA: ${ENTROPY_943_SCHEMA:?ENTROPY_943_SCHEMA must be set (entropy_943_<n>)}
+      PONDER_TELEMETRY_DISABLED: 'true'
+
+  # games-indexer-943: the gibsfinance/random CoinFlip + Raffle ponder indexer for chain 943, served
+  # at games-943.msgboard.xyz (Caddy proxies to :42069 over the docker network). Mirrors
+  # random-indexer-943 — vendored snapshot in deploy/games-indexer, a fresh Postgres schema
+  # games_943_<n> (GAMES_943_SCHEMA) inside a dedicated `games` database on msgboard-postgres (created
+  # by the deploy before this starts). Lets the games frontend read rounds from GraphQL instead of
+  # scraping eth_getLogs from every browser.
+  games-indexer-943:
+    container_name: games-indexer-943
+    build:
+      context: ./deploy/games-indexer
+    depends_on:
+      - msgboard-postgres
+    restart: unless-stopped
+    networks:
+      - msgboard
+    environment:
+      DATABASE_URL: postgres://msgboard-postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@msgboard-postgres:5432/games
+      PONDER_RPC_URL_943: ${PONDER_RPC_URL_943:?PONDER_RPC_URL_943 must be set (one.valve.city/rpc/<key>/evm/943)}
+      PONDER_SCHEMA: ${GAMES_943_SCHEMA:?GAMES_943_SCHEMA must be set (games_943_<n>)}
       PONDER_TELEMETRY_DISABLED: 'true'
 
   # hasura: GraphQL over the message_archive table. Published on LOOPBACK ONLY
