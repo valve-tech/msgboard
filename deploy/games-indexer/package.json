@@ -1,0 +1,13 @@
+{
+  "name": "games-indexer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "ponder start",
+    "codegen": "ponder codegen"
+  },
+  "dependencies": {
+    "ponder": "0.9.28",
+    "viem": "^2.23.2"
+  }
+}
