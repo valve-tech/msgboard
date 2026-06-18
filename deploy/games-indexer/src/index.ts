@@ -26,8 +26,10 @@ const store = (game: 'coinflip' | 'raffle', name: string) => async ({ event, con
 
 // The abis are imported as generic Abi, so Ponder can't derive the event-name union at the type level
 // (the names are valid at RUNTIME — registration reads the abi value). Cast `on` to a loose signature.
+// IMPORTANT: bind to `ponder` — `ponder.on` is a method that does `this.fns.push(...)`, so a detached
+// `const on = ponder.on` loses its receiver and throws "Cannot read properties of undefined (reading 'fns')".
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const on = ponder.on as unknown as (name: string, handler: (arg: any) => unknown) => void
+const on = ponder.on.bind(ponder) as unknown as (name: string, handler: (arg: any) => unknown) => void
 
 on('CoinFlip:Entered', store('coinflip', 'Entered'))
 on('CoinFlip:Cancelled', store('coinflip', 'Cancelled'))
