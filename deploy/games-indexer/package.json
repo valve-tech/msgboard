@@ -4,11 +4,15 @@
   "type": "module",
   "scripts": {
     "start": "ponder start",
-    "codegen": "ponder codegen"
+    "codegen": "ponder codegen",
+    "test": "vitest run"
   },
   "dependencies": {
     "hono": "^4.7.5",
     "ponder": "^0.16.6",
     "viem": "^2.48.11"
+  },
+  "devDependencies": {
+    "vitest": "^3.1.1"
   }
 }
