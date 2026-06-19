@@ -21,6 +21,7 @@
 - **Indexer is Ponder `^0.16.6`** (`chains`/`chain`/`id`/`rpc`, `ordering: 'omnichain'`, explicit `src/api/index.ts`). Register handlers with `ponder.on(...)` as a method — never a detached alias (loses `this` → empty registry).
 - **Chips are a mintable ERC20** (`Chips.mint` is owner-only); the faucet mints, the house treasury is minted + `fundHouse`'d.
 - **EIP-712 `verifyingContract` = HouseChannel address** for `SessionState` and `OpenTerms` (replaces the web's `PLACEHOLDER_VERIFIER`).
+- **⚠️ Two-sided commit-reveal RNG (funds safety — neither party may grind the roll).** `roundRandom = keccak256(serverSeed, clientSeed, nonce)`. Both inputs must be committed before either is revealed: (1) the player sends `clientSeedCommit = commitSeed(clientSeed)` in the open-request — NEVER the seed (implemented, commit `936c6b3`); (2) the house builds its seed chain BLIND and signs `terms.rngCommit` (its own commit, never the player's); (3) `open()` fixes `rngCommit` on-chain; (4) at round time the player reveals `clientSeed` and the house verifies `verifyReveal(clientSeedCommit, clientSeed)` (anti-player-grind) while the player verifies `proof.clientSeed === its own committed seed` (anti-house-substitution, commit `dc13f1b`) and `verifyReveal(rngCommit, serverSeed)` (anti-house-seed-swap). Omitting ANY of these four re-opens a grind.
 - **Web is viem-only** (no ethers); follow the existing `examples/games/web` patterns.
 
 ---
@@ -132,9 +133,9 @@ git commit -m "feat(games): dice escrow sizing helper"
 **Interfaces:**
 - Consumes: `escrowFor`, `diceMaxMultiplierX100` (Task 1); `signOpenTerms`, `verifyOpenTermsSig`, `OpenTerms` (`@gibs/msgboard-settle`); `makeSettleDomain` (`@gibs/msgboard-settle`); `StateSigner`/`GameDomain` (`@gibs/msgboard-games`).
 - Produces:
-  - `type OpenRequest = { tableId: Hex; player: Hex; playerKey: Hex; gameId: number; targetX100: bigint; stake: bigint; rngCommit: Hex; clientSeed: Hex }`
+  - `type OpenRequest = { tableId: Hex; player: Hex; playerKey: Hex; gameId: number; targetX100: bigint; stake: bigint; clientSeedCommit: Hex }` — the player commits its seed, never reveals it at open; `rngCommit` is NOT in the request (the house supplies its own).
   - `type Limits = { maxEscrowHouse: bigint; minTargetX100: bigint; clockBlocks: bigint; expiryBlocks: bigint }`
-  - `reviewOpen(req: OpenRequest, ctx: { houseKey: StateSigner; domain: GameDomain; headBlock: bigint; limits: Limits }): Promise<{ ok: true; terms: OpenTerms; houseSig: Hex } | { ok: false; reason: string }>`
+  - `reviewOpen(req: OpenRequest, ctx: { houseKey: StateSigner; domain: GameDomain; headBlock: bigint; limits: Limits; rngCommit: Hex }): Promise<{ ok: true; terms: OpenTerms; houseSig: Hex } | { ok: false; reason: string }>` — `ctx.rngCommit` is the house's blind-built commit; `terms.rngCommit = ctx.rngCommit`. (Shipped this way as of `936c6b3`.)
 
 - [ ] **Step 1: Write the failing test**
 
@@ -292,7 +293,7 @@ git commit -m "feat(games): split co-signing over a transport (transcript-parity
 - Test: `examples/games/house-service/test/houseLoop.test.ts`
 
 **Interfaces:**
-- Consumes: `reviewOpen` (Task 2); `runHouseSide` + `CoSignTransport` (Task 3); `createBoardClient`, `MsgBoardTransport`, `makeSeedChain` (`@gibs/msgboard-games`); `Chips` mint via viem wallet client.
+- Consumes: `reviewOpen` (Task 2, now takes `ctx.rngCommit`); `runHouseSide` + `CoSignTransport` (Task 3); `createBoardClient`, `MsgBoardTransport`, `buildSeedChain`, `verifyReveal`, `commitSeed` (`@gibs/msgboard-games`); `Chips` mint via viem wallet client.
 - Produces:
   - `startHouse(cfg: { boardRpc: string; chainId: number; houseChannel: Hex; houseKey: StateSigner; account: Account; limits: Limits }): { stop(): void }`
   - `faucetMint(opts: { walletClient; chips: Hex; to: Hex; amount: bigint; cap: bigint }): Promise<Hex>` — owner-mints up to `cap`.
@@ -303,10 +304,13 @@ git commit -m "feat(games): split co-signing over a transport (transcript-parity
 import { describe, it, expect } from 'vitest'
 import { handleOpenRequest } from '../src/houseLoop'
 // handleOpenRequest is the pure unit startHouse calls per board message: (req, ctx) -> grant | decline envelope
-it('answers a valid open-request with a signed grant envelope', async () => {
-  const env = await handleOpenRequest(/* baseReq from Task 2 */, /* ctx with houseKey/domain/headBlock/limits/seedChain */)
+it('answers a valid open-request with a signed grant whose rngCommit is the house chain head', async () => {
+  // req carries clientSeedCommit (NOT a plaintext seed); handleOpenRequest builds its own seed chain
+  // blind and grants terms whose rngCommit is that chain's head.
+  const env = await handleOpenRequest(baseReq /* { …, clientSeedCommit } */, { houseKey, domain, headBlock, limits })
   expect(env.kind).toBe('open-grant')
   expect(env.terms.escrowHouse).toBe(980n)
+  expect(env.terms.rngCommit).toBe(env.seedChain.commit) // house-built, not from req
   expect(env.houseSig).toMatch(/^0x/)
 })
 ```
@@ -315,7 +319,8 @@ it('answers a valid open-request with a signed grant envelope', async () => {
 
 - [ ] **Step 3: Write minimal implementation**
 
-`handleOpenRequest`: make a `makeSeedChain(length=1)` → `rngCommit`, call `reviewOpen`, return an `open-grant {terms, houseSig, rngCommit}` or `open-decline {reason}` envelope. `startHouse`: open a `MsgBoardTransport` on the per-table category pattern `games.msgboard.xyz:table:<chainId>:<tableId>`, poll; on `open-request` → `handleOpenRequest` → post grant; on the player's first round → `runHouseSide` to co-sign + reveal and post the result; post the OPEN anchor to `games.msgboard.xyz:lobby:<chainId>`. `faucetMint`: `writeContract` `Chips.mint(to, min(amount, cap))`.
+`handleOpenRequest`: build the house seed chain **blind** with `buildSeedChain(freshSecretTip, 1)` (the tip must be unpredictable and generated WITHOUT reading `req` — never derive it from the request), take `rngCommit = chain.commit`, call `reviewOpen(req, { …, rngCommit })`, and return an `open-grant {terms, houseSig}` or `open-decline {reason}` envelope. **Persist the table's `clientSeedCommit` (from `req`) and the seed chain** so the round step can use them. `startHouse`: open a `MsgBoardTransport` on the per-table category pattern `games.msgboard.xyz:table:<chainId>:<tableId>`, poll; on `open-request` → `handleOpenRequest` → post grant; on the player's first round the player reveals its `clientSeed` — the house MUST `verifyReveal(clientSeedCommit, clientSeed)` and refuse the round on mismatch (anti-player-grind) BEFORE calling `runHouseSide` to co-sign + reveal `serverSeed`; post the result; post the OPEN anchor to `games.msgboard.xyz:lobby:<chainId>`. `faucetMint`: `writeContract` `Chips.mint(to, min(amount, cap))`.
+  - **SECURITY (funds): the house seed chain MUST be built before/without learning `clientSeed`** (the request carries only `clientSeedCommit`). Add a test that `handleOpenRequest` does not read any plaintext seed from the request, and that a round whose revealed `clientSeed` fails `verifyReveal(clientSeedCommit, …)` is rejected.
 
 - [ ] **Step 4: Run test to verify it passes** — `pnpm --filter @gibs/games-house-service test houseLoop`. Expected PASS.
 
@@ -364,7 +369,7 @@ git commit -m "feat(house-service): board-watcher loop (open-grant, round co-sig
 - [ ] **Step 1: Write the failing test** — drive `runPlayerSide` against an in-memory house (Task 3 helper) and assert the player retains a transcript whose `verifyingContract` equals the configured `houseChannel` and that `verifyFinishedSession` passes.
 - [ ] **Step 2: Run** `pnpm --filter @gibs/games-web test useSession.coSign` → FAIL.
 - [ ] **Step 3: Implement** — replace the ephemeral house signer + `PLACEHOLDER_VERIFIER` with: a board `CoSignTransport` (post to `…:table:<chain>:<tableId>`, poll for the house's halves; grind in the Worker), `verifyingContract = deployment.houseChannel`, and `runPlayerSide`. Keep the existing return shape the screens use.
-  - **SECURITY — anti-house-bias clientSeed binding (the binding CHECK is already implemented; this task wires the UI to it).** As of commit `dc13f1b`, `runPlayerSide` takes `playerCfg.clientSeed` and `verifyProposedState` asserts `proof.clientSeed === cfg.clientSeed`, refusing to co-sign a house-substituted seed (tested). This task MUST: (a) have the browser generate its OWN high-entropy `clientSeed` per session and pass it as `playerCfg.clientSeed` — never reuse a fixed/house-supplied value; and (b) enforce the PROTOCOL ORDERING that the player fixes/announces its `clientSeed` at OPEN, before the house reveals the round's server seed, so neither side can grind. (chainLength 1 ⇒ one committed seed; a multi-round version needs a per-round committed seed list.)
+  - **SECURITY — anti-house-bias clientSeed binding (the binding CHECK is already implemented; this task wires the UI to it).** As of commit `dc13f1b`, `runPlayerSide` takes `playerCfg.clientSeed` and `verifyProposedState` asserts `proof.clientSeed === cfg.clientSeed`, refusing to co-sign a house-substituted seed (tested). This task MUST: (a) have the browser generate its OWN high-entropy `clientSeed` per session and pass it as `playerCfg.clientSeed` — never reuse a fixed/house-supplied value; and (b) send only `clientSeedCommit = commitSeed(clientSeed)` in the open-request, revealing `clientSeed` to the house ONLY at round time (after `open()` has fixed `terms.rngCommit` on-chain) — see the two-sided commit-reveal in Global Constraints. (chainLength 1 ⇒ one committed seed; a multi-round version needs a per-round committed seed list.) Back the `clientSeed` up locally like Raffle salts, since losing it before the round forfeits the ability to play (the table can still be refunded via the open floor).
   - **SECURITY — refund-floor consistency.** Assert `openBalances === { player: terms.escrowPlayer, house: terms.escrowHouse }` when building the session config. The contract's `disputeFromOpen` refund floor (commit `a5af087`) pays exactly the on-chain escrows; if the off-chain co-signed nonce-0 balances diverge from the escrows, the two floors disagree. Bind them so the player's worst case is always "reclaim my stake."
 - [ ] **Step 4: Run** → PASS.
 - [ ] **Step 5: Commit** `git commit -m "feat(games-web): useSession co-signs with the real house over the board"`.
