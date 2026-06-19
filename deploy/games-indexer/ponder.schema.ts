@@ -14,3 +14,20 @@ export const gameEvent = onchainTable('game_event', (t) => ({
   txHash: t.hex().notNull(),
   logIndex: t.integer().notNull(),
 }))
+
+// One row per HouseChannel table session.  Opened inserts the row; Settled updates payout+net.
+// id: the tableId bytes32 (one session per tableId — Opened is the canonical opener).
+// escrowPlayer/payoutPlayer/net: bigint (wei); net = payoutPlayer - escrowPlayer (can be negative).
+// payoutPlayer and net are null until Settled fires.
+export const settlement = onchainTable('settlement', (t) => ({
+  id:             t.hex().primaryKey(),    // tableId (bytes32 hex) — keyed per session
+  tableId:        t.hex().notNull(),       // same as id, kept for explicit GraphQL field
+  game:           t.text().notNull(),      // 'dice' | 'limbo' | String(gameId) for unknowns
+  player:         t.hex().notNull(),       // player address
+  escrowPlayer:   t.bigint().notNull(),    // wei locked by player at Opened
+  payoutPlayer:   t.bigint(),              // wei returned to player at Settled (null until then)
+  net:            t.bigint(),              // payoutPlayer - escrowPlayer (null until Settled)
+  blockNumber:    t.bigint().notNull(),    // block of the Opened event
+  blockTimestamp: t.bigint().notNull(),    // timestamp of the Opened event
+  txHash:         t.hex().notNull(),       // tx of the Opened event
+}))

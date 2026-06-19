@@ -1,5 +1,6 @@
 import { ponder } from 'ponder:registry'
-import { gameEvent } from 'ponder:schema'
+import { gameEvent, settlement } from 'ponder:schema'
+import { openedRow, settledUpdate } from './settlement'
 
 /**
  * Store one game-contract log verbatim. We only read the fields common to every event, so a loose
@@ -43,3 +44,21 @@ ponder.on('Raffle:Revealed', store('raffle', 'Revealed'))
 ponder.on('Raffle:Finalised', store('raffle', 'Finalised'))
 ponder.on('Raffle:NoContest', store('raffle', 'NoContest'))
 ponder.on('Raffle:TicketRefunded', store('raffle', 'TicketRefunded'))
+
+// HouseChannel: one settlement row per tableId session.
+// Opened → INSERT the open row (game name from gameId, player, escrow).
+// Settled → UPDATE the same row with payoutPlayer and net.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ponder.on('HouseChannel:Opened', async ({ event, context }: any) => {
+  const row = openedRow(event)
+  await context.db.insert(settlement).values(row).onConflictDoNothing()
+})
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ponder.on('HouseChannel:Settled', async ({ event, context }: any) => {
+  const { tableId } = event.args
+  const existing = await context.db.find(settlement, { id: tableId })
+  if (!existing) return // no matching Opened — skip (e.g. pre-startBlock open)
+  const update = settledUpdate(existing, event)
+  await context.db.update(settlement, { id: tableId }).set(update)
+})
