@@ -10,11 +10,10 @@ const COIN_FLIP = '0x8d3a58d77d22636026066200f8868cd653ec2b2a'
 const RAFFLE = '0x33f506fafe4f05c8de9a07e1c8a7f73f50f1da36'
 const START_BLOCK = 24_645_214
 
-// ⚠️ pending: replace with the redeployed PATCHED HouseChannel address
-// (gameId-binding + disputeFromOpen + gameId-in-Opened) before indexing real data.
-const HOUSE_CHANNEL = '0x57876609E4fEDDEeB83e46A1b3A20140998f0e46'
-// TODO: set to the redeployed HouseChannel block once the patched contract is live.
-const HOUSE_CHANNEL_START_BLOCK = START_BLOCK
+// patched HouseChannel (gameId-binding + disputeFromOpen + gameId-in-Opened), deployed 943.
+const HOUSE_CHANNEL = '0x74bbc31e77c02593c0a7aad0cadadb5b6bff3948'
+// exact contract-creation block (binary-searched via eth_getCode).
+const HOUSE_CHANNEL_START_BLOCK = 24_708_662
 
 export default createConfig({
   ordering: 'omnichain',
