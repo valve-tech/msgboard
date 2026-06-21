@@ -28,6 +28,7 @@ describe('openrpc.json', () => {
 
   it('does not document client-side methods', () => {
     const names = (doc.methods as Array<{ name: string }>).map((m) => m.name)
+    expect(names).not.toContain('grind')
     expect(names).not.toContain('doPoW')
     expect(names).not.toContain('getDifficulty')
   })

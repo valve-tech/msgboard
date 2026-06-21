@@ -99,7 +99,7 @@ scoped.subtask<BoardAndLogOptional & WorkInputs>(globalTaskName(taskNames.work))
     const d = msgboard.encodeData(data)
     const c = isHex(category) ? toHex(category, { size: 32 }) : keccak256(stringToBytes(category))
     const board = (b ?? hre.msgboard) as msgboard.MsgBoardClient
-    const work = await board.doPoW(c, d)
+    const work = await board.grind(c, d)
     if (log) {
       board.log('work: %o', work)
     }

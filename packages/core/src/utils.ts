@@ -77,7 +77,7 @@ export function getChallenge(msg: types.MessageSeed) {
  * `next(msgDifficulty)` advances `message.nonce` by 1, steps (or rebases) the running point,
  * and returns the work hash if `hash % msgDifficulty === 0n`, else null. It reads
  * `message.blockHash` live every call: if it changed since the running point was based (the
- * {@link MsgBoardClient.doPoW} block poller updates it mid-grind), the point is rebased with a
+ * {@link MsgBoardClient.grind} block poller updates it mid-grind), the point is rebased with a
  * single scalar multiply before continuing. {@link checkWork} remains the canonical verifier;
  * this only accelerates finding a winning nonce, and must stay byte-for-byte equivalent to it.
  *

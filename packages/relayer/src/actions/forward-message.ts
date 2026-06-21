@@ -4,7 +4,7 @@ import type { RelayerAction } from '../types.js'
 /**
  * Forwards a pre-computed RLP-encoded message to the board without doing
  * proof-of-work. The item must already be a valid RLP hex string produced by
- * the client's `doPoW` → `message` field.
+ * the client's `grind` → `message` field.
  *
  * Use this with `httpQueueSource` to build a "write for you" relay: clients
  * solve their own proof-of-work locally then POST the result; the relay

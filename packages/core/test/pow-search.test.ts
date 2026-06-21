@@ -93,7 +93,7 @@ describe('createChallengeSearch', () => {
       for (let n = 1n; n <= 250n; n++) {
         expect(search.next(diff)).toBe(checkWork(seed({ blockHash: BLOCK_A, nonce: n }), diff))
       }
-      // a new block arrives mid-grind (as the doPoW block poller would do)
+      // a new block arrives mid-grind (as the grind block poller would do)
       message.blockHash = BLOCK_B
       const resumeFrom = message.nonce
       for (let n = resumeFrom + 1n; n <= resumeFrom + 250n; n++) {
