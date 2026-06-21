@@ -66,7 +66,7 @@ describe('Integration tests msgboard', () => {
     })
     describe('msgboard:work', () => {
       it('should return valid work', async () => {
-        const work = await hre.msgboard.doPoW('test123', 'test123')
+        const work = await hre.msgboard.grind('test123', 'test123')
         expect(work.stats.difficulty).toBeGreaterThan(0n)
         expect(work.stats.iterations).toBeGreaterThan(0n)
       })
@@ -109,7 +109,7 @@ describe('Integration tests msgboard', () => {
     })
     describe('msgboard:send-decoded', () => {
       it('should send a message', async () => {
-        const work = await hre.msgboard.doPoW('test123', 'test123')
+        const work = await hre.msgboard.grind('test123', 'test123')
         const message = await hre.run({
           scope: 'msgboard',
           task: 'send-decoded',
@@ -130,7 +130,7 @@ describe('Integration tests msgboard', () => {
           data: 'test123',
         })
         // by the time this hits, a new block should not have been mined
-        const work = await hre.msgboard.doPoW('test123', 'test123')
+        const work = await hre.msgboard.grind('test123', 'test123')
         const difficulty = hre.msgboard.getDifficulty(work.message.data)
         expect(message).toEqual(msgboard.checkWork(work.message, difficulty))
       })

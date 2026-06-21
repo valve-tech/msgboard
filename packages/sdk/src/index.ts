@@ -67,7 +67,7 @@ export class MsgBoardClient {
     }
   }
 
-  /** Can be called to cancel a doPoW operation in progress. */
+  /** Can be called to cancel a {@link grind} operation in progress (also reachable via the deprecated `doPoW` alias). */
   cancel() {
     this.cancelled = true
   }
@@ -81,7 +81,7 @@ export class MsgBoardClient {
    * @returns a promise that will resolve with a valid work object, containing a pow
    * message that can be submitted to the API and a stats object about the work that was done
    */
-  async doPoW(category: Hex | string, data: Hex | string, limit = veryHighLimit): Promise<WorkResult> {
+  async grind(category: Hex | string, data: Hex | string, limit = veryHighLimit): Promise<WorkResult> {
     this.log('starting pow on message')
     this.cancelled = false
     let killPoll = false
@@ -162,6 +162,9 @@ export class MsgBoardClient {
       }
     }
   }
+
+  /** @deprecated Renamed to {@link grind}. This alias is retained for backward compatibility and will be removed in a future major. */
+  doPoW(category: Hex | string, data: Hex | string, limit = veryHighLimit): Promise<WorkResult> { return this.grind(category, data, limit) }
 
   /**
    * Fetches the latest block from the RPC.

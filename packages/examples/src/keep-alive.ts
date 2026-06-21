@@ -51,7 +51,7 @@ if (!rpcUrl) {
   console.log('The board retains only ~120 blocks of messages. To keep one alive you:')
   console.log('  • look it up by hash each interval (msgboard_getMessage returns null once evicted)')
   console.log('  • track its root block and the head block to estimate remaining life')
-  console.log('  • re-grind proof-of-work before it ages out (doPoW re-roots to the current head)\n')
+  console.log('  • re-grind proof-of-work before it ages out (grind re-roots to the current head)\n')
   console.log('Run it for real:')
   console.log('  MSGBOARD_RPC=https://one.valve.city/rpc/vk_demo/evm/943 \\')
   console.log('    npm run keep-alive --workspace=packages/examples\n')
@@ -68,7 +68,7 @@ const postFreshMessage = async (): Promise<{ hash: Hex; rootBlock: bigint }> => 
   // reject work ground against stale settings.
   const status = await client.status()
   client.setDifficultyFactors(BigInt(status.workMultiplier), BigInt(status.workDivisor))
-  const work = await client.doPoW(category, data)
+  const work = await client.grind(category, data)
   const hash = await client.addMessage(work.message)
   return { hash, rootBlock: work.message.blockNumber }
 }

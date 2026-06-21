@@ -5,7 +5,7 @@
  * This is the most basic "hello world" write example. The four steps are:
  *   1. status()              — read the board's current difficulty factors
  *   2. setDifficultyFactors  — grind against the same difficulty the node enforces
- *   3. doPoW(category, data) — find a valid nonce (this is the expensive part)
+ *   3. grind(category, data) — find a valid nonce (this is the expensive part)
  *   4. addMessage(message)   — submit the proven message; the node re-verifies the work
  *
  * Usage:
@@ -38,7 +38,7 @@ if (!rpcUrl) {
   console.log('The write flow is:')
   console.log('  1. const status = await client.status()')
   console.log('  2. client.setDifficultyFactors(BigInt(status.workMultiplier), BigInt(status.workDivisor))')
-  console.log('  3. const work = await client.doPoW(category, data)   // grinds a valid nonce')
+  console.log('  3. const work = await client.grind(category, data)   // grinds a valid nonce')
   console.log('  4. const hash = await client.addMessage(work.message) // node re-verifies the work\n')
   console.log('Run it for real:')
   console.log('  MSGBOARD_RPC=https://one.valve.city/rpc/vk_demo/evm/943 \\')
@@ -63,7 +63,7 @@ client.setDifficultyFactors(BigInt(status.workMultiplier), BigInt(status.workDiv
 console.log(`difficulty factors: ${status.workMultiplier}/${status.workDivisor} — grinding (this takes a while)…`)
 
 // 3: the expensive step. Returns { message, stats } once a valid nonce is found.
-const work = await client.doPoW(category, data)
+const work = await client.grind(category, data)
 console.log(`found valid nonce after ${work.stats.iterations} iterations in ${work.stats.duration}ms`)
 
 // 4: submit. The node re-verifies the proof of work before accepting.

@@ -60,7 +60,7 @@ describe('msgboard', () => {
         const encodedData = msgboard.encodeData(data)
         boardClient.log('category: %o <- %o', msgboard.categoryHash(cat), cat)
         boardClient.log('message:  %o <- %o', encodedData, data)
-        const work = await boardClient.doPoW(cat, data)
+        const work = await boardClient.grind(cat, data)
         boardClient.log('final work: %o', work)
 
         // test RLP encoding/decoding
@@ -113,11 +113,25 @@ describe('msgboard', () => {
       const boardClient = new msgboard.MsgBoardClient(viemProvider as msgboard.Provider, { progress })
       const messageCount = 3
       for (let i = 0; i < messageCount; i++) {
-        const work = await boardClient.doPoW(msgboard.categoryHash(i.toString()), msgboard.encodeData(`msg:${i}`))
+        const work = await boardClient.grind(msgboard.categoryHash(i.toString()), msgboard.encodeData(`msg:${i}`))
         const hash = await boardClient.addMessage(msgboard.toRLP(work.message))
         boardClient.log('message accepted:', hash)
       }
     },
     longTimeout,
   )
+
+  it('deprecated doPoW alias delegates to grind', async () => {
+    const boardClient = new msgboard.MsgBoardClient(viemProvider as msgboard.Provider)
+    const sentinel = { message: { hash: zeroHash }, stats: {} } as unknown as msgboard.WorkResult
+    let seen: unknown[] | undefined
+    // stub grind to avoid any network/PoW; assert the alias forwards args and returns its result
+    boardClient.grind = (async (...args: unknown[]) => {
+      seen = args
+      return sentinel
+    }) as typeof boardClient.grind
+    const result = await boardClient.doPoW('cat', 'data')
+    expect(result).toBe(sentinel)
+    expect(seen).toEqual(['cat', 'data', expect.anything()])
+  })
 })

@@ -17,7 +17,7 @@ export const submitMessageAction = <T>(
   execute: async (item, context) => {
     const category = options.category(item, context)
     const data = encodeData(options.data(item, context))
-    const work = await context.client.doPoW(category, data)
+    const work = await context.client.grind(category, data)
     const hash = await context.client.addMessage(work.message)
     return { ok: true, ref: hash, meta: { stats: work.stats } }
   },

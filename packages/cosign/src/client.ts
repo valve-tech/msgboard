@@ -7,7 +7,7 @@ import type { CosignAdapter } from './adapters/adapter.js'
 /**
  * The minimal board seam cosign needs. Mirrors the `{ category, data }` shape used by
  * `@gibs/msgboard-games`'s transport so it stays testable with a tiny fake. Wrap the real
- * `@msgboard/sdk` `MsgBoardClient` into this (doPoW + addMessage for posting, content passthrough);
+ * `@msgboard/sdk` `MsgBoardClient` into this (grind + addMessage for posting, content passthrough);
  * see the package README.
  */
 export interface BoardClient {

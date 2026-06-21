@@ -50,7 +50,7 @@ const doWork = async (source: Client, data: StartWorkReq) => {
   })
   setTimeout(async () => {
     try {
-      const result = await boardClient.doPoW(data.category, data.data)
+      const result = await boardClient.grind(data.category, data.data)
       if (!result.stats.isValid) {
         postMessage({ type: 'error', message: 'Failed to find valid message' })
         return
