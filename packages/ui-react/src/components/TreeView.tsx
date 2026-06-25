@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, useSyncExternalStore } from 'react'
 import { Icon } from '@iconify/react'
 import { hexToString, stringToHex, type Hex } from 'viem'
 import { kvSeparator, type Tree } from '../lib/tree'
@@ -24,11 +24,45 @@ const scopeNow = (): string =>
   getScope(selectChain(useChainStore.getState())?.id, selectRpcUrl(useChainStore.getState()))
 
 const _initialScope = scopeNow()
-const _expansionState: Record<string, boolean> = load<Record<string, boolean>>(_initialScope, 'treeExpansion', {})
-const _decodeState: Record<string, boolean> = load<Record<string, boolean>>(_initialScope, 'treeDecode', {})
+const _expansionState: Record<string, boolean> = load<Record<string, boolean>>(
+  _initialScope,
+  'treeExpansion',
+  {},
+)
+const _decodeState: Record<string, boolean> = load<Record<string, boolean>>(
+  _initialScope,
+  'treeDecode',
+  {},
+)
 
-/** module-scoped toggle: when true, all decodable nodes show decoded text. */
-export const decodeAll = { value: load<boolean>(_initialScope, 'decodeAll', true) }
+/**
+ * Module-scoped "decode all" toggle: when true, all decodable nodes show decoded text.
+ *
+ * The Svelte source was a `$state({ value })` wrapper shared between `Summary` (the toggle)
+ * and every `TreeView` node. Here it is a tiny external store: keep the `.value` get/set API
+ * (so `Summary`/`loadTreeNodeState` are unchanged), but back it with a subscriber set so that
+ * flipping it re-renders ALL mounted TreeView nodes live (Task-4 review carry-forward — the
+ * cross-node "decode all" must propagate, not just re-render the toggle).
+ */
+const _decodeAllListeners = new Set<() => void>()
+let _decodeAllValue = load<boolean>(_initialScope, 'decodeAll', true)
+export const decodeAll = {
+  get value(): boolean {
+    return _decodeAllValue
+  },
+  set value(next: boolean) {
+    if (next === _decodeAllValue) return
+    _decodeAllValue = next
+    _decodeAllListeners.forEach((l) => l())
+  },
+  subscribe(listener: () => void): () => void {
+    _decodeAllListeners.add(listener)
+    return () => _decodeAllListeners.delete(listener)
+  },
+  getSnapshot(): boolean {
+    return _decodeAllValue
+  },
+}
 
 export function loadTreeNodeState(scope: string): void {
   const expansion = load<Record<string, boolean>>(scope, 'treeExpansion', {})
@@ -81,6 +115,12 @@ export function TreeView({
   decodable = false,
   meta,
 }: Props) {
+  // subscribe to the shared "decode all" holder so a Summary toggle re-renders every node live
+  const decodeAllValue = useSyncExternalStore(
+    decodeAll.subscribe,
+    decodeAll.getSnapshot,
+    decodeAll.getSnapshot,
+  )
   const kv = l.split(kvSeparator)
   const isKV = kv.length > 1
   const target = (isKV ? kv[1] : l) as Hex
@@ -88,7 +128,7 @@ export function TreeView({
     l in _decodeState ? _decodeState[l] : l === stringToHex('gasmoneyplease', { size: 32 }),
   )
   const decoded = safeHexToString(target)
-  const effectiveDecoded = decodable && (decodeAll.value || showDecoded)
+  const effectiveDecoded = decodable && (decodeAllValue || showDecoded)
   const key = isKV ? kv[0] : ''
   const value = effectiveDecoded ? decoded : isKV ? kv[1] : l
   const isHexValue = /^0x[0-9a-fA-F]*$/.test(value)
@@ -126,7 +166,8 @@ export function TreeView({
   }
 
   return (
-    <ul className={`list list-style-none user-select-none ${isRoot ? 'list-root' : 'pl-3 sm:pl-4'}`}>
+    <ul
+      className={`list list-style-none user-select-none ${isRoot ? 'list-root' : 'pl-3 sm:pl-4'}`}>
       <li>
         {!hideContent && (
           <div
@@ -137,8 +178,7 @@ export function TreeView({
             tabIndex={hasChildren ? 0 : undefined}
             aria-expanded={hasChildren ? expanded : undefined}
             onKeyPress={hasChildren ? toggleExpansion : undefined}
-            onClick={hasChildren ? toggleExpansion : undefined}
-          >
+            onClick={hasChildren ? toggleExpansion : undefined}>
             {hasChildren ? (
               <Icon
                 icon="mdi:chevron-right"
@@ -158,8 +198,7 @@ export function TreeView({
                 className={`block w-full ${
                   isHexValue ? 'break-all' : 'break-words'
                 } whitespace-pre-wrap text-left cursor-copy rounded px-1 -mx-1 transition-colors hover:bg-gray-500/10`}
-                onClick={copyToClipboard}
-              >
+                onClick={copyToClipboard}>
                 {displayValue}
               </button>
               <span
@@ -167,8 +206,7 @@ export function TreeView({
                   copied
                     ? 'opacity-100 bg-green-600 text-white'
                     : 'opacity-0 bg-white text-gray-700 ring-1 ring-gray-200 dark:bg-gray-800 dark:text-gray-100 dark:ring-0'
-                }`}
-              >
+                }`}>
                 {copied ? 'Copied!' : 'Click to copy'}
               </span>
             </span>
