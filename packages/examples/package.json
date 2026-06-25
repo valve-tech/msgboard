@@ -24,7 +24,7 @@
     "@msgboard/history": "*",
     "@msgboard/relayer": "*",
     "@msgboard/sdk": "*",
-    "pg": "^8.14.1",
+    "pg": "^8.22.0",
     "tsx": "^4.19.3",
     "viem": "^2.25.0"
   },
