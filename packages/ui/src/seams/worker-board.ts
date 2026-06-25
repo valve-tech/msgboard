@@ -8,7 +8,7 @@ import type { ProgressMsg, WorkerRequestMsg, WorkerResponseMsg } from '../worker
  * Minimal board client the UI drives: post a PoW'd message + read board content.
  *
  * Adopted from cosign-web's `BoardClient` (it imported the interface from
- * `@msgboard/cosign-core`); msgboard's ui-react has no cosign dependency, so the shape
+ * `@msgboard/cosign-core`); msgboard's ui has no cosign dependency, so the shape
  * is defined locally over `@msgboard/sdk` types.
  */
 export interface BoardClient {

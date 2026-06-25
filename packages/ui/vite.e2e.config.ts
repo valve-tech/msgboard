@@ -4,7 +4,7 @@ import { defineConfig } from 'vite'
  * Dedicated Vite config for the Task-6 PoW-responsiveness e2e harness
  * (`e2e/harness/`). It serves ONLY the harness page — a tiny driver that spawns the
  * REAL `@msgboard/sdk` grind in a Web Worker so the spec can assert the main thread stays
- * responsive. The full ui-react app is served separately by its own `vite preview` (or
+ * responsive. The full ui app is served separately by its own `vite preview` (or
  * the parity suite's webServer); this config exists so the responsiveness test doesn't
  * depend on the whole app booting or any chain reads.
  *
