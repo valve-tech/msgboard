@@ -10,7 +10,6 @@
     "packages/relayer",
     "packages/indexer",
     "packages/ui",
-    "packages/ui-react",
     "packages/sponsor",
     "packages/examples",
     "packages/cosign"

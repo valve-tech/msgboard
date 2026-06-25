@@ -4,19 +4,15 @@ import { join } from 'node:path'
 import { defineConfig } from '@playwright/test'
 
 /**
- * Task-6 PARITY GATE config.
+ * E2E config — PoW main-thread responsiveness.
  *
- * Drives THREE servers and asserts the new React app reaches behavioral parity with the live
- * Svelte app before the (user-gated) cutover:
+ * (The React↔Svelte parity gate that drove the migration was retired at cutover, when React
+ * became `packages/ui` and the Svelte app was removed. The behavioral-parity verification it
+ * provided is preserved in git history / the SDD ledger.)
  *
- *   - :4310  the NEW React app   (`packages/ui-react`,  `vite preview` of its built `dist/`)
- *   - :4311  the LIVE Svelte app (`packages/ui`,        `vite preview` of its built `dist/`)
  *   - :4320  the PoW responsiveness harness (`vite --config vite.e2e.config.ts`), which spawns
- *            the REAL `@msgboard/sdk` grind in a Web Worker so the spec can assert the main
- *            thread stays responsive during a real grind (the assertion Tasks 2–5 deferred here).
- *
- * `parity.spec.ts` runs every route/board/docs assertion against BOTH :4310 and :4311 so a
- * single source of assertions proves the two apps render the same thing.
+ *            the REAL `@msgboard/sdk` grind in a Web Worker so `pow-responsive.spec.ts` can assert
+ *            the main thread stays responsive during a real grind.
  *
  * NOTE on Chromium resolution: Playwright normally uses the build it pinned, but some
  * environments only have a different cached Chrome-for-Testing. If the pinned build is
@@ -64,21 +60,6 @@ export default defineConfig({
     },
   ],
   webServer: [
-    {
-      // React app — serve its built dist via vite preview.
-      command: '../../node_modules/.bin/vite preview --port 4310 --strictPort',
-      url: 'http://localhost:4310',
-      reuseExistingServer: !process.env.CI,
-      timeout: 60_000,
-    },
-    {
-      // Live Svelte app — serve its built dist (UNTOUCHED) via vite preview, for comparison.
-      command: '../../node_modules/.bin/vite preview --port 4311 --strictPort',
-      cwd: join(__dirname, '..', 'ui'),
-      url: 'http://localhost:4311',
-      reuseExistingServer: !process.env.CI,
-      timeout: 60_000,
-    },
     {
       // PoW responsiveness harness — real grind in a Web Worker, no app boot / no chain.
       command: '../../node_modules/.bin/vite --config vite.e2e.config.ts',
