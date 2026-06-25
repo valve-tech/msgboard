@@ -36,7 +36,9 @@ jobs:
           forge install foundry-rs/forge-std --no-git
           forge install witnet/elliptic-curve-solidity --no-git
           forge build
-          forge test -vv
+          # integration tests (live msgboard node) run in the foundry-integration job;
+          # exclude them here so this required job stays deterministic (no skip-passes).
+          forge test -vv --no-match-path "test/integration/*"
 
   foundry-integration:
     # Live tests against a real msgboard node. Non-blocking: an external-endpoint hiccup
