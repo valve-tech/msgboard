@@ -145,6 +145,11 @@ jobs:
             set -e
             cd /opt/msgboard
             test -f docker-compose.prod.yml || { echo "/opt/msgboard does not look like the msgboard tree"; exit 1; }
+            # tar -x extracts OVER the tree without deleting files removed in git. The ui package was
+            # rewritten Svelte -> React, so stale Svelte-only files (e.g. postcss.config.js referencing
+            # @tailwindcss/postcss) would linger and break the React `vite build`. Clean ui dirs first so
+            # the extract recreates packages/ui purely from the tarball. (deploy/ is never touched.)
+            rm -rf packages/ui packages/ui-react
             # overwrite source in place; never touch deploy/ (live Caddyfile + certs + games dist) or .env
             tar -xzf /tmp/msgboard-src.tgz --exclude="deploy" --exclude="deploy/*"
             rm -f /tmp/msgboard-src.tgz
