@@ -51,6 +51,9 @@ library MsgPow {
         }
         out = new bytes(n);
         for (uint256 i = 0; i < n; i++) {
+            // casting to 'uint8' is safe: we intentionally keep only the low byte of each
+            // shifted chunk to emit x big-endian, one byte at a time.
+            // forge-lint: disable-next-line(unsafe-typecast)
             out[n - 1 - i] = bytes1(uint8(x >> (8 * i)));
         }
     }
