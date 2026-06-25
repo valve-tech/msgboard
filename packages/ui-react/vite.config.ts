@@ -133,5 +133,11 @@ export default defineConfig({
     include: ['test/**/*.test.ts', 'test/**/*.test.tsx'],
     setupFiles: ['./test/setup.tsx'],
     globals: true,
+    // The heavy <App>/DocsPortal renders (markdown-it + shiki) take several seconds and
+    // intermittently exceed vitest's 5s default under parallel-worker contention, flaking
+    // ~5/81 tests. Raise both timeouts so the suite is reliably green at the committed
+    // config (no per-run --testTimeout override needed). See Task-6 report.
+    testTimeout: 20000,
+    hookTimeout: 20000,
   },
 })
