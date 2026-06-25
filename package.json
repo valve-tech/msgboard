@@ -5,14 +5,14 @@
   "workspaces": [
     "packages/core",
     "packages/sdk",
+    "packages/cosign",
     "packages/history",
     "packages/hardhat",
     "packages/relayer",
     "packages/indexer",
     "packages/ui",
     "packages/sponsor",
-    "packages/examples",
-    "packages/cosign"
+    "packages/examples"
   ],
   "scripts": {
     "docker:build": "docker compose build",
