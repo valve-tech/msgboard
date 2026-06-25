@@ -76,21 +76,50 @@ export function Interactive({ workerFactory }: Props) {
   const stored = load<Partial<InteractiveState>>(initialScope, 'interactive', {})
 
   const [text, setText] = useState(stored.text ?? '')
-  const [categoryType, setCategoryType] = useState<CategoryKey>(stored.categoryType ?? 'gas-request')
+  const [categoryType, setCategoryType] = useState<CategoryKey>(
+    stored.categoryType ?? 'gas-request',
+  )
   const [categoryValue, setCategoryValue] = useState(stored.categoryValue ?? 'gasmoneyplease')
   const [showHexResult, setShowHexResult] = useState(stored.showHexResult ?? false)
-  const [showCategoryHexResult, setShowCategoryHexResult] = useState(stored.showCategoryHexResult ?? false)
+  const [showCategoryHexResult, setShowCategoryHexResult] = useState(
+    stored.showCategoryHexResult ?? false,
+  )
   const [useKeccak, setUseKeccak] = useState(stored.useKeccak ?? true)
 
   const [working, setWorking] = useState(false)
   const [workSnapshot, setWorkSnapshot] = useState<WorkSnapshot | null>(null)
   const cancelRef = useRef<() => void>(() => {})
 
+  // the persist scope tracks the active chain + rpc; recompute it reactively so a mid-session
+  // chain switch reloads the right slice of persisted state (the Svelte scope-change `$effect`).
+  const chainOption = useChainStore((s) => s.chainOption)
+  const customRpcUrl = useChainStore((s) => s.customRpcUrl)
+  const scope = useChainStore((s) => getScope(selectChain(s)?.id, selectRpcUrl(s)))
+
   // load persisted tree state once on mount
   useEffect(() => {
     loadTreeNodeState(initialScope)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Reload persisted interactive + tree state when the scope changes mid-session (a chain
+  // switch). Skip the very first run — mount already seeded state from `initialScope` above and
+  // from the `useState` initializers; re-applying here would clobber unsaved edits. Tracking the
+  // previous scope in a ref keeps this a focused "on change" effect (Task-4 review carry-forward).
+  const prevScopeRef = useRef(initialScope)
+  useEffect(() => {
+    if (scope === prevScopeRef.current) return
+    prevScopeRef.current = scope
+    loadTreeNodeState(scope)
+    const next = load<Partial<InteractiveState>>(scope, 'interactive', {})
+    setText(next.text ?? '')
+    setCategoryType(next.categoryType ?? 'gas-request')
+    setCategoryValue(next.categoryValue ?? 'gasmoneyplease')
+    setShowHexResult(next.showHexResult ?? false)
+    setShowCategoryHexResult(next.showCategoryHexResult ?? false)
+    setUseKeccak(next.useKeccak ?? true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope, chainOption, customRpcUrl])
 
   // if the faucet is not active, force out of gas-request mode (Svelte $effect)
   useEffect(() => {
@@ -101,7 +130,8 @@ export function Interactive({ workerFactory }: Props) {
 
   const categoryByteLength = new TextEncoder().encode(categoryValue).byteLength
   const categoryExceedsLimit = categoryByteLength > 32
-  const effectiveUseDirectEncoding = categoryType !== 'gas-request' && !useKeccak && !categoryExceedsLimit
+  const effectiveUseDirectEncoding =
+    categoryType !== 'gas-request' && !useKeccak && !categoryExceedsLimit
   const hexdText = (isHex(text) ? text : stringToHex(text)).toLowerCase() as Hex
 
   const oncategoryupdate = (type: CategoryKey, category: string) => {
@@ -148,7 +178,9 @@ export function Interactive({ workerFactory }: Props) {
     if (!transportUrl || !board) return
     setWorking(true)
     const category = (
-      effectiveUseDirectEncoding ? stringToHex(categoryValue, { size: 32 }) : keccak256(stringToHex(categoryValue))
+      effectiveUseDirectEncoding
+        ? stringToHex(categoryValue, { size: 32 })
+        : keccak256(stringToHex(categoryValue))
     ) as Hex
     setWorkSnapshot({
       chainName,
@@ -287,14 +319,18 @@ export function Interactive({ workerFactory }: Props) {
                 className="animate-spin h-6 w-6 text-gray-400"
                 xmlns="http://www.w3.org/2000/svg"
                 fill="none"
-                viewBox="0 0 24 24"
-              >
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                viewBox="0 0 24 24">
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"></circle>
                 <path
                   className="opacity-75"
                   fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                ></path>
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
               </svg>
               <span className="text-sm text-gray-500 dark:text-gray-400 font-mono">Loading…</span>
             </div>

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useSyncExternalStore } from 'react'
 import { useChainStore, selectCategories, selectMessages } from '../stores/chain'
 import { decodeAll, saveTreeNodeState } from './TreeView'
 import { ToggleButton } from './ToggleButton'
@@ -7,9 +7,14 @@ import { ToggleButton } from './ToggleButton'
 export function Summary() {
   const categories = useChainStore((s) => selectCategories(s).length)
   const messages = useChainStore((s) => selectMessages(s).length)
-  // `decodeAll` is a module-scoped mutable holder shared with TreeView; bump local state to
-  // re-render this toggle after flipping it.
-  const [, bump] = useState(0)
+  // `decodeAll` is a shared external store (see TreeView); subscribe so the toggle reflects its
+  // value whether flipped here or reset by a chain-switch reload, and so flipping it propagates
+  // live to every mounted TreeView node.
+  const decodeAllValue = useSyncExternalStore(
+    decodeAll.subscribe,
+    decodeAll.getSnapshot,
+    decodeAll.getSnapshot,
+  )
 
   return (
     <div className="flex flex-col justify-between my-2 font-mono w-full">
@@ -22,14 +27,15 @@ export function Summary() {
               on="txt"
               offIcon="mdi:code-brackets"
               onIcon="mdi:format-text"
-              checked={decodeAll.value}
+              checked={decodeAllValue}
               onClick={() => {
                 decodeAll.value = !decodeAll.value
                 saveTreeNodeState()
-                bump((n) => n + 1)
               }}
             />
-            <span className="text-xs text-gray-500 dark:text-gray-400 italic font-sans">decode all</span>
+            <span className="text-xs text-gray-500 dark:text-gray-400 italic font-sans">
+              decode all
+            </span>
           </span>
         </span>
         <span>Messages: {messages}</span>

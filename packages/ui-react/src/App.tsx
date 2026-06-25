@@ -1,20 +1,26 @@
 import { useEffect } from 'react'
 import { startChainPolling } from './stores/chain'
 import { initThemeOSListener } from './stores/theme'
-import { Interactive } from './components/Interactive'
+import { useRoute } from './router'
+import { Home } from './pages/Home'
+import { DocsPortal } from './pages/DocsPortal'
+import { Examples } from './pages/Examples'
+import { Games } from './pages/Games'
+import { RedirectToHome } from './pages/RedirectToHome'
 
 /**
- * App shell for the MVP vertical slice (Task 4).
+ * App shell — the full hash-routed application (Task 5).
  *
- * Mounts the two global lifecycle helpers the Task-3 stores exported but left unmounted:
+ * Mounts the two global lifecycle helpers the Task-3 stores export:
  *   - `startChainPolling()` — the 20s content poll (+ an immediate load)
  *   - `initThemeOSListener()` — re-applies the theme on OS scheme changes while preference is
  *     "system"
  * Both return a cleanup; we tear them down on unmount.
  *
- * The core screen is the `Interactive` post/PoW flow (SelectChain → compose → grind in the
- * Web Worker seam → post → board updates → Terminal/TreeView). The full landing-page
- * sections + hash router land in Task 5.
+ * The route is `location.hash` (the Task-3 ported hash router, NOT react-router). Every
+ * `#/route` the Svelte `App.svelte` served resolves to the same page here:
+ *   `#/` → Home · `#/docs` → DocsPortal · `#/examples` → Examples · `#/games` → Games ·
+ *   anything else → RedirectToHome (→ `#/`).
  */
 export function App() {
   useEffect(() => {
@@ -26,14 +32,21 @@ export function App() {
     }
   }, [])
 
+  const { id } = useRoute()
+
   return (
-    <main className="min-h-screen w-full bg-gray-50 dark:bg-gray-900">
-      <div
-        id="interactive-container"
-        className="flex bg-gray-50 dark:bg-gray-900 w-full flex-row items-center justify-center shadow py-8"
-      >
-        <Interactive />
-      </div>
+    <main className="min-h-screen w-full bg-white dark:bg-gray-950">
+      {id === '/' ? (
+        <Home />
+      ) : id === '/docs' ? (
+        <DocsPortal />
+      ) : id === '/examples' ? (
+        <Examples />
+      ) : id === '/games' ? (
+        <Games />
+      ) : (
+        <RedirectToHome />
+      )}
     </main>
   )
 }
