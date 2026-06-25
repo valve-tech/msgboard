@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="512" height="512" fill="#61A9E6"/>
+  <g stroke="#fff" stroke-width="32" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <!-- Outer continuous wave shape -->
+    <path d="M128 96 Q128 64 176 64 H336 Q384 64 384 96 V416 Q384 448 336 448 H176 Q128 448 128 416 V352 Q128 320 176 320 H336 Q384 320 384 352 V416"/>
+    <!-- Inner rounded square -->
+    <rect x="176" y="176" width="160" height="160" rx="40"/>
+    <!-- Horizontal bar -->
+    <line x1="96" y1="256" x2="416" y2="256"/>
+    <!-- Vertical bar -->
+    <line x1="256" y1="96" x2="256" y2="416"/>
+  </g>
+</svg>
