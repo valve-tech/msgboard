@@ -1,0 +1,31 @@
+version: 2
+updates:
+  # Root npm workspace (covers all packages/* via the workspace lockfile).
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      # Batch low-risk dev/test tooling bumps into one PR to cut noise.
+      dev-tooling:
+        patterns:
+          - vitest
+          - "@vitest/*"
+          - prettier
+          - typescript
+        update-types:
+          - minor
+          - patch
+
+  # faucet/web has its own lockfile, not part of the root workspace.
+  - package-ecosystem: npm
+    directory: /packages/faucet/web
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
