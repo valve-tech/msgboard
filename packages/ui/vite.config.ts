@@ -1,4 +1,4 @@
-import { svelte } from '@sveltejs/vite-plugin-svelte'
+import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { type PluginOption, type Connect, defineConfig } from 'vite'
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -111,7 +111,7 @@ const rpcProxyPlugin = (): PluginOption => {
 }
 
 export default defineConfig({
-  plugins: [malformedUrlGuard(), rpcProxyPlugin(), tailwindcss() as PluginOption, svelte()],
+  plugins: [malformedUrlGuard(), rpcProxyPlugin(), tailwindcss() as PluginOption, react()],
   base: './',
   resolve: {
     preserveSymlinks: true,
@@ -119,11 +119,25 @@ export default defineConfig({
   preview: {
     allowedHosts: true,
   },
+  // Web Worker output must be ES modules so `new Worker(url, { type: 'module' })`
+  // works and the PoW grind stays OFF the main thread.
   worker: {
     format: 'es',
   },
   build: {
     outDir: 'dist',
     target: 'esnext',
+  },
+  test: {
+    environment: 'jsdom',
+    include: ['test/**/*.test.ts', 'test/**/*.test.tsx'],
+    setupFiles: ['./test/setup.tsx'],
+    globals: true,
+    // The heavy <App>/DocsPortal renders (markdown-it + shiki) take several seconds and
+    // intermittently exceed vitest's 5s default under parallel-worker contention, flaking
+    // ~5/81 tests. Raise both timeouts so the suite is reliably green at the committed
+    // config (no per-run --testTimeout override needed). See Task-6 report.
+    testTimeout: 20000,
+    hookTimeout: 20000,
   },
 })
