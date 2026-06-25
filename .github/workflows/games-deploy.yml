@@ -98,7 +98,7 @@ jobs:
 
       - name: checkout msgboard source
         if: inputs.mode == 'site' || inputs.mode == 'games-indexer'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: games-indexer (deploy the CoinFlip+Raffle ponder indexer alongside the entropy one)
         if: inputs.mode == 'games-indexer'
@@ -180,7 +180,7 @@ jobs:
 
       - name: checkout games source
         if: inputs.mode == 'deploy' || inputs.mode == 'actors'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: gibsfinance/random
           ref: games-platform
