@@ -11,5 +11,14 @@ remappings = [
   "elliptic-curve-solidity/=lib/elliptic-curve-solidity/contracts/",
 ]
 
+# Each invariant handler call runs a full secp256k1 scalar multiplication in pure
+# Solidity (MsgPow/EllipticCurve), so the forge default budget (256 runs x 500 depth
+# ~= 128k calls) takes hours and effectively hangs CI. 64 x 64 = 4096 calls keeps
+# meaningful coverage of the used-stamp monotonicity property while finishing in seconds.
+[profile.default.invariant]
+runs = 64
+depth = 64
+fail_on_revert = false
+
 [rpc_endpoints]
 msgboard = "${MSGBOARD_RPC}"
