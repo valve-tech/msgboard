@@ -1,0 +1,29 @@
+# Edge override A — Cloudflare proxy + origin cert. Caddy terminates TLS with the Cloudflare
+# *.msgboard.xyz ORIGIN cert (NO Let's Encrypt) and reverse-proxies the WSS upgrade to nwaku:8001.
+# The DNS record is PROXIED (orange cloud) so the box IP is never in public DNS; only :443 is open
+# (firewall it to Cloudflare's IP ranges). Use with the base file:
+#   docker compose -f docker-compose.yml -f docker-compose.caddy.yml up -d
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: waku-caddy
+    restart: unless-stopped
+    ports:
+      - '443:443'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # the Cloudflare *.msgboard.xyz origin cert — copy onto the box (gitignored, never committed).
+      - ./origin.pem:/etc/caddy/origin.pem:ro
+      - ./origin.key:/etc/caddy/origin.key:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      WAKU_DOMAIN: ${WAKU_DOMAIN}
+    depends_on:
+      - nwaku
+    networks:
+      - waku
+
+volumes:
+  caddy-data:
+  caddy-config:

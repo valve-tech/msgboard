@@ -1,0 +1,40 @@
+# Edge override B — Cloudflare Tunnel (cloudflared). ZERO inbound ports: cloudflared makes an
+# OUTBOUND-only connection to Cloudflare, so nothing on the box listens publicly and there is no IP to
+# firewall. Cloudflare terminates TLS at its edge and routes ${WAKU_DOMAIN} through the tunnel to Caddy,
+# which reverse-proxies to nwaku (Caddy stays in the path for logging/gzip/routes — same role as the
+# proxy edge, minus the public :443 + origin cert). Use with the base file:
+#   docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d
+#
+# One-time setup in the Cloudflare dashboard (Zero Trust → Networks → Tunnels):
+#   1. Create a tunnel, copy its token → CF_TUNNEL_TOKEN in .env.
+#   2. Add a Public Hostname:  waku.msgboard.xyz  →  Service: HTTP  →  caddy:80
+#      (WebSockets traverse the tunnel over HTTP; the cloudflared→caddy→nwaku hops are all internal, so
+#      no TLS or origin cert is needed on the box). The tunnel manages the proxied DNS record for you.
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: waku-caddy
+    restart: unless-stopped
+    # no published ports — cloudflared reaches caddy by name over the internal network.
+    volumes:
+      - ./Caddyfile.tunnel:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - nwaku
+    networks:
+      - waku
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: waku-cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN}
+    depends_on:
+      - caddy
+    networks:
+      - waku
+
+volumes:
+  caddy-data:
+  caddy-config:
