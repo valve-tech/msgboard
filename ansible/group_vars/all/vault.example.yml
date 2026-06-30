@@ -1,0 +1,11 @@
+---
+# Copy to vault.yml in this dir, fill in, then encrypt:  ansible-vault encrypt vault.yml
+# (vault.yml + .vault_pass are gitignored.) These are referenced by the waku .env template.
+
+# nwaku node key — 32-byte hex. Generate ONCE (openssl rand -hex 32); keep stable so the peer id
+# (the multiaddr friends dial) never changes.
+vault_waku_nodekey: "GENERATE_WITH_openssl_rand_hex_32"
+
+# Cloudflare Tunnel token (Zero Trust → Networks → Tunnels → your tunnel). Used only when
+# waku_edge == "tunnel". Leave blank for the caddy edge.
+vault_cf_tunnel_token: "PASTE_CLOUDFLARE_TUNNEL_TOKEN"

@@ -1,0 +1,20 @@
+---
+# Waku box settings.
+waku_domain: "waku.msgboard.xyz"
+
+# PIN a real published tag — verify it exists at https://hub.docker.com/r/wakuorg/nwaku/tags
+nwaku_image: "wakuorg/nwaku:v0.34.0"
+
+# Which edge brings the public WSS to the box: "tunnel" (cloudflared, zero inbound ports — recommended)
+# or "caddy" (Cloudflare proxy + origin cert on :443). See packages/waku-relay/ops/README.md.
+waku_edge: "tunnel"
+
+# For waku_edge == "caddy" only: paths ON THE CONTROL NODE to the *.msgboard.xyz origin cert pair,
+# copied to the box. Leave unset for the tunnel edge.
+# origin_cert_src: "~/secrets/msgboard-origin.pem"
+# origin_key_src: "~/secrets/msgboard-origin.key"
+
+# Opt-in MsgBoard mirror (the relay). Leave false to expose only the node first.
+waku_relay_enabled: false
+msgboard_rpc_url: "https://one.valve.city/rpc/vk_demo/evm/943"
+relay_channels: "lobby"

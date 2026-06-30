@@ -1,0 +1,4 @@
+---
+# Both deployments. Run a single one with its own playbook, or all with:  ansible-playbook site.yml
+- import_playbook: deploy-cosign.yml
+- import_playbook: deploy-waku.yml

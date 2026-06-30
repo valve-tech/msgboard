@@ -1,0 +1,7 @@
+---
+# Shared, non-secret deploy settings. Secrets live in group_vars/all/vault.yml (encrypted, gitignored).
+
+# Where the repo is checked out on each box, and what to deploy.
+repo_url: "git@github.com:valve-tech/msgboard.git"
+repo_branch: "feat/cosign-and-waku-deploy"
+deploy_dir: "/opt/msgboard"

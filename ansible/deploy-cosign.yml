@@ -1,0 +1,103 @@
+---
+# Deploy the cosign UI on the msgboard prod box, with a SAFE Caddy reload (backup → add block →
+# `caddy adapt` → reload → positive smoke; auto-rollback on any failure). Encodes the valve-caddy-config
+# discipline. The box's deploy/caddy/Caddyfile is private/on-box (gitignored), so we edit it idempotently.
+#
+#   ansible-playbook deploy-cosign.yml
+- name: Deploy cosign UI (safe Caddy reload)
+  hosts: msgboard
+  become: true
+  vars:
+    caddyfile: "{{ deploy_dir }}/deploy/caddy/Caddyfile"
+    compose: "docker compose -f docker-compose.prod.yml"
+  tasks:
+    - name: Check out the repo at {{ repo_branch }}
+      ansible.builtin.git:
+        repo: "{{ repo_url }}"
+        dest: "{{ deploy_dir }}"
+        version: "{{ repo_branch }}"
+        accept_hostkey: true
+        force: true
+
+    - name: Build + (re)start cosign-web
+      ansible.builtin.command:
+        cmd: "{{ compose }} up -d --build cosign-web"
+        chdir: "{{ deploy_dir }}"
+      register: cosign_up
+      changed_when: "'Started' in cosign_up.stderr or 'Recreated' in cosign_up.stderr or 'Built' in cosign_up.stderr"
+
+    - name: Configure the cosign.msgboard.xyz Caddy site (with rollback on failure)
+      block:
+        - name: Back up the Caddyfile
+          ansible.builtin.copy:
+            src: "{{ caddyfile }}"
+            dest: "{{ caddyfile }}.bak.{{ ansible_date_time.iso8601_basic_short }}"
+            remote_src: true
+          register: caddy_backup
+
+        - name: Add / update the cosign.msgboard.xyz block (idempotent)
+          ansible.builtin.blockinfile:
+            path: "{{ caddyfile }}"
+            marker: "# {mark} ANSIBLE cosign.msgboard.xyz"
+            block: |
+              cosign.msgboard.xyz {
+              	tls /etc/caddy/origin.pem /etc/caddy/origin.key
+              	encode gzip
+              	reverse_proxy cosign-web:4173
+              }
+          register: caddy_edit
+
+        - name: Validate the Caddyfile (caddy adapt — read-only)
+          ansible.builtin.command:
+            cmd: "{{ compose }} exec -T caddy caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile"
+            chdir: "{{ deploy_dir }}"
+          changed_when: false
+
+        - name: Reload Caddy
+          ansible.builtin.command:
+            cmd: "{{ compose }} exec -T caddy caddy reload --config /etc/caddy/Caddyfile"
+            chdir: "{{ deploy_dir }}"
+          when: caddy_edit.changed
+
+        - name: Positive smoke — cosign.msgboard.xyz at the origin (bypass DNS/CF), expect 200
+          ansible.builtin.command:
+            cmd: >-
+              curl -sk --resolve cosign.msgboard.xyz:443:127.0.0.1
+              https://cosign.msgboard.xyz/ -o /dev/null -w '%{http_code}'
+          register: smoke
+          changed_when: false
+          failed_when: smoke.stdout != "200"
+          retries: 5
+          delay: 3
+          until: smoke.stdout == "200"
+
+        - name: Negative smoke — an unknown host must NOT 500 (Rule 1 regression guard)
+          ansible.builtin.command:
+            cmd: >-
+              curl -sk --resolve nope.msgboard.xyz:443:127.0.0.1
+              https://nope.msgboard.xyz/ -o /dev/null -w '%{http_code}'
+          register: neg
+          changed_when: false
+          failed_when: neg.stdout == "500"
+
+      rescue:
+        - name: Restore the Caddyfile from backup
+          ansible.builtin.copy:
+            src: "{{ caddy_backup.dest }}"
+            dest: "{{ caddyfile }}"
+            remote_src: true
+          when: caddy_backup.dest is defined
+
+        - name: Reload Caddy after restore
+          ansible.builtin.command:
+            cmd: "{{ compose }} exec -T caddy caddy reload --config /etc/caddy/Caddyfile"
+            chdir: "{{ deploy_dir }}"
+          when: caddy_backup.dest is defined
+
+        - name: Fail loudly
+          ansible.builtin.fail:
+            msg: "cosign Caddy change failed validation/smoke — Caddyfile restored from backup and reloaded."
+
+    - name: Done
+      ansible.builtin.debug:
+        msg: "cosign-web is live behind cosign.msgboard.xyz (origin smoke 200). Ensure the DNS A record exists + proxied."

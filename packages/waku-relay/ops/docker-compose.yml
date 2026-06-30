@@ -14,7 +14,7 @@
 # node's config is identical under both edges: friends always dial wss://${WAKU_DOMAIN} (tcp/443/wss).
 services:
   nwaku:
-    image: wakuorg/nwaku:latest # pin a real tag for prod (e.g. wakuorg/nwaku:v0.34.0); see README
+    image: ${NWAKU_IMAGE:-wakuorg/nwaku:latest} # PIN a real tag via NWAKU_IMAGE in .env (see README)
     container_name: nwaku
     restart: unless-stopped
     volumes:

@@ -1,0 +1,70 @@
+---
+# Deploy the nwaku WSS node (+ optional MsgBoard relay) on the waku box.
+#
+# Prereqs (one-time, by you): docker + compose on the box; the box can `git clone` the repo (deploy key
+# or forwarded agent); and — for the tunnel edge — a Cloudflare Tunnel created in the dashboard with its
+# Public Hostname routed waku.msgboard.xyz -> caddy:80, its token in vault_cf_tunnel_token.
+#
+#   ansible-playbook deploy-waku.yml
+#   ansible-playbook deploy-waku.yml -e waku_relay_enabled=true   # also start the MsgBoard mirror
+- name: Deploy nwaku WSS node on the waku box
+  hosts: waku
+  become: true
+  vars:
+    ops_dir: "{{ deploy_dir }}/packages/waku-relay/ops"
+    compose: "docker compose -f docker-compose.yml -f docker-compose.{{ waku_edge }}.yml"
+    profile: "{{ '--profile relay' if waku_relay_enabled | bool else '' }}"
+  tasks:
+    - name: Assert docker + compose v2 are present
+      ansible.builtin.command: "{{ item }}"
+      changed_when: false
+      loop:
+        - docker --version
+        - docker compose version
+
+    - name: Check out the repo at {{ repo_branch }}
+      ansible.builtin.git:
+        repo: "{{ repo_url }}"
+        dest: "{{ deploy_dir }}"
+        version: "{{ repo_branch }}"
+        accept_hostkey: true
+        force: true
+
+    - name: Render the ops .env (nodekey, tunnel token, image pin)
+      ansible.builtin.template:
+        src: waku.env.j2
+        dest: "{{ ops_dir }}/.env"
+        mode: "0600"
+
+    - name: Install the origin cert pair (caddy edge only)
+      ansible.builtin.copy:
+        src: "{{ item.src }}"
+        dest: "{{ ops_dir }}/{{ item.dest }}"
+        mode: "0600"
+      loop:
+        - { src: "{{ origin_cert_src | default('') }}", dest: "origin.pem" }
+        - { src: "{{ origin_key_src | default('') }}", dest: "origin.key" }
+      when: waku_edge == 'caddy'
+
+    - name: Bring up nwaku + {{ waku_edge }} edge {{ '(+ relay)' if waku_relay_enabled | bool else '' }}
+      ansible.builtin.command:
+        cmd: "{{ compose }} {{ profile }} up -d"
+        chdir: "{{ ops_dir }}"
+      register: up
+      changed_when: "'Started' in up.stderr or 'Created' in up.stderr or 'Recreated' in up.stderr"
+
+    - name: Wait for the nwaku REST API to answer
+      ansible.builtin.command:
+        cmd: "{{ compose }} exec -T nwaku curl -fsS http://127.0.0.1:8645/debug/v1/info"
+        chdir: "{{ ops_dir }}"
+      register: node_info
+      changed_when: false
+      retries: 20
+      delay: 3
+      until: node_info.rc == 0 and node_info.stdout | length > 0
+
+    - name: The node info (contains the multiaddr / peer id friends dial)
+      ansible.builtin.debug:
+        msg: >-
+          nwaku is up. Friends dial /dns4/{{ waku_domain }}/tcp/443/wss/p2p/<PEER_ID> with js-waku
+          networkConfig {clusterId:0, shards:[0]}. Node info: {{ node_info.stdout }}
