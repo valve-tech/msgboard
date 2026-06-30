@@ -1,0 +1,20 @@
+# Builds the @msgboard/waku-relay CLI from the monorepo root. Build context must be the repo root
+# (set in docker-compose.yml: context ../../..). Builds only the packages the relay needs — core,
+# sdk, waku-relay — not the frontends.
+FROM node:lts AS builder
+WORKDIR /app
+COPY package*.json ./
+COPY packages packages
+RUN npm i
+RUN npm run build -w @msgboard/core \
+ && npm run build -w @msgboard/sdk \
+ && npm run build -w @msgboard/waku-relay
+
+FROM node:lts-slim
+WORKDIR /app
+COPY --from=builder /app/package*.json ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/packages ./packages
+ENV NODE_ENV=production
+# the relay CLI (subscribe Waku -> stamp -> post to MsgBoard); env-configured (see .env.example).
+CMD ["node", "packages/waku-relay/dist/bin/relay.js"]

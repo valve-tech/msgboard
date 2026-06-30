@@ -1,0 +1,89 @@
+# Waku box deploy (88.99.62.98): an nwaku node exposed over secure WebSocket so browser/js-waku
+# light clients ("friends") can connect, plus the optional Waku->MsgBoard relay.
+#
+# Default `docker compose up -d` brings up nwaku + caddy (the "exposed node" — the core ask).
+# Add `--profile relay` to also run the MsgBoard mirror once the node's peer id is known (see README).
+#
+# nwaku runs a STANDALONE network: cluster-id 0 (the main Waku Network is cluster 1), so there is no
+# RLN membership requirement — friends + the relay just share cluster 0 + the same content topic.
+services:
+  nwaku:
+    image: wakuorg/nwaku:latest # pin a real tag for prod (e.g. wakuorg/nwaku:v0.34.0); see README
+    container_name: nwaku
+    restart: unless-stopped
+    volumes:
+      - nwaku-store:/store
+    networks:
+      - waku
+    # plain ws on 8001 (Caddy terminates TLS); libp2p tcp on 60000 stays internal.
+    command:
+      - --relay=true
+      - --lightpush=true
+      - --filter=true
+      - --store=true
+      - --store-message-retention-policy=time:86400
+      - --store-message-db-url=sqlite:///store/store.sqlite3
+      - --websocket-support=true
+      - --websocket-port=8001
+      - --tcp-port=60000
+      - --cluster-id=0
+      - --nodekey=${WAKU_NODEKEY}
+      - --ext-multiaddr=/dns4/${WAKU_DOMAIN}/tcp/443/wss
+      - --ext-multiaddr-only=true
+      - --rest=true
+      - --rest-address=0.0.0.0
+      - --rest-port=8645
+      - --log-level=INFO
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: waku-caddy
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      WAKU_DOMAIN: ${WAKU_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    depends_on:
+      - nwaku
+    networks:
+      - waku
+
+  # The Waku -> MsgBoard mirror. Opt-in (`--profile relay`): it needs the nwaku peer id (set
+  # WAKU_BOOTSTRAP after the node's first start — see README) and writes PoW-stamped messages to the
+  # board. Build context is the repo root so it can build the @msgboard/waku-relay workspace.
+  relay:
+    profiles: ['relay']
+    container_name: waku-relay
+    build:
+      context: ../../..
+      dockerfile: ./packages/waku-relay/ops/Dockerfile.relay
+    restart: unless-stopped
+    environment:
+      MSGBOARD_RPC_URL: ${MSGBOARD_RPC_URL}
+      RELAY_CHANNELS: ${RELAY_CHANNELS}
+      WAKU_APP_NAME: ${WAKU_APP_NAME:-msgboard-relay}
+      WAKU_BOOTSTRAP: ${WAKU_BOOTSTRAP}
+      RELAY_CATEGORY_ENCODING: ${RELAY_CATEGORY_ENCODING:-keccak256}
+      RELAY_SEEN_PATH: /data/seen.log
+    volumes:
+      - relay-data:/data
+    depends_on:
+      - nwaku
+    networks:
+      - waku
+
+networks:
+  waku:
+    driver: bridge
+
+volumes:
+  nwaku-store:
+  caddy-data:
+  caddy-config:
+  relay-data:
