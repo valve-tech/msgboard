@@ -1,11 +1,17 @@
 # Waku box deploy (88.99.62.98): an nwaku node exposed over secure WebSocket so browser/js-waku
 # light clients ("friends") can connect, plus the optional Waku->MsgBoard relay.
 #
-# Default `docker compose up -d` brings up nwaku + caddy (the "exposed node" — the core ask).
-# Add `--profile relay` to also run the MsgBoard mirror once the node's peer id is known (see README).
+# This is the BASE (nwaku + relay). Pick ONE edge override for how the public WSS reaches the box —
+# both keep the box behind Cloudflare and never expose its IP, neither uses Let's Encrypt:
+#   • origin-cert + Cloudflare proxy (one open :443, firewalled to CF ranges):
+#       docker compose -f docker-compose.yml -f docker-compose.caddy.yml up -d
+#   • Cloudflare Tunnel (ZERO inbound ports — outbound-only):
+#       docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d
+# Add `--profile relay` to either to also run the MsgBoard mirror once the node's peer id is known.
 #
 # nwaku runs a STANDALONE network: cluster-id 0 (the main Waku Network is cluster 1), so there is no
-# RLN membership requirement — friends + the relay just share cluster 0 + the same content topic.
+# RLN membership requirement — friends + the relay just share cluster 0 + the same content topic. The
+# node's config is identical under both edges: friends always dial wss://${WAKU_DOMAIN} (tcp/443/wss).
 services:
   nwaku:
     image: wakuorg/nwaku:latest # pin a real tag for prod (e.g. wakuorg/nwaku:v0.34.0); see README
@@ -15,7 +21,7 @@ services:
       - nwaku-store:/store
     networks:
       - waku
-    # plain ws on 8001 (Caddy terminates TLS); libp2p tcp on 60000 stays internal.
+    # plain ws on 8001 (the edge terminates TLS); libp2p tcp on 60000 stays internal.
     command:
       - --relay=true
       - --lightpush=true
@@ -34,27 +40,6 @@ services:
       - --rest-address=0.0.0.0
       - --rest-port=8645
       - --log-level=INFO
-
-  caddy:
-    image: caddy:2-alpine
-    container_name: waku-caddy
-    restart: unless-stopped
-    # only :443 — no Let's Encrypt, so no :80/ACME. Cloudflare proxies WSS to this origin.
-    ports:
-      - '443:443'
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      # the Cloudflare *.msgboard.xyz origin cert — copy these onto the box (gitignored, never committed).
-      - ./origin.pem:/etc/caddy/origin.pem:ro
-      - ./origin.key:/etc/caddy/origin.key:ro
-      - caddy-data:/data
-      - caddy-config:/config
-    environment:
-      WAKU_DOMAIN: ${WAKU_DOMAIN}
-    depends_on:
-      - nwaku
-    networks:
-      - waku
 
   # The Waku -> MsgBoard mirror. Opt-in (`--profile relay`): it needs the nwaku peer id (set
   # WAKU_BOOTSTRAP after the node's first start — see README) and writes PoW-stamped messages to the
@@ -86,6 +71,4 @@ networks:
 
 volumes:
   nwaku-store:
-  caddy-data:
-  caddy-config:
   relay-data:

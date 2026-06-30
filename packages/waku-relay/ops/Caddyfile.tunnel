@@ -1,0 +1,9 @@
+# Plain-HTTP local ingress for the Cloudflare TUNNEL edge. cloudflared holds the public TLS (terminated
+# at Cloudflare's edge) and routes inbound over the internal docker network to Caddy on :80; Caddy
+# reverse-proxies the WebSocket upgrade to nwaku. Caddy stays in the path for access logging / gzip /
+# future routes — the tunnel just swaps the public :443 + origin cert for an outbound-only connection,
+# so there's no cert and no published port here.
+:80 {
+	encode gzip
+	reverse_proxy nwaku:8001
+}

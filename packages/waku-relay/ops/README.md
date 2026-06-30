@@ -7,24 +7,25 @@ opt-in second stage.
 It runs a **standalone network** — `--cluster-id=0` (the main Waku Network is cluster 1), so there is
 **no RLN membership** requirement. Friends + the relay just share cluster 0 and the same content topic.
 
-## DNS + TLS (do this first) — behind Cloudflare, no Let's Encrypt
+## Edge: how Cloudflare reaches the box (no Let's Encrypt, IP never exposed)
 
-The IP is **never exposed in public DNS**: the record stays **proxied through Cloudflare** and Caddy
-serves the Cloudflare **`*.msgboard.xyz` origin cert** (the same one the msgboard box uses) — no ACME,
-no grey-cloud, no public-facing IP.
+Pick **one** edge. Both keep the box **behind Cloudflare** (IP never in public DNS) and use **Caddy as
+the local ingress** (logging / gzip / future routes) in front of nwaku — the only difference is how
+Cloudflare gets to Caddy. nwaku's config is identical either way; friends always dial
+`wss://waku.msgboard.xyz`.
 
-1. Create **one** A record:
+**Option A — Cloudflare proxy + origin cert** (`docker-compose.caddy.yml`): one open `:443`.
+1. A record `waku.msgboard.xyz` → `88.99.62.98`, **Proxied (orange cloud)**.
+2. Cloudflare SSL/TLS mode → **Full (strict)**.
+3. Copy the `*.msgboard.xyz` origin cert pair into this dir (gitignored): `origin.pem` + `origin.key`
+   (the same pair from the msgboard box's `deploy/caddy/`).
+4. Firewall `:443` to Cloudflare's IP ranges so the box answers nothing else.
 
-   | name | type | value | proxy |
-   | --- | --- | --- | --- |
-   | `waku.msgboard.xyz` | A | `88.99.62.98` | **Proxied (orange cloud)** |
-
-2. Cloudflare SSL/TLS mode → **Full (strict)**. WebSockets are proxied by default.
-3. Copy the Cloudflare origin cert pair onto the box, into THIS directory (gitignored, never committed):
-   `packages/waku-relay/ops/origin.pem` and `origin.key` (the same `*.msgboard.xyz` pair from the
-   msgboard box's `deploy/caddy/`).
-4. Only **:443** needs to be reachable — ideally firewall it to Cloudflare's IP ranges only, so the box
-   answers nothing but Cloudflare.
+**Option B — Cloudflare Tunnel** (`docker-compose.tunnel.yml`): **zero inbound ports** — strongest.
+1. Cloudflare Zero Trust → Networks → Tunnels → create a tunnel; copy its token → `CF_TUNNEL_TOKEN`
+   in `.env`.
+2. Add a Public Hostname `waku.msgboard.xyz` → Service **HTTP** → `caddy:80` (the tunnel manages the
+   proxied DNS record). No open ports, no cert on the box.
 
 > The separate `cosign.msgboard.xyz` record (for the cosign UI) points at the **msgboard** box
 > `88.99.192.187`, proxied like the other `*.msgboard.xyz` records — see the repo root deploy.
@@ -32,14 +33,19 @@ no grey-cloud, no public-facing IP.
 ## Bring up the exposed node
 
 ```bash
-# on 88.99.62.98, in this directory (packages/waku-relay/ops)
+# on 88.99.62.98, in packages/waku-relay/ops
 cp .env.example .env
-openssl rand -hex 32          # paste into WAKU_NODEKEY in .env (generate ONCE; keep it stable)
-cp /path/to/origin.pem ./origin.pem && cp /path/to/origin.key ./origin.key   # the *.msgboard.xyz pair
-
+openssl rand -hex 32          # → WAKU_NODEKEY in .env (generate ONCE; keep it stable)
 # pin the image first: replace `wakuorg/nwaku:latest` in docker-compose.yml with a real release tag
-# (check https://hub.docker.com/r/wakuorg/nwaku/tags), then:
-docker compose up -d nwaku caddy
+# (check https://hub.docker.com/r/wakuorg/nwaku/tags), then bring up ONE edge:
+
+# Option A — proxy + origin cert:
+cp /path/to/origin.pem ./origin.pem && cp /path/to/origin.key ./origin.key
+docker compose -f docker-compose.yml -f docker-compose.caddy.yml up -d
+
+# Option B — tunnel (set CF_TUNNEL_TOKEN in .env first):
+docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d
+
 docker compose logs -f nwaku        # wait for it to report its listening/announced multiaddrs
 ```
 
@@ -76,8 +82,8 @@ The relay subscribes to the content topic on this node and re-posts every messag
 ```bash
 # in .env, set the internal dial (plain ws over the compose network):
 #   WAKU_BOOTSTRAP=/dns4/nwaku/tcp/8001/ws/p2p/<PEER_ID>
-# and confirm MSGBOARD_RPC_URL / RELAY_CHANNELS.
-docker compose --profile relay up -d relay
+# and confirm MSGBOARD_RPC_URL / RELAY_CHANNELS. Use the SAME edge file you brought up with:
+docker compose -f docker-compose.yml -f docker-compose.<caddy|tunnel>.yml --profile relay up -d relay
 docker compose logs -f relay     # expect "subscribed" then "relayed" per message
 ```
 
