@@ -1,0 +1,21 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  overflow-x: clip;
+}
+
+body {
+  @apply bg-gray-950 text-gray-100;
+}
+
+button:not([disabled]),
+[role='button']:not([disabled]) {
+  cursor: pointer;
+}

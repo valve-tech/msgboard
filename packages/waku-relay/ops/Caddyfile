@@ -1,0 +1,13 @@
+# Caddy on the waku box — terminates TLS for the public WSS endpoint and reverse-proxies the
+# WebSocket upgrade to nwaku's plain-ws port (8001). Caddy auto-provisions a Let's Encrypt cert for
+# {$WAKU_DOMAIN}, so the DNS A record must point DIRECTLY at this box (DNS-only / "grey cloud", NOT
+# proxied through Cloudflare) and ports 80 + 443 must be reachable for the ACME challenge.
+{
+	email {$ACME_EMAIL}
+}
+
+{$WAKU_DOMAIN} {
+	encode gzip
+	# Caddy upgrades the WebSocket transparently; js-waku dials wss://{$WAKU_DOMAIN} (tcp/443/wss).
+	reverse_proxy nwaku:8001
+}

@@ -1,0 +1,59 @@
+{
+  "name": "@msgboard/waku-relay",
+  "version": "0.0.32",
+  "description": "One-way Waku -> MsgBoard relay: subscribe to Waku content topics and re-post every message to the MsgBoard board (proof-of-work stamped, no gas).",
+  "repository": "github:valve-tech/msgboard",
+  "author": "MsgBoard",
+  "license": "MIT",
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "waku-relay": "./dist/bin/relay.js"
+  },
+  "keywords": [
+    "msgboard",
+    "waku",
+    "relay",
+    "bridge",
+    "pulsechain",
+    "pow"
+  ],
+  "scripts": {
+    "prebuild": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "tsc",
+    "watch": "tsc -w",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "start": "tsx src/bin/relay.ts"
+  },
+  "files": [
+    "dist/"
+  ],
+  "dependencies": {
+    "@msgboard/sdk": "^0.0.32",
+    "viem": "^2.25.0"
+  },
+  "optionalDependencies": {
+    "@waku/sdk": "^0.0.30"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "vitest": "^3.1.1"
+  }
+}

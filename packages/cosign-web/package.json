@@ -1,0 +1,30 @@
+{
+  "name": "cosign-web",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "start": "npm run preview -- --host",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@iconify/react": "^5.0.2",
+    "@msgboard/cosign": "^0.0.32",
+    "@msgboard/sdk": "^0.0.32",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "viem": "^2.25.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.2",
+    "@types/react": "^18.3.1",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.0",
+    "tailwindcss": "^4.1.2",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.5"
+  }
+}

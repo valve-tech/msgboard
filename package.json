@@ -11,8 +11,10 @@
     "packages/relayer",
     "packages/indexer",
     "packages/ui",
+    "packages/cosign-web",
     "packages/sponsor",
-    "packages/examples"
+    "packages/examples",
+    "packages/waku-relay"
   ],
   "scripts": {
     "docker:build": "docker compose build",
