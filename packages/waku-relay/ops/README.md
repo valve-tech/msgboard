@@ -7,17 +7,24 @@ opt-in second stage.
 It runs a **standalone network** — `--cluster-id=0` (the main Waku Network is cluster 1), so there is
 **no RLN membership** requirement. Friends + the relay just share cluster 0 and the same content topic.
 
-## DNS (do this first)
+## DNS + TLS (do this first) — behind Cloudflare, no Let's Encrypt
 
-Create **one** A record:
+The IP is **never exposed in public DNS**: the record stays **proxied through Cloudflare** and Caddy
+serves the Cloudflare **`*.msgboard.xyz` origin cert** (the same one the msgboard box uses) — no ACME,
+no grey-cloud, no public-facing IP.
 
-| name | type | value | proxy |
-| --- | --- | --- | --- |
-| `waku.msgboard.xyz` | A | `88.99.62.98` | **DNS-only (grey cloud)** |
+1. Create **one** A record:
 
-It must be **unproxied** so Caddy on this box can complete the Let's Encrypt ACME challenge and serve a
-browser-trusted cert (the Cloudflare origin cert used by the msgboard box is **not** on this box). Ports
-**80 and 443** must be open to the internet.
+   | name | type | value | proxy |
+   | --- | --- | --- | --- |
+   | `waku.msgboard.xyz` | A | `88.99.62.98` | **Proxied (orange cloud)** |
+
+2. Cloudflare SSL/TLS mode → **Full (strict)**. WebSockets are proxied by default.
+3. Copy the Cloudflare origin cert pair onto the box, into THIS directory (gitignored, never committed):
+   `packages/waku-relay/ops/origin.pem` and `origin.key` (the same `*.msgboard.xyz` pair from the
+   msgboard box's `deploy/caddy/`).
+4. Only **:443** needs to be reachable — ideally firewall it to Cloudflare's IP ranges only, so the box
+   answers nothing but Cloudflare.
 
 > The separate `cosign.msgboard.xyz` record (for the cosign UI) points at the **msgboard** box
 > `88.99.192.187`, proxied like the other `*.msgboard.xyz` records — see the repo root deploy.
@@ -28,7 +35,7 @@ browser-trusted cert (the Cloudflare origin cert used by the msgboard box is **n
 # on 88.99.62.98, in this directory (packages/waku-relay/ops)
 cp .env.example .env
 openssl rand -hex 32          # paste into WAKU_NODEKEY in .env (generate ONCE; keep it stable)
-# edit WAKU_DOMAIN / ACME_EMAIL if needed
+cp /path/to/origin.pem ./origin.pem && cp /path/to/origin.key ./origin.key   # the *.msgboard.xyz pair
 
 # pin the image first: replace `wakuorg/nwaku:latest` in docker-compose.yml with a real release tag
 # (check https://hub.docker.com/r/wakuorg/nwaku/tags), then:
@@ -86,4 +93,6 @@ that's the first thing to add. The exposed node (above) works independently of t
   `nwaku:8001` directly over the compose network, so that's fine.
 - **PoW throughput** caps the relay: each MsgBoard post is a stamp (~1–2s native, much slower pure-JS).
   Don't point it at a high-volume topic without measuring `msgboard_status` difficulty first.
-- Keep `.env` (the nodekey especially) off git.
+- **Cloudflare WS idle timeout** (~100s on lower plans) closes quiet WebSockets; libp2p's own keepalive
+  pings normally keep them open — watch for unexpected drops if a connection sits fully idle.
+- Keep `.env`, `origin.pem`, `origin.key` (and the nodekey) off git — the ops/.gitignore covers them.

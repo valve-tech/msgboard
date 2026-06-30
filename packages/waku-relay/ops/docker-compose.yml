@@ -39,16 +39,18 @@ services:
     image: caddy:2-alpine
     container_name: waku-caddy
     restart: unless-stopped
+    # only :443 — no Let's Encrypt, so no :80/ACME. Cloudflare proxies WSS to this origin.
     ports:
-      - '80:80'
       - '443:443'
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # the Cloudflare *.msgboard.xyz origin cert — copy these onto the box (gitignored, never committed).
+      - ./origin.pem:/etc/caddy/origin.pem:ro
+      - ./origin.key:/etc/caddy/origin.key:ro
       - caddy-data:/data
       - caddy-config:/config
     environment:
       WAKU_DOMAIN: ${WAKU_DOMAIN}
-      ACME_EMAIL: ${ACME_EMAIL}
     depends_on:
       - nwaku
     networks:

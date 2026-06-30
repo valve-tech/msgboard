@@ -1,0 +1,4 @@
+# secrets / box-local files — never commit
+.env
+origin.pem
+origin.key
