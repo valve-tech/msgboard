@@ -1,5 +1,5 @@
-import type { Hex, TypedDataDefinition } from 'viem'
-import type { SafeTx } from '@msgboard/cosign'
+import { type Hex, type TypedDataDefinition, isAddressEqual, recoverAddress } from 'viem'
+import { type SafeTx, safeTransactionDigest } from '@msgboard/cosign'
 
 /**
  * The viem typed-data `types` for a Safe `SafeTx` (Safe v1.3.0 / v1.4.1). ORDER IS LAW and
@@ -45,6 +45,32 @@ export function safeTxTypedData(safeTx: SafeTx, chainId: number, safe: Hex): Typ
       nonce: safeTx.nonce,
     },
   }
+}
+
+/**
+ * PARITY GUARDRAIL. Verifies that the EIP-712 signature just produced from the LOCAL `SAFE_TX_TYPES`
+ * actually recovers to `expectedSigner` at the SDK's canonical `safeTransactionDigest(...)`. If the
+ * local typed-data table ever drifts from the SDK's internal `SAFE_TX_TYPEHASH`, viem will have signed
+ * a DIFFERENT hash and recovery at the SDK digest yields the wrong address — we THROW here so the drift
+ * can never produce a record the Safe adapter would later reject. Call this BEFORE posting the share.
+ * @throws if the recovered address does not match `expectedSigner`.
+ */
+export async function assertSafeTxSignatureParity(args: {
+  safeTx: SafeTx
+  chainId: number
+  safe: Hex
+  signature: Hex
+  expectedSigner: Hex
+}): Promise<Hex> {
+  const digest = safeTransactionDigest(args.safeTx, args.chainId, args.safe)
+  const recovered = await recoverAddress({ hash: digest, signature: args.signature })
+  if (!isAddressEqual(recovered, args.expectedSigner)) {
+    throw new Error(
+      `Typed-data parity check FAILED: signature recovered to ${recovered} but expected ${args.expectedSigner}. ` +
+        'The local SAFE_TX_TYPES has drifted from the SDK — refusing to post this share.',
+    )
+  }
+  return digest
 }
 
 /** Minimal `execTransaction` ABI fragment for the (experimental) on-chain submit path. */
