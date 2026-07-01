@@ -47,7 +47,6 @@ services:
       - caddy_config:/config
     depends_on:
       - ui
-      - cosign-web
       - faucet
       - hasura
     networks:
@@ -69,20 +68,6 @@ services:
     # Root Dockerfile CMD runs `npm run start` -> `vite preview --host` on port 4173,
     # which serves the built UI AND the /api/rpc-proxy endpoint. No host port: Caddy
     # reaches it over the compose network.
-
-  # The @msgboard/cosign multisig-coordination UI, served at cosign.msgboard.xyz. Same monorepo
-  # image as `ui` (the root Dockerfile builds every workspace), just a different start command:
-  # cosign-web's `start` runs `vite preview --host` on 4173 + its own /api/rpc-proxy. Caddy reaches
-  # it by name over the compose network; no host port. preview.allowedHosts is true in its vite config.
-  cosign-web:
-    container_name: cosign-web
-    build:
-      context: .
-      dockerfile: ./Dockerfile
-    command: ['npm', 'run', 'start', '--workspace=packages/cosign-web']
-    restart: unless-stopped
-    networks:
-      - msgboard
 
   faucet:
     container_name: faucet

@@ -1,0 +1,17 @@
+# Compose override that adds the @msgboard/cosign UI (cosign.msgboard.xyz) to the msgboard stack.
+# Run alongside the base:  docker compose -f docker-compose.prod.yml -f docker-compose.cosign.yml ...
+# Kept as an override (not folded into docker-compose.prod.yml) because the prod box's copy of the base
+# file is maintained out-of-band; the ansible runbook (ansible/deploy-cosign.yml) layers this on top.
+# Same monorepo image as `ui` (the root Dockerfile builds every workspace), just a different start
+# command: cosign-web's `start` runs `vite preview --host` on 4173 + its own /api/rpc-proxy. Caddy
+# reaches it by name over the compose network; no host port. preview.allowedHosts is true in its config.
+services:
+  cosign-web:
+    container_name: cosign-web
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    command: ['npm', 'run', 'start', '--workspace=packages/cosign-web']
+    restart: unless-stopped
+    networks:
+      - msgboard
