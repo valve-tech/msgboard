@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { type Hex, isAddress, isAddressEqual, getAddress } from 'viem'
+import { type Hex, formatUnits, isAddress, isAddressEqual, getAddress } from 'viem'
 import { Icon } from '@iconify/react'
 import {
   type CosignAdapter,
@@ -9,14 +9,17 @@ import {
   SCHEME,
   makeSafeAdapter,
   safeTransactionDigest,
-  encodeSafeMeta,
   decodeSafeMeta,
+  encodeSafeMeta,
   buildExecTransactionArgs,
 } from '@msgboard/cosign'
 import { useWallet } from './hooks/useWallet'
 import { makeWorkerBoard, type BoardClient } from './seams/worker-board'
 import { BOARD_ENDPOINTS, fetchBoardFactors, type BoardFactors } from './lib/board'
-import { safeTxTypedData } from './lib/safe-typed-data'
+import { safeTxTypedData, assertSafeTxSignatureParity } from './lib/safe-typed-data'
+import { chainMeta } from './lib/config'
+import { discoverSafes, type DiscoveredSafe } from './lib/discovery'
+import { simulateSafeTx, type SimResult } from './lib/simulate'
 import {
   type AggregateResult,
   type AnnotatedShare,
@@ -29,7 +32,7 @@ import {
   scopeFor,
 } from './lib/cosign'
 import type { ProgressMsg } from './worker/types'
-import { Button, Copyable, Field, Notice, Pill, Section, TextInput } from './components/ui'
+import { Copyable, Field, OwnerRow, RegisterLine, Seal, StepCard, TextInput, cx, short } from './components/ui'
 
 interface SafeInfo {
   owners: Hex[]
@@ -51,13 +54,22 @@ const emptySafeTxForm = {
   nonce: '0',
 }
 
+interface Chosen {
+  digest: Hex
+  tx: SafeTx | null
+  scheme: number
+}
+
 export function App() {
   const wallet = useWallet()
+  const safeChainId = wallet.chainId
 
-  // ── step 1: board endpoint ──────────────────────────────────────────────
-  const [boardIdx, setBoardIdx] = useState(0)
+  // ── board endpoint (a ⚙ setting in the rail, not a step) ────────────────────────────────────
+  const [boardIdx, setBoardIdx] = useState(1) // default PulseChain mainnet 369
   const endpoint = BOARD_ENDPOINTS[boardIdx]
   const [factors, setFactors] = useState<BoardFactors | null>(null)
+  const [showCfg, setShowCfg] = useState(false)
+  const [archiveOn] = useState(true)
 
   useEffect(() => {
     let cancelled = false
@@ -84,13 +96,20 @@ export function App() {
     })
   }, [endpoint.rpc, endpoint.chainId, factors, onProgress])
 
-  // ── step 2: Safe ─────────────────────────────────────────────────────────
-  const [safeInput, setSafeInput] = useState('')
-  const safe = useMemo<Hex | null>(() => (isAddress(safeInput) ? getAddress(safeInput) : null), [safeInput])
-  const safeChainId = wallet.chainId
+  // ── STEP 1 — pick your Safe (discover ∪ manual) ─────────────────────────────────────────────
+  const [discovered, setDiscovered] = useState<DiscoveredSafe[] | null>(null)
+  const [discovering, setDiscovering] = useState(false)
+  const [manual, setManual] = useState('')
+  const [selectedSafe, setSelectedSafe] = useState<Hex | null>(null)
   const [safeInfo, setSafeInfo] = useState<SafeInfo | null>(null)
-  const [safeLoading, setSafeLoading] = useState(false)
   const [safeError, setSafeError] = useState<string | null>(null)
+  const [safeLoading, setSafeLoading] = useState(false)
+
+  const safe = selectedSafe
+  const scope = useMemo<string | null>(
+    () => (safe && safeChainId ? scopeFor(safeChainId, safe) : null),
+    [safe, safeChainId],
+  )
 
   const adapter = useMemo<CosignAdapter | null>(() => {
     if (!safe || !safeChainId || !wallet.address) return null
@@ -101,28 +120,62 @@ export function App() {
     })
   }, [safe, safeChainId, wallet])
 
-  const scope = useMemo<string | null>(
-    () => (safe && safeChainId ? scopeFor(safeChainId, safe) : null),
-    [safe, safeChainId],
+  // auto-discover the wallet's Safes on connect / chain change
+  useEffect(() => {
+    if (!wallet.address || !safeChainId) {
+      setDiscovered(null)
+      return
+    }
+    let cancelled = false
+    setDiscovering(true)
+    void discoverSafes(wallet.address, safeChainId)
+      .then((list) => {
+        if (cancelled) return
+        setDiscovered(list)
+        if (list.length === 1) void selectAndLoad(list[0].address) // auto-select the sole Safe
+      })
+      .finally(() => {
+        if (!cancelled) setDiscovering(false)
+      })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wallet.address, safeChainId])
+
+  const selectAndLoad = useCallback(
+    async (addr: Hex) => {
+      if (!safeChainId || !wallet.address) return
+      setSafeError(null)
+      setSafeInfo(null)
+      setSelectedSafe(getAddress(addr))
+      setSafeLoading(true)
+      try {
+        const a = makeSafeAdapter({
+          publicClient: wallet.publicClient() as unknown as SafePublicClient,
+          safe: getAddress(addr),
+          chainId: safeChainId,
+        })
+        const [owners, threshold] = await Promise.all([a.owners!(), a.threshold!()])
+        setSafeInfo({ owners, threshold })
+      } catch (e) {
+        setSafeError(e instanceof Error ? e.message : 'Failed to read Safe (wrong chain, or not a Safe?)')
+        setSelectedSafe(null)
+      } finally {
+        setSafeLoading(false)
+      }
+    },
+    [safeChainId, wallet],
   )
 
-  const loadSafe = useCallback(async () => {
-    if (!adapter?.owners || !adapter.threshold) return
-    setSafeLoading(true)
-    setSafeError(null)
+  const editSafe = useCallback(() => {
+    setSelectedSafe(null)
     setSafeInfo(null)
-    try {
-      const [owners, threshold] = await Promise.all([adapter.owners(), adapter.threshold()])
-      setSafeInfo({ owners, threshold })
-    } catch (e) {
-      setSafeError(e instanceof Error ? e.message : 'Failed to read Safe (wrong chain or not a Safe?)')
-    } finally {
-      setSafeLoading(false)
-    }
-  }, [adapter])
+    setChosen(null)
+  }, [])
 
-  // ── step 3: digest to co-sign ─────────────────────────────────────────────
-  const [mode, setMode] = useState<'paste' | 'safetx'>('paste')
+  // ── STEP 2 — what to sign (+ simulation) ────────────────────────────────────────────────────
+  const [mode, setMode] = useState<'paste' | 'safetx'>('safetx')
   const [pasteDigest, setPasteDigest] = useState('')
   const [form, setForm] = useState(emptySafeTxForm)
   const setFormField = (k: keyof typeof emptySafeTxForm) => (v: string) => setForm((f) => ({ ...f, [k]: v }))
@@ -139,27 +192,62 @@ export function App() {
 
   const pasteValid = /^0x[0-9a-fA-F]{64}$/.test(pasteDigest)
 
-  // ── step 4: sign + post ───────────────────────────────────────────────────
+  const [sim, setSim] = useState<SimResult | null>(null)
+  const [simBusy, setSimBusy] = useState(false)
+
+  const runSim = useCallback(async () => {
+    if (!builtSafeTx || !safe || !safeChainId || !wallet.address) return
+    setSimBusy(true)
+    try {
+      setSim(await simulateSafeTx(safeChainId, safe, wallet.address, builtSafeTx.tx))
+    } finally {
+      setSimBusy(false)
+    }
+  }, [builtSafeTx, safe, safeChainId, wallet.address])
+
+  useEffect(() => {
+    setSim(null)
+    if (mode === 'safetx' && builtSafeTx) void runSim()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [builtSafeTx?.digest, mode])
+
+  const [chosen, setChosen] = useState<Chosen | null>(null)
+
+  const confirmDigest = useCallback(() => {
+    if (mode === 'paste' && pasteValid) {
+      setChosen({ digest: pasteDigest as Hex, tx: null, scheme: SCHEME.ECDSA })
+    } else if (mode === 'safetx' && builtSafeTx) {
+      setChosen({ digest: builtSafeTx.digest, tx: builtSafeTx.tx, scheme: SCHEME.EIP712 })
+    }
+  }, [mode, pasteValid, pasteDigest, builtSafeTx])
+
+  const editDigest = useCallback(() => {
+    setChosen(null)
+    setSignState('idle')
+  }, [])
+
+  // ── STEP 3 — sign & post your share ─────────────────────────────────────────────────────────
   const [signState, setSignState] = useState<'idle' | 'signing' | 'grinding' | 'posted' | 'error'>('idle')
   const [signError, setSignError] = useState<string | null>(null)
 
   const sign = useCallback(async () => {
-    if (!board || !scope || !safe || !safeChainId || !wallet.address) return
+    if (!board || !scope || !safe || !safeChainId || !wallet.address || !chosen) return
     setSignError(null)
     setGrind(null)
     setSignState('signing')
     try {
       let record: SignatureRecord
-      if (mode === 'paste') {
-        const digest = pasteDigest as Hex
-        const signature = await wallet.signRawDigest(digest)
-        record = { digest, signer: wallet.address, signature, scheme: SCHEME.ECDSA, meta: '0x' }
+      if (chosen.scheme === SCHEME.ECDSA || !chosen.tx) {
+        const signature = await wallet.signRawDigest(chosen.digest)
+        record = { digest: chosen.digest, signer: wallet.address, signature, scheme: SCHEME.ECDSA, meta: '0x' }
       } else {
-        if (!builtSafeTx) throw new Error('Fill in a valid SafeTx (a `to` address is required)')
-        const { tx, digest } = builtSafeTx
+        const tx = chosen.tx
         const signature = await wallet.signTyped(safeTxTypedData(tx, safeChainId, safe))
+        // GUARDRAIL: the local SAFE_TX_TYPES must recover to us at the SDK's canonical digest, or we
+        // refuse to post (never let a drifted typed-data table produce an adapter-rejected share).
+        await assertSafeTxSignatureParity({ safeTx: tx, chainId: safeChainId, safe, signature, expectedSigner: wallet.address })
         record = {
-          digest,
+          digest: chosen.digest,
           signer: wallet.address,
           signature,
           scheme: SCHEME.EIP712,
@@ -169,23 +257,20 @@ export function App() {
       setSignState('grinding')
       await postShare(board, scope, record)
       setSignState('posted')
-      setSelectedDigest(record.digest)
       await refreshShares()
     } catch (e) {
       setSignError(e instanceof Error ? e.message : String((e as { message?: string })?.message ?? e))
       setSignState('error')
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [board, scope, safe, safeChainId, wallet, mode, pasteDigest, builtSafeTx])
+  }, [board, scope, safe, safeChainId, wallet, chosen])
 
-  // ── step 5: read + aggregate ───────────────────────────────────────────────
-  const [shares, setShares] = useState<SignatureRecord[]>([])
+  // ── STEP 4 — collect & execute ──────────────────────────────────────────────────────────────
+  const [shares, setShares] = useState<{ record: SignatureRecord; source: 'board' | 'archive' }[]>([])
   const [sharesLoading, setSharesLoading] = useState(false)
-  const [selectedDigest, setSelectedDigest] = useState<Hex | null>(null)
   const [annotated, setAnnotated] = useState<AnnotatedShare[]>([])
   const [agg, setAgg] = useState<AggregateResult | null>(null)
   const [aggError, setAggError] = useState<string | null>(null)
-  const [aggBusy, setAggBusy] = useState(false)
   const [submitState, setSubmitState] = useState<{ state: 'idle' | 'busy' | 'done' | 'error'; detail?: string }>({
     state: 'idle',
   })
@@ -194,21 +279,21 @@ export function App() {
     if (!board || !scope) return
     setSharesLoading(true)
     try {
-      setShares(await loadShares(board, scope))
+      setShares(await loadShares(board, scope, { archive: archiveOn }))
     } finally {
       setSharesLoading(false)
     }
-  }, [board, scope])
+  }, [board, scope, archiveOn])
 
-  const digests = useMemo(() => {
-    const set = new Map<Hex, number>()
-    for (const r of shares) set.set(r.digest, (set.get(r.digest) ?? 0) + 1)
-    return [...set.entries()]
-  }, [shares])
+  // load shares as soon as a digest is chosen (and after posting)
+  useEffect(() => {
+    if (chosen && board && scope) void refreshShares()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chosen?.digest, board, scope])
 
   const selectedRecords = useMemo(
-    () => (selectedDigest ? shares.filter((r) => r.digest === selectedDigest) : []),
-    [shares, selectedDigest],
+    () => (chosen ? shares.filter((s) => s.record.digest === chosen.digest) : []),
+    [shares, chosen],
   )
 
   useEffect(() => {
@@ -239,20 +324,24 @@ export function App() {
     return seen
   }, [annotated, safeInfo])
 
+  const thresholdMet = safeInfo ? signedOwners.length >= safeInfo.threshold : false
+
   const runAggregate = useCallback(async () => {
     if (!adapter || selectedRecords.length === 0) return
-    setAggBusy(true)
     setAggError(null)
     try {
-      setAgg(await aggregateForSafe(selectedRecords, adapter))
+      setAgg(await aggregateForSafe(selectedRecords.map((s) => s.record), adapter))
     } catch (e) {
-      setAggError(e instanceof Error ? e.message : 'Aggregation failed (RPC/verify error)')
-    } finally {
-      setAggBusy(false)
+      setAggError(e instanceof Error ? e.message : 'Aggregation failed (RPC / verify error)')
     }
   }, [adapter, selectedRecords])
 
-  // execTransaction args are available only when the share carries a decodable SafeTx meta.
+  // AUTO-run aggregate (read-only) the moment the quorum is met.
+  useEffect(() => {
+    if (thresholdMet && adapter && !agg && !aggError) void runAggregate()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [thresholdMet, adapter, agg, aggError])
+
   const execArgs = useMemo(() => {
     if (!agg || agg.ordered.length === 0) return null
     const head = agg.ordered[0]
@@ -265,295 +354,405 @@ export function App() {
     }
   }, [agg])
 
-  const submit = useCallback(async () => {
+  const execute = useCallback(async () => {
     if (!safe || !execArgs) return
     setSubmitState({ state: 'busy' })
     try {
       const hash = await wallet.submitExecTransaction(safe, execArgs.args)
       setSubmitState({ state: 'done', detail: hash })
     } catch (e) {
-      setSubmitState({ state: 'error', detail: e instanceof Error ? e.message : 'submit rejected' })
+      setSubmitState({ state: 'error', detail: e instanceof Error ? e.message : 'execution rejected' })
     }
   }, [safe, execArgs, wallet])
 
-  const thresholdMet = safeInfo ? signedOwners.length >= safeInfo.threshold : false
+  // ── wizard progression ──────────────────────────────────────────────────────────────────────
+  const iSigned = useMemo(
+    () =>
+      !!chosen &&
+      !!wallet.address &&
+      annotated.some((a) => a.signer && isAddressEqual(a.signer, wallet.address as Hex)),
+    [annotated, chosen, wallet.address],
+  )
+  const step1done = !!safeInfo && !!safe
+  const step2done = !!chosen
+  const step3done = step2done && (signState === 'posted' || iSigned)
+  const activeStep = !step1done ? 1 : !step2done ? 2 : !step3done ? 3 : 4
 
-  // ── render ────────────────────────────────────────────────────────────────
+  const meta = chainMeta(safeChainId)
+  const valueStr = chosen?.tx ? `${formatUnits(chosen.tx.value, 18)} ${meta.symbol}` : '—'
+  const step2Summary = sim?.summary ?? (chosen ? short(chosen.digest) : '')
+
+  // ── render ────────────────────────────────────────────────────────────────────────────────────
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8">
-      <header className="mb-8">
-        <div className="flex items-center gap-2">
-          <Icon icon="mdi:signature-freehand" className="text-2xl text-indigo-400" />
-          <h1 className="text-xl font-bold">Cosign</h1>
+    <div className="wrap">
+      <header className="hdr">
+        <div className="brand">
+          <div className="sig">✶</div>
+          <div>
+            <div className="eyebrow">signing register</div>
+            <h1>Cosign</h1>
+          </div>
         </div>
-        <p className="mt-1 text-sm text-gray-400">
-          Co-sign a Gnosis Safe transaction off-chain over the MsgBoard signature-share board. Shares are
-          PoW-stamped in a Web Worker and bucketed under rotating UTC-day category keys.
-        </p>
+        <div className="who">
+          {wallet.address ? (
+            <>
+              <span className="chip">{short(wallet.address)}</span>
+              {board && factors?.enabled ? (
+                <span className="live">
+                  ◆ <b>on the board</b>
+                </span>
+              ) : (
+                <span className="pill">board offline</span>
+              )}
+            </>
+          ) : (
+            <button className="chip" onClick={() => void wallet.connect()} disabled={!wallet.available || wallet.connecting}>
+              {wallet.available ? (wallet.connecting ? 'connecting…' : 'connect wallet') : 'no wallet'}
+            </button>
+          )}
+        </div>
       </header>
 
-      <div className="flex flex-col gap-5">
-        {/* Step 1 — board */}
-        <Section step={1} title="Board endpoint" done={!!factors?.enabled} subtitle="Where signature shares are posted + read (independent of the Safe's chain).">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="MsgBoard RPC">
-              <select
-                value={boardIdx}
-                onChange={(e) => setBoardIdx(Number(e.target.value))}
-                className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-sm">
-                {BOARD_ENDPOINTS.map((b, i) => (
-                  <option key={b.rpc} value={i}>
-                    {b.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <div className="flex items-end gap-2 text-xs text-gray-400">
-              {!factors && <Pill>probing…</Pill>}
-              {factors && (
+      <div className="grid">
+        {/* ───────────────── MAIN COLUMN ───────────────── */}
+        <div>
+          {/* STEP 01 — Safe */}
+          {step1done && safeInfo && safe ? (
+            <RegisterLine n="01" label="Safe" tick="◈" action={{ label: 'change', onClick: editSafe }}>
+              {safeInfo.threshold}-of-{safeInfo.owners.length}{' '}
+              <span className="tag">
+                · {meta.name} {safeChainId} ·
+              </span>{' '}
+              {short(safe)}
+            </RegisterLine>
+          ) : (
+            <StepCard n="01" title="Pick your Safe" active={activeStep === 1} sub={discovering ? 'discovering…' : 'owned by you'}>
+              {!wallet.address ? (
                 <>
-                  <Pill tone={factors.enabled ? 'ok' : 'warn'}>
-                    msgboard_ {factors.enabled ? 'enabled' : 'unavailable'}
-                  </Pill>
-                  <Pill>
-                    work {factors.workMultiplier}/{factors.workDivisor}
-                  </Pill>
+                  <p className="hint">Connect a wallet to auto-discover the Safes it owns.</p>
+                  <button className="btn brass" onClick={() => void wallet.connect()} disabled={!wallet.available || wallet.connecting}>
+                    <Icon icon="mdi:wallet" /> {wallet.available ? 'Connect wallet' : 'No injected wallet'}
+                  </button>
+                  {wallet.error && <div className="notice err">{wallet.error}</div>}
+                </>
+              ) : (
+                <>
+                  {discovered && discovered.length > 0 && (
+                    <div style={{ marginBottom: 12 }}>
+                      <p className="hint">Safes owned by {short(wallet.address)} on {meta.name}:</p>
+                      {discovered.map((d) => (
+                        <button
+                          key={d.address}
+                          className={cx('pick', selectedSafe && isAddressEqual(selectedSafe, d.address) && 'on')}
+                          onClick={() => void selectAndLoad(d.address)}>
+                          <Icon icon="mdi:safe" />
+                          {short(d.address)}
+                          <span className="pill" style={{ marginLeft: 'auto' }}>
+                            {meta.name} {d.chainId}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {discovered && discovered.length === 0 && (
+                    <div className="notice info">
+                      No Safes auto-discovered for this wallet on {meta.name} (indexer/service unavailable or none owned).
+                      Enter a Safe address manually below.
+                    </div>
+                  )}
+                  <Field label="Safe address (manual)" hint="Read on your wallet's current chain — the chain id binds the EIP-712 domain.">
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <TextInput value={manual} onChange={setManual} placeholder="0x… Safe (proxy) address" mono />
+                      <button
+                        className="btn"
+                        onClick={() => isAddress(manual) && void selectAndLoad(manual as Hex)}
+                        disabled={!isAddress(manual) || safeLoading}>
+                        {safeLoading ? <Icon icon="mdi:loading" className="spin" /> : 'Load'}
+                      </button>
+                    </div>
+                  </Field>
+                  {safeError && <div className="notice err">{safeError}</div>}
                 </>
               )}
-            </div>
-          </div>
-        </Section>
+            </StepCard>
+          )}
 
-        {/* Step 2 — wallet + Safe */}
-        <Section step={2} title="Connect wallet & select Safe" done={!!safeInfo}>
-          {!wallet.address ? (
-            <Button onClick={() => void wallet.connect()} busy={wallet.connecting} disabled={!wallet.available}>
-              <Icon icon="mdi:wallet" /> {wallet.available ? 'Connect wallet' : 'No injected wallet'}
-            </Button>
+          {/* STEP 02 — Transaction */}
+          {step2done && chosen ? (
+            <RegisterLine n="02" label="Transaction" tick="⬡" action={{ label: 'view', onClick: editDigest }}>
+              safeTxHash <span className="tag">{short(chosen.digest)}</span>
+              {step2Summary && <> · <span className="trunc">{step2Summary}</span></>}
+            </RegisterLine>
           ) : (
-            <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-gray-300">
-              <Pill tone="ok">connected</Pill>
-              <code className="font-mono">{wallet.address}</code>
-              <Pill>chain {wallet.chainId ?? '?'}</Pill>
-            </div>
-          )}
-          {wallet.error && (
-            <div className="mt-2">
-              <Notice tone="error">{wallet.error}</Notice>
-            </div>
-          )}
-
-          <div className="mt-4 grid gap-3">
-            <Field
-              label="Safe address"
-              hint="Read on the wallet's current chain. Switch your wallet to the Safe's chain first — the chain id binds the EIP-712 domain.">
-              <TextInput value={safeInput} onChange={setSafeInput} placeholder="0x… Safe (proxy) address" mono />
-            </Field>
-            <div>
-              <Button onClick={() => void loadSafe()} disabled={!adapter} busy={safeLoading} variant="ghost">
-                <Icon icon="mdi:account-multiple" /> Read owners & threshold
-              </Button>
-            </div>
-          </div>
-
-          {safeError && (
-            <div className="mt-3">
-              <Notice tone="error">{safeError}</Notice>
-            </div>
-          )}
-          {safeInfo && (
-            <div className="mt-3 rounded-md border border-gray-800 bg-gray-950 p-3 text-xs">
-              <div className="mb-2 flex items-center gap-2">
-                <Pill tone="ok">threshold {safeInfo.threshold}</Pill>
-                <Pill>
-                  {safeInfo.owners.length} owner{safeInfo.owners.length === 1 ? '' : 's'}
-                </Pill>
-              </div>
-              <ul className="space-y-1 font-mono text-gray-400">
-                {safeInfo.owners.map((o) => (
-                  <li key={o} className="flex items-center gap-2">
-                    <Icon icon="mdi:circle-small" /> {o}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </Section>
-
-        {/* Step 3 — digest */}
-        <Section step={3} title="Pick a digest to co-sign">
-          <div className="mb-3 flex gap-2">
-            <Button onClick={() => setMode('paste')} variant={mode === 'paste' ? 'primary' : 'ghost'}>
-              Paste digest
-            </Button>
-            <Button onClick={() => setMode('safetx')} variant={mode === 'safetx' ? 'primary' : 'ghost'}>
-              Build SafeTx
-            </Button>
-          </div>
-
-          {mode === 'paste' ? (
-            <Field
-              label="Digest / safeTxHash (bytes32)"
-              hint="Signed with personal_sign → an eth_sign-style ECDSA share. Submission needs the SafeTx fields, so on-chain submit is unavailable for paste-only digests.">
-              <TextInput value={pasteDigest} onChange={setPasteDigest} placeholder="0x… 32-byte digest" mono />
-            </Field>
-          ) : (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="to"><TextInput value={form.to} onChange={setFormField('to')} placeholder="0x… target" mono /></Field>
-              <Field label="value (wei)"><TextInput value={form.value} onChange={setFormField('value')} mono /></Field>
-              <Field label="data"><TextInput value={form.data} onChange={setFormField('data')} mono /></Field>
-              <Field label="operation (0=call,1=delegatecall)"><TextInput value={form.operation} onChange={setFormField('operation')} mono /></Field>
-              <Field label="nonce"><TextInput value={form.nonce} onChange={setFormField('nonce')} mono /></Field>
-              <Field label="safeTxGas"><TextInput value={form.safeTxGas} onChange={setFormField('safeTxGas')} mono /></Field>
-              <Field label="baseGas"><TextInput value={form.baseGas} onChange={setFormField('baseGas')} mono /></Field>
-              <Field label="gasPrice"><TextInput value={form.gasPrice} onChange={setFormField('gasPrice')} mono /></Field>
-              <Field label="gasToken"><TextInput value={form.gasToken} onChange={setFormField('gasToken')} mono /></Field>
-              <Field label="refundReceiver"><TextInput value={form.refundReceiver} onChange={setFormField('refundReceiver')} mono /></Field>
-              <div className="sm:col-span-2">
-                {builtSafeTx ? (
-                  <Field label="computed safeTxHash (EIP-712, signTypedData)">
-                    <Copyable value={builtSafeTx.digest} label="digest" />
-                  </Field>
-                ) : (
-                  <Notice tone="info">Enter a valid `to` address to compute the EIP-712 digest.</Notice>
-                )}
-              </div>
-            </div>
-          )}
-        </Section>
-
-        {/* Step 4 — sign + post */}
-        <Section step={4} title="Sign & post share" done={signState === 'posted'}>
-          <Button
-            onClick={() => void sign()}
-            busy={signState === 'signing' || signState === 'grinding'}
-            disabled={
-              !board ||
-              !scope ||
-              !wallet.address ||
-              (mode === 'paste' ? !pasteValid : !builtSafeTx)
-            }>
-            <Icon icon="mdi:fountain-pen-tip" /> Sign & post to board
-          </Button>
-          <div className="mt-3 space-y-2 text-xs text-gray-400">
-            {!scope && wallet.address && <Notice tone="info">Load a Safe first to derive the board scope.</Notice>}
-            {signState === 'signing' && <Pill tone="warn">awaiting wallet signature…</Pill>}
-            {signState === 'grinding' && (
-              <Pill tone="warn">
-                grinding PoW in worker… {grind ? `${grind.stats.iterations.toString()} iters` : ''}
-              </Pill>
-            )}
-            {signState === 'posted' && <Pill tone="ok">share posted</Pill>}
-            {signState === 'error' && signError && <Notice tone="error">{signError}</Notice>}
-          </div>
-        </Section>
-
-        {/* Step 5 — read + aggregate */}
-        <Section step={5} title="Read shares & aggregate">
-          <div className="mb-3">
-            <Button onClick={() => void refreshShares()} disabled={!board || !scope} busy={sharesLoading} variant="ghost">
-              <Icon icon="mdi:refresh" /> Reload shares ({shares.length})
-            </Button>
-          </div>
-
-          {digests.length > 0 && (
-            <div className="mb-3">
-              <span className="mb-1 block text-xs font-medium text-gray-400">Co-sign sessions (by digest)</span>
-              <ul className="space-y-1">
-                {digests.map(([d, n]) => (
-                  <li key={d}>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedDigest(d)}
-                      className={`flex w-full items-center justify-between rounded-md border px-3 py-2 text-left font-mono text-[11px] ${
-                        selectedDigest === d ? 'border-indigo-500 bg-indigo-950/40' : 'border-gray-800 hover:bg-gray-800/50'
-                      }`}>
-                      <span className="truncate">{d}</span>
-                      <span className="ml-2 shrink-0 text-gray-400">
-                        {n} share{n === 1 ? '' : 's'}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {selectedDigest && (
-            <div className="rounded-md border border-gray-800 bg-gray-950 p-3">
-              <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
-                {safeInfo ? (
-                  <Pill tone={thresholdMet ? 'ok' : 'warn'}>
-                    {signedOwners.length}/{safeInfo.threshold} owners signed
-                  </Pill>
-                ) : (
-                  <Pill>load Safe for threshold progress</Pill>
-                )}
-                <Pill>{selectedRecords.length} raw shares</Pill>
+            <StepCard n="02" title="What to sign" active={activeStep === 2} sub="digest or SafeTx">
+              <div className="tabrow">
+                <button className={cx('tab', mode === 'safetx' && 'on')} onClick={() => setMode('safetx')}>
+                  Build SafeTx
+                </button>
+                <button className={cx('tab', mode === 'paste' && 'on')} onClick={() => setMode('paste')}>
+                  Paste digest
+                </button>
               </div>
 
-              <ul className="mb-3 space-y-1 text-[11px]">
-                {annotated.map((a, i) => {
-                  const isOwner = !!a.signer && !!safeInfo?.owners.some((o) => isAddressEqual(o, a.signer as Hex))
-                  return (
-                    <li key={`${a.record.signature}-${i}`} className="flex items-center gap-2 font-mono text-gray-400">
-                      <Icon
-                        icon={a.signer ? (isOwner ? 'mdi:check-circle' : 'mdi:help-circle') : 'mdi:alert-circle'}
-                        className={a.signer ? (isOwner ? 'text-emerald-400' : 'text-gray-500') : 'text-red-400'} />
-                      <span className="truncate">{a.signer ?? 'unrecoverable'}</span>
-                      <span className="ml-auto shrink-0 text-gray-600">{schemeLabel(a.record.scheme)}</span>
-                    </li>
-                  )
-                })}
-              </ul>
-
-              <Button onClick={() => void runAggregate()} disabled={!adapter} busy={aggBusy}>
-                <Icon icon="mdi:layers-triple" /> Verify & aggregate (adapter)
-              </Button>
-              {!adapter && <p className="mt-2 text-[11px] text-gray-500">Connect wallet + load Safe to enable aggregation.</p>}
-              {aggError && (
-                <div className="mt-2">
-                  <Notice tone="error">{aggError}</Notice>
-                </div>
-              )}
-
-              {agg && (
-                <div className="mt-3 space-y-2">
-                  <span className="block text-xs font-medium text-gray-400">
-                    Final Safe `signatures` blob ({agg.pairs.length} verified)
-                  </span>
-                  <Copyable value={agg.blob} label="signatures blob" />
-
-                  {execArgs ? (
-                    <div className="mt-3 space-y-2">
-                      <Notice tone="info">
-                        execTransaction args are available (this digest carries a SafeTx). Submitting sends a real
-                        transaction from your wallet on chain {safeChainId} — experimental, untested against a live Safe.
-                      </Notice>
-                      <Button onClick={() => void submit()} busy={submitState.state === 'busy'} variant="danger">
-                        <Icon icon="mdi:send" /> Submit execTransaction
-                      </Button>
-                      {submitState.state === 'done' && (
-                        <Pill tone="ok">submitted: {submitState.detail?.slice(0, 14)}…</Pill>
-                      )}
-                      {submitState.state === 'error' && <Notice tone="error">{submitState.detail}</Notice>}
-                    </div>
+              {mode === 'paste' ? (
+                <Field
+                  label="Digest / safeTxHash (bytes32)"
+                  hint="Signed with personal_sign → an eth_sign-style ECDSA share. On-chain execute needs the SafeTx fields, so a paste-only digest yields the signatures blob only.">
+                  <TextInput value={pasteDigest} onChange={setPasteDigest} placeholder="0x… 32-byte digest" mono />
+                </Field>
+              ) : (
+                <>
+                  <div className="formgrid">
+                    <Field label="to"><TextInput value={form.to} onChange={setFormField('to')} placeholder="0x… target" mono /></Field>
+                    <Field label="value (wei)"><TextInput value={form.value} onChange={setFormField('value')} mono /></Field>
+                    <Field label="data"><TextInput value={form.data} onChange={setFormField('data')} mono /></Field>
+                    <Field label="operation (0=call,1=delegatecall)"><TextInput value={form.operation} onChange={setFormField('operation')} mono /></Field>
+                    <Field label="nonce"><TextInput value={form.nonce} onChange={setFormField('nonce')} mono /></Field>
+                    <Field label="safeTxGas"><TextInput value={form.safeTxGas} onChange={setFormField('safeTxGas')} mono /></Field>
+                  </div>
+                  {builtSafeTx ? (
+                    <p className="hint" style={{ margin: '4px 0 0' }}>
+                      safeTxHash <span className="mono">{short(builtSafeTx.digest)}</span>
+                    </p>
                   ) : (
-                    <Notice tone="info">
-                      Submit is unavailable: this is a paste-only digest with no SafeTx fields. Copy the blob above and
-                      submit via your existing Safe execution path.
-                    </Notice>
+                    <div className="notice info">Enter a valid `to` address to compute the EIP-712 safeTxHash.</div>
                   )}
-                </div>
+
+                  {/* "What this does" — simulation panel */}
+                  {builtSafeTx && (
+                    <SimPanel sim={sim} busy={simBusy} onRerun={() => void runSim()} />
+                  )}
+                </>
               )}
-            </div>
+
+              <div className="btnrow">
+                <button
+                  className="btn brass"
+                  onClick={confirmDigest}
+                  disabled={mode === 'paste' ? !pasteValid : !builtSafeTx || (!!sim && sim.reverted)}>
+                  <Icon icon="mdi:arrow-right" /> Confirm &amp; continue
+                </button>
+              </div>
+            </StepCard>
           )}
-        </Section>
+
+          {/* STEP 03 — Your share */}
+          {step3done ? (
+            <RegisterLine n="03" label="Your share" tick="✎" action={{ label: 'receipt', onClick: () => void refreshShares() }}>
+              signed &amp; posted{' '}
+              <span className="tag">
+                · {schemeLabel(chosen?.scheme ?? SCHEME.EIP712)}
+                {grind ? ` · ${grind.stats.iterations.toString()} iters` : ''}
+              </span>
+            </RegisterLine>
+          ) : (
+            <StepCard n="03" title="Sign & post your share" active={activeStep === 3} sub="stamped off-thread">
+              {chosen && (
+                <>
+                  <p className="hint">
+                    Sign the {schemeLabel(chosen.scheme)} digest, PoW-stamp it in a Web Worker (never the main
+                    thread), and post the share to the board.
+                  </p>
+                  <div className="btnrow">
+                    <button
+                      className="btn brass"
+                      onClick={() => void sign()}
+                      disabled={!board || !scope || signState === 'signing' || signState === 'grinding'}>
+                      {signState === 'signing' || signState === 'grinding' ? (
+                        <Icon icon="mdi:loading" className="spin" />
+                      ) : (
+                        <Icon icon="mdi:fountain-pen-tip" />
+                      )}
+                      Sign &amp; post
+                    </button>
+                  </div>
+                  <div style={{ marginTop: 8 }}>
+                    {signState === 'signing' && <span className="pill brass">awaiting wallet signature…</span>}
+                    {signState === 'grinding' && (
+                      <span className="pill brass">
+                        grinding PoW… {grind ? `${grind.stats.iterations.toString()} iters` : ''}
+                      </span>
+                    )}
+                    {signState === 'error' && signError && <div className="notice err">{signError}</div>}
+                  </div>
+                </>
+              )}
+            </StepCard>
+          )}
+
+          {/* STEP 04 — Collect & execute (terminal active card) */}
+          <StepCard n="04" title="Collect & execute" active={activeStep === 4} sub={archiveOn ? 'board ∪ archive' : 'board'}>
+            <p className="hint">
+              Shares read from the live board{archiveOn ? ' and the archive' : ''}.{' '}
+              {thresholdMet ? 'The quorum is met — the seal is ready to execute.' : 'Waiting on more owners to sign.'}
+            </p>
+
+            {safeInfo?.owners.map((o) => {
+              const match = annotated.find((a) => a.signer && isAddressEqual(a.signer, o))
+              const done = !!match
+              const you = !!wallet.address && isAddressEqual(o, wallet.address)
+              const status = done
+                ? `signed · ${schemeLabel(match!.record.scheme).split(' ')[0]}${match!.source === 'archive' ? ' · from archive' : ''}`
+                : thresholdMet
+                  ? 'not required — quorum met'
+                  : 'awaiting signature'
+              return <OwnerRow key={o} addr={o} you={you} done={done} status={status} />
+            })}
+
+            <div style={{ marginTop: 8 }}>
+              <span className={cx('pill', thresholdMet ? 'patina' : 'brass')}>
+                {signedOwners.length}/{safeInfo?.threshold ?? '?'} owners signed
+              </span>{' '}
+              <button className="edit" style={{ marginLeft: 8 }} onClick={() => void refreshShares()}>
+                {sharesLoading ? 'reloading…' : 'reload'}
+              </button>
+            </div>
+
+            {aggError && <div className="notice err">{aggError}</div>}
+
+            {agg && (
+              <div style={{ marginTop: 10 }}>
+                <span className="pill patina">aggregate ready · {agg.pairs.length} verified</span>
+                <div style={{ marginTop: 8 }}>
+                  <Copyable value={agg.blob} label="signatures blob" />
+                </div>
+                <div className="btnrow">
+                  {execArgs ? (
+                    <button className="btn brass" onClick={() => void execute()} disabled={submitState.state === 'busy'}>
+                      {submitState.state === 'busy' ? <Icon icon="mdi:loading" className="spin" /> : <Icon icon="mdi:seal" />}
+                      Execute transaction
+                    </button>
+                  ) : (
+                    <span className="pill">paste-only digest — copy the blob and execute via your Safe</span>
+                  )}
+                  <button
+                    className="btn"
+                    onClick={() => void navigator.clipboard?.writeText(agg.blob)}>
+                    <Icon icon="mdi:content-copy" /> Copy signatures blob
+                  </button>
+                </div>
+                {submitState.state === 'done' && <span className="pill patina">executed: {short(submitState.detail)}</span>}
+                {submitState.state === 'error' && <div className="notice err">{submitState.detail}</div>}
+              </div>
+            )}
+          </StepCard>
+        </div>
+
+        {/* ───────────────── RAIL — the quorum seal ───────────────── */}
+        <aside className="rail-wrap">
+          <div className="rail">
+            <div className="sealwrap">
+              <Seal
+                signed={signedOwners.length}
+                threshold={safeInfo?.threshold ?? 0}
+                ownersTotal={safeInfo?.owners.length ?? 3}
+                executed={submitState.state === 'done'} />
+            </div>
+            <div className="sealcaption">
+              <div className="big">
+                {submitState.state === 'done'
+                  ? 'Sealed'
+                  : thresholdMet
+                    ? 'Seal ready'
+                    : safeInfo
+                      ? 'Collecting'
+                      : 'Awaiting Safe'}
+              </div>
+              <div className="small">
+                {safeInfo
+                  ? `${signedOwners.length} of ${safeInfo.owners.length} owners · threshold ${safeInfo.threshold}`
+                  : 'connect + pick a Safe'}
+              </div>
+            </div>
+
+            <dl className="meta">
+              <div className="mrow">
+                <dt>safe</dt>
+                <dd>
+                  {safe ? short(safe) : '—'}{' '}
+                  {safeInfo && <span className="q">{safeInfo.threshold}-of-{safeInfo.owners.length}</span>}
+                </dd>
+              </div>
+              <div className="mrow">
+                <dt>chain</dt>
+                <dd>
+                  {meta.name} <span className="q">{safeChainId ?? '?'}</span>
+                </dd>
+              </div>
+              <div className="mrow">
+                <dt>digest</dt>
+                <dd>{chosen ? short(chosen.digest) : '—'}</dd>
+              </div>
+              <div className="mrow">
+                <dt>value</dt>
+                <dd>{valueStr}</dd>
+              </div>
+            </dl>
+
+            <div className="cfg">
+              <span>
+                board {endpoint.chainId} · archive {archiveOn ? 'on' : 'off'}
+              </span>
+              <button className="gear" onClick={() => setShowCfg((s) => !s)}>
+                ⚙ settings
+              </button>
+            </div>
+            {showCfg && (
+              <div style={{ marginTop: 8 }}>
+                <select value={boardIdx} onChange={(e) => setBoardIdx(Number(e.target.value))}>
+                  {BOARD_ENDPOINTS.map((b, i) => (
+                    <option key={b.rpc} value={i}>
+                      {b.label}
+                    </option>
+                  ))}
+                </select>
+                <div className="small" style={{ marginTop: 6 }}>
+                  {factors ? `work ${factors.workMultiplier}/${factors.workDivisor}` : 'probing board…'}
+                </div>
+              </div>
+            )}
+          </div>
+        </aside>
       </div>
 
-      <footer className="mt-10 text-center text-[11px] text-gray-600">
-        @msgboard/cosign · Safe adapter · ECDSA + EIP-712 owner paths
-      </footer>
+      <footer className="foot">@msgboard/cosign · safe adapter · ECDSA + EIP-712 · shares stamped off-thread</footer>
+    </div>
+  )
+}
+
+/** The "What this does" simulation panel. */
+function SimPanel(props: { sim: SimResult | null; busy: boolean; onRerun: () => void }) {
+  const { sim, busy } = props
+  return (
+    <div className={cx('sim', sim?.reverted && 'rev')}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <span className="eyebrow">what this does</span>
+        <button className="edit" style={{ marginLeft: 'auto' }} onClick={props.onRerun} disabled={busy}>
+          {busy ? 'simulating…' : 're-simulate'}
+        </button>
+      </div>
+      {busy && !sim && <div className="small">simulating on the Safe's chain…</div>}
+      {sim && (
+        <>
+          <div className="plain">
+            {sim.reverted && <Icon icon="mdi:alert" style={{ color: 'var(--oxblood)' }} />} {sim.summary}
+          </div>
+          {sim.changes.map((c, i) => (
+            <div className="chg" key={i}>
+              <span className="trunc">
+                {short(c.address)} · {c.token ? short(c.token) : c.symbol}
+              </span>
+              <span className={c.raw < 0n ? 'neg' : 'pos'}>
+                {c.amount} {c.token ? '' : c.symbol}
+              </span>
+            </div>
+          ))}
+          <details className="raw">
+            <summary>raw trace · via {sim.source}</summary>
+            <pre>{JSON.stringify(sim.raw, null, 2)}</pre>
+          </details>
+        </>
+      )}
     </div>
   )
 }

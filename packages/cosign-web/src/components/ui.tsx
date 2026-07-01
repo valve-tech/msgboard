@@ -1,41 +1,161 @@
 import { useState, type ReactNode } from 'react'
 import { Icon } from '@iconify/react'
 
-/** A numbered flow step card with a title + optional subtitle. */
-export function Section(props: {
-  step: number
-  title: string
-  done?: boolean
-  subtitle?: string
-  children: ReactNode
+/** `0x9A3d…4F10`-style address/hash truncation (mono display). */
+export const short = (a?: string | null, head = 6, tail = 4): string =>
+  a ? (a.length <= head + tail + 1 ? a : `${a.slice(0, head)}…${a.slice(-tail)}`) : '—'
+
+export const cx = (...c: (string | false | null | undefined)[]): string => c.filter(Boolean).join(' ')
+
+/* ── The quorum seal ──────────────────────────────────────────────────────────────────────────
+ * A segmented SVG ring — one arc per required signature (threshold) — filling BRASS as owners sign.
+ * The center reads `signed/threshold`. On quorum it completes ("QUORUM MET"); after execute it locks
+ * to OXBLOOD ("SEALED"). This IS the threshold progress. Arc fills animate via the `.seg` CSS
+ * transition, which is disabled under `prefers-reduced-motion`.
+ */
+export function Seal(props: {
+  signed: number
+  threshold: number
+  ownersTotal: number
+  executed: boolean
 }) {
+  const { signed, threshold, ownersTotal, executed } = props
+  const cx0 = 75
+  const cy0 = 75
+  const r = 52
+  const C = 2 * Math.PI * r
+  const n = Math.max(threshold, 1)
+  const gap = n > 1 ? 7 : 0
+  const seg = C / n - gap
+  const met = signed >= threshold && threshold > 0
+  const fillColor = executed ? 'var(--oxblood)' : 'var(--brass)'
+
+  const segments = Array.from({ length: n }, (_, i) => {
+    const filled = i < signed
+    const rot = -90 + (i * 360) / n
+    return (
+      <circle
+        key={i}
+        className="seg"
+        cx={cx0}
+        cy={cy0}
+        r={r}
+        fill="none"
+        stroke={filled ? fillColor : 'var(--line2)'}
+        strokeWidth={7}
+        strokeLinecap="butt"
+        strokeDasharray={`${seg} ${C - seg}`}
+        transform={`rotate(${rot} ${cx0} ${cy0})`}
+        style={{ filter: filled && !executed ? 'drop-shadow(0 0 3px rgba(199,154,62,.5))' : undefined }} />
+    )
+  })
+
+  // owner ticks around the outside (one per owner in the set)
+  const ticks = Array.from({ length: Math.max(ownersTotal, 1) }, (_, i) => {
+    const a = (-90 + (i * 360) / Math.max(ownersTotal, 1)) * (Math.PI / 180)
+    const inner = 62
+    const outer = 68
+    return (
+      <line
+        key={i}
+        x1={cx0 + inner * Math.cos(a)}
+        y1={cy0 + inner * Math.sin(a)}
+        x2={cx0 + outer * Math.cos(a)}
+        y2={cy0 + outer * Math.sin(a)}
+        stroke="var(--dim)"
+        strokeWidth={2} />
+    )
+  })
+
+  const caption = executed ? 'SEALED' : met ? 'QUORUM MET' : `${threshold - signed} MORE`
+
   return (
-    <section className="rounded-xl border border-gray-800 bg-gray-900/60 p-5">
-      <header className="mb-4 flex items-center gap-3">
-        <span
-          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${
-            props.done ? 'bg-emerald-600 text-white' : 'bg-gray-800 text-gray-300'
-          }`}>
-          {props.done ? <Icon icon="mdi:check" /> : props.step}
-        </span>
-        <div>
-          <h2 className="text-base font-semibold text-gray-100">{props.title}</h2>
-          {props.subtitle && <p className="text-xs text-gray-400">{props.subtitle}</p>}
-        </div>
-      </header>
-      {props.children}
-    </section>
+    <svg
+      width="150"
+      height="150"
+      viewBox="0 0 150 150"
+      role="img"
+      aria-label={`${signed} of ${threshold} signatures collected${executed ? ', executed' : met ? ', quorum met' : ''}`}>
+      <g>{ticks}</g>
+      {segments}
+      <circle cx={cx0} cy={cy0} r={40} fill="rgba(199,154,62,.05)" stroke="var(--brass-dim)" strokeWidth={1} />
+      <text
+        x={cx0}
+        y={72}
+        textAnchor="middle"
+        fontFamily="Space Grotesk"
+        fontWeight={700}
+        fontSize={27}
+        fill="var(--parch)">
+        {signed}/{threshold || '?'}
+      </text>
+      <text
+        x={cx0}
+        y={90}
+        textAnchor="middle"
+        fontFamily="IBM Plex Mono"
+        fontSize={8.5}
+        letterSpacing={1.5}
+        fill={executed ? 'var(--oxblood)' : 'var(--brass)'}>
+        {caption}
+      </text>
+    </svg>
   )
 }
 
-/** A labelled form field. */
-export function Field(props: { label: string; hint?: string; children: ReactNode }) {
+/** A collapsed, completed step — a ledger line carrying its real dynamic values in mono. */
+export function RegisterLine(props: {
+  n: string
+  label: string
+  tick: string
+  children: ReactNode
+  action?: { label: string; onClick: () => void }
+}) {
   return (
-    <label className="block">
-      <span className="mb-1 block text-xs font-medium text-gray-400">{props.label}</span>
-      {props.children}
-      {props.hint && <span className="mt-1 block text-[11px] text-gray-500">{props.hint}</span>}
-    </label>
+    <div className="reg">
+      <span className="n">{props.n}</span>
+      <span className="lbl">{props.label}</span>
+      <span className="val trunc">
+        <span className="seal-tick">{props.tick}</span>
+        {props.children}
+      </span>
+      {props.action && (
+        <button type="button" className="edit" onClick={props.action.onClick}>
+          {props.action.label}
+        </button>
+      )}
+    </div>
+  )
+}
+
+/** The one active step card (bold) or a locked future-step head. */
+export function StepCard(props: {
+  n: string
+  title: string
+  sub?: string
+  active: boolean
+  children?: ReactNode
+}) {
+  return (
+    <div className={cx('step', props.active && 'active')}>
+      <div className="head">
+        <span className={cx('num', props.active ? 'on' : 'off')}>{props.n}</span>
+        <h3>{props.title}</h3>
+        {props.sub && <span className="sub">{props.sub}</span>}
+      </div>
+      {props.active && props.children && <div className="body">{props.children}</div>}
+    </div>
+  )
+}
+
+export function OwnerRow(props: { addr: string; you?: boolean; done: boolean; status: string }) {
+  return (
+    <div className={cx('owner', props.done && 'done')}>
+      <span className={cx('dot', props.done ? 'done' : 'wait')} />
+      {short(props.addr)}
+      {props.you && <span className="you">you</span>}
+      <span className="st">{props.status}</span>
+    </div>
   )
 }
 
@@ -53,39 +173,20 @@ export function TextInput(props: {
       disabled={props.disabled}
       placeholder={props.placeholder}
       onChange={(e) => props.onChange(e.target.value)}
-      className={`w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-100 outline-none placeholder:text-gray-600 focus:border-indigo-500 disabled:opacity-50 ${
-        props.mono ? 'font-mono text-xs' : ''
-      }`} />
+      className={cx('input', props.mono && 'mono')} />
   )
 }
 
-export function Button(props: {
-  onClick: () => void
-  children: ReactNode
-  disabled?: boolean
-  variant?: 'primary' | 'ghost' | 'danger'
-  busy?: boolean
-}) {
-  const variant = props.variant ?? 'primary'
-  const styles =
-    variant === 'primary'
-      ? 'bg-indigo-600 hover:bg-indigo-500 text-white disabled:bg-gray-700'
-      : variant === 'danger'
-        ? 'bg-amber-700 hover:bg-amber-600 text-white disabled:bg-gray-700'
-        : 'border border-gray-700 text-gray-200 hover:bg-gray-800 disabled:opacity-40'
+export function Field(props: { label: string; hint?: string; children: ReactNode }) {
   return (
-    <button
-      type="button"
-      onClick={props.onClick}
-      disabled={props.disabled || props.busy}
-      className={`inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition ${styles} disabled:cursor-not-allowed`}>
-      {props.busy && <Icon icon="mdi:loading" className="animate-spin" />}
+    <label className="field">
+      <span className="lbl">{props.label}</span>
       {props.children}
-    </button>
+      {props.hint && <span className="hint" style={{ margin: '5px 0 0' }}>{props.hint}</span>}
+    </label>
   )
 }
 
-/** Monospace value with a copy button. */
 export function Copyable(props: { value: string; label?: string }) {
   const [copied, setCopied] = useState(false)
   const copy = () => {
@@ -95,34 +196,18 @@ export function Copyable(props: { value: string; label?: string }) {
     })
   }
   return (
-    <div className="flex items-start gap-2 rounded-md border border-gray-800 bg-gray-950 p-2">
-      <code className="grow break-all font-mono text-[11px] text-gray-300">{props.value}</code>
+    <div className="notice info" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <code className="mono trunc" style={{ flex: 1, fontSize: 11 }}>
+        {props.value}
+      </code>
       <button
         type="button"
         onClick={copy}
         title={`Copy ${props.label ?? 'value'}`}
-        className="shrink-0 rounded p-1 text-gray-400 hover:bg-gray-800 hover:text-gray-100">
+        className="edit"
+        style={{ marginLeft: 0 }}>
         <Icon icon={copied ? 'mdi:check' : 'mdi:content-copy'} />
       </button>
     </div>
   )
-}
-
-export function Pill(props: { children: ReactNode; tone?: 'ok' | 'warn' | 'muted' }) {
-  const tone = props.tone ?? 'muted'
-  const styles =
-    tone === 'ok'
-      ? 'bg-emerald-900/50 text-emerald-300'
-      : tone === 'warn'
-        ? 'bg-amber-900/50 text-amber-300'
-        : 'bg-gray-800 text-gray-400'
-  return <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${styles}`}>{props.children}</span>
-}
-
-export function Notice(props: { tone: 'error' | 'info'; children: ReactNode }) {
-  const styles =
-    props.tone === 'error'
-      ? 'border-red-900 bg-red-950/50 text-red-300'
-      : 'border-indigo-900 bg-indigo-950/40 text-indigo-200'
-  return <div className={`rounded-md border px-3 py-2 text-xs ${styles}`}>{props.children}</div>
 }

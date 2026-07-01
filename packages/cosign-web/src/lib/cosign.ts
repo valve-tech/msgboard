@@ -12,6 +12,7 @@ import {
   recoverEffectiveSigner,
   buildSignatureBlob,
 } from '@msgboard/cosign'
+import { loadArchiveShares, shareKey } from './archive'
 
 /** The cosign namespace — the first segment of every category key. */
 export const NAMESPACE = 'cosign'
@@ -30,9 +31,39 @@ export async function postShare(board: BoardClient, scope: string, record: Signa
   await postSignature(board, { namespace: NAMESPACE, scope, record })
 }
 
-/** Reads the rolling window of shares for `scope` (decode-junk-skipping + dedupe handled by the SDK). */
-export async function loadShares(board: BoardClient, scope: string): Promise<SignatureRecord[]> {
-  return readSignatures(board, { namespace: NAMESPACE, scope, days: WINDOW_DAYS })
+/** Where a unioned share came from — surfaced in the owner checklist ("from archive"). */
+export type ShareSource = 'board' | 'archive'
+
+/**
+ * Reads the rolling window of shares for `scope`, UNIONING the live board with the cosign archivist
+ * (so shares that have aged out of the board still count toward the quorum). Board records win on a
+ * signature collision; the archive only contributes shares the board no longer serves. The archive
+ * leg degrades to nothing on any failure (`loadArchiveShares` never throws), so this stays board-only
+ * when the archive is down. Junk-skipping + per-source dedupe is handled by the SDK / archive client.
+ */
+export async function loadShares(
+  board: BoardClient,
+  scope: string,
+  opts?: { archiveBase?: string; archive?: boolean },
+): Promise<{ record: SignatureRecord; source: ShareSource }[]> {
+  const boardRecords = await readSignatures(board, { namespace: NAMESPACE, scope, days: WINDOW_DAYS })
+  const seen = new Set<string>()
+  const out: { record: SignatureRecord; source: ShareSource }[] = []
+  for (const record of boardRecords) {
+    const k = shareKey(record)
+    if (seen.has(k)) continue
+    seen.add(k)
+    out.push({ record, source: 'board' })
+  }
+  if (opts?.archive === false) return out
+  const archived = await loadArchiveShares({ base: opts?.archiveBase, namespace: NAMESPACE, scope, days: WINDOW_DAYS })
+  for (const record of archived) {
+    const k = shareKey(record)
+    if (seen.has(k)) continue
+    seen.add(k)
+    out.push({ record, source: 'archive' })
+  }
+  return out
 }
 
 /** Records grouped by the digest they sign, so the UI can list one co-sign session per digest. */
@@ -45,16 +76,20 @@ export interface AnnotatedShare {
   record: SignatureRecord
   /** The recovered signer, or null if the signature is malformed (recovery threw). */
   signer: Hex | null
+  /** Where the share was read from — board (live) or archive (aged-out). */
+  source: ShareSource
 }
 
 /** Annotates each record with its recovered signer (SDK `recoverEffectiveSigner`; digest-agnostic). */
-export async function annotate(records: SignatureRecord[]): Promise<AnnotatedShare[]> {
+export async function annotate(
+  records: { record: SignatureRecord; source: ShareSource }[],
+): Promise<AnnotatedShare[]> {
   return Promise.all(
-    records.map(async (record) => {
+    records.map(async ({ record, source }) => {
       try {
-        return { record, signer: await recoverEffectiveSigner(record) }
+        return { record, source, signer: await recoverEffectiveSigner(record) }
       } catch {
-        return { record, signer: null }
+        return { record, source, signer: null }
       }
     }),
   )
