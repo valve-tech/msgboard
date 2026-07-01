@@ -1,0 +1,39 @@
+# nwaku WSS node CO-LOCATED on the msgboard box (this is what's actually deployed at /opt/waku).
+# It joins the box's existing external `edge` network so the shared Caddy reaches it as nwaku:8001,
+# and the waku.msgboard.xyz route lives in the shared /opt/msgboard/deploy/caddy/Caddyfile — NOT the
+# standalone caddy/tunnel edges in this dir (those are for a dedicated waku box). Standalone Waku
+# network (cluster-id 0, no RLN); persistent nodekey via .env keeps the peer id stable.
+services:
+  nwaku:
+    image: ${NWAKU_IMAGE:-wakuorg/nwaku:v0.38.1}
+    container_name: nwaku
+    restart: unless-stopped
+    volumes:
+      - nwaku-store:/store
+    networks:
+      - edge
+    command:
+      - --relay=true
+      - --lightpush=true
+      - --filter=true
+      - --store=true
+      - --store-message-retention-policy=time:86400
+      - --store-message-db-url=sqlite:///store/store.sqlite3
+      - --websocket-support=true
+      - --websocket-port=8001
+      - --tcp-port=60000
+      - --cluster-id=0
+      - --nodekey=${WAKU_NODEKEY}
+      - --ext-multiaddr=/dns4/${WAKU_DOMAIN:-waku.msgboard.xyz}/tcp/443/wss
+      - --ext-multiaddr-only=true
+      - --rest=true
+      - --rest-address=0.0.0.0
+      - --rest-port=8645
+      - --log-level=INFO
+
+networks:
+  edge:
+    external: true
+
+volumes:
+  nwaku-store:

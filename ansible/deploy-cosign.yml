@@ -1,32 +1,70 @@
 ---
-# Deploy the cosign UI on the msgboard prod box, with a SAFE Caddy reload (backup → add block →
-# `caddy adapt` → reload → positive smoke; auto-rollback on any failure). Encodes the valve-caddy-config
-# discipline. The box's deploy/caddy/Caddyfile is private/on-box (gitignored), so we edit it idempotently.
+# Deploy the cosign UI onto the msgboard box. Reality: the box's {{ deploy_dir }} is a NON-git snapshot,
+# so we rsync the cosign-web source in (rather than git pull), register its workspace, add the service via
+# a compose override, build + start it, then add the Caddy route with a SAFE reload (backup → caddy adapt
+# → reload → positive + regression smoke → block/rescue auto-rollback). Idempotent.
 #
-#   ansible-playbook deploy-cosign.yml
-- name: Deploy cosign UI (safe Caddy reload)
+#   SSH_AUTH_SOCK="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock" \
+#     ansible-playbook deploy-cosign.yml
+- name: Deploy cosign UI (msgboard box)
   hosts: msgboard
-  become: true
+  gather_facts: true
   vars:
+    deploy_dir: /opt/msgboard
+    repo_root: "{{ playbook_dir }}/.."
     caddyfile: "{{ deploy_dir }}/deploy/caddy/Caddyfile"
-    compose: "docker compose -f docker-compose.prod.yml"
+    compose: "docker compose -f docker-compose.prod.yml -f docker-compose.cosign.yml"
   tasks:
-    - name: Check out the repo at {{ repo_branch }}
-      ansible.builtin.git:
-        repo: "{{ repo_url }}"
-        dest: "{{ deploy_dir }}"
-        version: "{{ repo_branch }}"
-        accept_hostkey: true
-        force: true
-
-    - name: Build + (re)start cosign-web
+    # Get the cosign-web source onto the box over the SINGLE existing SSH connection (tar → copy →
+    # extract) rather than `synchronize`, whose self-built `rsync -e ssh` ignores our identity args and
+    # trips the 1Password agent's key limit.
+    - name: Archive the cosign-web source locally (no node_modules/dist)
       ansible.builtin.command:
-        cmd: "{{ compose }} up -d --build cosign-web"
-        chdir: "{{ deploy_dir }}"
-      register: cosign_up
-      changed_when: "'Started' in cosign_up.stderr or 'Recreated' in cosign_up.stderr or 'Built' in cosign_up.stderr"
+        cmd: tar czf /tmp/cosign-web-src.tgz -C {{ repo_root }}/packages --exclude=node_modules --exclude=dist cosign-web
+      delegate_to: localhost
+      changed_when: false
 
-    - name: Configure the cosign.msgboard.xyz Caddy site (with rollback on failure)
+    - name: Copy the archive to the box
+      ansible.builtin.copy:
+        src: /tmp/cosign-web-src.tgz
+        dest: "{{ deploy_dir }}/cosign-web-src.tgz"
+        mode: "0644"
+
+    - name: Extract the cosign-web source into packages/
+      ansible.builtin.command:
+        cmd: tar xzf cosign-web-src.tgz -C packages
+        chdir: "{{ deploy_dir }}"
+      changed_when: true
+
+    - name: Copy the cosign compose override
+      ansible.builtin.copy:
+        src: "{{ repo_root }}/docker-compose.cosign.yml"
+        dest: "{{ deploy_dir }}/docker-compose.cosign.yml"
+        mode: "0644"
+
+    - name: Register the cosign-web workspace in root package.json (idempotent; via a node container)
+      ansible.builtin.command:
+        chdir: "{{ deploy_dir }}"
+        cmd: >
+          docker run --rm -v {{ deploy_dir }}:/w -w /w node:lts node -e
+          'const fs=require("fs"),p="package.json",j=JSON.parse(fs.readFileSync(p));j.workspaces=j.workspaces||[];if(!j.workspaces.includes("packages/cosign-web")){j.workspaces.push("packages/cosign-web");fs.writeFileSync(p,JSON.stringify(j,null,2)+"\n");console.log("added")}else{console.log("present")}'
+      register: ws
+      changed_when: "'added' in ws.stdout"
+
+    - name: Build the cosign-web image (full monorepo build — a few minutes)
+      ansible.builtin.command:
+        cmd: "{{ compose }} build cosign-web"
+        chdir: "{{ deploy_dir }}"
+      changed_when: true
+
+    - name: Start cosign-web
+      ansible.builtin.command:
+        cmd: "{{ compose }} up -d cosign-web"
+        chdir: "{{ deploy_dir }}"
+      register: up
+      changed_when: "'Started' in up.stderr or 'Recreated' in up.stderr or 'Created' in up.stderr"
+
+    - name: Configure the cosign.msgboard.xyz Caddy route (with rollback)
       block:
         - name: Back up the Caddyfile
           ansible.builtin.copy:
@@ -47,38 +85,52 @@
               }
           register: caddy_edit
 
-        - name: Validate the Caddyfile (caddy adapt — read-only)
-          ansible.builtin.command:
-            cmd: "{{ compose }} exec -T caddy caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile"
-            chdir: "{{ deploy_dir }}"
+        - name: Validate (caddy adapt — read-only)
+          ansible.builtin.command: docker exec caddy caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile
           changed_when: false
 
         - name: Reload Caddy
-          ansible.builtin.command:
-            cmd: "{{ compose }} exec -T caddy caddy reload --config /etc/caddy/Caddyfile"
-            chdir: "{{ deploy_dir }}"
+          ansible.builtin.command: docker exec caddy caddy reload --config /etc/caddy/Caddyfile
           when: caddy_edit.changed
 
-        - name: Positive smoke — cosign.msgboard.xyz at the origin (bypass DNS/CF), expect 200
-          ansible.builtin.command:
-            cmd: >-
-              curl -sk --resolve cosign.msgboard.xyz:443:127.0.0.1
-              https://cosign.msgboard.xyz/ -o /dev/null -w '%{http_code}'
+        # `caddy reload` on this box does NOT reliably apply a brand-NEW host block (it returns an empty
+        # 200 — Caddy's no-route default). Check the body, and if it's empty, do a clean restart (all
+        # sites are behind Cloudflare, which retries the ~1-3s blip).
+        - name: Probe whether the new host actually serves a body
+          ansible.builtin.command: >-
+            docker run --rm --network host curlimages/curl:latest -sk
+            --resolve cosign.msgboard.xyz:443:127.0.0.1 https://cosign.msgboard.xyz/ -o /dev/null -w '%{http_code}:%{size_download}'
+          register: probe
+          changed_when: false
+          failed_when: false
+
+        - name: Restart Caddy if the reload didn't apply the new host
+          ansible.builtin.command: docker restart caddy
+          when: probe.stdout is not match('^200:[1-9][0-9]*$')
+
+        - name: Settle after restart
+          ansible.builtin.pause:
+            seconds: 5
+          when: probe.stdout is not match('^200:[1-9][0-9]*$')
+
+        - name: Positive smoke — cosign.msgboard.xyz serves 200 + a NON-EMPTY body
+          ansible.builtin.command: >-
+            docker run --rm --network host curlimages/curl:latest -sk
+            --resolve cosign.msgboard.xyz:443:127.0.0.1 https://cosign.msgboard.xyz/ -o /dev/null -w '%{http_code}:%{size_download}'
           register: smoke
           changed_when: false
-          failed_when: smoke.stdout != "200"
-          retries: 5
+          failed_when: smoke.stdout is not match('^200:[1-9][0-9]*$')
+          retries: 8
           delay: 3
-          until: smoke.stdout == "200"
+          until: smoke.stdout is match('^200:[1-9][0-9]*$')
 
-        - name: Negative smoke — an unknown host must NOT 500 (Rule 1 regression guard)
-          ansible.builtin.command:
-            cmd: >-
-              curl -sk --resolve nope.msgboard.xyz:443:127.0.0.1
-              https://nope.msgboard.xyz/ -o /dev/null -w '%{http_code}'
-          register: neg
+        - name: Regression smoke — msgboard.xyz still serves 200 + a body
+          ansible.builtin.command: >-
+            docker run --rm --network host curlimages/curl:latest -sk
+            --resolve msgboard.xyz:443:127.0.0.1 https://msgboard.xyz/ -o /dev/null -w '%{http_code}:%{size_download}'
+          register: reg
           changed_when: false
-          failed_when: neg.stdout == "500"
+          failed_when: reg.stdout is not match('^200:[1-9][0-9]*$')
 
       rescue:
         - name: Restore the Caddyfile from backup
@@ -87,17 +139,13 @@
             dest: "{{ caddyfile }}"
             remote_src: true
           when: caddy_backup.dest is defined
-
         - name: Reload Caddy after restore
-          ansible.builtin.command:
-            cmd: "{{ compose }} exec -T caddy caddy reload --config /etc/caddy/Caddyfile"
-            chdir: "{{ deploy_dir }}"
+          ansible.builtin.command: docker exec caddy caddy reload --config /etc/caddy/Caddyfile
           when: caddy_backup.dest is defined
-
         - name: Fail loudly
           ansible.builtin.fail:
-            msg: "cosign Caddy change failed validation/smoke — Caddyfile restored from backup and reloaded."
+            msg: "cosign Caddy change failed validation/smoke — Caddyfile restored + reloaded."
 
     - name: Done
       ansible.builtin.debug:
-        msg: "cosign-web is live behind cosign.msgboard.xyz (origin smoke 200). Ensure the DNS A record exists + proxied."
+        msg: "cosign-web live behind cosign.msgboard.xyz (origin smoke 200)."

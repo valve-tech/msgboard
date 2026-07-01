@@ -1,70 +1,154 @@
 ---
-# Deploy the nwaku WSS node (+ optional MsgBoard relay) on the waku box.
+# Deploy the nwaku WSS node CO-LOCATED on the msgboard box (88.99.62.98) — the actual topology: nwaku
+# joins the box's existing `edge` network so the shared Caddy reaches it, and waku.msgboard.xyz is a
+# route in the shared Caddyfile. Standalone Waku network (cluster-id 0, no RLN); the nodekey is
+# generated ONCE and preserved so the peer id (the multiaddr friends dial) never changes. Idempotent.
 #
-# Prereqs (one-time, by you): docker + compose on the box; the box can `git clone` the repo (deploy key
-# or forwarded agent); and — for the tunnel edge — a Cloudflare Tunnel created in the dashboard with its
-# Public Hostname routed waku.msgboard.xyz -> caddy:80, its token in vault_cf_tunnel_token.
-#
-#   ansible-playbook deploy-waku.yml
-#   ansible-playbook deploy-waku.yml -e waku_relay_enabled=true   # also start the MsgBoard mirror
-- name: Deploy nwaku WSS node on the waku box
-  hosts: waku
-  become: true
+#   SSH_AUTH_SOCK="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock" \
+#     ansible-playbook deploy-waku.yml
+- name: Deploy nwaku WSS node (co-located on the msgboard box)
+  hosts: msgboard
+  gather_facts: true
   vars:
-    ops_dir: "{{ deploy_dir }}/packages/waku-relay/ops"
-    compose: "docker compose -f docker-compose.yml -f docker-compose.{{ waku_edge }}.yml"
-    profile: "{{ '--profile relay' if waku_relay_enabled | bool else '' }}"
+    waku_dir: /opt/waku
+    repo_root: "{{ playbook_dir }}/.."
+    caddyfile: /opt/msgboard/deploy/caddy/Caddyfile
+    waku_domain: waku.msgboard.xyz
+    nwaku_image: "wakuorg/nwaku:v0.38.1"
   tasks:
-    - name: Assert docker + compose v2 are present
-      ansible.builtin.command: "{{ item }}"
-      changed_when: false
-      loop:
-        - docker --version
-        - docker compose version
+    - name: Ensure the waku dir
+      ansible.builtin.file:
+        path: "{{ waku_dir }}"
+        state: directory
+        mode: "0755"
 
-    - name: Check out the repo at {{ repo_branch }}
-      ansible.builtin.git:
-        repo: "{{ repo_url }}"
-        dest: "{{ deploy_dir }}"
-        version: "{{ repo_branch }}"
-        accept_hostkey: true
-        force: true
+    - name: Generate a persistent nodekey once (keeps the peer id stable)
+      ansible.builtin.shell: "[ -f {{ waku_dir }}/.nodekey ] || openssl rand -hex 32 > {{ waku_dir }}/.nodekey; chmod 600 {{ waku_dir }}/.nodekey"
+      args:
+        creates: "{{ waku_dir }}/.nodekey"
 
-    - name: Render the ops .env (nodekey, tunnel token, image pin)
-      ansible.builtin.template:
-        src: waku.env.j2
-        dest: "{{ ops_dir }}/.env"
-        mode: "0600"
+    - name: Read the nodekey
+      ansible.builtin.slurp:
+        src: "{{ waku_dir }}/.nodekey"
+      register: nodekey
 
-    - name: Install the origin cert pair (caddy edge only)
+    - name: Render the .env
       ansible.builtin.copy:
-        src: "{{ item.src }}"
-        dest: "{{ ops_dir }}/{{ item.dest }}"
+        dest: "{{ waku_dir }}/.env"
         mode: "0600"
-      loop:
-        - { src: "{{ origin_cert_src | default('') }}", dest: "origin.pem" }
-        - { src: "{{ origin_key_src | default('') }}", dest: "origin.key" }
-      when: waku_edge == 'caddy'
+        content: |
+          WAKU_NODEKEY={{ nodekey.content | b64decode | trim }}
+          NWAKU_IMAGE={{ nwaku_image }}
+          WAKU_DOMAIN={{ waku_domain }}
 
-    - name: Bring up nwaku + {{ waku_edge }} edge {{ '(+ relay)' if waku_relay_enabled | bool else '' }}
+    - name: Copy the co-located nwaku compose
+      ansible.builtin.copy:
+        src: "{{ repo_root }}/packages/waku-relay/ops/docker-compose.colocated.yml"
+        dest: "{{ waku_dir }}/docker-compose.yml"
+        mode: "0644"
+
+    - name: Bring up nwaku (on the shared edge network)
       ansible.builtin.command:
-        cmd: "{{ compose }} {{ profile }} up -d"
-        chdir: "{{ ops_dir }}"
+        cmd: docker compose up -d
+        chdir: "{{ waku_dir }}"
       register: up
       changed_when: "'Started' in up.stderr or 'Created' in up.stderr or 'Recreated' in up.stderr"
 
-    - name: Wait for the nwaku REST API to answer
-      ansible.builtin.command:
-        cmd: "{{ compose }} exec -T nwaku curl -fsS http://127.0.0.1:8645/debug/v1/info"
-        chdir: "{{ ops_dir }}"
+    - name: Read the node's dial multiaddr (peer id)
+      ansible.builtin.command: docker run --rm --network edge curlimages/curl:latest -fsS http://nwaku:8645/debug/v1/info
       register: node_info
       changed_when: false
       retries: 20
       delay: 3
       until: node_info.rc == 0 and node_info.stdout | length > 0
 
-    - name: The node info (contains the multiaddr / peer id friends dial)
+    - name: Add the waku.msgboard.xyz route to the shared Caddyfile (with rollback)
+      block:
+        - name: Back up the Caddyfile
+          ansible.builtin.copy:
+            src: "{{ caddyfile }}"
+            dest: "{{ caddyfile }}.bak.{{ ansible_date_time.iso8601_basic_short }}"
+            remote_src: true
+          register: caddy_backup
+
+        - name: Add / update the waku.msgboard.xyz block (idempotent)
+          ansible.builtin.blockinfile:
+            path: "{{ caddyfile }}"
+            marker: "# {mark} ANSIBLE waku.msgboard.xyz"
+            block: |
+              waku.msgboard.xyz {
+              	tls /etc/caddy/origin.pem /etc/caddy/origin.key
+              	encode gzip
+              	reverse_proxy nwaku:8001
+              }
+          register: caddy_edit
+
+        - name: Validate (caddy adapt)
+          ansible.builtin.command: docker exec caddy caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile
+          changed_when: false
+
+        - name: Reload Caddy
+          ansible.builtin.command: docker exec caddy caddy reload --config /etc/caddy/Caddyfile
+          when: caddy_edit.changed
+
+        # reload doesn't reliably apply a NEW host on this box → probe the WSS handshake (expect 101);
+        # if it didn't take, restart caddy (all sites are behind Cloudflare).
+        - name: Probe the WSS handshake (expect 101)
+          ansible.builtin.command: >-
+            docker run --rm --network host curlimages/curl:latest -sk --http1.1
+            -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Sec-WebSocket-Version: 13"
+            -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ=="
+            --resolve {{ waku_domain }}:443:127.0.0.1 https://{{ waku_domain }}/ -o /dev/null -w '%{http_code}'
+          register: probe
+          changed_when: false
+          failed_when: false
+
+        - name: Restart Caddy if the reload didn't apply the new host
+          ansible.builtin.command: docker restart caddy
+          when: probe.stdout != "101"
+
+        - name: Settle after restart
+          ansible.builtin.pause:
+            seconds: 5
+          when: probe.stdout != "101"
+
+        - name: Positive smoke — WSS handshake returns 101
+          ansible.builtin.command: >-
+            docker run --rm --network host curlimages/curl:latest -sk --http1.1
+            -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Sec-WebSocket-Version: 13"
+            -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ=="
+            --resolve {{ waku_domain }}:443:127.0.0.1 https://{{ waku_domain }}/ -o /dev/null -w '%{http_code}'
+          register: smoke
+          changed_when: false
+          failed_when: smoke.stdout != "101"
+          retries: 6
+          delay: 3
+          until: smoke.stdout == "101"
+
+        - name: Regression smoke — msgboard.xyz still serves 200 + a body
+          ansible.builtin.command: >-
+            docker run --rm --network host curlimages/curl:latest -sk
+            --resolve msgboard.xyz:443:127.0.0.1 https://msgboard.xyz/ -o /dev/null -w '%{http_code}:%{size_download}'
+          register: reg
+          changed_when: false
+          failed_when: reg.stdout is not match('^200:[1-9][0-9]*$')
+
+      rescue:
+        - name: Restore the Caddyfile from backup
+          ansible.builtin.copy:
+            src: "{{ caddy_backup.dest }}"
+            dest: "{{ caddyfile }}"
+            remote_src: true
+          when: caddy_backup.dest is defined
+        - name: Restart Caddy after restore
+          ansible.builtin.command: docker restart caddy
+          when: caddy_backup.dest is defined
+        - name: Fail loudly
+          ansible.builtin.fail:
+            msg: "waku Caddy change failed — Caddyfile restored + caddy restarted."
+
+    - name: Dial address for friends
       ansible.builtin.debug:
         msg: >-
-          nwaku is up. Friends dial /dns4/{{ waku_domain }}/tcp/443/wss/p2p/<PEER_ID> with js-waku
-          networkConfig {clusterId:0, shards:[0]}. Node info: {{ node_info.stdout }}
+          nwaku live. Friends dial the /dns4/{{ waku_domain }}/tcp/443/wss/p2p/<peerId> from this info
+          with js-waku networkConfig {clusterId:0, shards:[0]}: {{ node_info.stdout }}
