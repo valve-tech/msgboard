@@ -1,0 +1,31 @@
+# Safe-owner indexer (owner -> [Safe addresses]) for PulseChain 369 + v4 943 — the two chains with NO
+# official Safe Transaction Service. Backs the cosign UI's SAFE_INDEXER_BASE
+# (https://cosign.msgboard.xyz/safe-indexer), so a wallet can discover the N Safes it co-owns on
+# PulseChain the same way mainnet uses safe.global. Ponder 0.16, same stack/conventions as
+# docker-compose.prod.yml's games-indexer-943.
+#
+# Deploy via the runbook, NOT by hand:  ansible-playbook ansible/deploy-safe-indexer.yml
+#   docker compose -f docker-compose.prod.yml -f docker-compose.safe-indexer.yml up -d safe-indexer
+#
+# Storage: a dedicated `safes` Postgres database on msgboard-postgres (created by the deploy play
+# before this starts, mirroring how games-indexer gets its `games` db), into a fresh schema safe_<n>
+# (SAFE_SCHEMA) so a re-index never clashes with live rows. Served on :42069 over the docker network;
+# Caddy path-routes cosign.msgboard.xyz/safe-indexer/* -> safe-indexer:42069 (see deploy-cosign.yml).
+services:
+  safe-indexer:
+    container_name: safe-indexer
+    build:
+      context: ./deploy/safe-indexer
+    depends_on:
+      - msgboard-postgres
+    restart: unless-stopped
+    networks:
+      - msgboard
+    environment:
+      DATABASE_URL: postgres://msgboard-postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@msgboard-postgres:5432/safes
+      # Default to the public valve.city RPC (same key the app already uses in config.ts) so the
+      # indexer needs no extra secret; override in the box .env to point at a private endpoint.
+      PONDER_RPC_URL_369: ${PONDER_RPC_URL_369:-https://one.valve.city/rpc/vk_demo/evm/369}
+      PONDER_RPC_URL_943: ${PONDER_RPC_URL_943:-https://one.valve.city/rpc/vk_demo/evm/943}
+      PONDER_SCHEMA: ${SAFE_SCHEMA:-safe_1}
+      PONDER_TELEMETRY_DISABLED: 'true'

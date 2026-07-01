@@ -73,6 +73,10 @@
             remote_src: true
           register: caddy_backup
 
+        # Union block: the SPA plus the safe-indexer path route (handle_path strips /safe-indexer so the
+        # upstream sees /owners/…, /health). Written identically in deploy-safe-indexer.yml under the same
+        # marker so either play converges to the same config. The /safe-indexer upstream simply 502s until
+        # the indexer is deployed — `caddy adapt` does not resolve upstreams, and the SPA is unaffected.
         - name: Add / update the cosign.msgboard.xyz block (idempotent)
           ansible.builtin.blockinfile:
             path: "{{ caddyfile }}"
@@ -81,7 +85,12 @@
               cosign.msgboard.xyz {
               	tls /etc/caddy/origin.pem /etc/caddy/origin.key
               	encode gzip
-              	reverse_proxy cosign-web:4173
+              	handle_path /safe-indexer/* {
+              		reverse_proxy safe-indexer:42069
+              	}
+              	handle {
+              		reverse_proxy cosign-web:4173
+              	}
               }
           register: caddy_edit
 

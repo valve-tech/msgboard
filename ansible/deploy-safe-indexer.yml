@@ -1,0 +1,172 @@
+---
+# Deploy the Safe-owner indexer onto the msgboard box and path-route it under cosign.msgboard.xyz.
+# The box's {{ deploy_dir }} is a NON-git snapshot, so we tar the vendored deploy/safe-indexer over the
+# single SSH connection (NOT `synchronize`, whose rsync ignores our identity args and trips the
+# 1Password key limit), ensure a dedicated `safes` Postgres database, build + start the service, then
+# fold the /safe-indexer/* route into the cosign.msgboard.xyz Caddy block with a SAFE reload
+# (backup -> caddy adapt -> reload -> body-aware smoke on BOTH the SPA and the indexer -> rollback).
+# Idempotent. The union Caddy block is written identically here and in deploy-cosign.yml so either play
+# converges to the same config regardless of run order.
+#
+#   SSH_AUTH_SOCK="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock" \
+#     ansible-playbook deploy-safe-indexer.yml
+- name: Deploy Safe-owner indexer (msgboard box)
+  hosts: msgboard
+  gather_facts: true
+  vars:
+    deploy_dir: /opt/msgboard
+    repo_root: "{{ playbook_dir }}/.."
+    caddyfile: "{{ deploy_dir }}/deploy/caddy/Caddyfile"
+    compose: "docker compose -f docker-compose.prod.yml -f docker-compose.safe-indexer.yml"
+  tasks:
+    - name: Archive the safe-indexer source locally (no node_modules)
+      ansible.builtin.command:
+        cmd: tar czf /tmp/safe-indexer-src.tgz -C {{ repo_root }}/deploy --exclude=node_modules safe-indexer
+      delegate_to: localhost
+      changed_when: false
+
+    - name: Copy the archive to the box
+      ansible.builtin.copy:
+        src: /tmp/safe-indexer-src.tgz
+        dest: "{{ deploy_dir }}/safe-indexer-src.tgz"
+        mode: "0644"
+
+    - name: Ensure deploy/ exists on the box
+      ansible.builtin.file:
+        path: "{{ deploy_dir }}/deploy"
+        state: directory
+        mode: "0755"
+
+    - name: Extract the safe-indexer source into deploy/
+      ansible.builtin.command:
+        cmd: tar xzf safe-indexer-src.tgz -C deploy
+        chdir: "{{ deploy_dir }}"
+      changed_when: true
+
+    - name: Copy the safe-indexer compose override
+      ansible.builtin.copy:
+        src: "{{ repo_root }}/docker-compose.safe-indexer.yml"
+        dest: "{{ deploy_dir }}/docker-compose.safe-indexer.yml"
+        mode: "0644"
+
+    # A dedicated `safes` database on the shared Postgres, mirroring how games-indexer gets `games`.
+    # psql over the container's unix socket connects as the POSTGRES_USER superuser (no password).
+    - name: Ensure the `safes` Postgres database exists (idempotent)
+      ansible.builtin.shell:
+        cmd: |
+          set -euo pipefail
+          if docker exec msgboard-postgres psql -U msgboard-postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='safes'" | grep -q 1; then
+            echo "safes db present"
+          else
+            docker exec msgboard-postgres createdb -U msgboard-postgres safes
+            echo "safes db created"
+          fi
+      register: safesdb
+      changed_when: "'created' in safesdb.stdout"
+
+    - name: Build the safe-indexer image
+      ansible.builtin.command:
+        cmd: "{{ compose }} build safe-indexer"
+        chdir: "{{ deploy_dir }}"
+      changed_when: true
+
+    - name: Start safe-indexer
+      ansible.builtin.command:
+        cmd: "{{ compose }} up -d safe-indexer"
+        chdir: "{{ deploy_dir }}"
+      register: up
+      changed_when: "'Started' in up.stderr or 'Recreated' in up.stderr or 'Created' in up.stderr"
+
+    - name: Configure the cosign.msgboard.xyz Caddy block with the /safe-indexer route (with rollback)
+      block:
+        - name: Back up the Caddyfile
+          ansible.builtin.copy:
+            src: "{{ caddyfile }}"
+            dest: "{{ caddyfile }}.bak.safeidx.{{ ansible_date_time.iso8601_basic_short }}"
+            remote_src: true
+          register: caddy_backup
+
+        # Union block: indexer path route first (handle_path strips /safe-indexer so the upstream sees
+        # /owners/…, /health, /graphql), SPA second. Same marker as deploy-cosign.yml -> idempotent
+        # across both plays.
+        - name: Write the union cosign.msgboard.xyz block (idempotent)
+          ansible.builtin.blockinfile:
+            path: "{{ caddyfile }}"
+            marker: "# {mark} ANSIBLE cosign.msgboard.xyz"
+            block: |
+              cosign.msgboard.xyz {
+              	tls /etc/caddy/origin.pem /etc/caddy/origin.key
+              	encode gzip
+              	handle_path /safe-indexer/* {
+              		reverse_proxy safe-indexer:42069
+              	}
+              	handle {
+              		reverse_proxy cosign-web:4173
+              	}
+              }
+          register: caddy_edit
+
+        - name: Validate (caddy adapt — read-only)
+          ansible.builtin.command: docker exec caddy caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile
+          changed_when: false
+
+        - name: Reload Caddy
+          ansible.builtin.command: docker exec caddy caddy reload --config /etc/caddy/Caddyfile
+          when: caddy_edit.changed
+
+        # `caddy reload` on this box does NOT reliably re-apply a rewritten host block; if the SPA root
+        # stops serving a body, do a clean restart (all sites are behind Cloudflare, which retries the blip).
+        - name: Probe whether the SPA still serves a body
+          ansible.builtin.command: >-
+            docker run --rm --network host curlimages/curl:latest -sk
+            --resolve cosign.msgboard.xyz:443:127.0.0.1 https://cosign.msgboard.xyz/ -o /dev/null -w '%{http_code}:%{size_download}'
+          register: probe
+          changed_when: false
+          failed_when: false
+
+        - name: Restart Caddy if the reload didn't apply the block
+          ansible.builtin.command: docker restart caddy
+          when: probe.stdout is not match('^200:[1-9][0-9]*$')
+
+        - name: Settle after restart
+          ansible.builtin.pause:
+            seconds: 5
+          when: probe.stdout is not match('^200:[1-9][0-9]*$')
+
+        - name: Positive smoke — the indexer answers 200 + a body through the path route
+          ansible.builtin.command: >-
+            docker run --rm --network host curlimages/curl:latest -sk
+            --resolve cosign.msgboard.xyz:443:127.0.0.1 https://cosign.msgboard.xyz/safe-indexer/health -o /dev/null -w '%{http_code}:%{size_download}'
+          register: idxsmoke
+          changed_when: false
+          failed_when: idxsmoke.stdout is not match('^200:[1-9][0-9]*$')
+          # Ponder needs a moment to boot + run migrations before /health listens.
+          retries: 30
+          delay: 5
+          until: idxsmoke.stdout is match('^200:[1-9][0-9]*$')
+
+        - name: Regression smoke — the cosign SPA still serves 200 + a body
+          ansible.builtin.command: >-
+            docker run --rm --network host curlimages/curl:latest -sk
+            --resolve cosign.msgboard.xyz:443:127.0.0.1 https://cosign.msgboard.xyz/ -o /dev/null -w '%{http_code}:%{size_download}'
+          register: spasmoke
+          changed_when: false
+          failed_when: spasmoke.stdout is not match('^200:[1-9][0-9]*$')
+
+      rescue:
+        - name: Restore the Caddyfile from backup
+          ansible.builtin.copy:
+            src: "{{ caddy_backup.dest }}"
+            dest: "{{ caddyfile }}"
+            remote_src: true
+          when: caddy_backup.dest is defined
+        - name: Reload Caddy after restore
+          ansible.builtin.command: docker exec caddy caddy reload --config /etc/caddy/Caddyfile
+          when: caddy_backup.dest is defined
+        - name: Fail loudly
+          ansible.builtin.fail:
+            msg: "safe-indexer Caddy change failed validation/smoke — Caddyfile restored + reloaded. (The service may still be up; only the route was rolled back.)"
+
+    - name: Done
+      ansible.builtin.debug:
+        msg: "safe-indexer live at cosign.msgboard.xyz/safe-indexer (owner->safes on 369/943); historical backfill continues in the background."
