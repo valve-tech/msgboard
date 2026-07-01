@@ -136,10 +136,12 @@ function foldTransferLogs(
     const from = getAddress(`0x${log.topics[1].slice(-40)}`)
     const to = getAddress(`0x${log.topics[2].slice(-40)}`)
     const amount = BigInt(log.data)
-    // geth's eth_simulateV1 traceTransfers emits native moves as Transfer logs from the zero address.
-    const addr = log.address ?? '0x0000000000000000000000000000000000000000'
-    const isNative = /^0x0+$/.test(addr)
-    const token = isNative ? null : getAddress(addr)
+    // eth_simulateV1 traceTransfers emits native moves as a Transfer log whose emitting address is the
+    // ERC-7528 native placeholder (0xEeee…EEeE — what this reth node uses) or, on some nodes, the zero
+    // address. Anything else is a real ERC-20 contract.
+    const addr = (log.address ?? '0x0000000000000000000000000000000000000000').toLowerCase()
+    const isNative = /^0x0+$/.test(addr) || addr === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+    const token = isNative ? null : getAddress(addr as Hex)
     bump(from, token, -amount)
     bump(to, token, amount)
   }
