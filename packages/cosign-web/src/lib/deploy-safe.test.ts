@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { buildSetup, SAFE_V141 } from './deploy-safe'
+import type { Hex } from 'viem'
+import { buildSetup, predictSafeAddress, SAFE_V141 } from './deploy-safe'
 
 describe('buildSetup', () => {
   it('encodes the exact v1.4.1 setup initializer (fixed fixture)', () => {
@@ -12,5 +13,24 @@ describe('buildSetup', () => {
 
   it('exposes the canonical v1.4.1 fallback handler', () => {
     expect(SAFE_V141.fallbackHandler).toBe('0xfd0732Dc9E303f09fCEf3a7388Ad10A83459Ec99')
+  })
+})
+
+describe('predictSafeAddress', () => {
+  it('matches the reference CREATE2 address for the fixed fixture (saltNonce 0)', () => {
+    // Reference computed from the real 369 v1.4.1 factory proxyCreationCode + canonical L2 singleton.
+    const predicted = predictSafeAddress({
+      owners: ['0x1111111111111111111111111111111111111111', '0x2222222222222222222222222222222222222222'],
+      threshold: 1,
+      saltNonce: 0n,
+    })
+    expect(predicted).toBe('0xf4065759F44c99b596448F58F59249a8C13F819C')
+  })
+
+  it('changes with the saltNonce', () => {
+    const base = { owners: ['0x1111111111111111111111111111111111111111'] as Hex[], threshold: 1 }
+    expect(predictSafeAddress({ ...base, saltNonce: 0n })).not.toBe(
+      predictSafeAddress({ ...base, saltNonce: 1n }),
+    )
   })
 })
