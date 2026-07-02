@@ -1,0 +1,21 @@
+{
+  "name": "msgboard-cosign-archive",
+  "version": "0.0.32",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@msgboard/history": "*",
+    "@msgboard/sdk": "*",
+    "pg": "^8.14.1",
+    "tsx": "^4.19.3",
+    "viem": "^2.25.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.11",
+    "typescript": "^5.8.2"
+  }
+}

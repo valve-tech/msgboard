@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "namespace": "cosign",
+  "windowDays": 7,
+  "teams": [{ "scope": "*", "label": "all" }],
+  "adapter": { "kind": "none" }
+}
