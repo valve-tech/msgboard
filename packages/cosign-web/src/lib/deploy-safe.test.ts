@@ -55,4 +55,20 @@ describe('confirmDeploy', () => {
     const other = '0x1111111111111111111111111111111111111111' as Hex
     await expect(confirmDeploy(fakeClientWithProxy(proxy), '0xdead' as Hex, other)).rejects.toThrow()
   })
+  it('ignores a ProxyCreation-shaped log not emitted by the canonical factory', async () => {
+    const topics = encodeEventTopics({ abi: PROXY_FACTORY_ABI, eventName: 'ProxyCreation', args: { proxy } })
+    const client = {
+      waitForTransactionReceipt: async () => ({
+        status: 'success',
+        logs: [
+          {
+            address: '0x9999999999999999999999999999999999999999',
+            topics,
+            data: '0x' + '0'.repeat(64),
+          },
+        ],
+      }),
+    } as any
+    await expect(confirmDeploy(client, '0xdead' as Hex, proxy)).rejects.toThrow('no ProxyCreation event')
+  })
 })

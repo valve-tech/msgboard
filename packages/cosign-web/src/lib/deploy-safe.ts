@@ -88,7 +88,7 @@ export function predictSafeAddress(args: { owners: Hex[]; threshold: number; sal
 }
 
 /** True when Safe v1.4.1's factory has code on `chainId` (i.e. Create-Safe can run there). */
-export async function isDeploySupported(client: PublicClient, _chainId: number): Promise<boolean> {
+export async function isDeploySupported(client: PublicClient): Promise<boolean> {
   const code = await client.getCode({ address: SAFE_V141.factory })
   return !!code && code !== '0x'
 }
@@ -99,24 +99,28 @@ export function randomSaltNonce(): bigint {
   return BigInt('0x' + [...bytes].map((b) => b.toString(16).padStart(2, '0')).join(''))
 }
 
+/** Thrown by {@link confirmDeploy} when the mined Safe proxy address doesn't match the predicted one. */
+export class SafeAddressMismatchError extends Error {}
+
 /** Waits for the deploy receipt, parses the `ProxyCreation` event, and returns the created proxy only if it equals the predicted address; otherwise throws. */
 export async function confirmDeploy(client: PublicClient, txHash: Hex, predicted: Hex): Promise<Hex> {
   const receipt = await client.waitForTransactionReceipt({ hash: txHash })
   if (receipt.status !== 'success') throw new Error('Deploy transaction reverted')
   for (const log of receipt.logs as Log[]) {
+    if (!isAddressEqual(log.address, SAFE_V141.factory)) continue
     try {
       const ev = decodeEventLog({ abi: PROXY_FACTORY_ABI, topics: log.topics, data: log.data })
       if (ev.eventName === 'ProxyCreation') {
         const proxy = (ev.args as { proxy: Hex }).proxy
         if (!isAddressEqual(proxy, predicted)) {
-          throw new Error(
+          throw new SafeAddressMismatchError(
             `Deployed Safe ${proxy} does not match the predicted address ${predicted} — do not use it.`,
           )
         }
         return proxy
       }
     } catch (e) {
-      if (e instanceof Error && e.message.includes('do not use it')) throw e
+      if (e instanceof SafeAddressMismatchError) throw e
       // not a ProxyCreation log — skip
     }
   }

@@ -38,7 +38,7 @@ export function CreateSafe(props: { wallet: UseWallet; onCreated: (safe: Hex, ch
       return
     }
     let cancelled = false
-    void isDeploySupported(wallet.publicClient(), wallet.chainId).then((ok) => {
+    void isDeploySupported(wallet.publicClient()).then((ok) => {
       if (!cancelled) setSupported(ok)
     })
     return () => {
