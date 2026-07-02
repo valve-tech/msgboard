@@ -9,6 +9,7 @@ import {
 } from 'viem'
 import { type Eip1193Provider, injectedProvider, parseChainId, firstAccount } from '../lib/eip1193'
 import { EXEC_TRANSACTION_ABI } from '../lib/safe-typed-data'
+import { SAFE_V141, PROXY_FACTORY_ABI } from '../lib/deploy-safe'
 
 export interface UseWallet {
   available: boolean
@@ -28,6 +29,8 @@ export interface UseWallet {
     safe: Hex,
     args: readonly [Hex, bigint, Hex, number, bigint, bigint, bigint, Hex, Hex, Hex],
   ) => Promise<Hex>
+  /** Deploys a new Safe v1.4.1 via createProxyWithNonce on the canonical factory. Returns the tx hash. */
+  deploySafe: (initializer: Hex, saltNonce: bigint) => Promise<Hex>
 }
 
 export function useWallet(): UseWallet {
@@ -123,6 +126,22 @@ export function useWallet(): UseWallet {
     [require],
   )
 
+  const deploySafe = useCallback(
+    async (initializer: Hex, saltNonce: bigint): Promise<Hex> => {
+      const { p, account } = require()
+      const wallet = createWalletClient({ account, transport: custom(p) })
+      return wallet.writeContract({
+        account,
+        chain: null,
+        address: SAFE_V141.factory,
+        abi: PROXY_FACTORY_ABI,
+        functionName: 'createProxyWithNonce',
+        args: [SAFE_V141.singletonL2, initializer, saltNonce],
+      })
+    },
+    [require],
+  )
+
   return {
     available: !!provider,
     address,
@@ -134,5 +153,6 @@ export function useWallet(): UseWallet {
     signTyped,
     publicClient,
     submitExecTransaction,
+    deploySafe,
   }
 }
