@@ -148,8 +148,12 @@ export function App() {
   }, [wallet.address, safeChainId])
 
   const selectAndLoad = useCallback(
-    async (addr: Hex) => {
-      if (!safeChainId || !wallet.address) return
+    // `chainIdOverride` lets a caller that already knows the exact chain (e.g. a just-completed
+    // Safe deploy) pin the read to THAT chain rather than trusting `safeChainId` (== wallet.chainId)
+    // to still match by the time this async call resolves.
+    async (addr: Hex, chainIdOverride?: number) => {
+      const chain = chainIdOverride ?? safeChainId
+      if (!chain || !wallet.address) return
       setSafeError(null)
       setSafeInfo(null)
       setSelectedSafe(getAddress(addr))
@@ -158,7 +162,7 @@ export function App() {
         const a = makeSafeAdapter({
           publicClient: wallet.publicClient() as unknown as SafePublicClient,
           safe: getAddress(addr),
-          chainId: safeChainId,
+          chainId: chain,
         })
         const [owners, threshold] = await Promise.all([a.owners!(), a.threshold!()])
         setSafeInfo({ owners, threshold })
@@ -173,11 +177,13 @@ export function App() {
   )
 
   // hand the newly-deployed Safe to the co-sign flow (same setter as the manual-entry path — reads
-  // owners/threshold straight off-chain, so it doesn't matter that we already know them).
+  // owners/threshold straight off-chain, so it doesn't matter that we already know them). Pin the
+  // read to the chain the deploy actually ran on, rather than relying on `safeChainId` still
+  // matching by the time this resolves.
   const handleCreated = useCallback(
-    (newSafe: Hex, _chainId: number) => {
+    (newSafe: Hex, chainId: number) => {
       setView('cosign')
-      void selectAndLoad(newSafe)
+      void selectAndLoad(newSafe, chainId)
     },
     [selectAndLoad],
   )
@@ -436,7 +442,7 @@ export function App() {
         </button>
       </div>
 
-      {view === 'create' && <CreateSafe onCreated={handleCreated} />}
+      {view === 'create' && <CreateSafe wallet={wallet} onCreated={handleCreated} />}
 
       {view === 'cosign' && (
       <div className="grid">

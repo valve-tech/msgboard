@@ -1,17 +1,21 @@
 import { useEffect, useMemo, useState } from 'react'
 import { type Hex, getAddress, isAddress, isAddressEqual } from 'viem'
 import { Icon } from '@iconify/react'
-import { useWallet } from '../hooks/useWallet'
+import type { UseWallet } from '../hooks/useWallet'
 import { buildSetup, confirmDeploy, isDeploySupported, predictSafeAddress, randomSaltNonce } from '../lib/deploy-safe'
 import { Copyable, Field, StepCard, TextInput, cx } from './ui'
 
-type Status = 'idle' | 'deploying' | 'mining' | 'done' | 'error'
+type Status = 'idle' | 'deploying' | 'mining' | 'error'
 
 /** The "Create a Safe" panel — owners + threshold form with a live predicted-address preview,
  * gated on the connected chain actually hosting Safe v1.4.1. Deploys via the wallet, verifies the
- * mined proxy against the (pure, pre-computed) predicted address, then hands the new Safe up. */
-export function CreateSafe(props: { onCreated: (safe: Hex, chainId: number) => void }) {
-  const wallet = useWallet()
+ * mined proxy against the (pure, pre-computed) predicted address, then hands the new Safe up.
+ *
+ * Takes the single app-wide `wallet` instance as a prop rather than calling `useWallet()` itself —
+ * a second instance would never see this one's `chainId`/`address` (there's no cross-instance
+ * broadcast), so the handoff to the co-sign view would silently no-op. */
+export function CreateSafe(props: { wallet: UseWallet; onCreated: (safe: Hex, chainId: number) => void }) {
+  const { wallet } = props
 
   const [owners, setOwners] = useState<string[]>([wallet.address ?? ''])
   const [threshold, setThreshold] = useState(1)
@@ -19,7 +23,6 @@ export function CreateSafe(props: { onCreated: (safe: Hex, chainId: number) => v
   const [status, setStatus] = useState<Status>('idle')
   const [error, setError] = useState<string | null>(null)
   const [txHash, setTxHash] = useState<Hex | null>(null)
-  const [newSafe, setNewSafe] = useState<Hex | null>(null)
   const [supported, setSupported] = useState<boolean | null>(null)
 
   // seed the first (still-empty) owner row with the wallet once it connects
@@ -87,6 +90,15 @@ export function CreateSafe(props: { onCreated: (safe: Hex, chainId: number) => v
   const regenerateSalt = () => setSaltNonce(randomSaltNonce())
 
   async function onDeploy() {
+    // capture the chain we're actually deploying on up front — the Deploy button is already
+    // disabled whenever this is null (see `canDeploy`), so this is never a silent no-op, and it
+    // avoids asserting non-null on a value that could in principle change out from under us.
+    const chainId = wallet.chainId
+    if (chainId == null) {
+      setError('Wallet chain unknown — reconnect and try again')
+      setStatus('error')
+      return
+    }
     setStatus('deploying')
     setError(null)
     try {
@@ -96,9 +108,7 @@ export function CreateSafe(props: { onCreated: (safe: Hex, chainId: number) => v
       setTxHash(hash)
       setStatus('mining')
       const safe = await confirmDeploy(wallet.publicClient(), hash, predictedAddr)
-      setNewSafe(safe)
-      setStatus('done')
-      props.onCreated(safe, wallet.chainId!)
+      props.onCreated(safe, chainId)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Deploy failed')
       setStatus('error')
@@ -130,16 +140,16 @@ export function CreateSafe(props: { onCreated: (safe: Hex, chainId: number) => v
                 <div className={cx('owner', valid && 'done')} key={i}>
                   <span className={cx('dot', valid ? 'done' : 'wait')} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <TextInput value={addr} onChange={setOwnerAt(i)} placeholder="0x… owner address" mono />
+                    <TextInput value={addr} onChange={setOwnerAt(i)} placeholder="0x… owner address" mono disabled={busy} />
                   </div>
                   {isYou && <span className="you">you</span>}
-                  <button type="button" className="edit" onClick={() => removeOwner(i)} disabled={owners.length <= 1}>
+                  <button type="button" className="edit" onClick={() => removeOwner(i)} disabled={busy || owners.length <= 1}>
                     remove
                   </button>
                 </div>
               )
             })}
-            <button type="button" className="btn" onClick={addOwner}>
+            <button type="button" className="btn" onClick={addOwner} disabled={busy}>
               <Icon icon="mdi:plus" /> Add owner
             </button>
           </Field>
@@ -152,6 +162,7 @@ export function CreateSafe(props: { onCreated: (safe: Hex, chainId: number) => v
               min={1}
               max={Math.max(validOwners.length, 1)}
               value={threshold}
+              disabled={busy}
               onChange={(e) => {
                 const n = Number(e.target.value) || 1
                 setThreshold(Math.min(Math.max(n, 1), Math.max(validOwners.length, 1)))
@@ -181,9 +192,6 @@ export function CreateSafe(props: { onCreated: (safe: Hex, chainId: number) => v
 
           {status === 'mining' && txHash && (
             <div className="notice info">Waiting for confirmation · tx {txHash}</div>
-          )}
-          {status === 'done' && newSafe && (
-            <div className="notice info">Safe deployed at {newSafe} — switching to the co-sign view…</div>
           )}
           {status === 'error' && error && <div className="notice err">{error}</div>}
         </>
