@@ -43,6 +43,8 @@ async function ownerSafesHandler(c: Context) {
 app.get('/owners/:address/safes', ownerSafesHandler)
 app.get('/owners/:address/safes/', ownerSafesHandler)
 
-app.get('/health', (c) => c.text('ok'))
+// NOTE: do NOT register a `/health` route — Ponder 0.16 reserves `/health` (and `/ready`) for its own
+// liveness/readiness endpoints and refuses to build if the app defines it (BuildError: "API route
+// '/health' is reserved for internal use"). The reserved `/health` is what the deploy smoke-tests.
 
 export default app

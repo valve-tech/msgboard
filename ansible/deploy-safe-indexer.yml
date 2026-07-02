@@ -53,6 +53,8 @@
     # psql over the container's unix socket connects as the POSTGRES_USER superuser (no password).
     - name: Ensure the `safes` Postgres database exists (idempotent)
       ansible.builtin.shell:
+        # The box's /bin/sh is dash (no `set -o pipefail`); run under bash explicitly.
+        executable: /bin/bash
         cmd: |
           set -euo pipefail
           if docker exec msgboard-postgres psql -U msgboard-postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='safes'" | grep -q 1; then
@@ -76,6 +78,19 @@
         chdir: "{{ deploy_dir }}"
       register: up
       changed_when: "'Started' in up.stderr or 'Recreated' in up.stderr or 'Created' in up.stderr"
+
+    # Prove the container is actually LISTENING before touching Caddy — this is what catches a
+    # crash-loop (e.g. a Ponder BuildError). Hit Ponder's built-in /health from inside the docker
+    # network via the caddy container's wget. A crash-looping indexer fails here and the play stops
+    # BEFORE any Caddy change, so there's nothing to roll back.
+    - name: Wait for safe-indexer to listen on the docker network
+      ansible.builtin.command: docker exec caddy wget -q -T 4 -O /dev/null http://safe-indexer:42069/health
+      register: idxup
+      changed_when: false
+      failed_when: idxup.rc != 0
+      retries: 40
+      delay: 5
+      until: idxup.rc == 0
 
     - name: Configure the cosign.msgboard.xyz Caddy block with the /safe-indexer route (with rollback)
       block:
@@ -114,36 +129,40 @@
           ansible.builtin.command: docker exec caddy caddy reload --config /etc/caddy/Caddyfile
           when: caddy_edit.changed
 
-        # `caddy reload` on this box does NOT reliably re-apply a rewritten host block; if the SPA root
-        # stops serving a body, do a clean restart (all sites are behind Cloudflare, which retries the blip).
-        - name: Probe whether the SPA still serves a body
+        # `caddy reload` on this box does NOT reliably apply a rewritten host block. Detect it PROPERLY:
+        # probe the indexer PATH ROUTE and look for an indexer-only response. The owners endpoint returns
+        # JSON `{"safes":[…]}`; the SPA fallthrough returns HTML. Checking for `safes` (not just 200+body)
+        # is what stops the SPA fallthrough from masking an unapplied route — the container is already
+        # confirmed up above, so a non-indexer body here means the route itself isn't live.
+        - name: Probe whether the /safe-indexer route is actually applied (vs SPA fallthrough)
           ansible.builtin.command: >-
             docker run --rm --network host curlimages/curl:latest -sk
-            --resolve cosign.msgboard.xyz:443:127.0.0.1 https://cosign.msgboard.xyz/ -o /dev/null -w '%{http_code}:%{size_download}'
-          register: probe
+            --resolve cosign.msgboard.xyz:443:127.0.0.1
+            "https://cosign.msgboard.xyz/safe-indexer/owners/0x0000000000000000000000000000000000000001/safes?chainId=943"
+          register: routeprobe
           changed_when: false
           failed_when: false
 
-        - name: Restart Caddy if the reload didn't apply the block
+        - name: Restart Caddy if the route isn't live (reload didn't apply it)
           ansible.builtin.command: docker restart caddy
-          when: probe.stdout is not match('^200:[1-9][0-9]*$')
+          when: '"safes" not in routeprobe.stdout'
 
         - name: Settle after restart
           ansible.builtin.pause:
             seconds: 5
-          when: probe.stdout is not match('^200:[1-9][0-9]*$')
+          when: '"safes" not in routeprobe.stdout'
 
-        - name: Positive smoke — the indexer answers 200 + a body through the path route
+        - name: Positive smoke — the indexer answers through the path route (body proves it's NOT the SPA)
           ansible.builtin.command: >-
             docker run --rm --network host curlimages/curl:latest -sk
-            --resolve cosign.msgboard.xyz:443:127.0.0.1 https://cosign.msgboard.xyz/safe-indexer/health -o /dev/null -w '%{http_code}:%{size_download}'
+            --resolve cosign.msgboard.xyz:443:127.0.0.1
+            "https://cosign.msgboard.xyz/safe-indexer/owners/0x0000000000000000000000000000000000000001/safes?chainId=943"
           register: idxsmoke
           changed_when: false
-          failed_when: idxsmoke.stdout is not match('^200:[1-9][0-9]*$')
-          # Ponder needs a moment to boot + run migrations before /health listens.
-          retries: 30
+          failed_when: '"safes" not in idxsmoke.stdout'
+          retries: 12
           delay: 5
-          until: idxsmoke.stdout is match('^200:[1-9][0-9]*$')
+          until: '"safes" in idxsmoke.stdout'
 
         - name: Regression smoke — the cosign SPA still serves 200 + a body
           ansible.builtin.command: >-
