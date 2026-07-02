@@ -33,6 +33,7 @@ import {
 } from './lib/cosign'
 import type { ProgressMsg } from './worker/types'
 import { Copyable, Field, OwnerRow, RegisterLine, Seal, StepCard, TextInput, cx, short } from './components/ui'
+import { CreateSafe } from './components/CreateSafe'
 
 interface SafeInfo {
   owners: Hex[]
@@ -63,6 +64,9 @@ interface Chosen {
 export function App() {
   const wallet = useWallet()
   const safeChainId = wallet.chainId
+
+  // ── top-level view: the existing co-sign wizard, or the Create-Safe panel ──────────────────
+  const [view, setView] = useState<'cosign' | 'create'>('cosign')
 
   // ── board endpoint (a ⚙ setting in the rail, not a step) ────────────────────────────────────
   const [boardIdx, setBoardIdx] = useState(1) // default PulseChain mainnet 369
@@ -166,6 +170,16 @@ export function App() {
       }
     },
     [safeChainId, wallet],
+  )
+
+  // hand the newly-deployed Safe to the co-sign flow (same setter as the manual-entry path — reads
+  // owners/threshold straight off-chain, so it doesn't matter that we already know them).
+  const handleCreated = useCallback(
+    (newSafe: Hex, _chainId: number) => {
+      setView('cosign')
+      void selectAndLoad(newSafe)
+    },
+    [selectAndLoad],
   )
 
   const editSafe = useCallback(() => {
@@ -413,6 +427,18 @@ export function App() {
         </div>
       </header>
 
+      <div className="tabrow" style={{ margin: '18px 0 6px' }}>
+        <button className={cx('tab', view === 'cosign' && 'on')} onClick={() => setView('cosign')}>
+          Co-sign
+        </button>
+        <button className={cx('tab', view === 'create' && 'on')} onClick={() => setView('create')}>
+          Create a Safe
+        </button>
+      </div>
+
+      {view === 'create' && <CreateSafe onCreated={handleCreated} />}
+
+      {view === 'cosign' && (
       <div className="grid">
         {/* ───────────────── MAIN COLUMN ───────────────── */}
         <div>
@@ -714,6 +740,7 @@ export function App() {
           </div>
         </aside>
       </div>
+      )}
 
       <footer className="foot">@msgboard/cosign · safe adapter · ECDSA + EIP-712 · shares stamped off-thread</footer>
     </div>
