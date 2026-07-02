@@ -12,6 +12,7 @@
     "packages/indexer",
     "packages/ui",
     "packages/cosign-web",
+    "packages/cosign-archive",
     "packages/sponsor",
     "packages/examples",
     "packages/waku-relay"
@@ -32,6 +33,7 @@
     "sponsor:bridge": "npm run bridge --workspace=packages/sponsor",
     "sponsor:start": "npm run start --workspace=packages/sponsor",
     "test:relayer": "npm run test --workspace=packages/relayer",
-    "indexer:start": "npm run start --workspace=packages/indexer"
+    "indexer:start": "npm run start --workspace=packages/indexer",
+    "cosign-archive:start": "npm run start --workspace=packages/cosign-archive"
   }
 }

@@ -1,0 +1,51 @@
+# Compose override that adds the @msgboard/cosign archivist READ API (cosign-archive.msgboard.xyz)
+# to the msgboard stack. Run alongside the base:
+#   docker compose -f docker-compose.prod.yml -f docker-compose.cosign-archive.yml up -d cosign-archive
+#
+# Same monorepo image as `ui` / `cosign-web` (the root Dockerfile builds every workspace); just a
+# different start command: the cosign-archive workspace's `start` runs `tsx src/index.ts`, serving
+# @msgboard/history's archiveServer with the cosign endpoint group on :4040. Caddy reaches it by name
+# over the compose network (no host port), injecting the bearer token upstream (see deploy/caddy).
+#
+# READ side only: the box's existing `indexer` container is the WRITE side and owns the schema. This
+# service reads the SAME `message_archive` table (the msgboard-postgres `msgboard-postgres` db) plus the
+# live board over RPC. Deploy via the runbook, NOT by hand:  ansible-playbook ansible/deploy-cosign-archive.yml
+services:
+  # Give the edge Caddy the token it injects upstream (Caddyfile: header_up Authorization
+  # "Bearer {env.COSIGN_ARCHIVE_TOKEN}"). Compose merges this environment onto the base caddy service.
+  caddy:
+    environment:
+      COSIGN_ARCHIVE_TOKEN: ${COSIGN_ARCHIVE_TOKEN:?COSIGN_ARCHIVE_TOKEN must be set (Caddy injects it upstream to cosign-archive)}
+
+  cosign-archive:
+    container_name: cosign-archive
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    command: ['npm', 'run', 'start', '--workspace=packages/cosign-archive']
+    depends_on:
+      - msgboard-postgres
+    restart: unless-stopped
+    networks:
+      - msgboard
+    environment:
+      # MUST pin 4040: the shared monorepo image bakes `ENV PORT=4173` (cosign-web/ui's vite preview
+      # port), which would otherwise override the entrypoint default and leave the server on 4173 while
+      # Caddy proxies to :4040 → connection refused. Match the Caddy upstream + the /health wait.
+      PORT: 4040
+      # Same shared archive the `indexer` writes to (postgres://…@msgboard-postgres/msgboard-postgres).
+      DATABASE_URL: postgres://msgboard-postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@msgboard-postgres:5432/msgboard-postgres
+      # Board-chain RPC for the live-share leg. Default the public valve.city 943 endpoint the app uses;
+      # override in the box .env (the box already sets PONDER_RPC_URL_943 for the ponder indexers).
+      MSGBOARD_RPC: ${MSGBOARD_RPC:-${PONDER_RPC_URL_943:-https://one.valve.city/rpc/vk_demo/evm/943}}
+      MSGBOARD_CHAIN_ID: ${MSGBOARD_CHAIN_ID:-943}
+      # Non-loopback bind (0.0.0.0 inside the container) REQUIRES a token or archiveServer refuses to
+      # start. Caddy injects `Authorization: Bearer <COSIGN_ARCHIVE_TOKEN>` upstream so the browser stays
+      # token-free; the caddy service must carry the SAME token in its env (see docker-compose.prod.yml).
+      COSIGN_ARCHIVE_TOKEN: ${COSIGN_ARCHIVE_TOKEN:?COSIGN_ARCHIVE_TOKEN must be set (Caddy injects it upstream; a non-loopback bind requires it)}
+      COSIGN_TEAM_FILE: /app/deploy/cosign/team-file.json
+      BOARD_RETENTION_DAYS: ${BOARD_RETENTION_DAYS:-1}
+      RETENTION_DAYS: ${RETENTION_DAYS:-365}
+    volumes:
+      # The team-file is config, not code — bind-mount it read-only so it can change without a rebuild.
+      - ./deploy/cosign/team-file.json:/app/deploy/cosign/team-file.json:ro

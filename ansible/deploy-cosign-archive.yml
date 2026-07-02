@@ -1,0 +1,222 @@
+---
+# Deploy the @msgboard/cosign archivist READ API onto the msgboard box and route it under
+# cosign-archive.msgboard.xyz. The box's {{ deploy_dir }} is a NON-git snapshot, so we tar the
+# cosign-archive workspace + the team-file over the single SSH connection (NOT `synchronize`, whose
+# rsync ignores our identity args and trips the 1Password key limit), register the workspace, ensure a
+# random COSIGN_ARCHIVE_TOKEN in the box .env, build + start the service, recreate Caddy so it carries
+# the token it injects upstream, then fold the cosign-archive.msgboard.xyz block into the Caddyfile with
+# a SAFE reload (backup -> caddy adapt -> recreate/restart -> body-aware smoke -> block/rescue rollback).
+# Idempotent.
+#
+# READ side ONLY: the box's existing `indexer` container is the WRITE side and owns the message_archive
+# schema. This service reads that same table (+ the live board over RPC).
+#
+#   SSH_AUTH_SOCK="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock" \
+#     ansible-playbook deploy-cosign-archive.yml
+- name: Deploy cosign archivist read API (msgboard box)
+  hosts: msgboard
+  gather_facts: true
+  vars:
+    deploy_dir: /opt/msgboard
+    repo_root: "{{ playbook_dir }}/.."
+    caddyfile: "{{ deploy_dir }}/deploy/caddy/Caddyfile"
+    compose: "docker compose -f docker-compose.prod.yml -f docker-compose.cosign-archive.yml"
+    domain: cosign-archive.msgboard.xyz
+    # A zero-address safe scope under the cosign namespace — a well-formed scope the team-file's "*"
+    # wildcard resolves, so the signatures route returns {"signatures":[...]} (proving the route, not data).
+    smoke_scope: "safe:943:0x0000000000000000000000000000000000000000"
+  tasks:
+    - name: Archive the cosign-archive source locally (no node_modules/dist)
+      ansible.builtin.command:
+        cmd: tar czf /tmp/cosign-archive-src.tgz -C {{ repo_root }}/packages --exclude=node_modules --exclude=dist cosign-archive
+      delegate_to: localhost
+      changed_when: false
+
+    - name: Copy the archive to the box
+      ansible.builtin.copy:
+        src: /tmp/cosign-archive-src.tgz
+        dest: "{{ deploy_dir }}/cosign-archive-src.tgz"
+        mode: "0644"
+
+    - name: Extract the cosign-archive source into packages/
+      ansible.builtin.command:
+        cmd: tar xzf cosign-archive-src.tgz -C packages
+        chdir: "{{ deploy_dir }}"
+      changed_when: true
+
+    - name: Ensure deploy/cosign exists on the box
+      ansible.builtin.file:
+        path: "{{ deploy_dir }}/deploy/cosign"
+        state: directory
+        mode: "0755"
+
+    - name: Copy the cosign team-file (config the container bind-mounts read-only)
+      ansible.builtin.copy:
+        src: "{{ repo_root }}/deploy/cosign/team-file.json"
+        dest: "{{ deploy_dir }}/deploy/cosign/team-file.json"
+        mode: "0644"
+
+    - name: Copy the cosign-archive compose override
+      ansible.builtin.copy:
+        src: "{{ repo_root }}/docker-compose.cosign-archive.yml"
+        dest: "{{ deploy_dir }}/docker-compose.cosign-archive.yml"
+        mode: "0644"
+
+    - name: Register the cosign-archive workspace in root package.json (idempotent; via a node container)
+      ansible.builtin.command:
+        chdir: "{{ deploy_dir }}"
+        cmd: >
+          docker run --rm -v {{ deploy_dir }}:/w -w /w node:lts node -e
+          'const fs=require("fs"),p="package.json",j=JSON.parse(fs.readFileSync(p));j.workspaces=j.workspaces||[];if(!j.workspaces.includes("packages/cosign-archive")){j.workspaces.push("packages/cosign-archive");fs.writeFileSync(p,JSON.stringify(j,null,2)+"\n");console.log("added")}else{console.log("present")}'
+      register: ws
+      changed_when: "'added' in ws.stdout"
+
+    # The token MUST exist before any `docker compose` command below: compose interpolates the
+    # `${COSIGN_ARCHIVE_TOKEN:?...}` guards (in the override, for BOTH cosign-archive and caddy) at parse
+    # time, so even `build` fails without it. Generate a random one once; preserve it thereafter.
+    - name: Ensure COSIGN_ARCHIVE_TOKEN exists in the box .env (generate if absent; idempotent)
+      ansible.builtin.shell:
+        executable: /bin/bash
+        chdir: "{{ deploy_dir }}"
+        cmd: |
+          set -euo pipefail
+          touch .env
+          if grep -q '^COSIGN_ARCHIVE_TOKEN=' .env; then
+            echo "token present"
+          else
+            printf 'COSIGN_ARCHIVE_TOKEN=%s\n' "$(openssl rand -hex 32)" >> .env
+            echo "token generated"
+          fi
+      register: tokenenv
+      changed_when: "'generated' in tokenenv.stdout"
+
+    - name: Build the cosign-archive image (full monorepo build — a few minutes)
+      ansible.builtin.command:
+        cmd: "{{ compose }} build cosign-archive"
+        chdir: "{{ deploy_dir }}"
+      changed_when: true
+
+    - name: Start cosign-archive
+      ansible.builtin.command:
+        cmd: "{{ compose }} up -d cosign-archive"
+        chdir: "{{ deploy_dir }}"
+      register: up
+      changed_when: "'Started' in up.stderr or 'Recreated' in up.stderr or 'Created' in up.stderr"
+
+    # Prove the container is actually LISTENING before touching Caddy — catches a crash-loop (e.g. a
+    # bad DATABASE_URL or a missing team-file). /health is open (pre-auth), so no token needed here.
+    # Hit it from inside the docker network via the caddy container's wget.
+    - name: Wait for cosign-archive to listen on the docker network
+      ansible.builtin.command: docker exec caddy wget -q -T 4 -O /dev/null http://cosign-archive:4040/health
+      register: svcup
+      changed_when: false
+      failed_when: svcup.rc != 0
+      retries: 40
+      delay: 5
+      until: svcup.rc == 0
+
+    - name: Configure the cosign-archive.msgboard.xyz Caddy block + inject the token (with rollback)
+      block:
+        - name: Back up the Caddyfile
+          ansible.builtin.copy:
+            src: "{{ caddyfile }}"
+            dest: "{{ caddyfile }}.bak.cosignarchive.{{ ansible_date_time.iso8601_basic_short }}"
+            remote_src: true
+          register: caddy_backup
+
+        # Only the cosign GET routes + /health are proxied; the bearer is injected upstream (the browser
+        # calls token-free; the server requires it for the non-loopback bind). Everything else 404s.
+        # Managed by a marker so this converges regardless of the box snapshot's inline block.
+        - name: Add / update the cosign-archive.msgboard.xyz block (idempotent)
+          ansible.builtin.blockinfile:
+            path: "{{ caddyfile }}"
+            marker: "# {mark} ANSIBLE cosign-archive.msgboard.xyz"
+            block: |
+              cosign-archive.msgboard.xyz {
+              	tls /etc/caddy/origin.pem /etc/caddy/origin.key
+              	encode gzip
+              	@api path /cosign/* /health
+              	handle @api {
+              		reverse_proxy cosign-archive:4040 {
+              			header_up Authorization "Bearer {env.COSIGN_ARCHIVE_TOKEN}"
+              		}
+              	}
+              	handle {
+              		respond "Not found" 404
+              	}
+              }
+          register: caddy_edit
+
+        - name: Validate (caddy adapt — read-only, in the running caddy container)
+          ansible.builtin.command: docker exec caddy caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile
+          changed_when: false
+
+        # Caddy must be RECREATED (not just reloaded) so it picks up COSIGN_ARCHIVE_TOKEN from the
+        # override's env — env is fixed at container-create time. Recreating also re-reads the Caddyfile,
+        # which reliably applies the new host block (reload is unreliable for new hosts on this box).
+        - name: Recreate caddy so it carries the token + fresh Caddyfile
+          ansible.builtin.command:
+            cmd: "{{ compose }} up -d caddy"
+            chdir: "{{ deploy_dir }}"
+          changed_when: true
+
+        - name: Settle after recreate
+          ansible.builtin.pause:
+            seconds: 5
+
+        # Positive smoke #1 — /health answers {"ok":true} (open, no token).
+        - name: Smoke /health (expects {"ok":true})
+          ansible.builtin.command: >-
+            docker run --rm --network host curlimages/curl:latest -sk
+            --resolve {{ domain }}:443:127.0.0.1 "https://{{ domain }}/health"
+          register: healthsmoke
+          changed_when: false
+          failed_when: '"\"ok\":true" not in healthsmoke.stdout'
+          retries: 12
+          delay: 5
+          until: '"\"ok\":true" in healthsmoke.stdout'
+
+        # Positive smoke #2 — the signatures route answers a cosign body (proves the token injection AND
+        # the route: a wrong route/token would 401/404/502 with NO "signatures" key; an empty archive
+        # still returns {"signatures":[]}). This is indexer-specific, not just 200+body.
+        - name: Smoke the signatures route (expects a "signatures" body)
+          ansible.builtin.command: >-
+            docker run --rm --network host curlimages/curl:latest -sk
+            --resolve {{ domain }}:443:127.0.0.1
+            "https://{{ domain }}/cosign/cosign/{{ smoke_scope }}/signatures?days=7"
+          register: sigsmoke
+          changed_when: false
+          failed_when: '"signatures" not in sigsmoke.stdout'
+          retries: 12
+          delay: 5
+          until: '"signatures" in sigsmoke.stdout'
+
+        # Regression smoke — the cosign SPA + msgboard root still serve, i.e. recreating caddy didn't
+        # break the other hosts.
+        - name: Regression smoke — msgboard.xyz still serves 200 + a body
+          ansible.builtin.command: >-
+            docker run --rm --network host curlimages/curl:latest -sk
+            --resolve msgboard.xyz:443:127.0.0.1 https://msgboard.xyz/ -o /dev/null -w '%{http_code}:%{size_download}'
+          register: reg
+          changed_when: false
+          failed_when: reg.stdout is not match('^200:[1-9][0-9]*$')
+
+      rescue:
+        - name: Restore the Caddyfile from backup
+          ansible.builtin.copy:
+            src: "{{ caddy_backup.dest }}"
+            dest: "{{ caddyfile }}"
+            remote_src: true
+          when: caddy_backup.dest is defined
+        - name: Recreate caddy after restore
+          ansible.builtin.command:
+            cmd: "{{ compose }} up -d caddy"
+            chdir: "{{ deploy_dir }}"
+          when: caddy_backup.dest is defined
+        - name: Fail loudly
+          ansible.builtin.fail:
+            msg: "cosign-archive Caddy change failed validation/smoke — Caddyfile restored + caddy recreated. (The service may still be up; only the route was rolled back.)"
+
+    - name: Done
+      ansible.builtin.debug:
+        msg: "cosign-archive live at https://{{ domain }} (/health + /cosign/*, token-injected upstream). Read side of the cosign archive; the indexer keeps writing shares."
