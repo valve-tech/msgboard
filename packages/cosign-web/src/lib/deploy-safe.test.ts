@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Hex } from 'viem'
-import { buildSetup, predictSafeAddress, SAFE_V141 } from './deploy-safe'
+import { encodeEventTopics } from 'viem'
+import { buildSetup, confirmDeploy, predictSafeAddress, PROXY_FACTORY_ABI, SAFE_V141 } from './deploy-safe'
 
 describe('buildSetup', () => {
   it('encodes the exact v1.4.1 setup initializer (fixed fixture)', () => {
@@ -32,5 +33,26 @@ describe('predictSafeAddress', () => {
     expect(predictSafeAddress({ ...base, saltNonce: 0n })).not.toBe(
       predictSafeAddress({ ...base, saltNonce: 1n }),
     )
+  })
+})
+
+function fakeClientWithProxy(proxy: Hex) {
+  const topics = encodeEventTopics({ abi: PROXY_FACTORY_ABI, eventName: 'ProxyCreation', args: { proxy } })
+  return {
+    waitForTransactionReceipt: async () => ({
+      status: 'success',
+      logs: [{ address: SAFE_V141.factory, topics, data: '0x' + '0'.repeat(64) }],
+    }),
+  } as any
+}
+
+describe('confirmDeploy', () => {
+  const proxy = '0xf4065759F44c99b596448F58F59249a8C13F819C' as Hex
+  it('returns the created proxy when it matches the predicted address', async () => {
+    expect(await confirmDeploy(fakeClientWithProxy(proxy), '0xdead' as Hex, proxy)).toBe(proxy)
+  })
+  it('throws when the created proxy != predicted', async () => {
+    const other = '0x1111111111111111111111111111111111111111' as Hex
+    await expect(confirmDeploy(fakeClientWithProxy(proxy), '0xdead' as Hex, other)).rejects.toThrow()
   })
 })

@@ -1,9 +1,12 @@
 import {
   type Hex,
+  type Log,
   type PublicClient,
   concat,
+  decodeEventLog,
   encodeFunctionData,
   getContractAddress,
+  isAddressEqual,
   keccak256,
   pad,
   toHex,
@@ -94,4 +97,28 @@ export async function isDeploySupported(client: PublicClient, _chainId: number):
 export function randomSaltNonce(): bigint {
   const bytes = crypto.getRandomValues(new Uint8Array(32))
   return BigInt('0x' + [...bytes].map((b) => b.toString(16).padStart(2, '0')).join(''))
+}
+
+/** Waits for the deploy receipt, parses the `ProxyCreation` event, and returns the created proxy only if it equals the predicted address; otherwise throws. */
+export async function confirmDeploy(client: PublicClient, txHash: Hex, predicted: Hex): Promise<Hex> {
+  const receipt = await client.waitForTransactionReceipt({ hash: txHash })
+  if (receipt.status !== 'success') throw new Error('Deploy transaction reverted')
+  for (const log of receipt.logs as Log[]) {
+    try {
+      const ev = decodeEventLog({ abi: PROXY_FACTORY_ABI, topics: log.topics, data: log.data })
+      if (ev.eventName === 'ProxyCreation') {
+        const proxy = (ev.args as { proxy: Hex }).proxy
+        if (!isAddressEqual(proxy, predicted)) {
+          throw new Error(
+            `Deployed Safe ${proxy} does not match the predicted address ${predicted} — do not use it.`,
+          )
+        }
+        return proxy
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message.includes('do not use it')) throw e
+      // not a ProxyCreation log — skip
+    }
+  }
+  throw new Error('Deploy transaction produced no ProxyCreation event')
 }
