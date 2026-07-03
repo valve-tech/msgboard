@@ -1,0 +1,197 @@
+---
+# Deploy the cosign gasless-deploy relay onto the msgboard box and path-route it under
+# cosign.msgboard.xyz/relay. The box's {{ deploy_dir }} is a NON-git snapshot, so we tar the
+# cosign-relay workspace over the single SSH connection, register it, inject RELAY_KEY_943 into the
+# box .env from the faucet container's funded key, build + start, wait for it to LISTEN, then fold the
+# /relay/* route into the cosign union block with body-aware smoke + block/rescue rollback. Idempotent.
+#
+# 943 only for now: RELAY_KEY_369 is left unset (PulseChain mainnet has no faucet). Supply RELAY_KEY_369
+# in the box .env later and re-run to enable 369.
+#
+#   SSH_AUTH_SOCK=... ansible-playbook deploy-cosign-relay.yml
+- name: Deploy cosign gasless-deploy relay (msgboard box)
+  hosts: msgboard
+  gather_facts: true
+  vars:
+    deploy_dir: /opt/msgboard
+    repo_root: "{{ playbook_dir }}/.."
+    caddyfile: "{{ deploy_dir }}/deploy/caddy/Caddyfile"
+    compose: "docker compose -f docker-compose.prod.yml -f docker-compose.cosign-relay.yml"
+  tasks:
+    - name: Archive the cosign-relay source locally (no node_modules/dist)
+      ansible.builtin.command:
+        cmd: tar czf /tmp/cosign-relay-src.tgz -C {{ repo_root }}/packages --exclude=node_modules --exclude=dist cosign-relay
+      delegate_to: localhost
+      changed_when: false
+
+    - name: Copy the archive to the box
+      ansible.builtin.copy:
+        src: /tmp/cosign-relay-src.tgz
+        dest: "{{ deploy_dir }}/cosign-relay-src.tgz"
+        mode: "0644"
+
+    - name: Extract the cosign-relay source into packages/
+      ansible.builtin.command:
+        cmd: tar xzf cosign-relay-src.tgz -C packages
+        chdir: "{{ deploy_dir }}"
+      changed_when: true
+
+    - name: Copy the cosign-relay compose override
+      ansible.builtin.copy:
+        src: "{{ repo_root }}/docker-compose.cosign-relay.yml"
+        dest: "{{ deploy_dir }}/docker-compose.cosign-relay.yml"
+        mode: "0644"
+
+    - name: Register the cosign-relay workspace in root package.json (idempotent; via a node container)
+      ansible.builtin.command:
+        chdir: "{{ deploy_dir }}"
+        cmd: >
+          docker run --rm -v {{ deploy_dir }}:/w -w /w node:lts node -e
+          'const fs=require("fs"),p="package.json",j=JSON.parse(fs.readFileSync(p));j.workspaces=j.workspaces||[];if(!j.workspaces.includes("packages/cosign-relay")){j.workspaces.push("packages/cosign-relay");fs.writeFileSync(p,JSON.stringify(j,null,2)+"\n");console.log("added")}else{console.log("present")}'
+      register: ws
+      changed_when: "'added' in ws.stdout"
+
+    # RELAY_KEY_943 = the box faucet's funded 943 key (the "msgboard sponsorship"). Read it from the
+    # faucet container ON THE BOX (never leaves the box), 0x-prefix it, and write it to .env once. The
+    # `:?` guard in the compose means it must exist before any `docker compose` command below.
+    - name: Ensure RELAY_KEY_943 exists in the box .env (from the faucet container key; idempotent)
+      ansible.builtin.shell:
+        executable: /bin/bash
+        chdir: "{{ deploy_dir }}"
+        cmd: |
+          set -euo pipefail
+          touch .env
+          if grep -q '^RELAY_KEY_943=' .env; then
+            echo "relay key present"
+          else
+            k=$(docker inspect faucet --format '{{ "{{" }}range .Config.Env{{ "}}" }}{{ "{{" }}println .{{ "}}" }}{{ "{{" }}end{{ "}}" }}' | sed -n 's/^PRIVATE_KEY=//p' | head -1)
+            if [ -z "$k" ]; then echo "FAUCET_KEY_NOT_FOUND" >&2; exit 1; fi
+            case "$k" in 0x*) : ;; *) k="0x$k" ;; esac
+            printf 'RELAY_KEY_943=%s\n' "$k" >> .env
+            echo "relay key injected"
+          fi
+      register: relaykey
+      changed_when: "'injected' in relaykey.stdout"
+      no_log: true
+
+    - name: Build the cosign-relay image (full monorepo build — a few minutes)
+      ansible.builtin.command:
+        cmd: "{{ compose }} build cosign-relay"
+        chdir: "{{ deploy_dir }}"
+      changed_when: true
+
+    - name: Start cosign-relay
+      ansible.builtin.command:
+        cmd: "{{ compose }} up -d cosign-relay"
+        chdir: "{{ deploy_dir }}"
+      register: up
+      changed_when: "'Started' in up.stderr or 'Recreated' in up.stderr or 'Created' in up.stderr"
+
+    # Prove the container LISTENS before touching Caddy — catches a crash-loop (bad key, wrong port).
+    - name: Wait for cosign-relay to listen on the docker network
+      ansible.builtin.command: docker exec caddy wget -q -T 4 -O /dev/null http://cosign-relay:8787/health
+      register: svcup
+      changed_when: false
+      failed_when: svcup.rc != 0
+      retries: 40
+      delay: 5
+      until: svcup.rc == 0
+
+    - name: Configure the cosign.msgboard.xyz Caddy block with the /relay route (with rollback)
+      block:
+        - name: Back up the Caddyfile
+          ansible.builtin.copy:
+            src: "{{ caddyfile }}"
+            dest: "{{ caddyfile }}.bak.relay.{{ ansible_date_time.iso8601_basic_short }}"
+            remote_src: true
+          register: caddy_backup
+
+        # Full union block (safe-indexer + relay path routes, /docs rewrite, SPA). Same marker + content
+        # as deploy-cosign.yml / deploy-safe-indexer.yml so any of the three converges to this config.
+        - name: Write the union cosign.msgboard.xyz block (idempotent)
+          ansible.builtin.blockinfile:
+            path: "{{ caddyfile }}"
+            marker: "# {mark} ANSIBLE cosign.msgboard.xyz"
+            block: |
+              cosign.msgboard.xyz {
+              	tls /etc/caddy/origin.pem /etc/caddy/origin.key
+              	encode gzip
+              	handle_path /safe-indexer/* {
+              		reverse_proxy safe-indexer:42069
+              	}
+              	handle_path /relay/* {
+              		reverse_proxy cosign-relay:8787
+              	}
+              	handle /docs {
+              		rewrite * /docs.html
+              		reverse_proxy cosign-web:4173
+              	}
+              	handle {
+              		reverse_proxy cosign-web:4173
+              	}
+              }
+          register: caddy_edit
+
+        - name: Validate (caddy adapt — read-only)
+          ansible.builtin.command: docker exec caddy caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile
+          changed_when: false
+
+        - name: Reload Caddy
+          ansible.builtin.command: docker exec caddy caddy reload --config /etc/caddy/Caddyfile
+          when: caddy_edit.changed
+
+        # Reload is unreliable for changed blocks on this box — detect via a relay-specific response and
+        # restart if the route isn't live. /relay/config returns JSON with "chains".
+        - name: Probe whether the /relay route is applied
+          ansible.builtin.command: >-
+            docker run --rm --network host curlimages/curl:latest -sk
+            --resolve cosign.msgboard.xyz:443:127.0.0.1 "https://cosign.msgboard.xyz/relay/config"
+          register: routeprobe
+          changed_when: false
+          failed_when: false
+
+        - name: Restart Caddy if the route isn't live
+          ansible.builtin.command: docker restart caddy
+          when: '"chains" not in routeprobe.stdout'
+
+        - name: Settle after restart
+          ansible.builtin.pause:
+            seconds: 5
+          when: '"chains" not in routeprobe.stdout'
+
+        - name: Positive smoke — /relay/config reports enabled chains (943)
+          ansible.builtin.command: >-
+            docker run --rm --network host curlimages/curl:latest -sk
+            --resolve cosign.msgboard.xyz:443:127.0.0.1 "https://cosign.msgboard.xyz/relay/config"
+          register: cfgsmoke
+          changed_when: false
+          failed_when: '"chains" not in cfgsmoke.stdout or "943" not in cfgsmoke.stdout'
+          retries: 12
+          delay: 5
+          until: '"943" in cfgsmoke.stdout'
+
+        - name: Regression smoke — the cosign SPA still serves 200 + a body
+          ansible.builtin.command: >-
+            docker run --rm --network host curlimages/curl:latest -sk
+            --resolve cosign.msgboard.xyz:443:127.0.0.1 https://cosign.msgboard.xyz/ -o /dev/null -w '%{http_code}:%{size_download}'
+          register: spasmoke
+          changed_when: false
+          failed_when: spasmoke.stdout is not match('^200:[1-9][0-9]*$')
+
+      rescue:
+        - name: Restore the Caddyfile from backup
+          ansible.builtin.copy:
+            src: "{{ caddy_backup.dest }}"
+            dest: "{{ caddyfile }}"
+            remote_src: true
+          when: caddy_backup.dest is defined
+        - name: Reload Caddy after restore
+          ansible.builtin.command: docker exec caddy caddy reload --config /etc/caddy/Caddyfile
+          when: caddy_backup.dest is defined
+        - name: Fail loudly
+          ansible.builtin.fail:
+            msg: "cosign-relay Caddy change failed validation/smoke — Caddyfile restored + reloaded. (The service may still be up; only the route was rolled back.)"
+
+    - name: Done
+      ansible.builtin.debug:
+        msg: "cosign-relay live at cosign.msgboard.xyz/relay (943 gasless deploy; 369 pending RELAY_KEY_369)."

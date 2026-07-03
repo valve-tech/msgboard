@@ -115,6 +115,9 @@
               	handle_path /safe-indexer/* {
               		reverse_proxy safe-indexer:42069
               	}
+              	handle_path /relay/* {
+              		reverse_proxy cosign-relay:8787
+              	}
               	handle /docs {
               		rewrite * /docs.html
               		reverse_proxy cosign-web:4173

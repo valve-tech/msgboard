@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { type Hex, getAddress, isAddress, isAddressEqual } from 'viem'
 import { Icon } from '@iconify/react'
 import type { UseWallet } from '../hooks/useWallet'
-import { buildSetup, confirmDeploy, isDeploySupported, predictSafeAddress, randomSaltNonce } from '../lib/deploy-safe'
+import { SAFE_V141, buildSetup, confirmDeploy, isDeploySupported, predictSafeAddress, randomSaltNonce } from '../lib/deploy-safe'
+import { deployRequestDigest, fetchRelayConfig, solveDeployPow, sponsoredDeploy } from '../lib/gasless'
 import { Copyable, Field, StepCard, TextInput, cx } from './ui'
 
-type Status = 'idle' | 'deploying' | 'mining' | 'error'
+type Status = 'idle' | 'deploying' | 'signing' | 'grinding' | 'relaying' | 'mining' | 'error'
 
 /** The "Create a Safe" panel — owners + threshold form with a live predicted-address preview,
  * gated on the connected chain actually hosting Safe v1.4.1. Deploys via the wallet, verifies the
@@ -24,6 +25,11 @@ export function CreateSafe(props: { wallet: UseWallet; onCreated: (safe: Hex, ch
   const [error, setError] = useState<string | null>(null)
   const [txHash, setTxHash] = useState<Hex | null>(null)
   const [supported, setSupported] = useState<boolean | null>(null)
+
+  // the optional gasless-deploy relay — only offered on chains it actually sponsors right now
+  const [relayChains, setRelayChains] = useState<number[]>([])
+  const [relayPowBits, setRelayPowBits] = useState(0)
+  const [gasless, setGasless] = useState(false)
 
   // seed the first (still-empty) owner row with the wallet once it connects
   useEffect(() => {
@@ -45,6 +51,27 @@ export function CreateSafe(props: { wallet: UseWallet; onCreated: (safe: Hex, ch
       cancelled = true
     }
   }, [wallet.chainId, wallet.publicClient])
+
+  // does the relay currently sponsor this chain? re-fetched on mount and whenever the chain changes.
+  useEffect(() => {
+    let cancelled = false
+    void fetchRelayConfig().then((cfg) => {
+      if (cancelled) return
+      setRelayChains(cfg.chains)
+      setRelayPowBits(cfg.powBits)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [wallet.chainId])
+
+  const gaslessAvailable = wallet.chainId != null && relayChains.includes(wallet.chainId)
+
+  // if the relay stops covering this chain (or the chain changes out from under an armed toggle),
+  // fall back to the user-pays path rather than silently attempting an unsponsored relay call.
+  useEffect(() => {
+    if (!gaslessAvailable) setGasless(false)
+  }, [gaslessAvailable])
 
   const validOwners = useMemo<Hex[]>(() => {
     const seen = new Set<string>()
@@ -75,7 +102,8 @@ export function CreateSafe(props: { wallet: UseWallet; onCreated: (safe: Hex, ch
     }
   }, [validOwners, threshold, saltNonce])
 
-  const busy = status === 'deploying' || status === 'mining'
+  const busy =
+    status === 'deploying' || status === 'signing' || status === 'grinding' || status === 'relaying' || status === 'mining'
   const canDeploy =
     !!wallet.address &&
     supported === true &&
@@ -99,12 +127,28 @@ export function CreateSafe(props: { wallet: UseWallet; onCreated: (safe: Hex, ch
       setStatus('error')
       return
     }
-    setStatus('deploying')
     setError(null)
     try {
       const initializer = buildSetup(validOwners, threshold)
       const predictedAddr = predictSafeAddress({ owners: validOwners, threshold, saltNonce })
-      const hash = await wallet.deploySafe(initializer, saltNonce)
+
+      let hash: Hex
+      if (gasless) {
+        // relay-sponsored path: sign the request digest, grind the relay's PoW, then let it submit
+        // + pay gas. The mined proxy is verified against `predictedAddr` exactly like the
+        // user-pays path below — a misbehaving relay can never hand back an unpredicted address.
+        setStatus('signing')
+        const digest = deployRequestDigest({ chainId, singleton: SAFE_V141.singletonL2, initializer, saltNonce })
+        const signature = await wallet.signRawDigest(digest)
+        setStatus('grinding')
+        const powNonce = await solveDeployPow(digest, relayPowBits)
+        setStatus('relaying')
+        hash = await sponsoredDeploy({ chainId, initializer, saltNonce, signature, powNonce })
+      } else {
+        setStatus('deploying')
+        hash = await wallet.deploySafe(initializer, saltNonce)
+      }
+
       setTxHash(hash)
       setStatus('mining')
       const safe = await confirmDeploy(wallet.publicClient(), hash, predictedAddr)
@@ -183,10 +227,36 @@ export function CreateSafe(props: { wallet: UseWallet; onCreated: (safe: Hex, ch
             </div>
           </div>
 
+          {gaslessAvailable && (
+            <div className="field">
+              <label className="lbl" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: busy ? 'default' : 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={gasless}
+                  disabled={busy}
+                  onChange={(e) => setGasless(e.target.checked)} />
+                Gasless deploy (relay-sponsored)
+              </label>
+              <p className="hint">
+                The relay pays gas — you sign the request and solve a small proof of work (~{relayPowBits} bits) instead.
+              </p>
+            </div>
+          )}
+
           <div className="btnrow">
             <button className="btn brass" onClick={() => void onDeploy()} disabled={!canDeploy}>
               {busy ? <Icon icon="mdi:loading" className="spin" /> : <Icon icon="mdi:safe" />}
-              {status === 'deploying' ? 'Awaiting wallet…' : status === 'mining' ? 'Mining…' : 'Deploy Safe'}
+              {status === 'deploying'
+                ? 'Awaiting wallet…'
+                : status === 'signing'
+                  ? 'Awaiting signature…'
+                  : status === 'grinding'
+                    ? 'Solving proof of work…'
+                    : status === 'relaying'
+                      ? 'Submitting via relay…'
+                      : status === 'mining'
+                        ? 'Mining…'
+                        : 'Deploy Safe'}
             </button>
           </div>
 
