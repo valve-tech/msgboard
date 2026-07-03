@@ -31,6 +31,19 @@ export const SAFE_TX_SERVICE: Record<number, string> = {
   1: 'https://safe-transaction-mainnet.safe.global',
 }
 
+/**
+ * The optional gasless-deploy relay (`packages/cosign-relay`) — sponsors gas for `createProxyWithNonce`
+ * on chains it has a funded key for. Purely additive: `CreateSafe`'s user-pays path never touches this,
+ * and every caller of the relay degrades to "feature unavailable" on any failure (see `gasless.ts`).
+ */
+export const RELAY_BASE = 'https://cosign.msgboard.xyz/relay'
+
+/** The relay's `GET /config` endpoint — which chains it sponsors + its current PoW difficulty. */
+export const relayConfigUrl = (): string => `${RELAY_BASE}/config`
+
+/** The relay's `POST /deploy-safe` endpoint. */
+export const relayDeploySafeUrl = (): string => `${RELAY_BASE}/deploy-safe`
+
 /** Display metadata for the chains cosign-web knows about. */
 export interface ChainMeta {
   name: string

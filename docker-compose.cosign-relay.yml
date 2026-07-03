@@ -1,0 +1,37 @@
+# Compose override for the cosign gasless-deploy relay (cosign.msgboard.xyz/relay/*). It validates +
+# relays a Safe v1.4.1 createProxyWithNonce on 943 (and 369 once a key is supplied), paying gas from a
+# per-chain funded key, gated by a signed-owner check + a hashcash PoW + a per-IP rate-limit.
+#
+# Deploy via the runbook:  ansible-playbook ansible/deploy-cosign-relay.yml
+#   docker compose -f docker-compose.prod.yml -f docker-compose.cosign-relay.yml up -d cosign-relay
+#
+# Same monorepo image as cosign-web/cosign-archive (root Dockerfile builds every workspace); the
+# cosign-relay workspace's `start` runs `tsx src/index.ts`. Served on :8787 over the compose network;
+# Caddy path-routes cosign.msgboard.xyz/relay/* -> cosign-relay:8787.
+#
+# 943 uses the box faucet key (RELAY_KEY_943, injected into .env by the deploy from the faucet
+# container). 369 stays DISABLED until RELAY_KEY_369 is supplied (PulseChain mainnet has no faucet) —
+# the service reports its enabled chains at GET /config, and the UI only shows the toggle for those.
+services:
+  cosign-relay:
+    container_name: cosign-relay
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    command: ['npm', 'run', 'start', '--workspace=packages/cosign-relay']
+    restart: unless-stopped
+    networks:
+      - msgboard
+    environment:
+      # MUST pin 8787: the shared monorepo image bakes ENV PORT=4173 (cosign-web vite preview), which
+      # would otherwise strand the relay off Caddy's upstream.
+      PORT: 8787
+      # 943 relay key — a funded 943 key (the box faucet key), written to .env by the deploy play.
+      RELAY_KEY_943: ${RELAY_KEY_943:?RELAY_KEY_943 must be set (a funded 943 key; the deploy injects the box faucet key)}
+      # 369 relay key — OPTIONAL. Empty => 369 stays disabled (no PulseChain-mainnet faucet; operator supplies).
+      RELAY_KEY_369: ${RELAY_KEY_369:-}
+      # Distinct .env names (RELAY_RPC_*) so we never collide with the box's own RPC_369/RPC_943.
+      RPC_943: ${RELAY_RPC_943:-https://one.valve.city/rpc/vk_demo/evm/943}
+      RPC_369: ${RELAY_RPC_369:-https://one.valve.city/rpc/vk_demo/evm/369}
+      POW_BITS: ${RELAY_POW_BITS:-20}
+      RATE_LIMIT_PER_DAY: ${RELAY_RATE_LIMIT_PER_DAY:-5}

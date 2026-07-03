@@ -13,6 +13,7 @@
     "packages/ui",
     "packages/cosign-web",
     "packages/cosign-archive",
+    "packages/cosign-relay",
     "packages/sponsor",
     "packages/examples",
     "packages/waku-relay"
