@@ -1,0 +1,95 @@
+# Cosign
+
+> Cosign co-signs a Gnosis Safe transaction off-chain, coordinated over MsgBoard (a
+> proof-of-work-stamped, ephemeral message board with no trusted server). Owners sign locally with
+> their own wallet, post a small ABI-encoded `SignatureRecord` share to the board under a rotating
+> daily category key, and any participant reads the shares back, verifies each one against the
+> Safe's own live owner set and threshold, aggregates them into an `execTransaction` `signatures`
+> blob, and executes once quorum is met. A Safe's on-chain `checkNSignatures` is the actual security
+> boundary; cosign's own verification is a UI convenience, not a trust requirement.
+
+## Docs
+
+- [Human-readable docs](https://cosign.msgboard.xyz/docs.html): full walkthrough of the trust model,
+  the step-by-step co-sign flow, the Create-a-Safe (v1.4.1) flow, and the architecture.
+- [App](https://cosign.msgboard.xyz/): the live wizard UI (React + Vite, `packages/cosign-web`).
+
+## SDK — `@msgboard/cosign`
+
+Framework-agnostic TypeScript package (`packages/cosign/src`). Zero chain writes; pure board +
+crypto. Key entry points (all exported from the package root):
+
+- `postSignature(board, { namespace, scope, record, now? })` — encodes a `SignatureRecord` and
+  posts it to the board under `currentKey(namespace, scope, now)`.
+- `readSignatures(board, { namespace, scope, days, now? })` — sweeps the rolling window of category
+  keys, decodes every board entry, skips undecodable junk, dedupes by `keccak256` of the raw bytes.
+- `groupByDigest(records)` — buckets records by the digest (`safeTxHash`) they sign.
+- `aggregate(records, adapter)` — keeps only records `adapter.verify()` accepts, then returns
+  `adapter.order()`'s output as `{ signer, signature }` pairs. Verification failures are excluded,
+  not trusted.
+- `makeSafeAdapter({ publicClient, safe, chainId })` — the Gnosis Safe `CosignAdapter`: verifies an
+  EOA signature by recovering over the digest and checking current Safe ownership; verifies
+  EIP-1271 contract-owner signatures against the owner's `isValidSignature`; orders shares strictly
+  ascending by signer (the order Safe's `checkNSignatures`/blob format requires).
+  Also available: `makeSafe4337Adapter` (Safe4337Module UserOp signing) and
+  `makeRhinestoneOwnableAdapter` (Rhinestone ownable-validator UserOps).
+- `safeTransactionDigest(safeTx, chainId, safe)` — the EIP-712 SafeTx digest; byte-equal to the
+  Safe's on-chain `getTransactionHash(...)`. No `EIP712Domain` name/version — only chainId +
+  verifyingContract, matching Safe's own `domainSeparator()`.
+- `buildSignatureBlob(orderedRecords)` / `buildExecTransactionArgs(orderedRecords, safeTx)` — build
+  the final Safe `signatures` bytes / the full `execTransaction(...)` positional argument tuple.
+- `recoverEffectiveSigner(record)` — digest-agnostic signer recovery: `ecrecover` over the digest for
+  EIP-712, `personal_sign`-prefixed recovery for ECDSA/`eth_sign`, or the claimed contract owner for
+  EIP-1271.
+- `encodeSafeMeta(safeTx, safe, chainId)` / `decodeSafeMeta(meta)` — pack/unpack the full SafeTx
+  tuple into `SignatureRecord.meta` so any reader can reconstruct `execTransaction`'s arguments from
+  the posted shares alone.
+- `SAFE_V141` deploy constants + `predictSafeAddress`/`confirmDeploy` live in
+  `packages/cosign-web/src/lib/deploy-safe.ts` (app-side, not yet re-exported from the SDK root).
+
+## Endpoints
+
+- **safe-indexer** — `GET https://cosign.msgboard.xyz/safe-indexer/owners/:address/safes?chainId=<369|943>`
+  → `{ "safes": ["0x…", …] }` (checksummed, deduped; same response shape as the official Safe
+  Transaction Service). Self-hosted (Ponder-indexed) because PulseChain has no official Safe Tx
+  Service. Ethereum mainnet (chain 1) uses the real upstream instead:
+  `GET https://safe-transaction-mainnet.safe.global/api/v1/owners/:address/safes/`.
+  Read-only discovery convenience — never trusted; owners/threshold are always re-read from the Safe
+  contract itself.
+- **cosign-archive** — `GET https://cosign-archive.msgboard.xyz/cosign/:namespace/:scope/signatures?days=<N>`
+  → `{ "signatures": [{ digest, signer, signature, scheme, meta }, …] }`. Serves decoded shares that
+  have scrolled off the live board's window so they still count toward quorum. The client unions
+  board ∪ archive (board wins on collision) and degrades to board-only if this is unreachable.
+
+## Category-key formula
+
+```
+categoryKey(namespace, scope, isoDate) = keccak256(utf8Bytes(`${namespace}:${scope}:${isoDate}`))
+
+namespace = "cosign"
+scope     = `safe:${chainId}:${safeAddress.toLowerCase()}`
+isoDate   = UTC YYYY-MM-DD (e.g. "2026-07-02")
+```
+
+A reader sweeps today's key plus the prior `days - 1` UTC days (cosign-web's app uses `days = 7`).
+
+## Record shape (`SignatureRecord` / `RECORD_ABI`)
+
+ABI tuple, order is law — `(bytes32 digest, address signer, bytes signature, uint8 scheme, bytes meta)`:
+
+```
+digest     bytes32   the signed digest (e.g. a Safe safeTxHash)
+signer     address   the claimed signer
+signature  bytes     e.g. 65-byte r||s||v for ECDSA/EIP-712
+scheme     uint8      0 = ECDSA (eth_sign), 1 = EIP1271, 2 = EIP712
+meta       bytes     scheme-specific payload; for a Safe EIP-712 record this ABI-encodes
+                     (to, value, data, operation, safeTxGas, baseGas, gasPrice, gasToken,
+                      refundReceiver, nonce, safe, chainId) — `0x` when unused
+```
+
+Encode/decode with `encodeRecord`/`decodeRecord` from `@msgboard/cosign`.
+
+## Supported chains
+
+Ethereum mainnet (1), PulseChain (369), PulseChain v4 testnet (943). The MsgBoard the shares travel
+over is independent of the chain the Safe lives on — it only needs the `msgboard_` RPC module.

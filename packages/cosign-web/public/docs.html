@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cosign — docs</title>
+<style>
+  :root {
+    --ink: #14151b;
+    --ink2: #1c1e26;
+    --line: rgba(233, 226, 208, 0.09);
+    --line2: rgba(233, 226, 208, 0.16);
+    --parch: #e9e2d0;
+    --muted: #8a897e;
+    --dim: #5e5d55;
+    --brass: #c79a3e;
+    --brass-dim: #8a6e33;
+    --oxblood: #9e3b2e;
+    --patina: #5e9384;
+    --disp: 'Space Grotesk', ui-sans-serif, sans-serif;
+    --mono: 'IBM Plex Mono', ui-monospace, monospace;
+    --body: 'Inter', ui-sans-serif, sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; overflow-x: clip; }
+  body {
+    font-family: var(--body);
+    color: var(--parch);
+    background:
+      radial-gradient(900px 420px at 82% -8%, rgba(199, 154, 62, 0.1), transparent 62%),
+      radial-gradient(700px 400px at 0% 108%, rgba(94, 147, 132, 0.06), transparent 60%), var(--ink);
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.55;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 34px 22px 80px; }
+  .mono { font-family: var(--mono); }
+  a { color: var(--brass); }
+  a:hover { color: #d8ab4c; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: var(--brass);
+  }
+
+  /* header */
+  .hdr {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    margin-bottom: 26px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--line);
+    flex-wrap: wrap;
+    gap: 14px;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .sig {
+    width: 40px; height: 40px;
+    border: 1px solid var(--brass-dim);
+    border-radius: 8px;
+    display: grid; place-items: center;
+    color: var(--brass);
+    background: linear-gradient(160deg, rgba(199, 154, 62, 0.14), transparent);
+    font-family: var(--disp); font-weight: 700; font-size: 19px;
+  }
+  .brand h1 { font-family: var(--disp); font-weight: 700; font-size: 20px; margin: 0; letter-spacing: -0.01em; }
+  .back { font-family: var(--mono); font-size: 11px; color: var(--muted); text-decoration: none; border: 1px solid var(--line2); border-radius: 999px; padding: 5px 12px; }
+  .back:hover { border-color: var(--brass-dim); color: var(--parch); }
+
+  h2 {
+    font-family: var(--disp); font-weight: 600; font-size: 19px;
+    margin: 46px 0 4px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; gap: 10px;
+  }
+  h2 .n { font-family: var(--mono); font-size: 12px; color: var(--dim); }
+  h3 { font-family: var(--disp); font-weight: 600; font-size: 14.5px; color: var(--parch); margin: 22px 0 8px; }
+  p { color: var(--parch); font-size: 14px; }
+  p.hint, li.hint { color: var(--muted); font-size: 13px; }
+  ul, ol { padding-left: 22px; font-size: 14px; }
+  li { margin-bottom: 8px; }
+  strong { color: var(--parch); font-weight: 600; }
+  code {
+    font-family: var(--mono); font-size: 0.9em;
+    background: rgba(20, 21, 27, 0.6);
+    border: 1px solid var(--line2);
+    border-radius: 4px;
+    padding: 1px 5px;
+    color: var(--patina);
+  }
+  pre {
+    font-family: var(--mono); font-size: 12.5px;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    color: var(--parch);
+  }
+  pre code { background: none; border: none; padding: 0; color: inherit; }
+
+  /* step cards */
+  .step {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: linear-gradient(180deg, var(--ink2), rgba(28, 30, 38, 0.5));
+    margin: 12px 0;
+    padding: 16px 18px;
+  }
+  .step .head { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+  .num {
+    font-family: var(--disp); font-weight: 700; font-size: 13px;
+    width: 26px; height: 26px; border-radius: 7px;
+    display: grid; place-items: center; flex: none;
+    background: var(--brass); color: #1a1206;
+  }
+  .step h3 { margin: 0; font-size: 15px; }
+  .step .why {
+    margin-top: 10px;
+    font-size: 12.5px;
+    color: var(--patina);
+    border-left: 2px solid var(--patina);
+    padding-left: 10px;
+  }
+  .step .why b { color: var(--patina); }
+
+  /* pills / tags */
+  .pill {
+    font-family: var(--mono); font-size: 10.5px;
+    border: 1px solid var(--line2); border-radius: 999px;
+    padding: 2px 9px; color: var(--muted);
+    display: inline-block;
+  }
+  .pill.brass { color: var(--brass); border-color: var(--brass-dim); }
+  .pill.patina { color: var(--patina); border-color: rgba(94, 147, 132, 0.4); }
+
+  /* architecture diagram (pure CSS/HTML, no external assets) */
+  .arch {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin: 18px 0;
+  }
+  @media (max-width: 640px) { .arch { grid-template-columns: 1fr; } }
+  .box {
+    border: 1px solid var(--line2);
+    border-radius: 10px;
+    padding: 12px 14px;
+    background: rgba(20, 21, 27, 0.5);
+  }
+  .box .t { font-family: var(--disp); font-weight: 600; font-size: 13px; color: var(--parch); margin-bottom: 4px; }
+  .box .d { font-family: var(--body); font-size: 11.5px; color: var(--muted); }
+  .arrow { text-align: center; color: var(--dim); font-family: var(--mono); font-size: 12px; align-self: center; }
+
+  /* endpoint table */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 12px 0; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-family: var(--disp); font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  td.mono { font-family: var(--mono); font-size: 12px; color: var(--patina); word-break: break-all; }
+
+  .notice {
+    border: 1px solid var(--line2);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 12.5px;
+    margin: 10px 0;
+    background: rgba(94, 147, 132, 0.06);
+    color: var(--muted);
+  }
+  .notice.brass { border-color: var(--brass-dim); background: rgba(199, 154, 62, 0.08); color: var(--parch); }
+
+  .toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 0; }
+  .toc a {
+    font-family: var(--mono); font-size: 11px; text-decoration: none;
+    border: 1px solid var(--line2); border-radius: 999px; padding: 5px 11px; color: var(--muted);
+  }
+  .toc a:hover { border-color: var(--brass-dim); color: var(--parch); }
+
+  .foot { margin-top: 50px; text-align: center; font-family: var(--mono); font-size: 10.5px; color: var(--dim); letter-spacing: 0.03em; border-top: 1px solid var(--line); padding-top: 20px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hdr">
+    <div class="brand">
+      <div class="sig">✶</div>
+      <div>
+        <div class="eyebrow">signing register</div>
+        <h1>Cosign — docs</h1>
+      </div>
+    </div>
+    <a class="back" href="/">← back to the app</a>
+  </header>
+
+  <p>
+    <strong>Cosign</strong> co-signs a <a href="https://safe.global" target="_blank" rel="noopener">Gnosis Safe</a>
+    transaction <strong>off-chain</strong>, <strong>walletless-for-readers</strong> and <strong>gasless-until-execution</strong>,
+    coordinated over <strong>MsgBoard</strong> — a proof-of-work-stamped message board where posts are cheap to
+    verify, expensive to spam, and ephemeral (the live window is ~120 blocks). No server ever holds a signature.
+    Every owner signs locally with their own wallet, posts the signed share to the board, and any participant can
+    read the shares, verify them against the Safe's own on-chain rules, and execute once threshold is met.
+  </p>
+
+  <div class="toc">
+    <a href="#trust-model">Trust model</a>
+    <a href="#flow">Co-sign flow</a>
+    <a href="#create-a-safe">Create a Safe</a>
+    <a href="#architecture">Architecture</a>
+    <a href="#endpoints">Live endpoints</a>
+  </div>
+
+  <h2><span class="n">§1</span> What cosign is</h2>
+  <p>
+    Cosign replaces the thing most multisig UIs quietly centralize: the place signatures live before a
+    transaction has enough of them to execute. Normally that's a vendor's database (a "transaction service").
+    Cosign uses <strong>MsgBoard</strong> instead — the same trustless, PoW-gated board used elsewhere in this
+    repo — as a dumb, ephemeral, permissionless relay. A signature share is just a small ABI-encoded blob posted
+    under a rotating category key; anyone (not just the owners) can read it back, and nothing about its validity
+    depends on who's serving the read.
+  </p>
+  <p>
+    The three moving pieces:
+  </p>
+  <ul>
+    <li><strong>cosign-web</strong> — the wizard UI (this app) that drives the whole flow: pick a Safe, build/paste
+      a transaction, simulate it, sign, post, collect, execute.</li>
+    <li><strong>@msgboard/cosign</strong> — the framework-agnostic SDK: category-key math, the generic
+      <code>SignatureRecord</code> wire format, <code>aggregate()</code>, and pluggable per-backend
+      <code>CosignAdapter</code>s (Safe today; Safe4337Module and a Rhinestone ownable-validator adapter also ship
+      in the package).</li>
+    <li>Two small **read-side** services that make the UI convenient, neither of which is trusted for anything —
+      <strong>safe-indexer</strong> (owner → Safes discovery on chains with no official Safe Transaction Service)
+      and <strong>cosign-archive</strong> (keeps serving shares after they've scrolled off the live board's window).</li>
+  </ul>
+
+  <h2 id="trust-model"><span class="n">§2</span> The trust model</h2>
+  <p>Three independent guarantees make the "no trusted server" claim actually hold:</p>
+
+  <div class="step">
+    <div class="head"><div class="num">A</div><h3>The digest is proven byte-equal to the Safe's own hash</h3></div>
+    <p class="hint">
+      The EIP-712 typed-data table the UI signs (<code>SAFE_TX_TYPES</code> in
+      <code>packages/cosign-web/src/lib/safe-typed-data.ts</code>) is a hand-copied mirror of the SDK's internal
+      table — necessary because the SDK doesn't export the raw typed-data shape, only the resulting digest
+      function. To make sure that copy can never silently drift, every signature is checked with
+      <code>assertSafeTxSignatureParity()</code> <em>before</em> it's posted: it recomputes
+      <code>safeTransactionDigest()</code> from the SDK's canonical, independently-implemented hasher
+      (<code>packages/cosign/src/adapters/safe.ts</code>, matching Safe's on-chain
+      <code>SAFE_TX_TYPEHASH</code>/<code>DOMAIN_SEPARATOR_TYPEHASH</code> — no <code>name</code>/<code>version</code>
+      in the domain, exactly like Safe's own <code>domainSeparator()</code>), then recovers the signer from the
+      signature over that digest. If the recovered address doesn't match the wallet that just signed, the app
+      <strong>throws and refuses to post</strong>. A drifted local types table can never produce a share the Safe
+      adapter would later silently reject.
+    </p>
+  </div>
+
+  <div class="step">
+    <div class="head"><div class="num">B</div><h3>Signatures are verified against the Safe's own membership rules — not trusted</h3></div>
+    <p class="hint">
+      Nothing about a posted share is taken on faith. The <code>CosignAdapter</code> for Safe
+      (<code>makeSafeAdapter</code>) reads <code>getOwners()</code>/<code>getThreshold()</code> straight off-chain
+      and, for every candidate share, recovers the effective signer and checks it's a current owner before
+      counting it. EIP-1271 (contract-owner) shares are checked the same way Safe's own
+      <code>checkNSignatures</code> would: rebuilding the exact pre-image and calling the owner contract's
+      <code>isValidSignature</code>. Verification failures are excluded, not trusted-through.
+    </p>
+  </div>
+
+  <div class="step">
+    <div class="head"><div class="num">C</div><h3>You see the real effect before you sign</h3></div>
+    <p class="hint">
+      Before asking for a signature, the app simulates the exact <code>execTransaction</code> call via
+      <code>eth_simulateV1</code> on the Safe's own chain, using a <strong>state override</strong> (not a fake
+      transaction) — temporarily setting <code>threshold = 1</code> and marking the connected wallet an owner in
+      the Safe's own storage layout, so the simulation exercises the Safe's real code path
+      (<code>checkNSignatures</code>'s approved-hash branch) with no signatures collected and no chain state
+      touched. Net asset changes (native + ERC-20/ERC-7528) are decoded from the trace and shown as "what this
+      does," with a hard revert flag. Falls back through <code>debug_traceCall</code> → <code>trace_call</code> →
+      calldata-only decode on chains without <code>eth_simulateV1</code>.
+    </p>
+  </div>
+
+  <h2 id="flow"><span class="n">§3</span> The co-sign flow, step by step</h2>
+
+  <div class="step">
+    <div class="head"><div class="num">1</div><h3>Connect + pick the Safe</h3></div>
+    <p>
+      Connect a wallet; cosign-web auto-discovers the Safes that wallet owns (or accepts a manual Safe address).
+      Discovery is a convenience only — it never gates anything. Once a Safe is chosen, its owners/threshold are
+      read straight off the Safe contract, and the coordination scope is fixed:
+      <code>scope = safe:&lt;chainId&gt;:&lt;safe address, lowercased&gt;</code>
+      (<code>scopeFor()</code> in <code>lib/cosign.ts</code>) — this is what buckets shares per-Safe-per-chain so
+      unrelated Safes never collide on the board.
+    </p>
+    <div class="why"><b>why it's trustless:</b> discovery only shortens a text box; nothing downstream trusts it. Owners/threshold come from the Safe contract itself.</div>
+  </div>
+
+  <div class="step">
+    <div class="head"><div class="num">2</div><h3>Build the SafeTx + compute the digest</h3></div>
+    <p>
+      Either build a <code>SafeTx</code> (to/value/data/operation/gas params/nonce) or paste a raw 32-byte digest
+      directly. For a built <code>SafeTx</code>, <code>safeTransactionDigest(tx, chainId, safe)</code> computes the
+      EIP-712 hash locally — this is the exact value Safe's on-chain <code>getTransactionHash(...)</code> returns
+      for the same inputs.
+    </p>
+    <div class="why"><b>why it's trustless:</b> the digest is a pure function of the transaction + chain + Safe address — no oracle, no server round-trip required to know what you're about to sign.</div>
+  </div>
+
+  <div class="step">
+    <div class="head"><div class="num">3</div><h3>Simulate — "what this does"</h3></div>
+    <p>
+      Runs the state-override <code>eth_simulateV1</code> described above and shows a plain-language summary,
+      per-address net asset deltas, and a raw-trace expander. A reverting transaction is flagged and blocks the
+      "confirm & continue" button.
+    </p>
+    <div class="why"><b>why it's trustless:</b> you're looking at the Safe's real bytecode executing against real state overrides, not a vendor's description of the calldata.</div>
+  </div>
+
+  <div class="step">
+    <div class="head"><div class="num">4</div><h3>Sign — with the parity guardrail</h3></div>
+    <p>
+      The wallet signs the EIP-712 typed data (or, for a pasted digest, an <code>eth_sign</code>-style ECDSA
+      signature — recorded with <code>scheme = ECDSA</code> rather than <code>EIP712</code>). For a built
+      <code>SafeTx</code>, <code>assertSafeTxSignatureParity()</code> runs immediately after signing and before
+      anything is posted (§2.A above).
+    </p>
+    <div class="why"><b>why it's trustless:</b> the guardrail makes "the app signed the wrong hash" a build-time-impossible failure mode rather than a silent one.</div>
+  </div>
+
+  <div class="step">
+    <div class="head"><div class="num">5</div><h3>Post the share to MsgBoard</h3></div>
+    <p>
+      The signature is packed into a <code>SignatureRecord</code> — <code>{ digest, signer, signature, scheme,
+      meta }</code> (for a <code>SafeTx</code>, <code>meta</code> ABI-encodes the full tx so any reader can later
+      reconstruct <code>execTransaction</code>'s arguments) — ABI-encoded per <code>RECORD_ABI</code>, and posted
+      under today's rotating category key. The proof-of-work stamping this requires runs in a
+      <strong>Web Worker</strong> — never the browser's main thread
+      (<code>packages/cosign-web/src/seams/worker-board.ts</code>) — so the UI stays responsive while the share is
+      minted onto the board.
+    </p>
+    <div class="why"><b>why it's trustless:</b> posting is a public write to a PoW-gated board, not a write to anyone's private database — anyone can independently confirm the post happened and reproduce its decode.</div>
+  </div>
+
+  <div class="step">
+    <div class="head"><div class="num">6</div><h3>Read, union, and aggregate</h3></div>
+    <p>
+      Any participant reads the rolling 7-UTC-day window of category keys
+      (<code>WINDOW_DAYS</code> in <code>lib/cosign.ts</code>) for the scope, <strong>unioned</strong> across the
+      live board and the cosign-archive service — board records win on a signature collision, and the archive only
+      contributes shares that have aged out of the board's live window (dedupe key: <code>digest:signature</code>,
+      lowercased). The union degrades gracefully to board-only if the archive is unreachable. Once shares for the
+      chosen digest are in hand, the SDK's <code>aggregate()</code> filters them through the Safe adapter's
+      <code>verify()</code> (recover signer → confirm current owner membership, or the EIP-1271 pre-image check),
+      keeps only the ones that pass, and orders the survivors the way Safe's <code>checkNSignatures</code>
+      requires (strictly ascending by signer address). <code>aggregateForSafe()</code> additionally builds the
+      final <code>signatures</code> bytes blob ready for <code>execTransaction</code>.
+    </p>
+    <div class="why"><b>why it's trustless:</b> a share only counts if it independently verifies against the Safe's live owner set — a malicious or buggy read source can at worst withhold a valid share, never inject a fake one that passes verification.</div>
+  </div>
+
+  <div class="step">
+    <div class="head"><div class="num">7</div><h3>Execute</h3></div>
+    <p>
+      Once signed owners &ge; threshold, any owner (or anyone holding the assembled blob) submits
+      <code>execTransaction(to, value, data, operation, safeTxGas, baseGas, gasPrice, gasToken, refundReceiver,
+      signatures)</code> directly to the Safe and pays the gas. Cosign itself never touches the chain on the write
+      side before this point — every prior step is board coordination only.
+    </p>
+    <div class="why"><b>why it's trustless:</b> execution is a plain call to the Safe contract, which re-verifies every signature itself (<code>checkNSignatures</code>) before moving any funds — cosign's own verification is a courtesy for the UI, not the actual security boundary.</div>
+  </div>
+
+  <h2 id="create-a-safe"><span class="n">§4</span> Create a Safe (v1.4.1)</h2>
+  <p>
+    Cosign can also deploy a brand-new Safe rather than requiring one to already exist. This uses the canonical,
+    deterministic Safe v1.4.1 deployment (same addresses on every EVM chain):
+  </p>
+  <table>
+    <tr><th>role</th><th>address</th></tr>
+    <tr><td>ProxyFactory</td><td class="mono">0x4e1DCf7AD4e460CfD30791CCC4F9c8a4f820ec67</td></tr>
+    <tr><td>Safe singleton (L2)</td><td class="mono">0x29fcB43b46531BcA003ddC8FCB67FFE91900C762</td></tr>
+    <tr><td>Fallback handler</td><td class="mono">0xfd0732Dc9E303f09fCEf3a7388Ad10A83459Ec99</td></tr>
+  </table>
+
+  <div class="step">
+    <div class="head"><div class="num">1</div><h3>Predict</h3></div>
+    <p>
+      Given owners + threshold + a random 256-bit <code>saltNonce</code>,
+      <code>predictSafeAddress()</code> computes the deterministic CREATE2 address purely and synchronously — no
+      RPC call — from the <code>setup()</code> initializer calldata, the embedded canonical
+      <code>SafeProxyFactory</code> creation code, and the factory address. The predicted address is shown live as
+      the owners/threshold form is edited.
+    </p>
+  </div>
+  <div class="step">
+    <div class="head"><div class="num">2</div><h3>Deploy</h3></div>
+    <p>
+      The connected wallet calls <code>createProxyWithNonce(singleton, initializer, saltNonce)</code> on the
+      factory. This mines the proxy and emits <code>ProxyCreation(proxy, singleton)</code>.
+    </p>
+  </div>
+  <div class="step">
+    <div class="head"><div class="num">3</div><h3>Verify (mined == predicted)</h3></div>
+    <p>
+      <code>confirmDeploy()</code> waits for the receipt, decodes the <code>ProxyCreation</code> log, and
+      <strong>throws</strong> (<code>SafeAddressMismatchError</code>) if the address that actually got deployed
+      doesn't match the address predicted in step 1 — the app never hands a Safe address downstream that it hasn't
+      independently confirmed came from the exact deployment it asked for.
+    </p>
+  </div>
+  <div class="step">
+    <div class="head"><div class="num">4</div><h3>Hand off</h3></div>
+    <p>
+      The confirmed Safe address (pinned to the chain the deploy actually ran on, not just "whatever chain the
+      wallet happens to be on by the time this resolves") is handed straight into the co-sign flow at step 1 —
+      owners/threshold are then re-read from the freshly deployed contract, same as any manually-entered Safe.
+    </p>
+  </div>
+
+  <h2 id="architecture"><span class="n">§5</span> Architecture</h2>
+  <div class="arch">
+    <div class="box"><div class="t">cosign-web (this app)</div><div class="d">React wizard: pick Safe → build/simulate tx → sign → post → collect → execute. No backend of its own.</div></div>
+    <div class="box"><div class="t">@msgboard/cosign SDK</div><div class="d">Category-key math, SignatureRecord codec, generic aggregate(), CosignAdapter (Safe / Safe4337 / Rhinestone).</div></div>
+    <div class="box"><div class="t">MsgBoard</div><div class="d">PoW-gated message board. Posts are the ONLY write path for coordination — ephemeral, ~120-block live window.</div></div>
+    <div class="box"><div class="t">safe-indexer</div><div class="d">Ponder-indexed owner→Safe map for chains with no official Safe Transaction Service (PulseChain 369/943). Read-only convenience.</div></div>
+    <div class="box"><div class="t">cosign-archive</div><div class="d">Serves decoded shares that scrolled off the board's live window, keyed identically to the board (namespace/scope/day). Read-only convenience.</div></div>
+    <div class="box"><div class="t">the Safe contract</div><div class="d">The actual security boundary — re-verifies every signature in checkNSignatures at execTransaction time regardless of what the UI already checked.</div></div>
+  </div>
+  <p class="hint">
+    The MsgBoard the shares travel over is <strong>independent of the chain the Safe lives on</strong> — cosign is
+    a pure coordination layer with no chain writes of its own, so the board can run on any EVM chain exposing the
+    <code>msgboard_</code> RPC module (<code>packages/cosign-web/src/lib/board.ts</code>).
+  </p>
+
+  <h3>The category-key scheme</h3>
+  <p>
+    Every share lives under a rotating, day-granular UTC category key so the board's working set stays small and
+    self-pruning:
+  </p>
+  <pre><code>categoryKey = keccak256(utf8Bytes(`${namespace}:${scope}:${isoDate}`))
+namespace   = "cosign"
+scope       = `safe:${chainId}:${safeAddress.toLowerCase()}`
+isoDate     = YYYY-MM-DD, UTC (e.g. "2026-07-02")</code></pre>
+  <p>
+    Readers sweep a rolling window (cosign-web uses 7 days) of these keys — today's plus the prior N−1 UTC days —
+    across both the live board and the archive, decode every entry, skip anything undecodable (the board is open;
+    junk under a category is expected and simply ignored), and dedupe by <code>keccak256</code> of the raw ABI
+    bytes (board reads) or by <code>digest:signature</code> (board∪archive union).
+  </p>
+
+  <h2 id="endpoints"><span class="n">§6</span> Live endpoints</h2>
+  <table>
+    <tr><th>purpose</th><th>base</th><th>notes</th></tr>
+    <tr>
+      <td>Simulation RPC</td>
+      <td class="mono">https://one.valve.city/rpc/vk_demo/evm/&lt;chainId&gt;</td>
+      <td>The Safe's own chain — used for <code>eth_simulateV1</code> and friends. Independent of the board's chain.</td>
+    </tr>
+    <tr>
+      <td>Cosign archive</td>
+      <td class="mono">https://cosign-archive.msgboard.xyz</td>
+      <td><code>GET /cosign/:namespace/:scope/signatures?days=N</code> → <code>{ signatures: [...] }</code>. Down-safe: the app falls back to board-only.</td>
+    </tr>
+    <tr>
+      <td>Safe owner indexer</td>
+      <td class="mono">https://cosign.msgboard.xyz/safe-indexer</td>
+      <td><code>GET /owners/:address/safes?chainId=369|943</code> → <code>{ safes: [...] }</code> (same shape as the official Safe Transaction Service). Self-hosted because PulseChain has no official Safe Tx Service.</td>
+    </tr>
+    <tr>
+      <td>Official Safe Tx Service</td>
+      <td class="mono">https://safe-transaction-mainnet.safe.global</td>
+      <td>Used for Ethereum mainnet (chain 1) discovery only — <code>GET /api/v1/owners/:address/safes/</code>.</td>
+    </tr>
+    <tr>
+      <td>MsgBoard endpoints</td>
+      <td class="mono">one.valve.city/rpc/vk_demo/evm/{369,943,1}</td>
+      <td>PulseChain mainnet (default), PulseChain v4 testnet, and Ethereum mainnet — selectable in the app's ⚙ settings. This is the coordination board, independent of the Safe's own chain.</td>
+    </tr>
+  </table>
+  <div class="notice">
+    Supported Safe chains in this app: <span class="pill brass">1 — Ethereum</span>
+    <span class="pill brass">369 — PulseChain</span>
+    <span class="pill brass">943 — PulseChain v4</span>.
+  </div>
+
+  <footer class="foot">@msgboard/cosign · safe adapter · ECDSA + EIP-712 · shares stamped off-thread</footer>
+</div>
+</body>
+</html>
