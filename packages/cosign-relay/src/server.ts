@@ -4,7 +4,7 @@ import { type Hex, isAddress, isAddressEqual } from 'viem'
 import { SAFE_V141 } from './constants.js'
 import { POW_BITS, verifyPow } from './pow.js'
 import { createRateLimiter } from './ratelimit.js'
-import { enabledChains, submitDeploy, type RelayChainId } from './submit.js'
+import { enabledChains, sponsorInfo, submitDeploy, type RelayChainId } from './submit.js'
 import { assertPlainSafeSetup, decodeSafeSetup, recoverRequestSigner, requestDigest } from './validate.js'
 
 const RATE_LIMIT_PER_DAY = Number(process.env.RATE_LIMIT_PER_DAY ?? 5)
@@ -76,7 +76,17 @@ export function createApp({ rateLimiter = createRateLimiter({ perDay: RATE_LIMIT
   const app = new Hono()
 
   app.get('/health', (c) => c.json({ ok: true }))
-  app.get('/config', (c) => c.json({ chains: enabledChains(), powBits: POW_BITS }))
+  app.get('/config', async (c) => {
+    // sponsorInfo() already never throws, but this endpoint must never fail on an RPC hiccup —
+    // belt and suspenders so /config always answers with at least the chains + PoW difficulty.
+    let sponsors: Awaited<ReturnType<typeof sponsorInfo>> = []
+    try {
+      sponsors = await sponsorInfo()
+    } catch {
+      sponsors = []
+    }
+    return c.json({ chains: enabledChains(), powBits: POW_BITS, sponsors })
+  })
 
   app.post('/deploy-safe', async (c) => {
     let rawBody: DeploySafeBody

@@ -2,27 +2,48 @@ import { type Hex, concat, encodeAbiParameters, keccak256, pad, toHex } from 'vi
 import { relayConfigUrl, relayDeploySafeUrl } from './config'
 import { SAFE_V141 } from './deploy-safe'
 
+/** One chain's gas sponsor — the relay's own funded address + its current native balance (wei). */
+export interface SponsorInfo {
+  chainId: number
+  address: Hex
+  balance: string
+}
+
 /** The relay's `GET /config` shape — which chains it currently sponsors + its PoW difficulty. */
 export interface RelayConfig {
   chains: number[]
   powBits: number
+  sponsors: SponsorInfo[]
+}
+
+function parseSponsors(raw: unknown): SponsorInfo[] {
+  if (!Array.isArray(raw)) return []
+  const out: SponsorInfo[] = []
+  for (const entry of raw) {
+    if (typeof entry !== 'object' || entry === null) continue
+    const { chainId, address, balance } = entry as Record<string, unknown>
+    if (typeof chainId !== 'number' || typeof address !== 'string' || !address.startsWith('0x')) continue
+    out.push({ chainId, address: address as Hex, balance: typeof balance === 'string' ? balance : '0' })
+  }
+  return out
 }
 
 /**
  * Reads the relay's `/config`. Never throws — a down/misconfigured/absent relay just means the
- * gasless toggle stays hidden (see `CreateSafe`'s `chains.includes(wallet.chainId)` gate), and the
- * user-pays path is completely unaffected.
+ * gasless toggle stays hidden (see `CreateSafe`'s `chains.includes(wallet.chainId)` gate) and the
+ * sponsor-status footer renders nothing; the user-pays path is completely unaffected.
  */
 export async function fetchRelayConfig(): Promise<RelayConfig> {
   try {
     const res = await fetch(relayConfigUrl(), { headers: { accept: 'application/json' } })
-    if (!res.ok) return { chains: [], powBits: 0 }
-    const json = (await res.json()) as { chains?: unknown; powBits?: unknown }
+    if (!res.ok) return { chains: [], powBits: 0, sponsors: [] }
+    const json = (await res.json()) as { chains?: unknown; powBits?: unknown; sponsors?: unknown }
     const chains = Array.isArray(json.chains) ? json.chains.filter((c): c is number => typeof c === 'number') : []
     const powBits = typeof json.powBits === 'number' ? json.powBits : 0
-    return { chains, powBits }
+    const sponsors = parseSponsors(json.sponsors)
+    return { chains, powBits, sponsors }
   } catch {
-    return { chains: [], powBits: 0 }
+    return { chains: [], powBits: 0, sponsors: [] }
   }
 }
 

@@ -52,6 +52,38 @@ export function enabledChains(): RelayChainId[] {
   return ([943, 369] as const).filter((id) => relayKey(id) !== undefined)
 }
 
+/** The relay's sponsor address for a chain, or undefined if no key is configured for it. */
+export function sponsorAddress(chainId: RelayChainId): Hex | undefined {
+  const key = relayKey(chainId)
+  return key ? privateKeyToAccount(key).address : undefined
+}
+
+export type SponsorInfo = { chainId: RelayChainId; address: Hex; balance: string }
+
+/**
+ * The relay's sponsor address + native balance for every enabled chain — surfaced by `GET /config`
+ * so users can see how much gas is left and top it up themselves. NEVER exposes the key. NEVER
+ * throws: an RPC hiccup on one chain just reports that chain's balance as `'0'` rather than failing
+ * the whole response.
+ */
+export async function sponsorInfo(): Promise<SponsorInfo[]> {
+  const out: SponsorInfo[] = []
+  for (const chainId of enabledChains()) {
+    const address = sponsorAddress(chainId)
+    if (!address) continue
+    let balance = '0'
+    try {
+      const cfg = CHAIN_CONFIG[chainId]
+      const publicClient = createPublicClient({ chain: cfg.chain, transport: http(rpcUrl(chainId)) })
+      balance = (await publicClient.getBalance({ address })).toString()
+    } catch {
+      // RPC hiccup — report the sponsor address with a '0' balance rather than failing /config.
+    }
+    out.push({ chainId, address, balance })
+  }
+  return out
+}
+
 /**
  * Submits `createProxyWithNonce` on `chainId`, paying gas from that chain's relay key, and waits
  * for the receipt. Returns the tx hash and the proxy address parsed from the `ProxyCreation` log.

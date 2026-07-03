@@ -34,6 +34,7 @@ import {
 import type { ProgressMsg } from './worker/types'
 import { Copyable, Field, OwnerRow, RegisterLine, Seal, StepCard, TextInput, cx, short } from './components/ui'
 import { CreateSafe } from './components/CreateSafe'
+import { SponsorStatus } from './components/SponsorStatus'
 
 interface SafeInfo {
   owners: Hex[]
@@ -748,7 +749,10 @@ export function App() {
       </div>
       )}
 
-      <footer className="foot">@msgboard/cosign · safe adapter · ECDSA + EIP-712 · shares stamped off-thread</footer>
+      <footer className="foot">
+        @msgboard/cosign · safe adapter · ECDSA + EIP-712 · shares stamped off-thread
+        <SponsorStatus />
+      </footer>
     </div>
   )
 }
