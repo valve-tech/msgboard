@@ -78,6 +78,12 @@ createProxyWithNonce(singleton: SAFE_V141.singletonL2, initializer: buildSetup(o
   → emits ProxyCreation(proxy, singleton)
 ```
 
+**Optional gasless alternative:** if the caller has no native gas (or just doesn't want to spend
+any), `packages/cosign-relay` can submit this same `createProxyWithNonce` call and pay the gas
+itself, for a **plain owners+threshold multisig only** — see `gasless-relay.md` for the full flow
+(sign a request digest, solve a small proof of work, POST to `/relay/deploy-safe`). It only ever
+replaces this step; Steps 1, 3, and 4 here are unchanged and still mandatory on the relay path too.
+
 ## Step 3 — Verify: mined address must equal predicted (or throw)
 
 ```ts

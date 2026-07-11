@@ -210,6 +210,7 @@
     <a href="#trust-model">Trust model</a>
     <a href="#flow">Co-sign flow</a>
     <a href="#create-a-safe">Create a Safe</a>
+    <a href="#gasless-deploy">Gasless deploy</a>
     <a href="#architecture">Architecture</a>
     <a href="#endpoints">Live endpoints</a>
   </div>
@@ -421,7 +422,108 @@
     </p>
   </div>
 
-  <h2 id="architecture"><span class="n">§5</span> Architecture</h2>
+  <h2 id="gasless-deploy"><span class="n">§5</span> Gasless deploy (optional)</h2>
+  <p>
+    Step 2 of Create-a-Safe above (<code>createProxyWithNonce</code>) normally costs the connected
+    wallet gas. <strong>cosign-relay</strong> is a small, purely-additive service
+    (<code>packages/cosign-relay</code>) that will submit that same call and pay the gas itself, for
+    a caller with an empty wallet — nothing else about the flow changes: prediction (step 1) and the
+    mined-address verification (step 3) are identical either way, and CREATE2 addresses are
+    <strong>submitter-independent</strong>, so a relay paying the gas can never change what address a
+    given <code>(factory, singleton, initializer, saltNonce)</code> deploys to. The toggle only
+    appears when the connected chain is one the relay currently sponsors.
+  </p>
+
+  <div class="step">
+    <div class="head"><div class="num">1</div><h3>Sign a request digest — not a SafeTx</h3></div>
+    <p>
+      The browser computes the same predicted address as step 1, then builds a request digest that
+      binds the exact deploy request:
+      <code>keccak256(abi.encode(chainId, singleton, keccak256(initializer), saltNonce))</code>. The
+      connected wallet signs this raw 32-byte digest with a plain EIP-191 personal-sign (not the
+      EIP-712 <code>SafeTx</code> signing used elsewhere in cosign) — binding chain id + singleton +
+      initializer + saltNonce means the signature can never be replayed against a different chain,
+      singleton, or Safe configuration.
+    </p>
+  </div>
+
+  <div class="step">
+    <div class="head"><div class="num">2</div><h3>Solve a small proof of work</h3></div>
+    <p>
+      A walletless hashcash-style stamp over the same digest: find a 32-byte nonce such that
+      <code>keccak256(digest ++ pad(nonce, 32))</code>, read as a uint256, falls below a
+      difficulty target (<code>powBits</code>, from the relay's own <code>/config</code>; default 20
+      — roughly a second of grinding). This runs in a Web Worker, never the browser's main thread,
+      matching the same off-thread-PoW convention used for posting shares to MsgBoard.
+    </p>
+  </div>
+
+  <div class="step">
+    <div class="head"><div class="num">3</div><h3>POST to the relay</h3></div>
+    <p>
+      <code>{ chainId, singleton, initializer, saltNonce, signature, powNonce }</code> goes to
+      <code>POST /relay/deploy-safe</code>. The relay checks, cheapest-first:
+    </p>
+    <ul>
+      <li>the chain is one it currently sponsors, and <code>singleton</code> is the canonical Safe
+        v1.4.1 L2 singleton;</li>
+      <li><strong>the setup is a plain owners+threshold multisig only</strong> — <code>to == 0x0</code>,
+        <code>data == 0x</code>, the canonical fallback handler, <code>paymentToken</code>/
+        <code>payment</code>/<code>paymentReceiver</code> all zero. Any setup that would delegatecall
+        out or redirect a payment is rejected outright — this is what makes it safe for the relay to
+        pay gas at all, since it can never be tricked into sponsoring anything but a Safe's own
+        ownership set;</li>
+      <li><strong>Gate 1 — proof of work</strong> (step 2 above) is verified;</li>
+      <li><strong>Gate 2 — signed owner:</strong> the signature (step 1 above) must recover to one of
+        the setup's own <code>owners[]</code> — a stranger can never spend the relay's gas;</li>
+      <li><strong>Gate 3 — rate limit:</strong> a per-IP daily cap (default 5/day) as a coarser
+        backstop.</li>
+    </ul>
+    <p>
+      Only after all of that does it submit <code>createProxyWithNonce</code> from its own
+      per-chain funded key and return <code>{ txHash, proxy }</code>.
+    </p>
+  </div>
+
+  <div class="step">
+    <div class="head"><div class="num">4</div><h3>Verify — exactly like the user-pays path</h3></div>
+    <p>
+      The app runs the <strong>same</strong> <code>confirmDeploy()</code> against the relay's
+      <code>txHash</code> as step 3 of Create-a-Safe, throwing on any mismatch between the mined and
+      predicted address. The relay's own validation protects its gas, not this guarantee — the app
+      never trusts the relay for anything beyond "a transaction got submitted."
+    </p>
+  </div>
+
+  <h3>Relay endpoints</h3>
+  <table>
+    <tr><th>method &amp; path</th><th>returns</th></tr>
+    <tr><td class="mono">GET /relay/health</td><td><code>{ "ok": true }</code> — liveness.</td></tr>
+    <tr>
+      <td class="mono">GET /relay/config</td>
+      <td><code>{ "chains": [...], "powBits": 20, "sponsors": [...] }</code> — sponsored chains, PoW
+        difficulty, and each sponsor's own address + native balance.</td>
+    </tr>
+    <tr>
+      <td class="mono">POST /relay/deploy-safe</td>
+      <td><code>200 { "txHash", "proxy" }</code>; <code>400 { "error" }</code> for any gate failure;
+        <code>429</code> for the rate limit.</td>
+    </tr>
+  </table>
+
+  <div class="notice brass">
+    <strong>Currently enabled: chain 943</strong> (PulseChain v4 testnet). 369 (PulseChain mainnet,
+    which has no faucet) activates once an operator funds its relay key; Ethereum mainnet is never
+    sponsored — it stays user-pays only.
+  </div>
+  <p class="hint">
+    The relay is entirely self-sustaining and self-disclosing: its per-chain sponsor address and
+    live native balance are shown in this app's footer (pulled from <code>GET /relay/config</code>),
+    and anyone — not just its operator — can keep gasless deploys running by sending that address
+    native gas.
+  </p>
+
+  <h2 id="architecture"><span class="n">§6</span> Architecture</h2>
   <div class="arch">
     <div class="box"><div class="t">cosign-web (this app)</div><div class="d">React wizard: pick Safe → build/simulate tx → sign → post → collect → execute. No backend of its own.</div></div>
     <div class="box"><div class="t">@msgboard/cosign SDK</div><div class="d">Category-key math, SignatureRecord codec, generic aggregate(), CosignAdapter (Safe / Safe4337 / Rhinestone).</div></div>
@@ -452,7 +554,7 @@ isoDate     = YYYY-MM-DD, UTC (e.g. "2026-07-02")</code></pre>
     bytes (board reads) or by <code>digest:signature</code> (board∪archive union).
   </p>
 
-  <h2 id="endpoints"><span class="n">§6</span> Live endpoints</h2>
+  <h2 id="endpoints"><span class="n">§7</span> Live endpoints</h2>
   <table>
     <tr><th>purpose</th><th>base</th><th>notes</th></tr>
     <tr>
@@ -469,6 +571,11 @@ isoDate     = YYYY-MM-DD, UTC (e.g. "2026-07-02")</code></pre>
       <td>Safe owner indexer</td>
       <td class="mono">https://cosign.msgboard.xyz/safe-indexer</td>
       <td><code>GET /owners/:address/safes?chainId=369|943</code> → <code>{ safes: [...] }</code> (same shape as the official Safe Transaction Service). Self-hosted because PulseChain has no official Safe Tx Service.</td>
+    </tr>
+    <tr>
+      <td>Gasless-deploy relay</td>
+      <td class="mono">https://cosign.msgboard.xyz/relay</td>
+      <td>Optional gas sponsor for Create-a-Safe's deploy step — see <a href="#gasless-deploy">§5</a>. <code>GET /health</code>, <code>GET /config</code>, <code>POST /deploy-safe</code>. Currently sponsors chain 943 only.</td>
     </tr>
     <tr>
       <td>Official Safe Tx Service</td>
