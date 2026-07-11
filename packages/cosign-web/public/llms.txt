@@ -49,6 +49,13 @@ crypto. Key entry points (all exported from the package root):
 
 ## Endpoints
 
+- **cosign-relay** (gasless Safe deploy, optional) — `https://cosign.msgboard.xyz/relay`. See
+  "Gasless Safe deploy" below for the request shape. `GET /relay/health` → `{ "ok": true }`.
+  `GET /relay/config` → `{ "chains": [943], "powBits": 20, "sponsors": [{ "chainId", "address",
+  "balance" }] }` — which chains currently have a funded relay key (only request-deploy on a chain
+  this lists), the PoW difficulty to solve, and each sponsor wallet's address + native balance
+  (wei, decimal string) so anyone can top it up. Currently sponsors chain 943 only; 369 activates
+  once `RELAY_KEY_369` is funded; chain 1 (Ethereum) is never sponsored.
 - **safe-indexer** — `GET https://cosign.msgboard.xyz/safe-indexer/owners/:address/safes?chainId=<369|943>`
   → `{ "safes": ["0x…", …] }` (checksummed, deduped; same response shape as the official Safe
   Transaction Service). Self-hosted (Ponder-indexed) because PulseChain has no official Safe Tx
@@ -93,3 +100,49 @@ Encode/decode with `encodeRecord`/`decodeRecord` from `@msgboard/cosign`.
 
 Ethereum mainnet (1), PulseChain (369), PulseChain v4 testnet (943). The MsgBoard the shares travel
 over is independent of the chain the Safe lives on — it only needs the `msgboard_` RPC module.
+
+## Gasless Safe deploy (optional, via cosign-relay)
+
+An alternative to Step 2 of Create-a-Safe (v1.4.1): a caller with no native gas can have
+`cosign-relay` submit `createProxyWithNonce` and pay gas from its own funded key, for a **plain
+owners+threshold multisig setup only** (`to == 0x0`, `data == 0x`, canonical `fallbackHandler`,
+`paymentToken/payment/paymentReceiver` all zero/empty — anything else is rejected before any other
+check runs). Steps 1/3/4 of Create-a-Safe (predict, verify mined==predicted, hand off) are
+unchanged.
+
+Request digest — MUST match byte-for-byte, this binds the request to one exact chain/singleton/
+Safe-config so it can never be replayed elsewhere:
+
+```
+digest = keccak256(abi.encode(
+  ['uint256', 'address', 'bytes32', 'uint256'],
+  [chainId, singleton, keccak256(initializer), saltNonce],
+))
+```
+
+Two gates the request must pass, in addition to the plain-multisig check above:
+
+1. **PoW** — find `powNonce` (32 bytes) such that `keccak256(digest ++ pad(powNonce, 32))`, as a
+   uint256, is `< 2^256 / 2^powBits` (`powBits` from `GET /relay/config`, default 20). Walletless
+   CPU cost, no funds required. Grind off the main thread if in a browser.
+2. **Signed owner** — an EIP-191 personal-sign of the raw digest
+   (`recoverMessageAddress({ message: { raw: digest } })`) by one of the setup's own `owners[]`.
+   Not an EIP-712 `SafeTx` signature — this is a different, deploy-time-only digest.
+
+`POST https://cosign.msgboard.xyz/relay/deploy-safe`:
+
+```json
+{
+  "chainId": 943,
+  "singleton": "0x29fcB43b46531BcA003ddC8FCB67FFE91900C762",
+  "initializer": "0x...",
+  "saltNonce": "12345",
+  "signature": "0x...",
+  "powNonce": "0x..."
+}
+```
+
+→ `200 { "txHash": "0x...", "proxy": "0x..." }` (still run `confirmDeploy` against this txHash —
+CREATE2 is submitter-independent, so the relay can never substitute a different address than the
+one predicted and signed for), `400 { "error": "..." }` for any gate failure, `429` for the relay's
+per-IP daily rate limit (default 5/day).
