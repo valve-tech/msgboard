@@ -17,19 +17,24 @@
     "randomness-game": "tsx src/randomness-game.ts",
     "write-for-me": "tsx src/write-for-me.ts",
     "archivist": "tsx src/archivist.ts",
-    "history-server": "tsx src/history-server.ts"
+    "history-server": "tsx src/history-server.ts",
+    "zk-msgboard": "tsx src/zk-msgboard.ts",
+    "zk:build": "tsx scripts/build-zk.ts"
   },
   "dependencies": {
     "@gibs/random": "^0.0.18",
     "@msgboard/history": "*",
     "@msgboard/relayer": "*",
     "@msgboard/sdk": "*",
+    "circomlibjs": "^0.1.7",
     "pg": "^8.14.1",
+    "snarkjs": "^0.7.6",
     "tsx": "^4.19.3",
     "viem": "^2.25.0"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^3.1.2",
+    "circomlib": "^2.0.5",
     "vitest": "^3.1.2"
   }
 }
