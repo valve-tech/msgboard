@@ -70,6 +70,14 @@ const examples: Example[] = [
     description:
       'Record every message as it flows by into Postgres and serve durable history over a read interface — the same pattern behind the hosted GraphQL archive below.',
   },
+  {
+    title: 'ZK-filtered archive',
+    script: 'zk-msgboard',
+    file: 'zk-msgboard.ts',
+    icon: 'mdi:shield-lock-outline',
+    description:
+      'A Semaphore-style zero-knowledge message board. Members prove they belong to an allowed group without revealing which member they are; a watcher verifies every proof and archives only the messages that make it through — provably in-group, still anonymous.',
+  },
 ]
 
 const runCommand = (script: string) => `npm run ${script} --workspace @msgboard/examples`
