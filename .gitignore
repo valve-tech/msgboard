@@ -18,6 +18,11 @@ packages/foundry/out/
 packages/foundry/cache/
 packages/foundry/lib/
 
+# zk-msgboard example: heavy trusted-setup + circuit build artifacts (ptau/zkey/r1cs/wasm).
+# The committed source (circuit, verification_key.json, fixtures, scripts) is enough to
+# verify; regenerate the rest with `npm run zk:build --workspace=packages/examples`.
+packages/examples/zk/build/
+
 # Yarn artifacts: this repo is npm-managed (package-lock.json is the lockfile).
 # Reject stray Yarn 4 / Plug'n'Play files so a `yarn` run can't be committed.
 .yarn/
