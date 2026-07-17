@@ -1,12 +1,14 @@
 ---
 # Deploy the cosign gasless-deploy relay onto the msgboard box and path-route it under
 # cosign.msgboard.xyz/relay. The box's {{ deploy_dir }} is a NON-git snapshot, so we tar the
-# cosign-relay workspace over the single SSH connection, register it, inject RELAY_KEY_943 into the
-# box .env from the faucet container's funded key, build + start, wait for it to LISTEN, then fold the
-# /relay/* route into the cosign union block with body-aware smoke + block/rescue rollback. Idempotent.
+# cosign-relay workspace over the single SSH connection, register it, require RELAY_KEY_943 to be present
+# in the box .env, build + start, wait for it to LISTEN, then fold the /relay/* route into the cosign
+# union block with body-aware smoke + block/rescue rollback. Idempotent.
 #
-# 943 only for now: RELAY_KEY_369 is left unset (PulseChain mainnet has no faucet). Supply RELAY_KEY_369
-# in the box .env later and re-run to enable 369.
+# Both relay keys are DEDICATED, operator-provisioned keys (the cosign relay wallet 0xD8Bd, index-0 of
+# op://valve/cosign relay) — NOT the faucet key. RELAY_KEY_943 and RELAY_KEY_369 must both exist in the
+# box .env before deploying; the play fails loudly if RELAY_KEY_943 is missing rather than re-coupling to
+# the faucet (a shared EOA caused nonce races — see the 2026-07 943 decoupling).
 #
 #   SSH_AUTH_SOCK=... ansible-playbook deploy-cosign-relay.yml
 - name: Deploy cosign gasless-deploy relay (msgboard box)
@@ -51,10 +53,13 @@
       register: ws
       changed_when: "'added' in ws.stdout"
 
-    # RELAY_KEY_943 = the box faucet's funded 943 key (the "msgboard sponsorship"). Read it from the
-    # faucet container ON THE BOX (never leaves the box), 0x-prefix it, and write it to .env once. The
-    # `:?` guard in the compose means it must exist before any `docker compose` command below.
-    - name: Ensure RELAY_KEY_943 exists in the box .env (from the faucet container key; idempotent)
+    # RELAY_KEY_943 must be a DEDICATED, pre-funded 943 key (the cosign relay wallet 0xD8Bd), provisioned
+    # by the operator in the box .env — NOT the faucet key. Sharing one EOA between the faucet and the
+    # relay causes nonce races + a shared blast radius (the 2026-07 943 decoupling). The `:?` guard in the
+    # compose requires it before any `docker compose` command below; if it is absent we FAIL LOUDLY rather
+    # than re-coupling to the faucet. Provision it exactly like RELAY_KEY_369 (derive index-0 from
+    # op://valve/cosign relay), fund it on 943, then re-run.
+    - name: Require RELAY_KEY_943 in the box .env (operator-provisioned dedicated key; fail if missing)
       ansible.builtin.shell:
         executable: /bin/bash
         chdir: "{{ deploy_dir }}"
@@ -64,14 +69,11 @@
           if grep -q '^RELAY_KEY_943=' .env; then
             echo "relay key present"
           else
-            k=$(docker inspect faucet --format '{{ "{{" }}range .Config.Env{{ "}}" }}{{ "{{" }}println .{{ "}}" }}{{ "{{" }}end{{ "}}" }}' | sed -n 's/^PRIVATE_KEY=//p' | head -1)
-            if [ -z "$k" ]; then echo "FAUCET_KEY_NOT_FOUND" >&2; exit 1; fi
-            case "$k" in 0x*) : ;; *) k="0x$k" ;; esac
-            printf 'RELAY_KEY_943=%s\n' "$k" >> .env
-            echo "relay key injected"
+            echo "RELAY_KEY_943_MISSING: provision a dedicated, funded 943 key (the cosign relay wallet, NOT the faucet key) in {{ deploy_dir }}/.env before deploying" >&2
+            exit 1
           fi
       register: relaykey
-      changed_when: "'injected' in relaykey.stdout"
+      changed_when: false
       no_log: true
 
     - name: Build the cosign-relay image (full monorepo build — a few minutes)
@@ -194,4 +196,4 @@
 
     - name: Done
       ansible.builtin.debug:
-        msg: "cosign-relay live at cosign.msgboard.xyz/relay (943 gasless deploy; 369 pending RELAY_KEY_369)."
+        msg: "cosign-relay live at cosign.msgboard.xyz/relay (943 + 369 gasless deploy; both on the dedicated cosign relay key)."
