@@ -9,9 +9,9 @@
 # cosign-relay workspace's `start` runs `tsx src/index.ts`. Served on :8787 over the compose network;
 # Caddy path-routes cosign.msgboard.xyz/relay/* -> cosign-relay:8787.
 #
-# 943 uses the box faucet key (RELAY_KEY_943, injected into .env by the deploy from the faucet
-# container). 369 stays DISABLED until RELAY_KEY_369 is supplied (PulseChain mainnet has no faucet) —
-# the service reports its enabled chains at GET /config, and the UI only shows the toggle for those.
+# Both 943 and 369 use the DEDICATED cosign relay key (0xD8Bd, index-0 of op://valve/cosign relay),
+# operator-provisioned in the box .env — NOT the faucet key (they must not share an EOA; nonce races).
+# The service reports its enabled chains at GET /config, and the UI only shows the toggle for those.
 services:
   cosign-relay:
     container_name: cosign-relay
@@ -26,9 +26,10 @@ services:
       # MUST pin 8787: the shared monorepo image bakes ENV PORT=4173 (cosign-web vite preview), which
       # would otherwise strand the relay off Caddy's upstream.
       PORT: 8787
-      # 943 relay key — a funded 943 key (the box faucet key), written to .env by the deploy play.
-      RELAY_KEY_943: ${RELAY_KEY_943:?RELAY_KEY_943 must be set (a funded 943 key; the deploy injects the box faucet key)}
-      # 369 relay key — OPTIONAL. Empty => 369 stays disabled (no PulseChain-mainnet faucet; operator supplies).
+      # 943 relay key — the DEDICATED cosign relay key (0xD8Bd), operator-provisioned + funded on 943. NOT
+      # the faucet key (must not share an EOA). Required: the deploy fails loudly if it is missing.
+      RELAY_KEY_943: ${RELAY_KEY_943:?RELAY_KEY_943 must be set (the dedicated cosign relay key, funded on 943; NOT the faucet key)}
+      # 369 relay key — the same dedicated cosign relay key, funded on 369. Empty => 369 stays disabled.
       RELAY_KEY_369: ${RELAY_KEY_369:-}
       # Distinct .env names (RELAY_RPC_*) so we never collide with the box's own RPC_369/RPC_943.
       RPC_943: ${RELAY_RPC_943:-https://one.valve.city/rpc/vk_demo/evm/943}
