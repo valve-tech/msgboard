@@ -9,6 +9,18 @@ interface UseCase {
 
 const useCases: UseCase[] = [
   {
+    title: 'Cosign',
+    description:
+      'A live app for Safe multisigs: collect owner signatures off chain over msgboard and submit only the final, fully-signed transaction — no per-signer gas, no central coordinator.',
+    icon: 'mdi:file-sign',
+  },
+  {
+    title: 'The Archive',
+    description:
+      'A read-only, queryable history of the board: every proof-of-work message is retained and served over GraphQL, so any app can replay or audit what was posted.',
+    icon: 'mdi:archive-search',
+  },
+  {
     title: 'Multi-Sigs',
     description:
       'Accounts can share signatures with multi sig partners to distribute consent of an action without writing anything on chain.',
