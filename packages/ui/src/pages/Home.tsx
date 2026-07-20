@@ -8,7 +8,6 @@ import { Footer } from '../components/Footer'
 import { Docs } from '../components/Docs'
 import { UseCases } from '../components/UseCases'
 import { JoinNetwork } from '../components/JoinNetwork'
-import { GamesCallout } from '../components/GamesCallout'
 import { Ecosystem } from '../components/Ecosystem'
 import { SideToc } from '../components/SideToc'
 
@@ -16,7 +15,6 @@ const sections = [
   { id: 'overview', label: 'Overview' },
   { id: 'try-it', label: 'Try it' },
   { id: 'use-cases', label: 'Use cases' },
-  { id: 'games', label: 'Games' },
   { id: 'ecosystem', label: 'Ecosystem' },
   { id: 'api', label: 'API' },
   { id: 'network', label: 'Network' },
@@ -45,9 +43,6 @@ export function Home() {
       </section>
       <section id="use-cases" className="scroll-mt-16">
         <UseCases />
-      </section>
-      <section id="games" className="scroll-mt-16">
-        <GamesCallout />
       </section>
       <section id="ecosystem" className="scroll-mt-16">
         <Ecosystem />
