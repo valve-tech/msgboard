@@ -41,9 +41,18 @@ const products: Product[] = [
     external: false,
     badge: 'Example',
   },
+  {
+    title: 'MsgBoard Games',
+    description:
+      'A provably-fair game venue built on the board: coin flips and a numbers draw settled by validator entropy (never the house), plus ZK skill games. Coordination rides proof-of-work stamps instead of gas, and every result ships a receipt your browser re-checks against the chain.',
+    icon: 'mdi:cards-playing-outline',
+    href: 'https://games.msgboard.xyz',
+    cta: 'Enter the venue',
+    external: true,
+  },
 ]
 
-/** A three-card row of things built on the board: two live apps and one ZK pattern. */
+/** A grid of things built on the board: three live apps (Cosign, the archive, Games) + one ZK pattern. */
 export function Ecosystem() {
   return (
     <div className="flex flex-col gap-4 text-center py-16 px-4">
@@ -51,7 +60,7 @@ export function Ecosystem() {
       <p className="mx-auto max-w-2xl text-slate-600 dark:text-gray-300 pb-4">
         Apps and archives built on the board — live today, or runnable as a pattern.
       </p>
-      <div className="mx-auto grid w-full max-w-6xl gap-6 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="mx-auto grid w-full max-w-5xl gap-6 sm:grid-cols-2">
         {products.map((product) => (
           <a
             key={product.title}
