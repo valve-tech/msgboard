@@ -8,3 +8,4 @@
 - import_playbook: deploy-games-indexer.yml
 - import_playbook: deploy-games-web.yml
 - import_playbook: deploy-msgboard-ui.yml
+- import_playbook: deploy-games-actors.yml

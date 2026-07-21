@@ -1,0 +1,118 @@
+---
+# Deploy the games actor fleet (/opt/games-actors on the box): the cast-watcher + player-bots on
+# 943 AND 369, and the FlipBook maker/taker bots on 943. Sources live in gibsfinance/random
+# (examples/games/e2e/scripts); this play bundles them LOCALLY with the same esbuild recipe the
+# games-deploy GH workflow uses, ships the .mjs + the compose file, and restarts only what changed.
+#
+# The box's /opt/games-actors/.env (MNEMONIC, SEEDS0, VALVE_RPC_KEY — the actors' own funded
+# mnemonic, NOT the contracts deployer) is never written by this play, only asserted present.
+#
+#   ansible-playbook deploy-games-actors.yml [-e random_repo=/path/to/gibsfinance/random]
+- name: Deploy the games actor fleet (cast-watcher + player-bots + flipbook-bots)
+  hosts: msgboard
+  gather_facts: false
+  vars:
+    random_repo: "{{ lookup('env', 'HOME') }}/Documents/gibs-finance/random"
+    actors_dir: /opt/games-actors
+    bundles: [cast-watcher, player-bots, flipbook-bots]
+  tasks:
+    - name: The random checkout must exist locally (actor sources live there)
+      ansible.builtin.stat:
+        path: "{{ random_repo }}/examples/games/e2e/scripts/cast-watcher.ts"
+      delegate_to: localhost
+      register: src_stat
+
+    - name: Refuse to deploy without the sources
+      ansible.builtin.fail:
+        msg: "{{ random_repo }}/examples/games/e2e/scripts not found — pass -e random_repo=…"
+      when: not src_stat.stat.exists
+
+    # Same recipe as .github/workflows/games-deploy.yml (actors mode): esbuild ESM bundle with a
+    # createRequire banner. esbuild is a devDependency of examples/games/e2e.
+    - name: Bundle the actors locally
+      ansible.builtin.command:
+        cmd: >-
+          pnpm exec esbuild scripts/{{ item }}.ts --bundle --platform=node --target=node24
+          --format=esm
+          --banner:js="import { createRequire } from 'module'; const require = createRequire(import.meta.url);"
+          --outfile=/tmp/games-actors-build/{{ item }}.mjs
+        chdir: "{{ random_repo }}/examples/games/e2e"
+      loop: "{{ bundles }}"
+      delegate_to: localhost
+      changed_when: false
+
+    - name: The box .env must exist with the actor secrets (never written here)
+      ansible.builtin.shell: >-
+        grep -q '^MNEMONIC=' {{ actors_dir }}/.env
+        && grep -q '^SEEDS0=' {{ actors_dir }}/.env
+        && grep -q '^VALVE_RPC_KEY=' {{ actors_dir }}/.env
+      changed_when: false
+      no_log: true
+
+    - name: Ship the bundles
+      ansible.builtin.copy:
+        src: "/tmp/games-actors-build/{{ item }}.mjs"
+        dest: "{{ actors_dir }}/{{ item }}.mjs"
+        mode: "0644"
+      loop: "{{ bundles }}"
+      register: bundle_sync
+
+    - name: Ship the compose file
+      ansible.builtin.copy:
+        src: files/games-actors-compose.yml
+        dest: "{{ actors_dir }}/docker-compose.yml"
+        mode: "0644"
+      register: compose_sync
+
+    - name: Bring the fleet up (compose reconciles service set + env changes)
+      ansible.builtin.command:
+        cmd: docker compose up -d
+        chdir: "{{ actors_dir }}"
+      register: up
+      changed_when: "'Started' in up.stderr or 'Created' in up.stderr or 'Recreated' in up.stderr"
+
+    # The .mjs files are bind-mounted, so a changed bundle needs an explicit restart (compose sees
+    # no config change). Unchanged bundles → no restart → running actors keep their scan caches.
+    - name: Restart services whose bundle changed
+      ansible.builtin.command:
+        cmd: docker compose restart {{ restart_targets | join(' ') }}
+        chdir: "{{ actors_dir }}"
+      vars:
+        changed_bundles: "{{ bundle_sync.results | selectattr('changed') | map(attribute='item') | list }}"
+        # cast-watcher + player-bots each run per-chain service pairs; flipbook-bots is 943-only.
+        restart_targets: >-
+          {{ (['cast-watcher', 'cast-watcher-369'] if 'cast-watcher' in changed_bundles else [])
+           + (['player-bots', 'player-bots-369'] if 'player-bots' in changed_bundles else [])
+           + (['flipbook-bots'] if 'flipbook-bots' in changed_bundles else []) }}
+      when: restart_targets | length > 0
+
+    - name: Smoke — all five services are up
+      ansible.builtin.shell: >-
+        set -o pipefail;
+        docker compose ps --format '{{ '{{' }}.Service{{ '}}' }} {{ '{{' }}.State{{ '}}' }}' | sort
+      args:
+        chdir: "{{ actors_dir }}"
+        executable: /bin/bash
+      register: fleet
+      changed_when: false
+      failed_when: >-
+        fleet.stdout_lines | select('search', ' running') | list | length != 5
+
+    - name: Smoke — each actor logged its startup banner (body-aware, not just process-up)
+      ansible.builtin.shell: >-
+        set -o pipefail;
+        docker compose logs --tail 200 {{ item.svc }} | grep -q '{{ item.banner }}'
+      args:
+        chdir: "{{ actors_dir }}"
+        executable: /bin/bash
+      loop:
+        - { svc: cast-watcher, banner: "cast watcher on chain 943" }
+        - { svc: player-bots, banner: "player bots on chain 943" }
+        - { svc: flipbook-bots, banner: "flipbook bots on chain 943" }
+        - { svc: cast-watcher-369, banner: "cast watcher on chain 369" }
+        - { svc: player-bots-369, banner: "player bots on chain 369" }
+      changed_when: false
+
+    - name: Fleet status
+      ansible.builtin.debug:
+        msg: "{{ fleet.stdout_lines }}"

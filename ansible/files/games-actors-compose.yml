@@ -1,0 +1,70 @@
+services:
+  cast-watcher:
+    image: node:24-alpine
+    restart: unless-stopped
+    working_dir: /app
+    volumes: [ "./:/app" ]
+    env_file: .env
+    environment:
+      CHAIN: "943"
+      CONFIG: /app/943-deployment.json
+      # keyed RPC for the chain reads/sends too — the public 943 RPC the default falls back to is flaky
+      RPC: "https://one.valve.city/rpc/${VALVE_RPC_KEY}/evm/943"
+      MSGBOARD_RPC: "https://one.valve.city/rpc/${VALVE_RPC_KEY}/evm/943"
+    command: node cast-watcher.mjs
+  player-bots:
+    image: node:24-alpine
+    restart: unless-stopped
+    working_dir: /app
+    volumes: [ "./:/app" ]
+    env_file: .env
+    environment:
+      CHAIN: "943"
+      CONFIG: /app/943-deployment.json
+      RPC: "https://one.valve.city/rpc/${VALVE_RPC_KEY}/evm/943"
+    command: node player-bots.mjs
+  # FlipBook maker/taker pair: keeps the P2P offer book stocked on testnet and continuously
+  # soak-tests post/take/reveal/claim/cancel (incl. a deterministic forfeit slice).
+  flipbook-bots:
+    image: node:24-alpine
+    restart: unless-stopped
+    working_dir: /app
+    volumes: [ "./:/app" ]
+    env_file: .env
+    environment:
+      CHAIN: "943"
+      RPC: "https://one.valve.city/rpc/${VALVE_RPC_KEY}/evm/943"
+      FLIPBOOK: "0xb009bd8b849dd33d9c5081ec6e53f29a947f6832"
+      FLIPBOOK_DEPLOY_BLOCK: "24921235"
+      INTERVAL_MS: "180000"
+      SELF_PLAY_INTERVAL_MS: "600000"
+    command: node flipbook-bots.mjs
+  cast-watcher-369:
+    image: node:24-alpine
+    restart: unless-stopped
+    working_dir: /app
+    volumes: [ "./:/app" ]
+    env_file: .env
+    environment:
+      CHAIN: "369"
+      CONFIG: /app/369-deployment.json
+      INTERVAL_MS: "30000"
+      VAULT_FLOOR: "5000"
+      RPC: "https://one.valve.city/rpc/${VALVE_RPC_KEY}/evm/369"
+      MSGBOARD_RPC: "https://one.valve.city/rpc/${VALVE_RPC_KEY}/evm/369"
+    command: node cast-watcher.mjs
+  player-bots-369:
+    image: node:24-alpine
+    restart: unless-stopped
+    working_dir: /app
+    volumes: [ "./:/app" ]
+    env_file: .env
+    environment:
+      CHAIN: "369"
+      CONFIG: /app/369-deployment.json
+      INTERVAL_MS: "900000"
+      SELF_PLAY_INTERVAL_MS: "21600000"
+      VAULT_FLOOR: "5000"
+      MAX_STAKE: "25"
+      RPC: "https://one.valve.city/rpc/${VALVE_RPC_KEY}/evm/369"
+    command: node player-bots.mjs

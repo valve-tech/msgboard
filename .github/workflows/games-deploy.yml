@@ -199,17 +199,17 @@ jobs:
             tar -C examples/games/web/dist -czf /tmp/games-web.tgz .
           else
             cd examples/games/e2e
-            npx --yes esbuild@0.24.2 scripts/cast-watcher.ts --bundle --platform=node --target=node22 --format=esm \
+            npx --yes esbuild@0.24.2 scripts/cast-watcher.ts --bundle --platform=node --target=node24 --format=esm \
               --banner:js="import { createRequire } from 'module'; const require = createRequire(import.meta.url);" \
               --outfile=/tmp/cast-watcher.mjs
-            npx --yes esbuild@0.24.2 scripts/player-bots.ts --bundle --platform=node --target=node22 --format=esm \
+            npx --yes esbuild@0.24.2 scripts/player-bots.ts --bundle --platform=node --target=node24 --format=esm \
               --banner:js="import { createRequire } from 'module'; const require = createRequire(import.meta.url);" \
               --outfile=/tmp/player-bots.mjs
             # session-bots: off-chain session games (dice/limbo/plinko/keno/mines/hilo) played headless
             # with random strategies. They post lifecycle notices (open/settle) to the shared lobby
             # category games.msgboard.xyz:lobby:943 — real, node-accepted activity. (The HouseSession
             # seed chain is still in-process; the board footprint is real.)
-            npx --yes esbuild@0.24.2 scripts/session-bots.ts --bundle --platform=node --target=node22 --format=esm \
+            npx --yes esbuild@0.24.2 scripts/session-bots.ts --bundle --platform=node --target=node24 --format=esm \
               --banner:js="import { createRequire } from 'module'; const require = createRequire(import.meta.url);" \
               --outfile=/tmp/session-bots.mjs
             # pow-worker is a worker_threads grinder that mints the PoW stamp via the NATIVE Rust addon
@@ -218,7 +218,7 @@ jobs:
             # package below so the bundle's `import '@gibs/pow-grinder'` resolves at runtime. (ubuntu-
             # latest ships cargo; rust toolchain required.)
             ( cd ../pow-grinder && cargo build --release --features napi && bash scripts/copy-native.sh )
-            npx --yes esbuild@0.24.2 scripts/pow-worker.ts --bundle --platform=node --target=node22 --format=esm \
+            npx --yes esbuild@0.24.2 scripts/pow-worker.ts --bundle --platform=node --target=node24 --format=esm \
               --external:@gibs/pow-grinder \
               --banner:js="import { createRequire } from 'module'; const require = createRequire(import.meta.url);" \
               --outfile=/tmp/pow-worker.mjs
@@ -276,7 +276,7 @@ jobs:
           cat > /tmp/actors-compose.yml <<'EOF'
           services:
             cast-watcher:
-              image: node:22-alpine
+              image: node:24-alpine
               restart: unless-stopped
               working_dir: /app
               volumes: [ "./:/app" ]
@@ -287,7 +287,7 @@ jobs:
                 MSGBOARD_RPC: "https://one.valve.city/rpc/${VALVE_RPC_KEY}/evm/943"
               command: node cast-watcher.mjs
             player-bots:
-              image: node:22-alpine
+              image: node:24-alpine
               restart: unless-stopped
               working_dir: /app
               volumes: [ "./:/app" ]
@@ -300,7 +300,7 @@ jobs:
               # off-chain session games (dice/limbo/plinko/keno/mines/hilo-war) played with random
               # strategies + realistic think-delays. In-process today (no 943/MsgBoard footprint) —
               # proves the loops + timing; goes testnet-visible once a real transport is wired.
-              image: node:22-alpine
+              image: node:24-alpine
               restart: unless-stopped
               working_dir: /app
               volumes: [ "./:/app" ]
@@ -317,7 +317,7 @@ jobs:
           if [ -f /tmp/369-deployment.json ]; then
             cat >> /tmp/actors-compose.yml <<'EOF'
             cast-watcher-369:
-              image: node:22-alpine
+              image: node:24-alpine
               restart: unless-stopped
               working_dir: /app
               volumes: [ "./:/app" ]
@@ -331,7 +331,7 @@ jobs:
                 MSGBOARD_RPC: "https://one.valve.city/rpc/${VALVE_RPC_KEY}/evm/369"
               command: node cast-watcher.mjs
             player-bots-369:
-              image: node:22-alpine
+              image: node:24-alpine
               restart: unless-stopped
               working_dir: /app
               volumes: [ "./:/app" ]
