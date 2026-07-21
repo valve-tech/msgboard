@@ -1,0 +1,61 @@
+---
+# Deploy the msgboard.xyz UI: rsync THIS repo's packages/ui source to the box, then rebuild the `ui`
+# compose service (root-context Dockerfile → vite build → `vite preview` on :4173 behind Caddy).
+# Mirrors the proven manual procedure; only packages/ui syncs — the rest of /opt/msgboard is owned
+# by its own deploys, and the docker build reuses the tree already on the box for everything else.
+#
+#   ansible-playbook deploy-msgboard-ui.yml
+- name: Deploy the msgboard.xyz UI (source rsync + docker rebuild)
+  hosts: msgboard
+  gather_facts: false
+  vars:
+    repo_root: "{{ playbook_dir }}/.."
+    deploy_dir: /opt/msgboard
+  tasks:
+    - name: Rsync packages/ui source (exclude build outputs)
+      ansible.posix.synchronize:
+        src: "{{ repo_root }}/packages/ui/"
+        dest: "{{ deploy_dir }}/packages/ui/"
+        delete: true
+        use_ssh_args: true
+        rsync_opts:
+          - "--exclude=node_modules"
+          - "--exclude=dist"
+      register: ui_sync
+
+    - name: Rebuild the ui image
+      ansible.builtin.command:
+        cmd: docker compose -f docker-compose.prod.yml build ui
+        chdir: "{{ deploy_dir }}"
+      register: build
+      changed_when: true
+
+    - name: Restart the ui service
+      ansible.builtin.command:
+        cmd: docker compose -f docker-compose.prod.yml up -d ui
+        chdir: "{{ deploy_dir }}"
+      register: up
+      changed_when: "'Started' in up.stderr or 'Recreated' in up.stderr"
+
+    # Body-aware, from the box itself (bypasses Cloudflare via --resolve): the container may take a
+    # few seconds to come back after the recreate.
+    - name: Smoke — msgboard.xyz serves 200 + a body
+      ansible.builtin.command: >-
+        docker run --rm --network host curlimages/curl:latest -sk -m 15
+        --resolve msgboard.xyz:443:127.0.0.1 https://msgboard.xyz/ -o /dev/null -w '%{http_code}:%{size_download}'
+      register: smoke
+      changed_when: false
+      retries: 8
+      delay: 5
+      until: smoke.stdout is match('^200:[1-9][0-9]*$')
+      failed_when: smoke.stdout is not match('^200:[1-9][0-9]*$')
+
+    - name: Smoke — public URL through Cloudflare
+      ansible.builtin.command: curl -sS -m 15 -o /dev/null -w '%{http_code}:%{size_download}' https://msgboard.xyz/
+      register: public_smoke
+      changed_when: false
+      failed_when: public_smoke.stdout is not match('^200:[1-9][0-9]*$')
+
+    - name: Deployed
+      ansible.builtin.debug:
+        msg: "msgboard.xyz rebuilt + serving ({{ public_smoke.stdout }})"

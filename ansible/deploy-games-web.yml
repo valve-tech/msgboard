@@ -1,0 +1,70 @@
+---
+# Deploy the games.msgboard.xyz SPA — the BUILT dist committed in the gibsfinance/random checkout
+# (examples/games/web; `pnpm build` there first). Static rsync into the Caddy bind mount: no
+# container change, no reload. The Caddy routes themselves (/games-indexer, /rpc, /proving-keys)
+# belong to deploy-games-indexer.yml; this play only replaces the SPA files and proves, body-aware,
+# that the site serves the exact bundle that was just synced and that the sibling routes survived.
+#
+#   ansible-playbook deploy-games-web.yml [-e games_dist=/path/to/random/examples/games/web/dist]
+- name: Deploy the games.msgboard.xyz SPA (static dist rsync)
+  hosts: msgboard
+  gather_facts: false
+  vars:
+    games_dist: "{{ lookup('env', 'HOME') }}/Documents/gibs-finance/random/examples/games/web/dist"
+    games_root: /opt/msgboard/deploy/caddy/graphiql/games
+  tasks:
+    - name: The local dist must exist (build it in gibsfinance/random first)
+      ansible.builtin.stat:
+        path: "{{ games_dist }}/index.html"
+      delegate_to: localhost
+      register: dist_index
+
+    - name: Refuse to deploy without a built dist
+      ansible.builtin.fail:
+        msg: "{{ games_dist }}/index.html not found — run `pnpm build` in random/examples/games/web (or pass -e games_dist=…)."
+      when: not dist_index.stat.exists
+
+    # The bundle name the freshly-built index.html references — the body-aware smoke below must see
+    # THIS name back from the live site, proving the sync landed (not a stale page or a CDN echo).
+    - name: Read the expected bundle name from the local dist
+      ansible.builtin.shell: grep -o 'index-[A-Za-z0-9_-]*\.js' {{ games_dist }}/index.html | head -1
+      delegate_to: localhost
+      register: bundle
+      changed_when: false
+      failed_when: bundle.stdout | length == 0
+
+    - name: Rsync the dist into the Caddy mount (delete strays)
+      ansible.posix.synchronize:
+        src: "{{ games_dist }}/"
+        dest: "{{ games_root }}/"
+        delete: true
+        use_ssh_args: true
+      register: sync
+
+    - name: Smoke — the live site serves the just-synced bundle
+      ansible.builtin.shell: curl -sS -m 15 https://games.msgboard.xyz/ | grep -o 'index-[A-Za-z0-9_-]*\.js' | head -1
+      register: live_bundle
+      changed_when: false
+      retries: 3
+      delay: 5
+      until: live_bundle.stdout == bundle.stdout
+      failed_when: live_bundle.stdout != bundle.stdout
+
+    - name: Regression — sibling routes still answer (indexer / keyed rpc / proving keys)
+      ansible.builtin.shell: >-
+        set -o pipefail;
+        I=$(curl -sS -m 15 -o /dev/null -w '%{http_code}' https://games.msgboard.xyz/games-indexer/health);
+        R=$(curl -sS -m 15 -H 'content-type: application/json'
+        -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}'
+        https://games.msgboard.xyz/rpc/evm/943 | grep -o '"result":"0x3af"' || echo bad);
+        P=$(curl -sS -m 15 -o /dev/null -w '%{http_code}' -r 0-0 https://games.msgboard.xyz/proving-keys/wordle_clue.wasm);
+        echo "indexer=$I rpc=$R proving=$P"
+      args:
+        executable: /bin/bash
+      register: siblings
+      changed_when: false
+      failed_when: "'indexer=200' not in siblings.stdout or 'rpc=\"result\"' not in siblings.stdout or 'proving=2' not in siblings.stdout"
+
+    - name: Deployed
+      ansible.builtin.debug:
+        msg: "games.msgboard.xyz now serves {{ bundle.stdout }} · {{ siblings.stdout }}"
