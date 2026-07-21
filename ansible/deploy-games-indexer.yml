@@ -1,0 +1,132 @@
+---
+# Deploy the games indexer (deploy/games-indexer — CoinFlip + Raffle + FlipBook on 943 AND 369,
+# HouseChannel on 943) and the games.msgboard.xyz Caddy routes: /games-indexer/* (GraphQL) and the
+# domain-scoped RPC proxy /rpc/evm/{943,369} (the real one.valve.city key stays server-side; the
+# browser bundle stops carrying vk_demo). Replaces the GH-workflow path for this service so deploys
+# go through the runbook like everything else on this box.
+#
+# The Caddy block itself is written by deploy/games-indexer/install-caddy-route.sh — the canonical
+# writer (brace-balanced replace + backup + validate + reload + body-aware smokes + auto-restore),
+# shared with the GH workflow so both paths converge on the same block.
+#
+#   ansible-playbook deploy-games-indexer.yml
+- name: Deploy the games indexer + games.msgboard.xyz routes (indexer GraphQL + keyed RPC proxy)
+  hosts: msgboard
+  gather_facts: true
+  vars:
+    deploy_dir: /opt/msgboard
+    repo_root: "{{ playbook_dir }}/.."
+    # The vendored indexer source — everything the docker build context needs (node_modules and
+    # generated files stay local; the image runs its own npm install).
+    indexer_files:
+      - Dockerfile
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - abis.ts
+      - ponder.config.ts
+      - ponder.schema.ts
+      - install-caddy-route.sh
+      - vitest.config.ts
+      - src/index.ts
+      - src/settlement.ts
+      - src/api/index.ts
+      - test/settlementJoin.test.ts
+  tasks:
+    - name: Ensure the indexer source dirs
+      ansible.builtin.file:
+        path: "{{ deploy_dir }}/deploy/games-indexer/{{ item }}"
+        state: directory
+        mode: "0755"
+      loop: [src, src/api, test]
+
+    - name: Sync the vendored indexer source
+      ansible.builtin.copy:
+        src: "{{ repo_root }}/deploy/games-indexer/{{ item }}"
+        dest: "{{ deploy_dir }}/deploy/games-indexer/{{ item }}"
+        mode: "0644"
+      loop: "{{ indexer_files }}"
+      register: src_sync
+
+    - name: Install script must be executable
+      ansible.builtin.file:
+        path: "{{ deploy_dir }}/deploy/games-indexer/install-caddy-route.sh"
+        mode: "0755"
+
+    - name: Sync docker-compose.prod.yml (adds PONDER_RPC_URL_369 to the service)
+      ansible.builtin.copy:
+        src: "{{ repo_root }}/docker-compose.prod.yml"
+        dest: "{{ deploy_dir }}/docker-compose.prod.yml"
+        mode: "0644"
+      register: compose_sync
+
+    - name: Ensure the games database exists (idempotent)
+      ansible.builtin.shell: >-
+        docker exec msgboard-postgres psql -U msgboard-postgres -d msgboard-postgres -tAc
+        "SELECT 1 FROM pg_database WHERE datname='games'" | grep -q 1
+        || docker exec msgboard-postgres psql -U msgboard-postgres -d msgboard-postgres -c 'CREATE DATABASE games'
+      register: games_db
+      changed_when: "'CREATE DATABASE' in games_db.stdout"
+
+    # The mainnet RPC URL: derive from the 943 line already in .env (same key, /evm/369) unless the
+    # operator has set one explicitly. no_log — the line carries the real key.
+    - name: Ensure PONDER_RPC_URL_369 in the box .env
+      ansible.builtin.shell: >-
+        grep -q '^PONDER_RPC_URL_369=' {{ deploy_dir }}/.env
+        || grep -m1 '^PONDER_RPC_URL_943=' {{ deploy_dir }}/.env
+        | sed 's|^PONDER_RPC_URL_943=|PONDER_RPC_URL_369=|; s|/evm/943|/evm/369|'
+        >> {{ deploy_dir }}/.env
+      register: env369
+      changed_when: false
+      no_log: true
+
+    # The gameEvent schema changed (chainId column), so every deploy pins a FRESH ponder schema and
+    # reindexes into it — the old schema stays behind for rollback (same discipline as the GH workflow).
+    - name: Pin a fresh ponder schema for this (re)index
+      ansible.builtin.lineinfile:
+        path: "{{ deploy_dir }}/.env"
+        regexp: '^GAMES_943_SCHEMA='
+        line: "GAMES_943_SCHEMA=games_943_{{ ansible_date_time.epoch }}"
+
+    - name: Build + start the games indexer
+      ansible.builtin.command:
+        cmd: docker compose -f docker-compose.prod.yml up -d --build games-indexer-943
+        chdir: "{{ deploy_dir }}"
+      register: up
+      changed_when: true
+
+    - name: Install / repair the games.msgboard.xyz routes (indexer + keyed RPC proxy, auto-rollback)
+      ansible.builtin.command:
+        cmd: bash {{ deploy_dir }}/deploy/games-indexer/install-caddy-route.sh
+      register: route
+      changed_when: true
+
+    - name: Route installer output
+      ansible.builtin.debug:
+        msg: "{{ route.stdout_lines[-4:] }}"
+
+    - name: Regression smoke — msgboard.xyz still serves 200 + a body
+      ansible.builtin.command: >-
+        docker run --rm --network host curlimages/curl:latest -sk
+        --resolve msgboard.xyz:443:127.0.0.1 https://msgboard.xyz/ -o /dev/null -w '%{http_code}:%{size_download}'
+      register: reg
+      changed_when: false
+      failed_when: reg.stdout is not match('^200:[1-9][0-9]*$')
+
+    # Backfill can take a while (943 from 24.6M + 369 from 26.75M through the keyed RPC). /ready
+    # flips to 200 when the indexer is fully synced; report progress but never fail the play on it.
+    - name: Wait for the indexer to finish backfilling (best-effort)
+      ansible.builtin.command: >-
+        curl -sS -o /dev/null -w '%{http_code}' https://games.msgboard.xyz/games-indexer/ready
+      register: ready
+      changed_when: false
+      failed_when: false
+      retries: 60
+      delay: 10
+      until: ready.stdout == "200"
+
+    - name: Sync status
+      ansible.builtin.debug:
+        msg: >-
+          games-indexer {{ 'is fully synced' if ready.stdout == '200'
+          else 'is still backfilling (health OK, /ready=' + ready.stdout + ') — GraphQL serves as rows land' }}.

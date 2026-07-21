@@ -201,7 +201,8 @@ services:
       PONDER_SCHEMA: ${ENTROPY_943_SCHEMA:?ENTROPY_943_SCHEMA must be set (entropy_943_<n>)}
       PONDER_TELEMETRY_DISABLED: 'true'
 
-  # games-indexer-943: the gibsfinance/random CoinFlip + Raffle ponder indexer for chain 943, served
+  # games-indexer-943: the gibsfinance/random games ponder indexer (CoinFlip + Raffle + FlipBook on
+  # BOTH 943 and 369, HouseChannel on 943), served
   # at games-943.msgboard.xyz (Caddy proxies to :42069 over the docker network). Mirrors
   # random-indexer-943 — vendored snapshot in deploy/games-indexer, a fresh Postgres schema
   # games_943_<n> (GAMES_943_SCHEMA) inside a dedicated `games` database on msgboard-postgres (created
@@ -219,6 +220,7 @@ services:
     environment:
       DATABASE_URL: postgres://msgboard-postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@msgboard-postgres:5432/games
       PONDER_RPC_URL_943: ${PONDER_RPC_URL_943:?PONDER_RPC_URL_943 must be set (one.valve.city/rpc/<key>/evm/943)}
+      PONDER_RPC_URL_369: ${PONDER_RPC_URL_369:?PONDER_RPC_URL_369 must be set (one.valve.city/rpc/<key>/evm/369)}
       PONDER_SCHEMA: ${GAMES_943_SCHEMA:?GAMES_943_SCHEMA must be set (games_943_<n>)}
       PONDER_TELEMETRY_DISABLED: 'true'
 

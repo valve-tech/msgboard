@@ -5,9 +5,10 @@ import { onchainTable } from 'ponder'
 // are stored as JSON with bigints serialised to strings (JSON/GraphQL has no bigint); the frontend
 // re-hydrates the bigint fields it reads.
 export const gameEvent = onchainTable('game_event', (t) => ({
-  id: t.text().primaryKey(), // `${txHash}-${logIndex}` — unique per log; re-indexing is idempotent
-  game: t.text().notNull(), // 'coinflip' | 'raffle'
-  name: t.text().notNull(), // event name: Entered, Paired, Settled, RoundOpened, Drawn, …
+  id: t.text().primaryKey(), // `${chainId}-${txHash}-${logIndex}` — unique per log; re-indexing is idempotent
+  chainId: t.integer().notNull(), // games are indexed on 943 AND 369 now — the frontend filters by this
+  game: t.text().notNull(), // 'coinflip' | 'raffle' | 'flipbook'
+  name: t.text().notNull(), // event name: Entered, Paired, Settled, RoundOpened, Drawn, OfferPosted, …
   args: t.json().notNull(), // decoded args; bigints as decimal strings
   blockNumber: t.bigint().notNull(),
   blockTimestamp: t.bigint().notNull(),

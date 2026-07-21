@@ -5,3 +5,4 @@
 - import_playbook: deploy-cosign-archive.yml
 - import_playbook: deploy-cosign-relay.yml
 - import_playbook: deploy-waku.yml
+- import_playbook: deploy-games-indexer.yml
