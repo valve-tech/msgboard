@@ -8,12 +8,13 @@ import { openedRow, settledUpdate } from './settlement'
  * `id` is unique per log, so re-indexing is idempotent.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const store = (game: 'coinflip' | 'raffle', name: string) => async ({ event, context }: any) => {
+const store = (game: 'coinflip' | 'raffle' | 'flipbook', name: string) => async ({ event, context }: any) => {
   const args = JSON.parse(JSON.stringify(event.args ?? {}, (_k, v) => (typeof v === 'bigint' ? v.toString() : v)))
   await context.db
     .insert(gameEvent)
     .values({
-      id: `${event.transaction.hash}-${event.log.logIndex}`,
+      id: `${context.chain.id}-${event.transaction.hash}-${event.log.logIndex}`,
+      chainId: context.chain.id,
       game,
       name,
       args,
@@ -44,6 +45,15 @@ ponder.on('Raffle:Revealed', store('raffle', 'Revealed'))
 ponder.on('Raffle:Finalised', store('raffle', 'Finalised'))
 ponder.on('Raffle:NoContest', store('raffle', 'NoContest'))
 ponder.on('Raffle:TicketRefunded', store('raffle', 'TicketRefunded'))
+
+// FlipBook (the P2P coin flip offer book): the full offer lifecycle, on both chains. Note the
+// event-name overlap with Raffle ('Revealed') — the frontend filters by `game`, never name alone.
+ponder.on('FlipBook:OfferPosted', store('flipbook', 'OfferPosted'))
+ponder.on('FlipBook:OfferCancelled', store('flipbook', 'OfferCancelled'))
+ponder.on('FlipBook:OfferTaken', store('flipbook', 'OfferTaken'))
+ponder.on('FlipBook:Revealed', store('flipbook', 'Revealed'))
+ponder.on('FlipBook:Forfeited', store('flipbook', 'Forfeited'))
+ponder.on('FlipBook:Withdrawn', store('flipbook', 'Withdrawn'))
 
 // HouseChannel: one settlement row per tableId session.
 // Opened → INSERT the open row (game name from gameId, player, escrow).
