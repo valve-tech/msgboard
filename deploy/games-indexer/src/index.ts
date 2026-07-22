@@ -8,7 +8,7 @@ import { openedRow, settledUpdate } from './settlement'
  * `id` is unique per log, so re-indexing is idempotent.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const store = (game: 'coinflip' | 'raffle' | 'flipbook', name: string) => async ({ event, context }: any) => {
+const store = (game: 'coinflip' | 'raffle' | 'flipbook' | 'flipbookx', name: string) => async ({ event, context }: any) => {
   const args = JSON.parse(JSON.stringify(event.args ?? {}, (_k, v) => (typeof v === 'bigint' ? v.toString() : v)))
   await context.db
     .insert(gameEvent)
@@ -54,6 +54,13 @@ ponder.on('FlipBook:OfferTaken', store('flipbook', 'OfferTaken'))
 ponder.on('FlipBook:Revealed', store('flipbook', 'Revealed'))
 ponder.on('FlipBook:Forfeited', store('flipbook', 'Forfeited'))
 ponder.on('FlipBook:Withdrawn', store('flipbook', 'Withdrawn'))
+
+// FlipBookX (variant B): offers live off-chain, so the chain record STARTS at Taken.
+ponder.on('FlipBookX:Taken', store('flipbookx', 'Taken'))
+ponder.on('FlipBookX:ChoiceRevealed', store('flipbookx', 'ChoiceRevealed'))
+ponder.on('FlipBookX:Settled', store('flipbookx', 'Settled'))
+ponder.on('FlipBookX:MakerDefaulted', store('flipbookx', 'MakerDefaulted'))
+ponder.on('FlipBookX:TakerDefaulted', store('flipbookx', 'TakerDefaulted'))
 
 // HouseChannel: one settlement row per tableId session.
 // Opened → INSERT the open row (game name from gameId, player, escrow).

@@ -1,7 +1,7 @@
 import { createConfig } from 'ponder'
 // `as const` abis (abis.ts) so Ponder derives the event-name types and the registry is populated —
 // a generic `as Abi` cast erases the events and `ponder.on('CoinFlip:Entered')` fails at runtime.
-import { coinFlipAbi, flipBookAbi, houseChannelAbi, raffleAbi } from './abis'
+import { coinFlipAbi, flipBookAbi, flipBookXAbi, houseChannelAbi, raffleAbi } from './abis'
 
 // Vendored, self-contained snapshot (mirrors deploy/random-indexer, which runs ponder 0.16): the
 // game ABIs are bundled in ./abis so the image builds with no workspace deps. Source of
@@ -24,6 +24,12 @@ const FLIP_BOOK_943 = '0xb009bd8b849dd33d9c5081ec6e53f29a947f6832'
 const FLIP_BOOK_369 = '0x603e32ddaf5f4b6ada77e04bb7c44c4603f59eee'
 const FLIP_BOOK_START_943 = 24_921_235
 const FLIP_BOOK_START_369 = 27_080_922
+
+// FlipBookX — variant B (x402PLS-settled, off-chain offers). Deployed 2026-07-21.
+const FLIP_BOOK_X_943 = '0x9e232e84E80FCaC3c78dE0820dABccf660511275'
+const FLIP_BOOK_X_369 = '0x28EfA8fA6c956C0b49f6Cdc6273b1eBe76382CD8'
+const FLIP_BOOK_X_START_943 = 24_932_217
+const FLIP_BOOK_X_START_369 = 27_091_482
 
 // patched HouseChannel (gameId-binding + disputeFromOpen + gameId-in-Opened), deployed 943.
 const HOUSE_CHANNEL = '0x74bbc31e77c02593c0a7aad0cadadb5b6bff3948'
@@ -62,6 +68,13 @@ export default createConfig({
       chain: {
         pulsechainV4: { address: FLIP_BOOK_943, startBlock: FLIP_BOOK_START_943 },
         pulsechain: { address: FLIP_BOOK_369, startBlock: FLIP_BOOK_START_369 },
+      },
+    },
+    FlipBookX: {
+      abi: flipBookXAbi,
+      chain: {
+        pulsechainV4: { address: FLIP_BOOK_X_943, startBlock: FLIP_BOOK_X_START_943 },
+        pulsechain: { address: FLIP_BOOK_X_369, startBlock: FLIP_BOOK_X_START_369 },
       },
     },
     HouseChannel: {
