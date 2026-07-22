@@ -20,8 +20,8 @@
   "dependencies": {
     "@msgboard/relayer": "^0.0.32",
     "@msgboard/sdk": "^0.0.32",
-    "@types/pg": "^8.11.11",
-    "pg": "^8.14.1",
+    "@types/pg": "^8.20.0",
+    "pg": "^8.22.0",
     "tsx": "^4.19.3",
     "viem": "^2.25.0"
   }
