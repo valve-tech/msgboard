@@ -1,42 +1,42 @@
 ---
 # Deploy the games actor fleet (/opt/games-actors on the box): the cast-watcher + player-bots on
-# 943 AND 369, and the FlipBook maker/taker bots on 943. Sources live in gibsfinance/random
-# (examples/games/e2e/scripts); this play bundles them LOCALLY with the same esbuild recipe the
+# 943 AND 369, and the FlipBook maker/taker bots on 943. Sources live in this repo
+# (games/e2e/scripts in THIS repo); this play bundles them LOCALLY with the same esbuild recipe the
 # games-deploy GH workflow uses, ships the .mjs + the compose file, and restarts only what changed.
 #
 # The box's /opt/games-actors/.env (MNEMONIC, SEEDS0, VALVE_RPC_KEY — the actors' own funded
 # mnemonic, NOT the contracts deployer) is never written by this play, only asserted present.
 #
-#   ansible-playbook deploy-games-actors.yml [-e random_repo=/path/to/gibsfinance/random]
+#   ansible-playbook deploy-games-actors.yml [-e games_repo=/path/to/msgboard]
 - name: Deploy the games actor fleet (cast-watcher + player-bots + flipbook-bots)
   hosts: msgboard
   gather_facts: false
   vars:
-    random_repo: "{{ lookup('env', 'HOME') }}/Documents/gibs-finance/random"
+    games_repo: "{{ playbook_dir }}/.."
     actors_dir: /opt/games-actors
     bundles: [cast-watcher, player-bots, flipbook-bots]
   tasks:
-    - name: The random checkout must exist locally (actor sources live there)
+    - name: The actor sources must exist locally
       ansible.builtin.stat:
-        path: "{{ random_repo }}/examples/games/e2e/scripts/cast-watcher.ts"
+        path: "{{ games_repo }}/games/e2e/scripts/cast-watcher.ts"
       delegate_to: localhost
       register: src_stat
 
     - name: Refuse to deploy without the sources
       ansible.builtin.fail:
-        msg: "{{ random_repo }}/examples/games/e2e/scripts not found — pass -e random_repo=…"
+        msg: "{{ games_repo }}/games/e2e/scripts not found — pass -e games_repo=…"
       when: not src_stat.stat.exists
 
     # Same recipe as .github/workflows/games-deploy.yml (actors mode): esbuild ESM bundle with a
-    # createRequire banner. esbuild is a devDependency of examples/games/e2e.
+    # createRequire banner. esbuild is a devDependency of games/e2e (hoisted; npx resolves it).
     - name: Bundle the actors locally
       ansible.builtin.command:
         cmd: >-
-          pnpm exec esbuild scripts/{{ item }}.ts --bundle --platform=node --target=node24
+          npx esbuild scripts/{{ item }}.ts --bundle --platform=node --target=node24
           --format=esm
           --banner:js="import { createRequire } from 'module'; const require = createRequire(import.meta.url);"
           --outfile=/tmp/games-actors-build/{{ item }}.mjs
-        chdir: "{{ random_repo }}/examples/games/e2e"
+        chdir: "{{ games_repo }}/games/e2e"
       loop: "{{ bundles }}"
       delegate_to: localhost
       changed_when: false

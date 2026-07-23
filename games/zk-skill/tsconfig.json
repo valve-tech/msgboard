@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "noUncheckedIndexedAccess": true,
+    "types": ["node"]
+  },
+  "include": ["src", "test"],
+  // Browser-only modules (DOM/WebWorker APIs, no node types) are typechecked by tsconfig.browser.json.
+  // Excluding them here keeps this node-oriented config (types: ["node"], no DOM lib) clean.
+  "exclude": ["src/browser"]
+}

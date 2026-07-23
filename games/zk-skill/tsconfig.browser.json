@@ -1,0 +1,23 @@
+{
+  // Typechecks the browser-only modules under src/browser (loader + Web Worker prover). These use
+  // DOM + WebWorker globals (fetch, indexedDB, crypto.subtle, Worker, self) and no node APIs, so they
+  // can't share the node-oriented tsconfig.json (types: ["node"], no DOM lib). The web app that
+  // consumes them supplies the same libs via its own tsconfig.
+  //
+  // Run: npx tsc -p tsconfig.browser.json --noEmit
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "noUncheckedIndexedAccess": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable", "WebWorker"],
+    "types": [],
+    "noEmit": true
+  },
+  // src/types.d.ts carries the ambient `declare module 'snarkjs'` the worker needs.
+  "include": ["src/browser", "src/types.d.ts"]
+}

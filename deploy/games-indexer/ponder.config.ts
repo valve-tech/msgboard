@@ -6,7 +6,7 @@ import { coinFlipAbi, easAbi, flipBookAbi, flipBookXAbi, houseChannelAbi, raffle
 
 // Vendored, self-contained snapshot (mirrors deploy/random-indexer, which runs ponder 0.16): the
 // game ABIs are bundled in ./abis so the image builds with no workspace deps. Source of
-// truth for the indexer logic is gibsfinance/random examples/games/indexer (@gibs/games-indexer).
+// truth for the indexer logic is games/indexer in this repo (@msgboard/games-indexer).
 //
 // CoinFlip + Raffle are pinned per chain (deployed by the gate runs; startBlock matches the web
 // config's deployBlock on each chain, so the indexer and the browser fallback count from the same

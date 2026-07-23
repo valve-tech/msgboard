@@ -16,7 +16,24 @@
     "packages/cosign-relay",
     "packages/sponsor",
     "packages/examples",
-    "packages/waku-relay"
+    "packages/waku-relay",
+    "games/contracts",
+    "games/core",
+    "games/coinflip",
+    "games/raffle",
+    "games/hilo-war",
+    "games/holdem",
+    "games/house-service",
+    "games/indexer",
+    "games/msgboard-games",
+    "games/msgboard-settle",
+    "games/msgboard-settle-relayer",
+    "games/pow-grinder",
+    "games/zk-core",
+    "games/zk-settle",
+    "games/zk-skill",
+    "games/e2e",
+    "games/web"
   ],
   "scripts": {
     "docker:build": "docker compose build",
@@ -36,5 +53,8 @@
     "test:relayer": "npm run test --workspace=packages/relayer",
     "indexer:start": "npm run start --workspace=packages/indexer",
     "cosign-archive:start": "npm run start --workspace=packages/cosign-archive"
+  },
+  "overrides": {
+    "viem": "2.52.2"
   }
 }

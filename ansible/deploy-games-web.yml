@@ -1,16 +1,16 @@
 ---
-# Deploy the games.msgboard.xyz SPA — the BUILT dist committed in the gibsfinance/random checkout
-# (examples/games/web; `pnpm build` there first). Static rsync into the Caddy bind mount: no
+# Deploy the games.msgboard.xyz SPA — the BUILT dist committed in this repo
+# (games/web in THIS repo; `npm run build` there first). Static rsync into the Caddy bind mount: no
 # container change, no reload. The Caddy routes themselves (/games-indexer, /rpc, /proving-keys)
 # belong to deploy-games-indexer.yml; this play only replaces the SPA files and proves, body-aware,
 # that the site serves the exact bundle that was just synced and that the sibling routes survived.
 #
-#   ansible-playbook deploy-games-web.yml [-e games_dist=/path/to/random/examples/games/web/dist]
+#   ansible-playbook deploy-games-web.yml [-e games_dist=/path/to/games/web/dist]
 - name: Deploy the games.msgboard.xyz SPA (static dist rsync)
   hosts: msgboard
   gather_facts: false
   vars:
-    games_dist: "{{ lookup('env', 'HOME') }}/Documents/gibs-finance/random/examples/games/web/dist"
+    games_dist: "{{ playbook_dir }}/../games/web/dist"
     games_root: /opt/msgboard/deploy/caddy/graphiql/games
   tasks:
     - name: The local dist must exist (build it in gibsfinance/random first)
@@ -21,7 +21,7 @@
 
     - name: Refuse to deploy without a built dist
       ansible.builtin.fail:
-        msg: "{{ games_dist }}/index.html not found — run `pnpm build` in random/examples/games/web (or pass -e games_dist=…)."
+        msg: "{{ games_dist }}/index.html not found — run `npm run build` in games/web (or pass -e games_dist=…)."
       when: not dist_index.stat.exists
 
     # The bundle name the freshly-built index.html references — the body-aware smoke below must see
