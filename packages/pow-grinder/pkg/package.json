@@ -1,5 +1,4 @@
 {
-  "license": "AGPL-3.0-only",
   "name": "pow-grinder",
   "type": "module",
   "description": "Fast MsgBoard proof-of-work grinder (bit-identical to reth msgboard-types pow.rs)",

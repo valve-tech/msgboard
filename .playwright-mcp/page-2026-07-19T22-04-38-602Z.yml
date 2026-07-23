@@ -1,0 +1,61 @@
+- generic [ref=f13e3]:
+  - generic [ref=f13e4]:
+    - generic [ref=f13e5]:
+      - heading "MsgBoard Games" [level=1] [ref=f13e6]
+      - generic [ref=f13e7]: the back room where the books stay open
+    - generic [ref=f13e8]:
+      - button "chain" [ref=f13e10] [cursor=pointer]:
+        - generic [ref=f13e11]: PulseChain
+        - generic [ref=f13e12]: ▾
+      - button "Connect wallet" [ref=f13e13] [cursor=pointer]
+  - group [ref=f13e14]:
+    - generic "How the back room stays honest — and cheap ▾" [ref=f13e15] [cursor=pointer]
+  - generic [ref=f13e16]:
+    - button "game" [ref=f13e18] [cursor=pointer]:
+      - generic [ref=f13e19]: 🪙 Coin Flip
+      - generic [ref=f13e20]: ▾
+    - generic [ref=f13e21]: block 0
+  - generic [ref=f13e22]:
+    - generic [ref=f13e23]: ✦
+    - generic [ref=f13e24]:
+      - text: Provably fair — a draw is safe as long as
+      - strong [ref=f13e25]: one
+      - text: of the 3 validators is honest
+      - button "how the fairness works" [ref=f13e27]: i
+    - button "Got it" [ref=f13e28] [cursor=pointer]
+  - generic [ref=f13e29]:
+    - generic [ref=f13e30]:
+      - heading [level=3] [ref=f13e31]:
+        - text: Call it in the air
+        - button "where this information comes from" [ref=f13e33]: i
+      - generic [ref=f13e34]:
+        - generic [ref=f13e35]:
+          - textbox "stake" [ref=f13e36]: "0.1"
+          - button "0.1" [ref=f13e37] [cursor=pointer]
+          - button "1" [ref=f13e38] [cursor=pointer]
+          - button "10" [ref=f13e39] [cursor=pointer]
+        - generic [ref=f13e40]:
+          - button "heads" [ref=f13e41] [cursor=pointer]
+          - button "tails" [ref=f13e42] [cursor=pointer]
+        - button "Enter heads" [disabled] [ref=f13e43]
+        - generic [ref=f13e44]: connect a wallet to play
+    - heading [level=2] [ref=f13e45]:
+      - text: Open action
+      - button "where this information comes from" [ref=f13e47]: i
+    - paragraph [ref=f13e48]: Nobody's at the table — your entry opens the action.
+    - heading [level=2] [ref=f13e49]:
+      - text: The record
+      - button "where this information comes from" [ref=f13e51]: i
+    - paragraph [ref=f13e52]: No settled flips yet.
+  - generic [ref=f13e53]:
+    - generic [ref=f13e54]:
+      - text: a
+      - link "MsgBoard" [ref=f13e55] [cursor=pointer]:
+        - /url: https://msgboard.xyz
+      - text: venue · run by valve
+    - generic [ref=f13e56]:
+      - link "contracts" [ref=f13e57] [cursor=pointer]:
+        - /url: https://github.com/gibsfinance/random
+      - text: ·
+      - link "msgboard" [ref=f13e58] [cursor=pointer]:
+        - /url: https://github.com/valve-tech/msgboard

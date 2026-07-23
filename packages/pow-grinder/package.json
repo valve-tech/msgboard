@@ -6,7 +6,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/gibs-finance/random.git",
-    "directory": "examples/games/pow-grinder"
+    "directory": "packages/pow-grinder"
   },
   "main": "index.js",
   "module": "pkg/pow_grinder.js",

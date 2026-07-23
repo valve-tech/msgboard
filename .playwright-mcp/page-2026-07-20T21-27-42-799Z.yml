@@ -1,0 +1,112 @@
+- generic [ref=f9e3]:
+  - generic [ref=f9e4]:
+    - generic [ref=f9e5]:
+      - heading "MsgBoard Games" [level=1] [ref=f9e6]
+      - generic [ref=f9e7]: the back room where the books stay open
+    - generic [ref=f9e8]:
+      - button "chain" [ref=f9e10] [cursor=pointer]:
+        - generic [ref=f9e11]: PulseChain
+        - generic [ref=f9e12]: ▾
+      - button "Connect wallet" [ref=f9e13] [cursor=pointer]
+  - group [ref=f9e14]:
+    - generic "How the back room stays honest — and cheap ▾" [ref=f9e15] [cursor=pointer]
+  - generic [ref=f9e16]:
+    - button "game" [ref=f9e18] [cursor=pointer]:
+      - generic [ref=f9e19]: 🪙 Coin Flip
+      - generic "peer-vs-peer guessing duel — your own coin protects your odds" [ref=f9e20]: 🎭
+      - generic [ref=f9e21]: ▾
+    - generic [ref=f9e22]: block 0
+  - generic [ref=f9e23]:
+    - generic [ref=f9e24]: 🎭
+    - generic [ref=f9e25]:
+      - text: Provably fair — a pure guessing duel;
+      - strong [ref=f9e26]: your own coin
+      - text: protects your odds, not theirs
+      - button "how the fairness works" [ref=f9e28]: i
+    - button "Got it" [ref=f9e29] [cursor=pointer]
+  - generic [ref=f9e30]:
+    - generic [ref=f9e31]:
+      - generic [ref=f9e32]:
+        - strong [ref=f9e33]:
+          - text: Post an offer
+          - button "how posting works" [ref=f9e35]: i
+        - button "where this information comes from" [ref=f9e37]: i
+      - generic [ref=f9e38]:
+        - generic [ref=f9e39]: your hidden side
+        - button "heads" [ref=f9e40] [cursor=pointer]
+        - button "tails" [ref=f9e41] [cursor=pointer]
+      - generic [ref=f9e42]:
+        - generic [ref=f9e43]: stake
+        - generic [ref=f9e44]:
+          - textbox "stake" [ref=f9e45]: "0.1"
+          - button "0.1" [ref=f9e46] [cursor=pointer]
+          - button "1" [ref=f9e47] [cursor=pointer]
+          - button "10" [ref=f9e48] [cursor=pointer]
+      - generic [ref=f9e49]:
+        - generic [ref=f9e50]:
+          - text: bond
+          - button "why a bond" [ref=f9e52]: i
+        - generic [ref=f9e53]:
+          - textbox "bond" [ref=f9e54]: "0.05"
+          - button "0.1" [ref=f9e55] [cursor=pointer]
+          - button "1" [ref=f9e56] [cursor=pointer]
+          - button "10" [ref=f9e57] [cursor=pointer]
+      - generic [ref=f9e58]:
+        - generic [ref=f9e59]: open for
+        - button "1 hour" [ref=f9e60] [cursor=pointer]
+        - button "6 hours" [ref=f9e61] [cursor=pointer]
+        - button "24 hours" [ref=f9e62] [cursor=pointer]
+        - generic [ref=f9e63]: reveal within
+        - button "10 min" [ref=f9e64] [cursor=pointer]
+        - button "1 hour" [ref=f9e65] [cursor=pointer]
+        - button "6 hours" [ref=f9e66] [cursor=pointer]
+      - generic [ref=f9e67]:
+        - button "Escrow 0.15 PLS & post" [disabled] [ref=f9e68]
+        - generic [ref=f9e69]: connect a wallet to post or take
+    - heading [level=3] [ref=f9e80]:
+      - text: Open offers
+      - button "how taking works" [ref=f9e72]: i
+    - generic [ref=f9e73]: no open offers — post one above and let the board find your opponent
+    - heading "Settled" [level=3] [ref=f9e81]
+    - generic [ref=f9e83]:
+      - generic [ref=f9e84]:
+        - generic [ref=f9e85]: "#2"
+        - generic [ref=f9e86]:
+          - text: coin was
+          - strong [ref=f9e87]: heads
+          - text: ", call was"
+          - strong [ref=f9e88]: tails
+          - text: —
+          - generic [ref=f9e89]:
+            - link "0xAF2c…B9B0" [ref=f9e90] [cursor=pointer]:
+              - /url: https://scan.pulsechain.com/#/address/0xAF2ce0189f46f5663715b0b9ED2a10eA924AB9B0
+            - text: takes 1 PLS
+      - link "tx ↗" [ref=f9e91] [cursor=pointer]:
+        - /url: https://scan.pulsechain.com/#/tx/0x1c231bec80caec741177c56a4293aaaa017916d09e9846a9a69f507d09530a3d
+    - generic [ref=f9e93]:
+      - generic [ref=f9e94]:
+        - generic [ref=f9e95]: "#1"
+        - generic [ref=f9e96]:
+          - text: coin was
+          - strong [ref=f9e97]: heads
+          - text: ", call was"
+          - strong [ref=f9e98]: heads
+          - text: —
+          - generic [ref=f9e99]:
+            - link "0x3D4e…84E8" [ref=f9e100] [cursor=pointer]:
+              - /url: https://scan.pulsechain.com/#/address/0x3D4e73Ef152711eCe409c60F71ab3adDaF1B84E8
+            - text: takes 1 PLS
+      - link "tx ↗" [ref=f9e101] [cursor=pointer]:
+        - /url: https://scan.pulsechain.com/#/tx/0xa3e45c6b12934315e8004d87580d68e738e0096fd81ec363c77b2261d05ebc51
+  - generic [ref=f9e74]:
+    - generic [ref=f9e75]:
+      - text: a
+      - link "MsgBoard" [ref=f9e76] [cursor=pointer]:
+        - /url: https://msgboard.xyz
+      - text: venue · run by valve
+    - generic [ref=f9e77]:
+      - link "contracts" [ref=f9e78] [cursor=pointer]:
+        - /url: https://github.com/gibsfinance/random
+      - text: ·
+      - link "msgboard" [ref=f9e79] [cursor=pointer]:
+        - /url: https://github.com/valve-tech/msgboard

@@ -1,0 +1,47 @@
+- generic [ref=f7e3]:
+  - generic [ref=f7e4]:
+    - generic [ref=f7e5]:
+      - heading "MsgBoard Games" [level=1] [ref=f7e6]
+      - generic [ref=f7e7]: the back room where the books stay open
+    - generic [ref=f7e8]:
+      - button "chain" [ref=f7e10] [cursor=pointer]:
+        - generic [ref=f7e11]: PulseChain
+        - generic [ref=f7e12]: ▾
+      - button "Connect wallet" [ref=f7e13] [cursor=pointer]
+  - group [ref=f7e14]:
+    - generic "How the back room stays honest — and cheap ▾" [ref=f7e15] [cursor=pointer]
+  - generic [ref=f7e16]:
+    - button "game" [ref=f7e18] [cursor=pointer]:
+      - generic [ref=f7e19]: 🧩 ZK Sudoku
+      - generic [ref=f7e20]: ▾
+    - generic [ref=f7e21]: block 0
+  - generic [ref=f7e22]:
+    - generic [ref=f7e23]: ✦
+    - generic [ref=f7e24]:
+      - text: Provably fair — a draw is safe as long as
+      - strong [ref=f7e25]: one
+      - text: of the 3 validators is honest
+      - button "how the fairness works" [ref=f7e27]: i
+    - button "Got it" [ref=f7e28] [cursor=pointer]
+  - generic [ref=f7e29]:
+    - generic [ref=f7e30]:
+      - heading [level=3] [ref=f7e31]:
+        - text: "ZK Sudoku — puzzle #1"
+        - button "where this information comes from" [ref=f7e33]: i
+      - paragraph [ref=f7e34]: Loading puzzle…
+    - generic [ref=f7e35]:
+      - heading "Leaderboard" [level=3] [ref=f7e36]
+      - paragraph [ref=f7e37]: No solves logged yet — be the first to post a time.
+      - paragraph [ref=f7e38]: "source: —"
+  - generic [ref=f7e39]:
+    - generic [ref=f7e40]:
+      - text: a
+      - link "MsgBoard" [ref=f7e41] [cursor=pointer]:
+        - /url: https://msgboard.xyz
+      - text: venue · run by valve
+    - generic [ref=f7e42]:
+      - link "contracts" [ref=f7e43] [cursor=pointer]:
+        - /url: https://github.com/gibsfinance/random
+      - text: ·
+      - link "msgboard" [ref=f7e44] [cursor=pointer]:
+        - /url: https://github.com/valve-tech/msgboard

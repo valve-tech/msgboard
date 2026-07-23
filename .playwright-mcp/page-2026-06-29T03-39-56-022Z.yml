@@ -1,0 +1,8 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - img [ref=e6]
+    - region "Notifications alt+T"
+    - button "Open chat" [ref=e8]:
+      - img [ref=e9]
+      - generic [ref=e11]: Chat
+  - alert [ref=e12]

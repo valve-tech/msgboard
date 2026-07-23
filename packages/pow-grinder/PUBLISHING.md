@@ -49,7 +49,7 @@ these two entries.
 The package is scoped (`@gibs/...`) and `publishConfig.access` is `"public"`, so it publishes public.
 
 ```bash
-cd examples/games/pow-grinder
+cd packages/pow-grinder
 
 # 1. (Re)build the portable wasm. `prepublishOnly` also runs this automatically on publish, but run it
 #    explicitly to confirm a clean build. Needs the Rust toolchain + wasm-pack + wasm32 target:

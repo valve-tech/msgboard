@@ -1,0 +1,58 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: ✶
+      - generic [ref=e7]:
+        - generic [ref=e8]: signing register
+        - heading "Cosign" [level=1] [ref=e9]
+    - button "no wallet" [disabled] [ref=e11]
+  - generic [ref=e12]:
+    - button "Co-sign" [ref=e13] [cursor=pointer]
+    - button "Create a Safe" [ref=e14] [cursor=pointer]
+  - generic [ref=e15]:
+    - generic [ref=e16]:
+      - generic [ref=e17]:
+        - generic [ref=e18]:
+          - generic [ref=e19]: "01"
+          - heading "Pick your Safe" [level=3] [ref=e20]
+          - generic [ref=e21]: owned by you
+        - generic [ref=e22]:
+          - paragraph [ref=e23]: Connect a wallet to auto-discover the Safes it owns.
+          - button "No injected wallet" [disabled] [ref=e24]
+      - generic [ref=e26]:
+        - generic [ref=e27]: "02"
+        - heading "What to sign" [level=3] [ref=e28]
+        - generic [ref=e29]: digest or SafeTx
+      - generic [ref=e31]:
+        - generic [ref=e32]: "03"
+        - heading "Sign & post your share" [level=3] [ref=e33]
+        - generic [ref=e34]: stamped off-thread
+      - generic [ref=e36]:
+        - generic [ref=e37]: "04"
+        - heading "Collect & execute" [level=3] [ref=e38]
+        - generic [ref=e39]: board ∪ archive
+    - complementary [ref=e40]:
+      - generic [ref=e41]:
+        - img "0 of 0 signatures collected" [ref=e43]:
+          - generic [ref=e49]: 0/?
+          - generic [ref=e50]: 0 MORE
+        - generic [ref=e51]:
+          - generic [ref=e52]: Awaiting Safe
+          - generic [ref=e53]: connect + pick a Safe
+        - generic [ref=e54]:
+          - generic [ref=e55]:
+            - term [ref=e56]: safe
+            - definition [ref=e57]: —
+          - generic [ref=e58]:
+            - term [ref=e59]: chain
+            - definition [ref=e60]: chain ? ?
+          - generic [ref=e61]:
+            - term [ref=e62]: digest
+            - definition [ref=e63]: —
+          - generic [ref=e64]:
+            - term [ref=e65]: value
+            - definition [ref=e66]: —
+        - generic [ref=e67]:
+          - generic [ref=e68]: board 369 · archive on
+          - button "⚙ settings" [ref=e69] [cursor=pointer]
+  - contentinfo [ref=e70]: "@msgboard/cosign · safe adapter · ECDSA + EIP-712 · shares stamped off-thread"
