@@ -12,7 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@gibs/random": "^0.0.18",
+    "@gibs/random": "^0.0.19",
     "viem": "^2.25.0"
   },
   "devDependencies": {

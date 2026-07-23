@@ -22,7 +22,7 @@
     "@msgboard/games": "*",
     "@msgboard/pow-grinder": "*",
     "@msgboard/raffle": "*",
-    "@gibs/random": "^0.0.18",
+    "@gibs/random": "^0.0.19",
     "@msgboard/zk-cards-core": "*",
     "@msgboard/sdk": "^0.0.31",
     "viem": "^2.25.0"

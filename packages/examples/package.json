@@ -22,7 +22,7 @@
     "zk:build": "tsx scripts/build-zk.ts"
   },
   "dependencies": {
-    "@gibs/random": "^0.0.18",
+    "@gibs/random": "^0.0.19",
     "@msgboard/history": "*",
     "@msgboard/relayer": "*",
     "@msgboard/sdk": "*",
