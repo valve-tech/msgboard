@@ -44,7 +44,7 @@
   ],
   "dependencies": {
     "@ethereum-attestation-service/eas-contracts": "1.8.0",
-    "@gibs/random": "^0.0.18",
+    "@gibs/random": "^0.0.19",
     "@scure/bip32": "^2.2.0",
     "@scure/bip39": "^2.2.0",
     "lodash": "^4.17.21",
