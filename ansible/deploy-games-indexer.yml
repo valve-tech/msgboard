@@ -26,12 +26,15 @@
       - abis.ts
       - ponder.config.ts
       - ponder.schema.ts
+      - schemas.ts
       - install-caddy-route.sh
       - vitest.config.ts
       - src/index.ts
       - src/settlement.ts
+      - src/solves.ts
       - src/api/index.ts
       - test/settlementJoin.test.ts
+      - test/solveRow.test.ts
     # Only these files affect what ponder indexes — a change here forces the fresh-schema reindex.
     # Route-script or test changes rerun the play cheaply against the existing schema.
     reindex_files:
@@ -41,8 +44,10 @@
       - abis.ts
       - ponder.config.ts
       - ponder.schema.ts
+      - schemas.ts
       - src/index.ts
       - src/settlement.ts
+      - src/solves.ts
       - src/api/index.ts
   tasks:
     - name: Ensure the indexer source dirs
