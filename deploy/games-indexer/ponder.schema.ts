@@ -16,6 +16,22 @@ export const gameEvent = onchainTable('game_event', (t) => ({
   logIndex: t.integer().notNull(),
 }))
 
+// One row per proof-gated solve attestation (the EAS "facts rail"). The resolver already verified
+// the solve on-chain before the attestation could exist, so a row here IS a proven solve — the
+// frontend only counts and ranks them.
+export const solveAttestation = onchainTable('solve_attestation', (t) => ({
+  id: t.text().primaryKey(), // `${chainId}-${uid}` — uids are per-EAS-instance, chain disambiguates
+  chainId: t.integer().notNull(),
+  uid: t.hex().notNull(), // EAS attestation uid (portable reference for other consumers)
+  game: t.text().notNull(), // 'sudoku' | 'wordle' — mapped from the schema UID
+  schemaUid: t.hex().notNull(),
+  solver: t.hex().notNull(), // attestation recipient — the proven solver
+  attester: t.hex().notNull(),
+  blockNumber: t.bigint().notNull(),
+  blockTimestamp: t.bigint().notNull(),
+  txHash: t.hex().notNull(),
+}))
+
 // One row per HouseChannel table session.  Opened inserts the row; Settled updates payout+net.
 // id: the tableId bytes32 (one session per tableId — Opened is the canonical opener).
 // escrowPlayer/payoutPlayer/net: bigint (wei); net = payoutPlayer - escrowPlayer (can be negative).
