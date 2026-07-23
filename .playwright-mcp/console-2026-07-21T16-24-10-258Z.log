@@ -1,3 +1,0 @@
-[ 1154547ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://games.msgboard.xyz/rpc/evm/943:0
-[ 7838704ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://games.msgboard.xyz/games-indexer/graphql:0
-[15458569ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://games.msgboard.xyz/games-indexer/graphql:0

@@ -36,3 +36,5 @@ deploy/
 docs/superpowers/specs/2026-06-01-msgboard-faucet-deploy-design.md
 docs/superpowers/plans/2026-06-01-msgboard-faucet-deploy.md
 /lib/
+.playwright-mcp/
+/*.png
