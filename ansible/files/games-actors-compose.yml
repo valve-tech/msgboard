@@ -70,5 +70,11 @@ services:
       SELF_PLAY_INTERVAL_MS: "21600000"
       VAULT_FLOOR: "5000"
       MAX_STAKE: "25"
+      # 369-sized floats (mainnet gas ~4e5 gwei): the pre-flight envelope for a 4M-gas enter is
+      # ~3.5k PLS, so the cushion covers one envelope and the top-up band sits above cushion+stake.
+      # The 200-PLS testnet default wedged the bots at nonce 0 from first boot (2026-07-21).
+      GAS_CUSHION: "4000"
+      TOP_UP_BELOW: "4500"
+      TOP_UP_TO: "8000"
       RPC: "https://one.valve.city/rpc/${VALVE_RPC_KEY}/evm/369"
     command: node player-bots.mjs
