@@ -1,7 +1,8 @@
 import { createConfig } from 'ponder'
 // `as const` abis (abis.ts) so Ponder derives the event-name types and the registry is populated —
 // a generic `as Abi` cast erases the events and `ponder.on('CoinFlip:Entered')` fails at runtime.
-import { coinFlipAbi, flipBookAbi, flipBookXAbi, houseChannelAbi, raffleAbi } from './abis'
+import { SOLVE_SCHEMAS } from './schemas'
+import { coinFlipAbi, easAbi, flipBookAbi, flipBookXAbi, houseChannelAbi, raffleAbi } from './abis'
 
 // Vendored, self-contained snapshot (mirrors deploy/random-indexer, which runs ponder 0.16): the
 // game ABIs are bundled in ./abis so the image builds with no workspace deps. Source of
@@ -30,6 +31,13 @@ const FLIP_BOOK_X_943 = '0x9e232e84E80FCaC3c78dE0820dABccf660511275'
 const FLIP_BOOK_X_369 = '0x28EfA8fA6c956C0b49f6Cdc6273b1eBe76382CD8'
 const FLIP_BOOK_X_START_943 = 24_932_217
 const FLIP_BOOK_X_START_369 = 27_091_482
+
+// EAS (the Provex instance, same address both chains) — the "facts rail": proof-gated solve
+// attestations from the Sudoku/Wordle resolvers. Filtered to OUR schema UIDs (indexed topic), so
+// unrelated Provex attestations never enter the store. UIDs are chain-specific; listing all four in
+// one filter is safe — a 943 UID simply never fires on 369. startBlock = the FlipBook pin on each
+// chain (2026-07-20, hours before the resolvers deployed) — nothing to miss before that.
+const EAS = '0x9e84Aa4BD0C1931A34B14C1EC918A53C33e2B0F8'
 
 // patched HouseChannel (gameId-binding + disputeFromOpen + gameId-in-Opened), deployed 943.
 const HOUSE_CHANNEL = '0x74bbc31e77c02593c0a7aad0cadadb5b6bff3948'
@@ -82,6 +90,17 @@ export default createConfig({
       abi: houseChannelAbi,
       address: HOUSE_CHANNEL,
       startBlock: HOUSE_CHANNEL_START_BLOCK,
+    },
+    EAS: {
+      abi: easAbi,
+      chain: {
+        pulsechainV4: { address: EAS, startBlock: FLIP_BOOK_START_943 },
+        pulsechain: { address: EAS, startBlock: FLIP_BOOK_START_369 },
+      },
+      filter: {
+        event: 'Attested',
+        args: { schemaUID: Object.keys(SOLVE_SCHEMAS) as `0x${string}`[] },
+      },
     },
   },
 })

@@ -5,7 +5,8 @@
   "scripts": {
     "start": "ponder start",
     "codegen": "ponder codegen",
-    "test": "vitest run"
+    "test": "vitest run",
+    "verify:solves": "node scripts/verify-solves.ts"
   },
   "dependencies": {
     "hono": "^4.7.5",

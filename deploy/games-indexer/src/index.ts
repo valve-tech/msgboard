@@ -1,6 +1,7 @@
 import { ponder } from 'ponder:registry'
-import { gameEvent, settlement } from 'ponder:schema'
+import { gameEvent, settlement, solveAttestation } from 'ponder:schema'
 import { openedRow, settledUpdate } from './settlement'
+import { solveRow } from './solves'
 
 /**
  * Store one game-contract log verbatim. We only read the fields common to every event, so a loose
@@ -78,4 +79,12 @@ ponder.on('HouseChannel:Settled', async ({ event, context }: any) => {
   if (!existing) return // no matching Opened — skip (e.g. pre-startBlock open)
   const update = settledUpdate(existing, event)
   await context.db.update(settlement, { id: tableId }).set(update)
+})
+
+// EAS: one row per proof-gated solve attestation (solveRow returns null for non-solve schemas).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ponder.on('EAS:Attested', async ({ event, context }: any) => {
+  const row = solveRow(context.chain.id, event)
+  if (!row) return
+  await context.db.insert(solveAttestation).values(row).onConflictDoNothing()
 })
