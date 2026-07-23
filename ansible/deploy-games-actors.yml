@@ -98,10 +98,14 @@
       failed_when: >-
         fleet.stdout_lines | select('search', ' running') | list | length != 5
 
+    # No --tail: the banner prints once at startup, and a long-running unchanged service (no
+    # restart this run — by design) has it far beyond any tail window; grep -q short-circuits so
+    # the full-log scan stays cheap. retries absorbs the transient `docker compose logs` errors
+    # seen under a busy daemon (empty-output rc=255).
     - name: Smoke — each actor logged its startup banner (body-aware, not just process-up)
       ansible.builtin.shell: >-
         set -o pipefail;
-        docker compose logs --tail 200 {{ item.svc }} | grep -q '{{ item.banner }}'
+        docker compose logs {{ item.svc }} | grep -q '{{ item.banner }}'
       args:
         chdir: "{{ actors_dir }}"
         executable: /bin/bash
@@ -112,6 +116,10 @@
         - { svc: cast-watcher-369, banner: "cast watcher on chain 369" }
         - { svc: player-bots-369, banner: "player bots on chain 369" }
       changed_when: false
+      register: banner
+      retries: 2
+      delay: 3
+      until: banner.rc == 0
 
     - name: Fleet status
       ansible.builtin.debug:
