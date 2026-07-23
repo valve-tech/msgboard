@@ -1,0 +1,47 @@
+- generic [ref=f24e3]:
+  - generic [ref=f24e4]:
+    - generic [ref=f24e5]:
+      - heading "MsgBoard Games" [level=1] [ref=f24e6]
+      - generic [ref=f24e7]: the back room where the books stay open
+    - generic [ref=f24e8]:
+      - button "chain" [ref=f24e10] [cursor=pointer]:
+        - generic [ref=f24e11]: PulseChain
+        - generic [ref=f24e12]: ▾
+      - button "Connect wallet" [ref=f24e13] [cursor=pointer]
+  - group [ref=f24e14]:
+    - generic "How the back room stays honest — and cheap ▾" [ref=f24e15] [cursor=pointer]
+  - generic [ref=f24e16]:
+    - button "game" [ref=f24e18] [cursor=pointer]:
+      - generic [ref=f24e19]: 🧩 ZK Sudoku
+      - generic [ref=f24e20]: ▾
+    - generic [ref=f24e21]: block 0
+  - generic [ref=f24e22]:
+    - generic [ref=f24e23]: ✦
+    - generic [ref=f24e24]:
+      - text: Provably fair — every solve is checked by a
+      - strong [ref=f24e25]: zero-knowledge proof
+      - text: ", so no house, server, or validator can forge or block it"
+      - button "how the fairness works" [ref=f24e27]: i
+    - button "Got it" [ref=f24e28] [cursor=pointer]
+  - generic [ref=f24e29]:
+    - generic [ref=f24e30]:
+      - heading [level=3] [ref=f24e31]:
+        - text: "ZK Sudoku — puzzle #1"
+        - button "where this information comes from" [ref=f24e33]: i
+      - paragraph [ref=f24e34]: Loading puzzle…
+    - generic [ref=f24e35]:
+      - heading "Leaderboard" [level=3] [ref=f24e36]
+      - paragraph [ref=f24e37]: No solves logged yet — be the first to post a time.
+      - paragraph [ref=f24e38]: "source: —"
+  - generic [ref=f24e39]:
+    - generic [ref=f24e40]:
+      - text: a
+      - link "MsgBoard" [ref=f24e41] [cursor=pointer]:
+        - /url: https://msgboard.xyz
+      - text: venue · run by valve
+    - generic [ref=f24e42]:
+      - link "contracts" [ref=f24e43] [cursor=pointer]:
+        - /url: https://github.com/gibsfinance/random
+      - text: ·
+      - link "msgboard" [ref=f24e44] [cursor=pointer]:
+        - /url: https://github.com/valve-tech/msgboard

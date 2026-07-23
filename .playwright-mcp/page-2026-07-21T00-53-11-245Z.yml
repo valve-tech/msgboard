@@ -1,0 +1,66 @@
+- generic [ref=f1e3]:
+  - generic [ref=f1e4]:
+    - generic [ref=f1e5]:
+      - heading "MsgBoard Games" [level=1] [ref=f1e6]
+      - generic [ref=f1e7]: the back room where the books stay open
+    - generic [ref=f1e8]:
+      - button "chain" [ref=f1e10] [cursor=pointer]:
+        - generic [ref=f1e11]: PulseChain testnet v4
+        - generic [ref=f1e12]: ▾
+      - button "Connect wallet" [ref=f1e13] [cursor=pointer]
+  - group [ref=f1e14]:
+    - generic "How the back room stays honest — and cheap ▾" [ref=f1e15] [cursor=pointer]
+  - generic [ref=f1e16]:
+    - button "game" [ref=f1e18] [cursor=pointer]:
+      - generic [ref=f1e19]: 🎟 The Numbers
+      - generic "validator randomness — safe if one validator is honest" [ref=f1e20]: 🛡️
+      - generic [ref=f1e21]: ▾
+    - generic [ref=f1e22]: block 0
+  - generic [ref=f1e23]:
+    - generic [ref=f1e24]: 🛡️
+    - generic [ref=f1e25]:
+      - text: Provably fair — safe as long as
+      - strong [ref=f1e26]: one
+      - text: of the 3 validators is honest
+      - button "how the fairness works" [ref=f1e28]: i
+    - button "Got it" [ref=f1e29] [cursor=pointer]
+  - generic [ref=f1e30]:
+    - generic [ref=f1e31]:
+      - heading [level=3] [ref=f1e32]:
+        - text: Play a number
+        - button "where this information comes from" [ref=f1e34]: i
+      - generic [ref=f1e35]:
+        - generic [ref=f1e36]:
+          - textbox "ticket price" [ref=f1e37]: "0.1"
+          - button "0.1" [ref=f1e38] [cursor=pointer]
+          - button "1" [ref=f1e39] [cursor=pointer]
+          - button "10" [ref=f1e40] [cursor=pointer]
+        - generic [ref=f1e41]:
+          - text: players
+          - spinbutton "player threshold" [ref=f1e42]: "3"
+        - spinbutton "your number 1–256" [ref=f1e43]
+        - button "Commit" [disabled] [ref=f1e44]
+        - generic [ref=f1e45]: connect a wallet to play
+      - generic [ref=f1e46]:
+        - textbox "paste a backup string to restore salts" [ref=f1e47]
+        - button "Import backup" [disabled] [ref=f1e48]
+    - heading [level=2] [ref=f1e49]:
+      - text: Open rounds
+      - button "where this information comes from" [ref=f1e51]: i
+    - paragraph [ref=f1e52]: No round on the table — play a number to open one.
+    - heading [level=2] [ref=f1e53]:
+      - text: The record
+      - button "where this information comes from" [ref=f1e55]: i
+    - paragraph [ref=f1e56]: No finished rounds yet.
+  - generic [ref=f1e57]:
+    - generic [ref=f1e58]:
+      - text: a
+      - link "MsgBoard" [ref=f1e59] [cursor=pointer]:
+        - /url: https://msgboard.xyz
+      - text: venue · run by valve
+    - generic [ref=f1e60]:
+      - link "contracts" [ref=f1e61] [cursor=pointer]:
+        - /url: https://github.com/gibsfinance/random
+      - text: ·
+      - link "msgboard" [ref=f1e62] [cursor=pointer]:
+        - /url: https://github.com/valve-tech/msgboard

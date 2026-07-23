@@ -1,4 +1,0 @@
-# Intentionally empty. wasm-pack generates a `pkg/.gitignore` containing `*`, which npm would
-# otherwise honor and exclude the committed wasm (pow_grinder_bg.wasm, pow_grinder.js, *.d.ts) from
-# the published tarball. The presence of this `.npmignore` makes npm ignore `pkg/.gitignore`, so the
-# parent package's `files` allowlist (which includes `pkg`) ships the portable wasm engine.

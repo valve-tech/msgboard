@@ -1,0 +1,110 @@
+- generic [ref=f3e3]:
+  - generic [ref=f3e4]:
+    - generic [ref=f3e5]:
+      - heading "MsgBoard Games" [level=1] [ref=f3e6]
+      - generic [ref=f3e7]: the back room where the books stay open
+    - generic [ref=f3e8]:
+      - button "chain" [ref=f3e10] [cursor=pointer]:
+        - generic [ref=f3e32]: PulseChain testnet v4
+        - generic [ref=f3e12]: ▾
+      - button "Connect wallet" [ref=f3e13] [cursor=pointer]
+  - group [ref=f3e14]:
+    - generic "How the back room stays honest — and cheap ▾" [ref=f3e15] [cursor=pointer]
+  - generic [ref=f3e16]:
+    - button "game" [ref=f3e18] [cursor=pointer]:
+      - generic [ref=f3e33]: 🏆 Standings
+      - generic [ref=f3e20]: ▾
+    - generic [ref=f3e21]: block 24932355
+  - generic [ref=f3e22]:
+    - heading [level=3] [ref=f3e34]:
+      - text: Standings
+      - button "how standings are computed" [ref=f3e25]: i
+    - table [ref=f3e35]:
+      - rowgroup [ref=f3e36]:
+        - row [ref=f3e37]:
+          - columnheader "#" [ref=f3e38]
+          - columnheader "player" [ref=f3e39]
+          - columnheader "wins" [ref=f3e40]
+          - columnheader "collected" [ref=f3e41]
+          - columnheader "games" [ref=f3e42]
+      - rowgroup [ref=f3e43]:
+        - row [ref=f3e44]:
+          - cell "1" [ref=f3e45]
+          - cell [ref=f3e46]:
+            - link "0x7F70…Cd51" [ref=f3e47] [cursor=pointer]:
+              - /url: https://scan.v4.testnet.pulsechain.com/#/address/0x7F70B4a792f741D17C07967f4D25f1d295B2Cd51
+          - cell "1267" [ref=f3e48]
+          - cell "257.8 v4PLS" [ref=f3e49]
+          - cell "🪙 1223 🎟 44" [ref=f3e50]:
+            - 'generic "coinflip: 1223 wins" [ref=f3e51]': 🪙 1223
+            - 'generic "raffle: 44 wins" [ref=f3e52]': 🎟 44
+        - row [ref=f3e53]:
+          - cell "2" [ref=f3e54]
+          - cell [ref=f3e55]:
+            - link "0x5BFf…955C" [ref=f3e56] [cursor=pointer]:
+              - /url: https://scan.v4.testnet.pulsechain.com/#/address/0x5BFfb6dAf2c66C7a33C87639434Dbc4C7C05955C
+          - cell "1248" [ref=f3e57]
+          - cell "256.1 v4PLS" [ref=f3e58]
+          - cell "🪙 1183 🎟 65" [ref=f3e59]:
+            - 'generic "coinflip: 1183 wins" [ref=f3e60]': 🪙 1183
+            - 'generic "raffle: 65 wins" [ref=f3e61]': 🎟 65
+        - row [ref=f3e62]:
+          - cell "3" [ref=f3e63]
+          - cell [ref=f3e64]:
+            - link "0x6805…AbDB" [ref=f3e65] [cursor=pointer]:
+              - /url: https://scan.v4.testnet.pulsechain.com/#/address/0x6805087FF6DD7456Bb61763DFE3aE3FC8883AbDB
+          - cell "1231" [ref=f3e66]
+          - cell "253.6 v4PLS" [ref=f3e67]
+          - cell "🪙 1157 🎟 74" [ref=f3e68]:
+            - 'generic "coinflip: 1157 wins" [ref=f3e69]': 🪙 1157
+            - 'generic "raffle: 74 wins" [ref=f3e70]': 🎟 74
+        - row [ref=f3e71]:
+          - cell "4" [ref=f3e72]
+          - cell [ref=f3e73]:
+            - link "0x4210…f2f1" [ref=f3e74] [cursor=pointer]:
+              - /url: https://scan.v4.testnet.pulsechain.com/#/address/0x42105fbAb38d714B617C9D4E520A6fdD8aa6f2f1
+          - cell "20" [ref=f3e75]
+          - cell "10.67 v4PLS" [ref=f3e76]
+          - cell "🎭 20" [ref=f3e77]:
+            - 'generic "flipbook: 20 wins" [ref=f3e78]': 🎭 20
+        - row [ref=f3e79]:
+          - cell "5" [ref=f3e80]
+          - cell [ref=f3e81]:
+            - link "0xe646…318d" [ref=f3e82] [cursor=pointer]:
+              - /url: https://scan.v4.testnet.pulsechain.com/#/address/0xe646Ebf79Ffb0371ad7B3771c0d81CA012b3318d
+          - cell "10" [ref=f3e83]
+          - cell "7.4 v4PLS" [ref=f3e84]
+          - cell "🎭 10" [ref=f3e85]:
+            - 'generic "flipbook: 10 wins" [ref=f3e86]': 🎭 10
+        - row [ref=f3e87]:
+          - cell "6" [ref=f3e88]
+          - cell [ref=f3e89]:
+            - link "0x3D4e…84E8" [ref=f3e90] [cursor=pointer]:
+              - /url: https://scan.v4.testnet.pulsechain.com/#/address/0x3D4e73Ef152711eCe409c60F71ab3adDaF1B84E8
+          - cell "4" [ref=f3e91]
+          - cell "4.3 v4PLS" [ref=f3e92]
+          - cell "🎭 2 ✍️ 2" [ref=f3e93]:
+            - 'generic "flipbook: 2 wins" [ref=f3e94]': 🎭 2
+            - 'generic "flipbookx: 2 wins" [ref=f3e95]': ✍️ 2
+        - row [ref=f3e96]:
+          - cell "7" [ref=f3e97]
+          - cell [ref=f3e98]:
+            - link "0xAF2c…B9B0" [ref=f3e99] [cursor=pointer]:
+              - /url: https://scan.v4.testnet.pulsechain.com/#/address/0xAF2ce0189f46f5663715b0b9ED2a10eA924AB9B0
+          - cell "2" [ref=f3e100]
+          - cell "2 v4PLS" [ref=f3e101]
+          - cell "🎭 1 ✍️ 1" [ref=f3e102]:
+            - 'generic "flipbook: 1 wins" [ref=f3e103]': 🎭 1
+            - 'generic "flipbookx: 1 wins" [ref=f3e104]': ✍️ 1
+  - generic [ref=f3e26]:
+    - generic [ref=f3e27]:
+      - text: a
+      - link "MsgBoard" [ref=f3e28] [cursor=pointer]:
+        - /url: https://msgboard.xyz
+      - text: venue · run by valve
+    - generic [ref=f3e29]:
+      - link "contracts" [ref=f3e30] [cursor=pointer]:
+        - /url: https://github.com/gibsfinance/random
+      - text: ·
+      - link "msgboard" [ref=f3e31] [cursor=pointer]:
+        - /url: https://github.com/valve-tech/msgboard

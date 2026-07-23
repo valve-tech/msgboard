@@ -1,5 +1,0 @@
-/target
-*.node
-node_modules
-# NOTE: pkg/ (wasm-pack output) IS committed — platform-independent and consumed by the web build, so
-# committing it avoids a build-ordering dependency. Rebuild with `pnpm run build:wasm`.

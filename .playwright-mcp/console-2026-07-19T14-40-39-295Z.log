@@ -1,0 +1,26 @@
+[     233ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://localhost:5177/node_modules/.vite/deps/chunk-K5ULSBXY.js?v=5662fa39:21550
+[     261ms] [WARNING] Module "buffer" has been externalized for browser compatibility. Cannot access "buffer.Buffer" in client code. See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details. @ http://localhost:5177/node_modules/.vite/deps/chunk-AOJABQA5.js?v=5662fa39:10
+[     261ms] [WARNING] Module "buffer" has been externalized for browser compatibility. Cannot access "buffer.Buffer" in client code. See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details. @ http://localhost:5177/node_modules/.vite/deps/chunk-AOJABQA5.js?v=5662fa39:10
+[     322ms] [WARNING] Module "util" has been externalized for browser compatibility. Cannot access "util.debuglog" in client code. See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details. @ http://localhost:5177/node_modules/.vite/deps/circomlibjs.js?v=f1143be0:3369
+[     322ms] [WARNING] Module "util" has been externalized for browser compatibility. Cannot access "util.inspect" in client code. See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details. @ http://localhost:5177/node_modules/.vite/deps/circomlibjs.js?v=f1143be0:3369
+[     322ms] ReferenceError: Buffer is not defined
+    at ../../../node_modules/.pnpm/blake-hash@2.0.0/node_modules/blake-hash/lib/blake.js (http://localhost:5177/node_modules/.vite/deps/circomlibjs.js?v=f1143be0:6139:21)
+    at __require (http://localhost:5177/node_modules/.vite/deps/chunk-EWTE5DHJ.js?v=5662fa39:12:50)
+    at ../../../node_modules/.pnpm/blake-hash@2.0.0/node_modules/blake-hash/lib/blake256.js (http://localhost:5177/node_modules/.vite/deps/circomlibjs.js?v=f1143be0:6277:17)
+    at __require (http://localhost:5177/node_modules/.vite/deps/chunk-EWTE5DHJ.js?v=5662fa39:12:50)
+    at ../../../node_modules/.pnpm/blake-hash@2.0.0/node_modules/blake-hash/lib/blake224.js (http://localhost:5177/node_modules/.vite/deps/circomlibjs.js?v=f1143be0:6386:20)
+    at __require (http://localhost:5177/node_modules/.vite/deps/chunk-EWTE5DHJ.js?v=5662fa39:12:50)
+    at ../../../node_modules/.pnpm/blake-hash@2.0.0/node_modules/blake-hash/lib/index.js (http://localhost:5177/node_modules/.vite/deps/circomlibjs.js?v=f1143be0:6607:17)
+    at __require (http://localhost:5177/node_modules/.vite/deps/chunk-EWTE5DHJ.js?v=5662fa39:12:50)
+    at ../../../node_modules/.pnpm/blake-hash@2.0.0/node_modules/blake-hash/js.js (http://localhost:5177/node_modules/.vite/deps/circomlibjs.js?v=f1143be0:6618:36)
+    at __require (http://localhost:5177/node_modules/.vite/deps/chunk-EWTE5DHJ.js?v=5662fa39:12:50)
+[   76737ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://localhost:5177/node_modules/.vite/deps/chunk-K5ULSBXY.js?v=5662fa39:21550
+[   76826ms] [WARNING] Module "util" has been externalized for browser compatibility. Cannot access "util.debuglog" in client code. See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details. @ http://localhost:5177/node_modules/.vite/deps/circomlibjs.js?v=f1143be0:3369
+[   76826ms] [WARNING] Module "util" has been externalized for browser compatibility. Cannot access "util.inspect" in client code. See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details. @ http://localhost:5177/node_modules/.vite/deps/circomlibjs.js?v=f1143be0:3369
+[   78097ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://localhost:5177/node_modules/.vite/deps/chunk-K5ULSBXY.js?v=4054af19:21550
+[   78201ms] [WARNING] Module "util" has been externalized for browser compatibility. Cannot access "util.debuglog" in client code. See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details. @ http://localhost:5177/node_modules/.vite/deps/circomlibjs.js?v=4054af19:3189
+[   78225ms] [WARNING] Module "util" has been externalized for browser compatibility. Cannot access "util.inspect" in client code. See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details. @ http://localhost:5177/node_modules/.vite/deps/circomlibjs.js?v=4054af19:3189
+[   78332ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8545/:0
+[   78489ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8545/:0
+[   78794ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8545/:0
+[   79403ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8545/:0

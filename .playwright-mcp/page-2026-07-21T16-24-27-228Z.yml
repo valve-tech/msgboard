@@ -1,0 +1,157 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - heading "MsgBoard Games" [level=1] [ref=e6]
+      - generic [ref=e7]: the back room where the books stay open
+    - generic [ref=e8]:
+      - button "chain" [ref=e10] [cursor=pointer]:
+        - generic [ref=e80]: PulseChain testnet v4
+        - generic [ref=e12]: ▾
+      - button "Connect wallet" [ref=e13] [cursor=pointer]
+  - group [ref=e14]:
+    - generic "How the back room stays honest — and cheap ▾" [ref=e15] [cursor=pointer]
+  - generic [ref=e16]:
+    - button "game" [ref=e18] [cursor=pointer]:
+      - generic [ref=e81]: 🪙 Coin Flip
+      - generic "peer-vs-peer guessing duel — your own coin protects your odds" [ref=e82]: 🎭
+      - generic [ref=e21]: ▾
+    - generic [ref=e22]: block 24928412
+  - generic [ref=e23]:
+    - generic [ref=e24]: 🎭
+    - generic [ref=e25]:
+      - text: Provably fair — a pure guessing duel;
+      - strong [ref=e26]: your own coin
+      - text: protects your odds, not theirs
+      - button "how the fairness works" [ref=e28]: i
+    - button "Got it" [ref=e29] [cursor=pointer]
+  - generic [ref=e30]:
+    - generic [ref=e31]:
+      - generic [ref=e32]:
+        - strong [ref=e33]:
+          - text: Post an offer
+          - button "how posting works" [ref=e35]: i
+        - button "where this information comes from" [ref=e37]: i
+      - generic [ref=e38]:
+        - generic [ref=e39]: your hidden side
+        - button "heads" [ref=e40] [cursor=pointer]
+        - button "tails" [ref=e41] [cursor=pointer]
+      - generic [ref=e42]:
+        - generic [ref=e43]: stake
+        - generic [ref=e44]:
+          - textbox "stake" [ref=e45]: "0.1"
+          - button "0.1" [ref=e46] [cursor=pointer]
+          - button "1" [ref=e47] [cursor=pointer]
+          - button "10" [ref=e48] [cursor=pointer]
+      - generic [ref=e49]:
+        - generic [ref=e50]:
+          - text: bond
+          - button "why a bond" [ref=e52]: i
+        - generic [ref=e53]:
+          - textbox "bond" [ref=e54]: "0.05"
+          - button "0.1" [ref=e55] [cursor=pointer]
+          - button "1" [ref=e56] [cursor=pointer]
+          - button "10" [ref=e57] [cursor=pointer]
+      - generic [ref=e58]:
+        - generic [ref=e59]: open for
+        - button "1 hour" [ref=e60] [cursor=pointer]
+        - button "6 hours" [ref=e61] [cursor=pointer]
+        - button "24 hours" [ref=e62] [cursor=pointer]
+        - generic [ref=e63]: reveal within
+        - button "10 min" [ref=e64] [cursor=pointer]
+        - button "1 hour" [ref=e65] [cursor=pointer]
+        - button "6 hours" [ref=e66] [cursor=pointer]
+      - generic [ref=e67]:
+        - button "Escrow 0.15 v4PLS & post" [disabled] [ref=e68]
+        - generic [ref=e69]: connect a wallet to post or take
+    - heading [level=3] [ref=e83]:
+      - text: Open offers
+      - button "how taking works" [ref=e72]: i
+    - generic [ref=e73]: no open offers — post one above and let the board find your opponent
+    - heading "Settled" [level=3] [ref=e84]
+    - generic [ref=e86]:
+      - generic [ref=e87]:
+        - generic [ref=e88]: "#6"
+        - generic [ref=e89]:
+          - text: coin was
+          - strong [ref=e90]: heads
+          - text: ", call was"
+          - strong [ref=e91]: tails
+          - text: —
+          - generic [ref=e92]:
+            - link "0xe646…318d" [ref=e93] [cursor=pointer]:
+              - /url: https://scan.v4.testnet.pulsechain.com/#/address/0xe646ebf79ffb0371ad7b3771c0d81ca012b3318d
+            - text: takes 1 v4PLS
+      - link "tx ↗" [ref=e94] [cursor=pointer]:
+        - /url: https://scan.v4.testnet.pulsechain.com/#/tx/0x293e803a72a1144ef0ae64c4915ecbfe22187bf2e193bae43e6f3b1cdbfa1337
+    - generic [ref=e96]:
+      - generic [ref=e97]:
+        - generic [ref=e98]: "#5"
+        - generic [ref=e99]:
+          - text: coin was
+          - strong [ref=e100]: heads
+          - text: ", call was"
+          - strong [ref=e101]: tails
+          - text: —
+          - generic [ref=e102]:
+            - link "0xe646…318d" [ref=e103] [cursor=pointer]:
+              - /url: https://scan.v4.testnet.pulsechain.com/#/address/0xe646ebf79ffb0371ad7b3771c0d81ca012b3318d
+            - text: takes 1 v4PLS
+      - link "tx ↗" [ref=e104] [cursor=pointer]:
+        - /url: https://scan.v4.testnet.pulsechain.com/#/tx/0x5bb119f51ec4f79864c1e59621268b1eb882601be01dca63205e0e86f9b9ee1c
+    - generic [ref=e106]:
+      - generic [ref=e107]:
+        - generic [ref=e108]: "#3"
+        - generic [ref=e109]:
+          - text: maker
+          - link "0xaf2c…b9b0" [ref=e110] [cursor=pointer]:
+            - /url: https://scan.v4.testnet.pulsechain.com/#/address/0xaf2ce0189f46f5663715b0b9ed2a10ea924ab9b0
+          - text: never revealed —
+          - generic [ref=e111]:
+            - link "0x3d4e…84e8" [ref=e112] [cursor=pointer]:
+              - /url: https://scan.v4.testnet.pulsechain.com/#/address/0x3d4e73ef152711ece409c60f71ab3addaf1b84e8
+            - text: claims 1.1 v4PLS
+          - generic [ref=e113]: forfeit
+      - link "tx ↗" [ref=e114] [cursor=pointer]:
+        - /url: https://scan.v4.testnet.pulsechain.com/#/tx/0xb111f022979902d58de294994ca537c8594a30e06960599b4fc466c7897af2a7
+    - generic [ref=e116]:
+      - generic [ref=e117]:
+        - generic [ref=e118]: "#2"
+        - generic [ref=e119]:
+          - text: coin was
+          - strong [ref=e120]: heads
+          - text: ", call was"
+          - strong [ref=e121]: tails
+          - text: —
+          - generic [ref=e122]:
+            - link "0xaf2c…b9b0" [ref=e123] [cursor=pointer]:
+              - /url: https://scan.v4.testnet.pulsechain.com/#/address/0xaf2ce0189f46f5663715b0b9ed2a10ea924ab9b0
+            - text: takes 1 v4PLS
+      - link "tx ↗" [ref=e124] [cursor=pointer]:
+        - /url: https://scan.v4.testnet.pulsechain.com/#/tx/0x3575265b4249e5361e5383f901771ca72cdf15717eb6f426d4712c3abc73e7d2
+    - generic [ref=e126]:
+      - generic [ref=e127]:
+        - generic [ref=e128]: "#1"
+        - generic [ref=e129]:
+          - text: coin was
+          - strong [ref=e130]: heads
+          - text: ", call was"
+          - strong [ref=e131]: heads
+          - text: —
+          - generic [ref=e132]:
+            - link "0x3d4e…84e8" [ref=e133] [cursor=pointer]:
+              - /url: https://scan.v4.testnet.pulsechain.com/#/address/0x3d4e73ef152711ece409c60f71ab3addaf1b84e8
+            - text: takes 1 v4PLS
+      - link "tx ↗" [ref=e134] [cursor=pointer]:
+        - /url: https://scan.v4.testnet.pulsechain.com/#/tx/0xc4807e522e15274e9990d8bc561ee865d49646a5c372bb0e8e7ce762ec097fdd
+  - generic [ref=e74]:
+    - generic [ref=e75]:
+      - text: a
+      - link "MsgBoard" [ref=e76] [cursor=pointer]:
+        - /url: https://msgboard.xyz
+      - text: venue · run by valve
+    - generic [ref=e77]:
+      - link "contracts" [ref=e78] [cursor=pointer]:
+        - /url: https://github.com/gibsfinance/random
+      - text: ·
+      - link "msgboard" [ref=e79] [cursor=pointer]:
+        - /url: https://github.com/valve-tech/msgboard

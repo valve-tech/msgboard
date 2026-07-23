@@ -1,0 +1,82 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - heading "MsgBoard Games" [level=1] [ref=e6]
+      - generic [ref=e7]: the back room where the books stay open
+    - generic [ref=e8]:
+      - button "chain" [ref=e10] [cursor=pointer]:
+        - generic [ref=e11]: PulseChain testnet v4
+        - generic [ref=e12]: ▾
+      - button "Connect wallet" [ref=e13] [cursor=pointer]
+  - group [ref=e14]:
+    - generic "How the back room stays honest — and cheap ▾" [ref=e15] [cursor=pointer]
+  - generic [ref=e16]:
+    - button "game" [ref=e18] [cursor=pointer]:
+      - generic [ref=e19]: 🪙 Coin Flip
+      - generic "peer-vs-peer guessing duel — your own coin protects your odds" [ref=e20]: 🎭
+      - generic [ref=e21]: ▾
+    - generic [ref=e22]: block 0
+  - generic [ref=e23]:
+    - generic [ref=e24]: 🎭
+    - generic [ref=e25]:
+      - text: Provably fair — a pure guessing duel;
+      - strong [ref=e26]: your own coin
+      - text: protects your odds, not theirs
+      - button "how the fairness works" [ref=e28]: i
+    - button "Got it" [ref=e29] [cursor=pointer]
+  - generic [ref=e30]:
+    - generic [ref=e31]:
+      - generic [ref=e32]:
+        - strong [ref=e33]:
+          - text: Post an offer
+          - button "how posting works" [ref=e35]: i
+        - button "where this information comes from" [ref=e37]: i
+      - generic [ref=e38]:
+        - generic [ref=e39]: your hidden side
+        - button "heads" [ref=e40] [cursor=pointer]
+        - button "tails" [ref=e41] [cursor=pointer]
+      - generic [ref=e42]:
+        - generic [ref=e43]: stake
+        - generic [ref=e44]:
+          - textbox "stake" [ref=e45]: "0.1"
+          - button "0.1" [ref=e46] [cursor=pointer]
+          - button "1" [ref=e47] [cursor=pointer]
+          - button "10" [ref=e48] [cursor=pointer]
+      - generic [ref=e49]:
+        - generic [ref=e50]:
+          - text: bond
+          - button "why a bond" [ref=e52]: i
+        - generic [ref=e53]:
+          - textbox "bond" [ref=e54]: "0.05"
+          - button "0.1" [ref=e55] [cursor=pointer]
+          - button "1" [ref=e56] [cursor=pointer]
+          - button "10" [ref=e57] [cursor=pointer]
+      - generic [ref=e58]:
+        - generic [ref=e59]: open for
+        - button "1 hour" [ref=e60] [cursor=pointer]
+        - button "6 hours" [ref=e61] [cursor=pointer]
+        - button "24 hours" [ref=e62] [cursor=pointer]
+        - generic [ref=e63]: reveal within
+        - button "10 min" [ref=e64] [cursor=pointer]
+        - button "1 hour" [ref=e65] [cursor=pointer]
+        - button "6 hours" [ref=e66] [cursor=pointer]
+      - generic [ref=e67]:
+        - button "Escrow 0.15 v4PLS & post" [disabled] [ref=e68]
+        - generic [ref=e69]: connect a wallet to post or take
+    - heading [level=3] [ref=e70]:
+      - text: Open offers
+      - button "how taking works" [ref=e72]: i
+      - text: refreshing…
+    - generic [ref=e73]: no open offers — post one above and let the board find your opponent
+  - generic [ref=e74]:
+    - generic [ref=e75]:
+      - text: a
+      - link "MsgBoard" [ref=e76] [cursor=pointer]:
+        - /url: https://msgboard.xyz
+      - text: venue · run by valve
+    - generic [ref=e77]:
+      - link "contracts" [ref=e78] [cursor=pointer]:
+        - /url: https://github.com/gibsfinance/random
+      - text: ·
+      - link "msgboard" [ref=e79] [cursor=pointer]:
+        - /url: https://github.com/valve-tech/msgboard

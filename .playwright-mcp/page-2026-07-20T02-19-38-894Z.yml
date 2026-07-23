@@ -1,0 +1,301 @@
+- main [ref=f28e3]:
+  - generic [ref=f28e6]:
+    - heading "Permissionless MsgBoard" [level=1] [ref=f28e8]:
+      - generic [ref=f28e9]: Permissionless
+      - generic [ref=f28e11]: MsgBoard
+    - paragraph [ref=f28e12]: Unstoppable, ephemeral messaging for any app.No gas, no token, no account.
+    - generic [ref=f28e13]:
+      - generic [ref=f28e14]: Supported on
+      - generic [ref=f28e15]:
+        - img "PulseChain" [ref=f28e16]
+        - img "Ethereum" [ref=f28e17]
+    - generic [ref=f28e18]:
+      - button "Try it now" [ref=f28e19] [cursor=pointer]
+      - link "Read the docs →" [ref=f28e20] [cursor=pointer]:
+        - /url: "#/docs"
+  - generic [ref=f28e22]:
+    - generic [ref=f28e23]:
+      - heading "Censorship-Resistant" [level=3] [ref=f28e24]
+      - paragraph [ref=f28e25]: Messages flow freely across the peer-to-peer network — unstoppable by any authority.
+    - generic [ref=f28e26]:
+      - heading "Ephemeral" [level=3] [ref=f28e27]
+      - paragraph [ref=f28e28]: Messages are short-lived and lightweight, aging out without cluttering the network.
+    - generic [ref=f28e29]:
+      - heading "Permissionless" [level=3] [ref=f28e30]
+      - paragraph [ref=f28e31]: No gas, no token, no account. Anyone can post — math is the only toll.
+    - generic [ref=f28e32]:
+      - heading "Paid in Work" [level=3] [ref=f28e33]
+      - paragraph [ref=f28e34]: You mint a proof-of-work stamp for each message — that stamp regulates what gets on the board.
+  - generic [ref=f28e38]:
+    - generic [ref=f28e40]:
+      - generic [ref=f28e41]:
+        - combobox "chain" [ref=f28e44]:
+          - option "PulseChain V4"
+          - option "PulseChain" [selected]
+          - option "Ethereum"
+          - option "Custom"
+        - generic [ref=f28e45]: https://one.valve.city/rpc/vk_demo/evm/369
+        - generic [ref=f28e47]:
+          - generic "Checking whether this RPC serves the msgboard_ namespace…" [ref=f28e48]: checking
+          - button
+          - generic [ref=f28e51]:
+            - switch "direct" [ref=f28e52] [cursor=pointer]
+            - generic:
+              - 'button "Direct (lightning icon): RPC requests go directly from the browser to the endpoint. Switch to Proxy (server icon) to route through the msgboard server if the RPC is HTTP-only."'
+      - generic [ref=f28e53]:
+        - generic [ref=f28e54]:
+          - generic [ref=f28e55]:
+            - heading [level=3] [ref=f28e56]:
+              - generic [ref=f28e57]:
+                - switch "txt" [ref=f28e58] [cursor=pointer]
+                - generic:
+                  - 'button "The category is 32 bytes long. It is often used coordinate where to look for messages on the msgboard by clients to quickly find useful messages for their protocol. Switch the toggle to `0x` to view the hex version of your input."'
+                - text: Category
+                - generic [ref=f28e59]:
+                  - switch "keccak" [checked] [ref=f28e60] [cursor=pointer]:
+                    - generic: 0x
+                  - generic:
+                    - 'button "0x: category is hex-encoded and zero-padded to 32 bytes. keccak (fingerprint icon): category hex is keccak256 hashed to 32 bytes. Strings longer than 32 bytes are always hashed."'
+            - textbox [ref=f28e64]: gasmoneyplease
+          - generic [ref=f28e65]:
+            - generic [ref=f28e66]:
+              - 'heading "txt The message can be any input. The text will be converted to a hex string, and the bytes counted. For each byte the difficulty will increase. Switch the toggle to `0x` to view the resulting hex version of your input. Message" [level=3] [ref=f28e67]':
+                - switch "txt" [ref=f28e68] [cursor=pointer]
+                - generic:
+                  - 'button "The message can be any input. The text will be converted to a hex string, and the bytes counted. For each byte the difficulty will increase. Switch the toggle to `0x` to view the resulting hex version of your input."'
+                - generic [ref=f28e69]: Message
+              - generic:
+                - generic:
+                  - button "Generate a random keccak256 hash as the message content. Useful when you just want to post something quickly without typing a specific message."
+                - button
+            - textbox "any text can go here" [ref=f28e71]
+          - button "Work + Send It!" [ref=f28e74] [cursor=pointer]
+        - paragraph [ref=f28e77]:
+          - generic [ref=f28e78]: Logs
+          - generic [ref=f28e79]:
+            - button "clear logs" [ref=f28e80] [cursor=pointer]
+            - checkbox [ref=f28e81] [cursor=pointer]
+    - generic [ref=f28e83]:
+      - generic [ref=f28e84]: Loading…
+      - generic [ref=f28e91]:
+        - generic [ref=f28e92]:
+          - text: "Categories: 0"
+          - generic [ref=f28e93]:
+            - switch "txt" [checked] [ref=f28e94] [cursor=pointer]
+            - generic [ref=f28e95]: decode all
+        - generic [ref=f28e96]: "Messages: 0"
+      - list:
+        - listitem
+  - generic [ref=f28e98]:
+    - heading "Use Cases" [level=2] [ref=f28e99]
+    - group "Use cases" [ref=f28e101]:
+      - generic [ref=f28e102]:
+        - generic [ref=f28e104]:
+          - heading "Multi-Sigs" [level=3] [ref=f28e105]
+          - paragraph [ref=f28e106]: Accounts can share signatures with multi sig partners to distribute consent of an action without writing anything on chain.
+        - generic [ref=f28e108]:
+          - heading "Intent Distribution" [level=3] [ref=f28e109]
+          - paragraph [ref=f28e110]: Intents can be shared with solvers to execute on chain without relying on a central coordinator or service.
+        - generic [ref=f28e112]:
+          - heading "Onboarding and Education" [level=3] [ref=f28e113]
+          - paragraph [ref=f28e114]: Proof of work can be used as a token gated means to mint tokens and onboard users.
+        - generic [ref=f28e116]:
+          - heading "Action Requests" [level=3] [ref=f28e117]
+          - paragraph [ref=f28e118]: Wallets can signal their desire for an action to be taken on their behalf.
+        - generic [ref=f28e120]:
+          - heading "Account Abstraction" [level=3] [ref=f28e121]
+          - paragraph [ref=f28e122]: Accounts can request actions to be taken on their behalf by sharing signatures - without relying on a central coordinator or service.
+        - generic [ref=f28e124]:
+          - heading "Antagonistic Games" [level=3] [ref=f28e125]
+          - paragraph [ref=f28e126]: Games requiring impartial inputs can use msgboard to pit players' incentives against each other and complete rounds promptly.
+      - generic [ref=f28e127]:
+        - button "Previous" [disabled] [ref=f28e128]
+        - button "Next" [ref=f28e129] [cursor=pointer]
+  - generic [ref=f28e131]:
+    - heading "The ecosystem" [level=2] [ref=f28e132]
+    - paragraph [ref=f28e133]: Apps and archives built on the board — live today, or runnable as a pattern.
+    - generic [ref=f28e134]:
+      - link [ref=f28e135] [cursor=pointer]:
+        - /url: https://cosign.msgboard.xyz/
+        - heading "Cosign" [level=3] [ref=f28e136]
+        - paragraph [ref=f28e137]: Off-chain co-signing for Safe multi-sigs. Owners share their signatures over the board and assemble the set once the threshold is met — nothing partial is written on chain until the transaction executes.
+        - generic [ref=f28e138]:
+          - text: Open Cosign
+          - generic [ref=f28e139]: ↗
+      - link [ref=f28e140] [cursor=pointer]:
+        - /url: https://archive.msgboard.xyz
+        - heading "The archive" [level=3] [ref=f28e141]
+        - paragraph [ref=f28e142]: The board keeps only the last ~120 blocks, so history is captured off to the side. The archive is the durable, read-only GraphQL record of every message that has crossed the board — query it by category, content, or time.
+        - generic [ref=f28e143]:
+          - text: Query the archive
+          - generic [ref=f28e144]: ↗
+      - link "Example ZK-filtered subset archive A provably-gated slice of board traffic. Members prove — in zero knowledge — that they belong to an allowed group before they post, so every message is attributable to the group but never to the individual. The archive is only the messages whose membership proof checks out. See the example" [ref=f28e145] [cursor=pointer]:
+        - /url: "#/examples"
+        - generic [ref=f28e146]: Example
+        - heading "ZK-filtered subset archive" [level=3] [ref=f28e148]
+        - paragraph [ref=f28e149]: A provably-gated slice of board traffic. Members prove — in zero knowledge — that they belong to an allowed group before they post, so every message is attributable to the group but never to the individual. The archive is only the messages whose membership proof checks out.
+        - generic [ref=f28e150]:
+          - text: See the example
+          - generic [ref=f28e151]: →
+      - link [ref=f28e152] [cursor=pointer]:
+        - /url: https://games.msgboard.xyz
+        - heading "MsgBoard Games" [level=3] [ref=f28e153]
+        - paragraph [ref=f28e154]: "A provably-fair game venue built on the board: coin flips and a numbers draw settled by validator entropy (never the house), plus ZK skill games. Coordination rides proof-of-work stamps instead of gas, and every result ships a receipt your browser re-checks against the chain."
+        - generic [ref=f28e155]:
+          - text: Enter the venue
+          - generic [ref=f28e156]: ↗
+  - generic [ref=f28e158]:
+    - heading "Simple API = ❤️ Happy Devs 💻" [level=2] [ref=f28e159]
+    - generic [ref=f28e160]:
+      - link "GitHub" [ref=f28e161] [cursor=pointer]:
+        - /url: https://github.com/valve-tech/msgboard
+      - link "npm" [ref=f28e162] [cursor=pointer]:
+        - /url: https://www.npmjs.com/package/@msgboard/sdk
+    - generic [ref=f28e163]:
+      - combobox "language" [ref=f28e165]:
+        - option "typescript" [selected]
+        - option "shell"
+      - combobox "method" [ref=f28e167]:
+        - option "status" [selected]
+        - option "categories"
+        - option "content"
+        - option "addMessage"
+        - option "getMessage"
+    - generic [ref=f28e168]:
+      - generic [ref=f28e169]:
+        - generic [ref=f28e170]: "Request:"
+        - generic [ref=f28e171]:
+          - code [ref=f28e174]:
+            - generic [ref=f28e175]: const status = await client.status()
+          - button [ref=f28e176] [cursor=pointer]
+      - generic [ref=f28e177]:
+        - generic [ref=f28e178]: "Response:"
+        - generic [ref=f28e179]:
+          - code [ref=f28e182]:
+            - generic [ref=f28e183]: "type Status {"
+            - generic [ref=f28e184]: "enabled: boolean;"
+            - generic [ref=f28e185]: "count: Hex;"
+            - generic [ref=f28e186]: "size: Hex;"
+            - generic [ref=f28e187]: "workMultiplier: Hex;"
+            - generic [ref=f28e188]: "workDivisor: Hex;"
+            - generic [ref=f28e189]: "}"
+          - button [ref=f28e190] [cursor=pointer]
+  - generic [ref=f28e192]:
+    - heading "Join the Network" [level=2] [ref=f28e193]
+    - paragraph [ref=f28e194]:
+      - text: Any node with the
+      - code [ref=f28e195]: msgboard_
+      - text: module can serve the board.
+    - generic [ref=f28e196]:
+      - generic [ref=f28e197]: Supported
+      - generic [ref=f28e199]: Pending
+      - generic [ref=f28e201]: Unsupported
+    - generic [ref=f28e203]:
+      - generic [ref=f28e204]:
+        - generic [ref=f28e205]:
+          - link "valve.city" [ref=f28e206] [cursor=pointer]:
+            - /url: https://valve.city
+          - link "Open-source node code":
+            - /url: https://github.com/valve-tech/reth
+        - generic [ref=f28e207]:
+          - generic "PulseChain · Supported" [ref=f28e208]: PulseChain
+          - generic "Ethereum · Supported" [ref=f28e211]: Ethereum
+          - generic "v4 testnet · Supported" [ref=f28e214]: v4 testnet
+      - generic [ref=f28e217]:
+        - generic [ref=f28e218]:
+          - link "PulseChain" [ref=f28e219] [cursor=pointer]:
+            - /url: https://pulsechain.com
+          - link "Open-source node code":
+            - /url: https://gitlab.com/pulsechaincom/erigon-pulse
+        - generic [ref=f28e220]:
+          - generic "PulseChain · Pending" [ref=f28e221]: PulseChain
+          - generic "Ethereum · Pending" [ref=f28e224]: Ethereum
+          - generic "v4 testnet · Pending" [ref=f28e227]: v4 testnet
+      - generic [ref=f28e230]:
+        - generic [ref=f28e231]:
+          - link "g4mm4" [ref=f28e232] [cursor=pointer]:
+            - /url: https://g4mm4.io
+          - link "Open-source node code":
+            - /url: https://gitlab.com/pulsechaincom/erigon-pulse
+        - generic [ref=f28e233]:
+          - generic "PulseChain · Pending" [ref=f28e234]: PulseChain
+          - generic "Ethereum · Pending" [ref=f28e237]: Ethereum
+          - generic "v4 testnet · Pending" [ref=f28e240]: v4 testnet
+    - paragraph [ref=f28e243]: Run a node with the module, or point the app at a supported provider.
+  - generic [ref=f28e246]:
+    - heading "Decentralized Messaging Protocols" [level=2] [ref=f28e247]
+    - table [ref=f28e249]:
+      - rowgroup [ref=f28e250]:
+        - row [ref=f28e251]:
+          - columnheader "Feature" [ref=f28e252]
+          - columnheader "MsgBoard" [ref=f28e253]
+          - columnheader "Waku" [ref=f28e254]
+          - columnheader "Nostr" [ref=f28e255]
+      - rowgroup [ref=f28e256]:
+        - row [ref=f28e257]:
+          - cell "Censorship Resistance" [ref=f28e258]
+          - cell "✅ Unstoppable P2P Relaying" [ref=f28e259]
+          - cell "✅ Decentralized routing" [ref=f28e260]
+          - cell "✅ Relay switching" [ref=f28e261]
+        - row [ref=f28e262]:
+          - cell "Spam Prevention" [ref=f28e263]
+          - cell "✅ Proof of Work" [ref=f28e264]
+          - cell "✅ Rate limiting (RLN)" [ref=f28e265]
+          - cell "🟡 Fractured Network" [ref=f28e266]
+        - row [ref=f28e267]:
+          - cell "Privacy" [ref=f28e268]
+          - cell "🟡 Metadata Exposed to Contact Node" [ref=f28e269]
+          - cell "🟡 Nullifier Based Messages" [ref=f28e270]
+          - cell "🟡 Relay Dependent" [ref=f28e271]
+        - row [ref=f28e272]:
+          - cell "Scalability" [ref=f28e273]
+          - cell "✅ High with P2P efficiency" [ref=f28e274]
+          - cell "✅ Sharding support" [ref=f28e275]
+          - cell "🟡 Relay Limited" [ref=f28e276]
+        - row [ref=f28e277]:
+          - cell "Ease Of Use" [ref=f28e278]
+          - cell "✅ Simple JSON-RPC API" [ref=f28e279]
+          - cell "🟡 Complex protocols" [ref=f28e280]
+          - cell "✅ Simple JSON events" [ref=f28e281]
+        - row [ref=f28e282]:
+          - cell "Uptime" [ref=f28e283]
+          - cell "✅ Backed by the chain's nodes" [ref=f28e284]
+          - cell "💥 Few Relayers" [ref=f28e285]
+          - cell "🟡 Many Relayers" [ref=f28e286]
+  - generic [ref=f28e289]:
+    - heading "Ready to Build the Future?" [level=2] [ref=f28e290]
+    - group "Next steps" [ref=f28e291]:
+      - generic [ref=f28e292]:
+        - link [ref=f28e294] [cursor=pointer]:
+          - /url: "#/examples"
+          - heading "Run the Examples" [level=3] [ref=f28e296]
+          - paragraph [ref=f28e297]: Runnable scripts for every use case, plus the live GraphQL archive of historical messages.
+          - generic [ref=f28e298]: See examples
+        - link [ref=f28e300] [cursor=pointer]:
+          - /url: "#/docs"
+          - heading "Explore the API" [level=3] [ref=f28e302]
+          - paragraph [ref=f28e303]: Integrate MsgBoard into your applications with our simple endpoints, and SDK.
+          - generic [ref=f28e304]: Build
+        - link [ref=f28e306] [cursor=pointer]:
+          - /url: https://pulsechain.com
+          - heading "Learn About PulseChain" [level=3] [ref=f28e308]
+          - paragraph [ref=f28e309]: Discover the blockchain that powers MsgBoard's decentralized messaging.
+          - generic [ref=f28e310]: Learn More
+        - link [ref=f28e312] [cursor=pointer]:
+          - /url: http://t.me/pulsechain_msgboard
+          - heading "Join the Community" [level=3] [ref=f28e314]
+          - paragraph [ref=f28e315]: Connect with developers, contribute to the project, and help shape the future of decentralized messaging.
+          - generic [ref=f28e316]: Get Started
+      - generic [ref=f28e317]:
+        - button "Previous" [disabled] [ref=f28e318]
+        - button "Next" [ref=f28e319] [cursor=pointer]
+    - generic [ref=f28e320]:
+      - paragraph [ref=f28e321]: Join developers and users worldwide in creating unstoppable Web3 apps with Distributed MsgBoard.
+      - link "Try it Now" [ref=f28e322] [cursor=pointer]:
+        - /url: "#interactive"
+  - generic [ref=f28e323]:
+    - radiogroup "Color theme" [ref=f28e324]:
+      - radio "Light" [ref=f28e325] [cursor=pointer]
+      - radio "Dark" [ref=f28e326] [cursor=pointer]
+      - radio "System" [checked] [ref=f28e327] [cursor=pointer]
+    - generic [ref=f28e328]: © 2026 Distributed MsgBoard. All rights reserved.Built with ❤️ for the decentralized web.

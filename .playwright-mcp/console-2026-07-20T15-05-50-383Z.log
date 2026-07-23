@@ -1,0 +1,87 @@
+[     482ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://localhost:5177/node_modules/.vite/deps/chunk-K5ULSBXY.js?v=4054af19:21550
+[     567ms] [WARNING] Module "util" has been externalized for browser compatibility. Cannot access "util.debuglog" in client code. See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details. @ http://localhost:5177/node_modules/.vite/deps/circomlibjs.js?v=4054af19:3189
+[     567ms] [WARNING] Module "util" has been externalized for browser compatibility. Cannot access "util.inspect" in client code. See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details. @ http://localhost:5177/node_modules/.vite/deps/circomlibjs.js?v=4054af19:3189
+[    1029ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:5177/favicon.ico:0
+[    3527ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[    3561ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[    3565ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[    4304ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[    4307ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[    6335ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[    7629ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[    7632ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[    9258ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[    9564ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[   11173ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[   11488ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[   14439ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[   15379ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[   15382ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[   16149ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[   16316ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[   16468ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[   16630ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[   17368ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[   17473ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[   44562ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://localhost:5177/node_modules/.vite/deps/chunk-K5ULSBXY.js?v=4054af19:21550
+[   44630ms] [WARNING] Module "util" has been externalized for browser compatibility. Cannot access "util.debuglog" in client code. See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details. @ http://localhost:5177/node_modules/.vite/deps/circomlibjs.js?v=4054af19:3189
+[   44630ms] [WARNING] Module "util" has been externalized for browser compatibility. Cannot access "util.inspect" in client code. See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details. @ http://localhost:5177/node_modules/.vite/deps/circomlibjs.js?v=4054af19:3189
+[   45477ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://localhost:5177/node_modules/.vite/deps/chunk-K5ULSBXY.js?v=4054af19:21550
+[   45543ms] [WARNING] Module "util" has been externalized for browser compatibility. Cannot access "util.debuglog" in client code. See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details. @ http://localhost:5177/node_modules/.vite/deps/circomlibjs.js?v=4054af19:3189
+[   45543ms] [WARNING] Module "util" has been externalized for browser compatibility. Cannot access "util.inspect" in client code. See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details. @ http://localhost:5177/node_modules/.vite/deps/circomlibjs.js?v=4054af19:3189
+[   46567ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[   49652ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[   51465ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[   52481ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[   52482ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[   53317ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[   53630ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[   55142ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[   55447ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[   57119ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[   57449ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[   58556ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[   58558ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[   59276ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[   59587ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  116128ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  116465ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  117577ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  117578ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  118346ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  119294ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  119295ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  119615ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  119615ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  121096ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  121415ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  122513ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  122514ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  124371ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  125334ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  125336ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  126213ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  126532ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  128234ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  128554ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  133107ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  133114ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  133115ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  133437ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  133437ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  133447ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  134336ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  134341ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  135495ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  136546ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  137351ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  138450ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  138451ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  139170ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  139484ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  140563ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  140564ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  141398ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  144235ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  145518ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
+[  145519ms] [ERROR] Failed to load resource: the server responded with a status of 429 () @ https://one.valve.city/rpc/vk_demo/evm/369:0
