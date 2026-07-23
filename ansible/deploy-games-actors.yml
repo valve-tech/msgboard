@@ -99,12 +99,12 @@
         fleet.stdout_lines | select('search', ' running') | list | length != 5
 
     # No --tail: the banner prints once at startup, and a long-running unchanged service (no
-    # restart this run — by design) has it far beyond any tail window; grep -q short-circuits so
-    # the full-log scan stays cheap. retries absorbs the transient `docker compose logs` errors
-    # seen under a busy daemon (empty-output rc=255).
+    # restart this run — by design) has it far beyond any tail window. NO pipefail here — grep -q
+    # exits on first match, SIGPIPE-ing the still-streaming `docker compose logs`, whose broken-pipe
+    # rc (255) would fail the pipeline exactly when the banner IS present early in a large log. The
+    # pipeline's status is grep's, which is the assertion; a dead docker stream still greps to rc=1.
     - name: Smoke — each actor logged its startup banner (body-aware, not just process-up)
       ansible.builtin.shell: >-
-        set -o pipefail;
         docker compose logs {{ item.svc }} | grep -q '{{ item.banner }}'
       args:
         chdir: "{{ actors_dir }}"
