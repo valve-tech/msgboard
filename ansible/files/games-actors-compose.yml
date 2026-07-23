@@ -36,6 +36,10 @@ services:
       RPC: "https://one.valve.city/rpc/${VALVE_RPC_KEY}/evm/943"
       FLIPBOOK: "0xb009bd8b849dd33d9c5081ec6e53f29a947f6832"
       FLIPBOOK_DEPLOY_BLOCK: "24921235"
+      # variant B: off-chain signed offers over x402PLS, sprayed + read on msgboard, taker driven
+      # by WebSocket newHeads pushes (BOARD_WS defaults to the wss games proxy for the chain).
+      FLIPBOOKX: "0x9e232e84E80FCaC3c78dE0820dABccf660511275"
+      FLIPBOOKX_DEPLOY_BLOCK: "24932217"
       INTERVAL_MS: "180000"
       SELF_PLAY_INTERVAL_MS: "600000"
     command: node flipbook-bots.mjs
