@@ -1,0 +1,55 @@
+{
+  "generatedAt": "2026-07-18T03:25:50.549Z",
+  "gitCommit": "b4d242bcadfe49f2023e8fc43073888241d08f03",
+  "repo": "gibsfinance/random",
+  "release": {
+    "tag": "proving-keys-v2",
+    "assetBaseUrl": "https://games.msgboard.xyz/proving-keys",
+    "originUrl": "https://github.com/gibsfinance/random/releases/download/proving-keys-v2",
+    "note": "assetBaseUrl is the CORS-enabled box mirror (GitHub release downloads send no CORS headers, so browsers cannot fetch them); originUrl is the release of record the mirror was verified against."
+  },
+  "circuits": [
+    {
+      "circuit": "sudoku_solve",
+      "zkey": {
+        "file": "sudoku_solve_plonk.zkey",
+        "sha256": "e2a7754da2043dc98cf7314a80e44873ea61faf032e70451f85a25c091e70df4",
+        "bytes": 66346804
+      },
+      "wasm": {
+        "file": "sudoku_solve.wasm",
+        "sha256": "b16abdc7e5b7a09772d83ef9d3d28fb17585fdac239e2e1655839c83eac14752",
+        "bytes": 4308891
+      },
+      "release": "proving-keys-v2"
+    },
+    {
+      "circuit": "wordle_solve",
+      "zkey": {
+        "file": "wordle_solve_plonk.zkey",
+        "sha256": "52a05d10d62ad228745f94488f06f7ba337a240cfe917f5290228d33b9196a09",
+        "bytes": 32826828
+      },
+      "wasm": {
+        "file": "wordle_solve.wasm",
+        "sha256": "52955d2547ddb05c5cd268b1eca9962a869a84ab1cd524c6685b9fee437a0462",
+        "bytes": 2683842
+      },
+      "release": "proving-keys-v2"
+    },
+    {
+      "circuit": "wordle_clue",
+      "zkey": {
+        "file": "wordle_clue_plonk.zkey",
+        "sha256": "80149519e15316db3d1e7a7817c3837f71b3e885c801bb0ae87ee57fec413ef1",
+        "bytes": 6427092
+      },
+      "wasm": {
+        "file": "wordle_clue.wasm",
+        "sha256": "f72a630ed215c0f7171f60805413b5e6983d4936f28a6a50b3cc9aab6253691d",
+        "bytes": 2313937
+      },
+      "release": "proving-keys-v2"
+    }
+  ]
+}

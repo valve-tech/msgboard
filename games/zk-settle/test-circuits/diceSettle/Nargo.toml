@@ -1,0 +1,8 @@
+[package]
+name = "dice_settle"
+type = "bin"
+authors = [""]
+compiler_version = ">=1.0.0-beta.20"
+
+[dependencies]
+keccak256 = { path = "../../vendor/keccak256" }

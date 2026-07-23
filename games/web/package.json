@@ -1,0 +1,45 @@
+{
+  "license": "AGPL-3.0-only",
+  "name": "@msgboard/games-web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "dev:local": "tsx scripts/dev-local.ts && vite",
+    "dev:seed": "tsx scripts/dev-local.ts",
+    "dev:cast": "tsx scripts/dev-cast.ts",
+    "dev:walkthrough": "tsx scripts/dev-walkthrough.ts"
+  },
+  "dependencies": {
+    "@msgboard/coinflip": "*",
+    "@msgboard/games-core": "*",
+    "@msgboard/hilo-war": "*",
+    "@msgboard/games": "*",
+    "@msgboard/settle": "*",
+    "@msgboard/pow-grinder": "*",
+    "@msgboard/raffle": "*",
+    "@gibs/random": "^0.0.18",
+    "@msgboard/zk-cards-core": "*",
+    "@msgboard/zk-skill": "*",
+    "buffer": "^6.0.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "snarkjs": "^0.7.6",
+    "viem": "^2.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "tsx": "^4.19.3",
+    "typescript": "~5.8.3",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.0"
+  }
+}

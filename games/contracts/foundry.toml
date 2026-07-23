@@ -1,0 +1,412 @@
+# Foundry config for the games-platform fuzz + invariant suite.
+#
+# Scoped deliberately: `src`/`test` point at test/foundry so forge compiles ONLY the foundry
+# tests and whatever they import transitively — the GameBase/Raffle/CoinFlip graph, which is
+# tstore-free. The core Random.sol/StorageSlot.sol use transient storage (tstore) and are NOT
+# imported here, so they never reach the compiler. evm_version is pinned to shanghai to match the
+# Hardhat per-contract overrides for the games (chain 943 is pre-cancun: PUSH0 ok, MCOPY/TSTORE
+# rejected). solc/viaIR/optimizer-runs mirror hardhat.config.ts so bytecode behavior matches.
+[profile.default]
+src = 'test/foundry'
+test = 'test/foundry'
+out = 'forge-out'
+cache_path = 'forge-cache'
+libs = ['../../lib', '../../node_modules']
+solc = '0.8.25'
+via_ir = true
+optimizer = true
+optimizer_runs = 1000
+evm_version = 'shanghai'
+remappings = [
+  'forge-std/=../../lib/forge-std/src/',
+  'solady/=../../node_modules/solady/',
+]
+# ShuffleVerifier52.t.sol pulls in the vendored uzkge PlonkVerifier, which hits solc
+# stack-too-deep under this profile's viaIR:true. It compiles + runs under the dedicated
+# `zk` profile (viaIR:false / runs:200, mirroring hardhat.config.ts). Exclude it here so
+# the default game-suite run is unaffected:
+#   FOUNDRY_PROFILE=zk forge test --match-path 'test/foundry/ShuffleVerifier52*'
+# (the actual `skip` list is set below, alongside the M2 verifier-test skips.)
+# Foundry 1.6's table-test feature collects any function whose name starts with `table`.
+# ZkTable's `mapping(bytes32 => Table) public tables` auto-generates a `tables(bytes32)`
+# getter that the runner misclassifies as a fixtureless table test ("should have fixtures
+# defined"). The production ZkTable contract has no real foundry tests — its suites are
+# ZkTableFuzzTest / ZkTableInvariantTest / ZkTableHandler — so exclude the contract itself
+# (anchored, to not catch the *Test/*Handler suites). Renaming the public getter would
+# churn the ABI + ~46 call sites for a tooling false-positive; this is the surgical fix.
+no_match_contract = '^ZkTable$'
+# DiceSettleVerifier.t.sol imports the GENERATED UltraHonk verifier
+# (contracts/zk/generated/DiceSettleHonkVerifier.sol), which bb.js emits using
+# `require(cond, CustomError())` — a solc 0.8.26+ feature — and which needs
+# viaIR:false. The default profile is solc 0.8.25 + viaIR, so that test compiles
+# under the dedicated `zkverify` profile and is skipped here. SettleWithProof.t.sol
+# (the HouseChannel mode-2 integration) stays in THIS profile: it does NOT import
+# the verifier — it `vm.etch`es the verifier runtime that DiceSettleVerifier dumps —
+# so it compiles cleanly with HouseChannel/Solady under 0.8.25 + viaIR.
+#   FOUNDRY_PROFILE=zkverify forge test --match-path 'test/foundry/DiceSettleVerifier.t.sol'
+# SettleWithProof.t.sol (the HouseChannel mode-2 integration) is also skipped here: it
+# deploys the verifier from the PRE-BUILT zkverify artifact via vm.deployCode, so it runs
+# under the `zkm2` profile (viaIR 0.8.25 for HouseChannel, out shared with zkverify).
+# HoldemShareDispute.t.sol shells out (vm.ffi) to the real off-chain secp256k1 prover; it runs
+# under the dedicated `ffi` profile (FOUNDRY_PROFILE=ffi ... --ffi), excluded here so the default
+# `forge test` (no --ffi) stays green.
+skip = ['test/foundry/ShuffleVerifier52.t.sol', 'test/foundry/ShuffleVerifier52Positive.t.sol', 'test/foundry/RevealVerifierBabyJubJub.t.sol', 'test/foundry/DiceSettleVerifier.t.sol', 'test/foundry/SettleWithProof.t.sol', 'test/foundry/HoldemShareDispute.t.sol', 'test/foundry/SolveResolvers.t.sol']
+
+# M2 (zk mode-2) integration test (SettleWithProof) reads the proof fixture + the
+# etched verifier-runtime fixture. (The reveal-snark tamper test keeps ./test/fixtures.)
+fs_permissions = [
+  { access = 'read', path = './test/fixtures' },
+  { access = 'read-write', path = './test/foundry/fixtures' },
+]
+
+[fuzz]
+runs = 512
+
+[invariant]
+runs = 256
+depth = 64
+fail_on_revert = false
+
+# Dedicated profile for the zk shuffle/reveal verifier negative-fuzz suite
+# (test/foundry/ShuffleVerifier52.t.sol). Two opposing constraints:
+#   - the vendored uzkge PlonkVerifier (reached via ShuffleVerifier52) hits solc
+#     stack-too-deep UNDER viaIR, and
+#   - the rest of the foundry test graph (CoinFlip/Raffle/…) hits stack-too-deep
+#     WITHOUT viaIR,
+# so they cannot share one compiler setting in a single compilation. hardhat.config.ts
+# already pins the shuffle-verifier graph to viaIR:false / runs:200; this profile
+# mirrors that and `skip`s the viaIR-requiring suites so only the shuffle/reveal test
+# compiles. The default profile is untouched, so CoinFlip/Raffle keep viaIR:true. Run:
+#   FOUNDRY_PROFILE=zk forge test --match-path 'test/foundry/ShuffleVerifier52*'
+[profile.zk]
+src = 'test/foundry'
+test = 'test/foundry'
+out = 'forge-out-zk'
+cache_path = 'forge-cache-zk'
+libs = ['../../lib', '../../node_modules']
+solc = '0.8.25'
+via_ir = false
+optimizer = true
+optimizer_runs = 200
+evm_version = 'shanghai'
+remappings = [
+  'forge-std/=../../lib/forge-std/src/',
+  'solady/=../../node_modules/solady/',
+]
+# Skip every other foundry test/helper so the viaIR-requiring game suites never
+# reach this non-viaIR compilation. Only ShuffleVerifier52.t.sol compiles here.
+skip = [
+  'test/foundry/CoinFlip.t.sol',
+  'test/foundry/CardCascadePayouts.t.sol',
+  'test/foundry/FlipBookX.t.sol',
+  'test/foundry/FlipBookXFork.t.sol',
+  'test/foundry/LadderRules.t.sol',
+  'test/foundry/MinesRules.t.sol',
+  'test/foundry/PlonkSoundness.t.sol',
+  'test/foundry/ProofSystemGas.t.sol',
+  'test/foundry/SkillSettle.t.sol',
+  'test/foundry/SudokuLog.t.sol',
+  'test/foundry/SudokuRules.t.sol',
+  'test/foundry/TablePayouts.t.sol',
+  'test/foundry/WordleRules.t.sol',
+  'test/foundry/Raffle.t.sol',
+  'test/foundry/RaffleInvariant.t.sol',
+  'test/foundry/HiLoWarRules.t.sol',
+  'test/foundry/ZkTable.t.sol',
+  'test/foundry/ZkTableInvariant.t.sol',
+  'test/foundry/HoldemTableN.t.sol',
+  'test/foundry/HoldemTableNInvariant.t.sol',
+  # secp256k1 EllipticCurve.sol (reached via RevealShareDLEQ) needs viaIR:true.
+  'test/foundry/RevealShareDLEQ.t.sol',
+  'test/foundry/HoldemShareDispute.t.sol',
+  'test/foundry/SolveResolvers.t.sol',
+  'test/foundry/HoldemTableNShowdown.t.sol',
+  'test/foundry/MockRandom.sol',
+  # M2 verifier tests: the generated verifier needs solc >= 0.8.26 (zkverify profile) and
+  # SettleWithProof pulls HouseChannel/Solady (needs viaIR:true); neither belongs in this 0.8.25 unit.
+  'test/foundry/DiceSettleVerifier.t.sol',
+  'test/foundry/SettleWithProof.t.sol',
+  # Settlement/games suites pull the HouseBankroll/HouseChannel/GamePayouts graph, which
+  # needs viaIR:true. This profile compiles ONLY ShuffleVerifier52, so skip them all.
+  'test/foundry/Chips.t.sol',
+  'test/foundry/GamePayouts.t.sol',
+  'test/foundry/HouseBankroll.t.sol',
+  'test/foundry/HouseChannel.t.sol',
+  'test/foundry/SessionStateDigest.t.sol',
+  'test/foundry/SettleWithSeeds.t.sol',
+]
+
+# Allow the reveal-snark tamper test to read its decimal-string fixture, and the
+# M2 (zk mode-2) tests to read/write the generated UltraHonk proof + verifier-runtime
+# fixtures (SettleWithProof etches the runtime; the zkverify probe dumps it).
+fs_permissions = [
+  { access = 'read', path = './test/fixtures' },
+  { access = 'read-write', path = './test/foundry/fixtures' },
+]
+
+[profile.zk.fuzz]
+runs = 512
+
+# Dedicated profile for the M2 (ZK mode-2) on-chain UltraHonk verifier + settle
+# tests. The generated verifier needs solc >= 0.8.26 (it uses
+# `require(cond, CustomError())`), so this profile bumps solc to 0.8.27 while
+# KEEPING evm_version = shanghai (chain 943 is pre-cancun; 0.8.27 + shanghai emits
+# no MCOPY/TSTORE). It compiles ONLY
+# the two M2 tests + their imports (the generated verifier, HouseChannel, Chips);
+# everything else is skipped so the verifier's heavy compile doesn't touch the game
+# suite. Run:
+#   FOUNDRY_PROFILE=zkverify forge test --match-path 'test/foundry/DiceSettle*' \
+#       --match-path 'test/foundry/SettleWithProof.t.sol'
+[profile.zkverify]
+src = 'test/foundry'
+test = 'test/foundry'
+out = 'forge-out-zkverify'
+cache_path = 'forge-cache-zkverify'
+libs = ['../../lib', '../../node_modules']
+solc = '0.8.27'
+# viaIR:false — the generated UltraHonk verifier hits Yul stack-too-deep under
+# viaIR (same constraint as the vendored uzkge PlonkVerifier in the `zk` profile).
+# Mirrors that profile: legacy pipeline, runs:200.
+via_ir = false
+optimizer = true
+optimizer_runs = 200
+evm_version = 'shanghai'
+remappings = [
+  'forge-std/=../../lib/forge-std/src/',
+  'solady/=../../node_modules/solady/',
+]
+fs_permissions = [
+  { access = 'read', path = './test/fixtures' },
+  { access = 'read-write', path = './test/foundry/fixtures' },
+]
+no_match_contract = '^ZkTable$'
+# Compile ONLY the M2 tests in this profile. Skipping every other foundry test
+# keeps the (large, slow) verifier compile isolated to the M2 run.
+skip = [
+  'test/foundry/CoinFlip.t.sol',
+  'test/foundry/CardCascadePayouts.t.sol',
+  'test/foundry/FlipBookX.t.sol',
+  'test/foundry/FlipBookXFork.t.sol',
+  'test/foundry/LadderRules.t.sol',
+  'test/foundry/MinesRules.t.sol',
+  'test/foundry/PlonkSoundness.t.sol',
+  'test/foundry/ProofSystemGas.t.sol',
+  'test/foundry/SkillSettle.t.sol',
+  'test/foundry/SudokuLog.t.sol',
+  'test/foundry/SudokuRules.t.sol',
+  'test/foundry/TablePayouts.t.sol',
+  'test/foundry/WordleRules.t.sol',
+  'test/foundry/Raffle.t.sol',
+  'test/foundry/RaffleInvariant.t.sol',
+  'test/foundry/HiLoWarRules.t.sol',
+  'test/foundry/ZkTable.t.sol',
+  'test/foundry/ZkTableInvariant.t.sol',
+  'test/foundry/ShuffleVerifier52.t.sol',
+  'test/foundry/ShuffleVerifier52Positive.t.sol',
+  'test/foundry/RevealVerifierBabyJubJub.t.sol',
+  'test/foundry/MockRandom.sol',
+  'test/foundry/Chips.t.sol',
+  'test/foundry/HouseBankroll.t.sol',
+  'test/foundry/HouseChannel.t.sol',
+  'test/foundry/GamePayouts.t.sol',
+  'test/foundry/SessionStateDigest.t.sol',
+  'test/foundry/SettleWithSeeds.t.sol',
+  'test/foundry/SettleWithProof.t.sol',
+  # Holdem suites pull in HoldemRules.sol, which needs viaIR:true (stack-too-deep
+  # under this profile's legacy pipeline). They run in the default profile.
+  'test/foundry/HoldemTableN.t.sol',
+  'test/foundry/HoldemTableNShowdown.t.sol',
+  'test/foundry/HoldemTableNInvariant.t.sol',
+  # secp256k1 EllipticCurve.sol (reached via RevealShareDLEQ) needs viaIR:true.
+  'test/foundry/RevealShareDLEQ.t.sol',
+  'test/foundry/HoldemShareDispute.t.sol',
+  'test/foundry/SolveResolvers.t.sol',
+]
+
+[profile.zkverify.fuzz]
+runs = 512
+
+# Dedicated profile for the M2 mode-2 INTEGRATION test (SettleWithProof.t.sol). It exercises
+# HouseChannel.settleWithProof, which needs the games' solc 0.8.25 + viaIR (Solady), while the
+# generated UltraHonk verifier needs solc 0.8.27 + viaIR:false — irreconcilable in one compilation.
+# Resolution: this test does NOT import the verifier; it deploys it with vm.deployCode from the
+# PRE-BUILT artifact in `forge-out-zkverify` (produced by the `zkverify` profile). forge auto-links
+# the verifier's ZKTranscriptLib library and deploys it without recompiling. So this profile compiles
+# ONLY SettleWithProof.t.sol (+ HouseChannel/Chips) under the games' settings, and shares the zkverify
+# out dir so the artifact is present. Two-step run:
+#   FOUNDRY_PROFILE=zkverify forge test --match-path 'test/foundry/DiceSettleVerifier.t.sol'  # builds verifier artifact
+#   FOUNDRY_PROFILE=zkm2     forge test --match-path 'test/foundry/SettleWithProof.t.sol'     # deploys it + settles
+[profile.zkm2]
+src = 'test/foundry'
+test = 'test/foundry'
+out = 'forge-out-zkverify'
+cache_path = 'forge-cache-zkverify'
+libs = ['../../lib', '../../node_modules']
+solc = '0.8.25'
+via_ir = true
+optimizer = true
+optimizer_runs = 1000
+evm_version = 'shanghai'
+remappings = [
+  'forge-std/=../../lib/forge-std/src/',
+  'solady/=../../node_modules/solady/',
+]
+fs_permissions = [
+  { access = 'read', path = './test/fixtures' },
+  { access = 'read-write', path = './test/foundry/fixtures' },
+  { access = 'read', path = './forge-out-zkverify' },
+]
+no_match_contract = '^ZkTable$'
+# Compile ONLY the integration test here. DiceSettleVerifier.t.sol is skipped so the verifier
+# source is NOT pulled into this viaIR unit (it would fail viaIR); its artifact is read from out.
+skip = [
+  'test/foundry/CoinFlip.t.sol',
+  'test/foundry/CardCascadePayouts.t.sol',
+  'test/foundry/FlipBookX.t.sol',
+  'test/foundry/FlipBookXFork.t.sol',
+  'test/foundry/LadderRules.t.sol',
+  'test/foundry/MinesRules.t.sol',
+  'test/foundry/PlonkSoundness.t.sol',
+  'test/foundry/ProofSystemGas.t.sol',
+  'test/foundry/SkillSettle.t.sol',
+  'test/foundry/SudokuLog.t.sol',
+  'test/foundry/SudokuRules.t.sol',
+  'test/foundry/TablePayouts.t.sol',
+  'test/foundry/WordleRules.t.sol',
+  'test/foundry/Raffle.t.sol',
+  'test/foundry/RaffleInvariant.t.sol',
+  'test/foundry/HiLoWarRules.t.sol',
+  'test/foundry/ZkTable.t.sol',
+  'test/foundry/ZkTableInvariant.t.sol',
+  'test/foundry/ShuffleVerifier52.t.sol',
+  'test/foundry/ShuffleVerifier52Positive.t.sol',
+  'test/foundry/RevealVerifierBabyJubJub.t.sol',
+  'test/foundry/MockRandom.sol',
+  'test/foundry/Chips.t.sol',
+  'test/foundry/HouseBankroll.t.sol',
+  'test/foundry/HouseChannel.t.sol',
+  'test/foundry/GamePayouts.t.sol',
+  'test/foundry/SessionStateDigest.t.sol',
+  'test/foundry/SettleWithSeeds.t.sol',
+  'test/foundry/DiceSettleVerifier.t.sol',
+  # Holdem suites pull in HoldemRules.sol, which needs viaIR:true (stack-too-deep
+  # under the verifier's legacy pipeline); not part of the mode-2 integration.
+  'test/foundry/HoldemTableN.t.sol',
+  'test/foundry/HoldemTableNShowdown.t.sol',
+  'test/foundry/HoldemTableNInvariant.t.sol',
+  # secp256k1 EllipticCurve.sol (reached via RevealShareDLEQ) needs viaIR:true.
+  'test/foundry/RevealShareDLEQ.t.sol',
+  'test/foundry/HoldemShareDispute.t.sol',
+  'test/foundry/SolveResolvers.t.sol',
+]
+
+[profile.zkm2.fuzz]
+runs = 512
+
+# Dedicated profile for the SHARE-dispute end-to-end suite, which uses vm.ffi to invoke the
+# real off-chain secp256k1 prover (examples/games/zk-core/scripts/gen-share-dispute.mts).
+# Mirrors the default compiler settings (solc 0.8.25 + viaIR) but enables ffi and runs ONLY
+# HoldemShareDispute. Run:
+#   FOUNDRY_PROFILE=ffi forge test --match-path 'test/foundry/HoldemShareDispute*' --ffi
+[profile.ffi]
+src = 'test/foundry'
+test = 'test/foundry'
+out = 'forge-out'
+cache_path = 'forge-cache'
+libs = ['../../lib', '../../node_modules']
+solc = '0.8.25'
+via_ir = true
+optimizer = true
+optimizer_runs = 1000
+evm_version = 'shanghai'
+ffi = true
+remappings = [
+  'forge-std/=../../lib/forge-std/src/',
+  'solady/=../../node_modules/solady/',
+]
+fs_permissions = [
+  { access = 'read', path = './test/fixtures' },
+  { access = 'read-write', path = './test/foundry/fixtures' },
+]
+no_match_contract = '^ZkTable$'
+# The M2 verifier tests need the zkverify/zkm2 profiles (0.8.27 viaIR:false / prebuilt artifact),
+# so exclude them from this viaIR:true unit.
+skip = [
+  'test/foundry/ShuffleVerifier52.t.sol',
+  'test/foundry/ShuffleVerifier52Positive.t.sol',
+  'test/foundry/RevealVerifierBabyJubJub.t.sol',
+  'test/foundry/DiceSettleVerifier.t.sol',
+  'test/foundry/SettleWithProof.t.sol',
+  'test/foundry/SolveResolvers.t.sol',
+]
+
+[profile.ffi.fuzz]
+runs = 512
+
+# Dedicated profile for the EAS solve-resolver suite (SolveResolvers.t.sol): it deploys the REAL
+# EAS + SchemaRegistry from @ethereum-attestation-service/eas-contracts, which pin solc 0.8.27
+# exactly, so it cannot share the default 0.8.25 unit. evm_version stays shanghai (943/369 are
+# pre-cancun) — OZ is pinned to 5.0.2 in package.json precisely because newer OZ Strings pulls the
+# mcopy-using Bytes.sol, which cannot compile for shanghai. Run:
+#   FOUNDRY_PROFILE=eas forge test --match-path 'test/foundry/SolveResolvers.t.sol'
+[profile.eas]
+src = 'test/foundry'
+test = 'test/foundry'
+out = 'forge-out-eas'
+cache_path = 'forge-cache-eas'
+libs = ['../../lib', '../../node_modules']
+solc = '0.8.27'
+via_ir = true
+optimizer = true
+optimizer_runs = 1000
+evm_version = 'shanghai'
+remappings = [
+  'forge-std/=../../lib/forge-std/src/',
+  'solady/=../../node_modules/solady/',
+  '@ethereum-attestation-service/=../../node_modules/@ethereum-attestation-service/',
+  '@openzeppelin/=../../node_modules/@openzeppelin/',
+]
+fs_permissions = [
+  { access = 'read', path = './test/fixtures' },
+  { access = 'read-write', path = './test/foundry/fixtures' },
+]
+no_match_contract = '^ZkTable$'
+# Compile ONLY the resolver suite + its imports in this 0.8.27 unit.
+skip = [
+  'test/foundry/CardCascadePayouts.t.sol',
+  'test/foundry/Chips.t.sol',
+  'test/foundry/CoinFlip.t.sol',
+  'test/foundry/DiceSettleVerifier.t.sol',
+  'test/foundry/GamePayouts.t.sol',
+  'test/foundry/HiLoWarRules.t.sol',
+  'test/foundry/HoldemShareDispute.t.sol',
+  'test/foundry/HoldemTableN.t.sol',
+  'test/foundry/HoldemTableNInvariant.t.sol',
+  'test/foundry/HoldemTableNShowdown.t.sol',
+  'test/foundry/HouseBankroll.t.sol',
+  'test/foundry/HouseChannel.t.sol',
+  'test/foundry/LadderRules.t.sol',
+  'test/foundry/MinesRules.t.sol',
+  'test/foundry/MockRandom.sol',
+  'test/foundry/PlonkSoundness.t.sol',
+  'test/foundry/ProofSystemGas.t.sol',
+  'test/foundry/Raffle.t.sol',
+  'test/foundry/RaffleInvariant.t.sol',
+  'test/foundry/RevealShareDLEQ.t.sol',
+  'test/foundry/RevealVerifierBabyJubJub.t.sol',
+  'test/foundry/SessionStateDigest.t.sol',
+  'test/foundry/SettleWithProof.t.sol',
+  'test/foundry/SettleWithSeeds.t.sol',
+  'test/foundry/ShuffleVerifier52.t.sol',
+  'test/foundry/ShuffleVerifier52Positive.t.sol',
+  'test/foundry/SkillSettle.t.sol',
+  'test/foundry/SudokuLog.t.sol',
+  'test/foundry/SudokuRules.t.sol',
+  'test/foundry/TablePayouts.t.sol',
+  'test/foundry/WordleRules.t.sol',
+  'test/foundry/ZkTable.t.sol',
+  'test/foundry/ZkTableInvariant.t.sol',
+]
+
+[profile.eas.fuzz]
+runs = 512
