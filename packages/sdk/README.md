@@ -26,7 +26,7 @@ const client = createPublicClient({
 const board = new msgboard.MsgBoardClient(client)
 
 // do the work for your category and data
-const work = await board.doPoW('gasmoneyplease', 'hello board')
+const work = await board.grind('gasmoneyplease', 'hello board')
 // submit the valid message
 const hash = await board.addMessage(work.message)
 ```
@@ -40,7 +40,7 @@ import { providers } from 'ethers'
 const provider = new providers.JsonRpcProvider('https://one.valve.city/rpc/vk_demo/evm/369')
 const board = new msgboard.MsgBoardClient(msgboard.wrapLegacySend(provider))
 
-const work = await board.doPoW('gasmoneyplease', 'hello board')
+const work = await board.grind('gasmoneyplease', 'hello board')
 const hash = await board.addMessage(work.message)
 ```
 
@@ -82,7 +82,7 @@ Submission is gated by proof of work, not a fee. Difficulty scales with message 
 board.getDifficulty('0x...') // bigint
 ```
 
-`workMultiplier` and `workDivisor` come from `status()` and are applied automatically by `doPoW`.
+`workMultiplier` and `workDivisor` come from `status()` and are applied automatically by `grind`.
 
 ### The board enforces a floor, not a fixed config
 
@@ -95,7 +95,7 @@ The consequence is the part that surprises people: **a message does not have to 
 
 ### Manipulating the work
 
-`doPoW` reads the board's live factors from `status()` because they produce the **cheapest valid message** — the least work that still clears the floor. But you can deliberately do more:
+`grind` reads the board's live factors from `status()` because they produce the **cheapest valid message** — the least work that still clears the floor. But you can deliberately do more:
 
 ```ts
 const status = await board.status()
@@ -107,7 +107,7 @@ board.setDifficultyFactors(BigInt(status.workMultiplier), BigInt(status.workDivi
 board.setDifficultyFactors(BigInt(status.workMultiplier), BigInt(status.workDivisor) / 2n)
 ```
 
-So the two factors are best understood as a **board-level floor** plus a **per-message dial**: operators raise the floor (a higher `workMultiplier` or lower `workDivisor`) to admit fewer messages and resist spam, or lower it to admit more; individual senders may always pay *above* the floor. The only failure mode is paying **below** it — work that cleared a looser floor is rejected once the board raises it, which is why `doPoW` grinds against the **live** factors by default.
+So the two factors are best understood as a **board-level floor** plus a **per-message dial**: operators raise the floor (a higher `workMultiplier` or lower `workDivisor`) to admit fewer messages and resist spam, or lower it to admit more; individual senders may always pay *above* the floor. The only failure mode is paying **below** it — work that cleared a looser floor is rejected once the board raises it, which is why `grind` grinds against the **live** factors by default.
 
 ## Categories
 
@@ -119,7 +119,7 @@ Messages are short-lived: the board retains roughly the last 120 blocks of messa
 
 ## Keeping work off the UI thread
 
-`doPoW` is a busy loop; JavaScript blocks while it runs. In a browser, run it in a Web Worker so the interface stays responsive. The client yields periodically (`breakInterval`) to let block updates resolve, but the heavy hashing still occupies the thread it runs on.
+`grind` is a busy loop; JavaScript blocks while it runs. In a browser, run it in a Web Worker so the interface stays responsive. The client yields periodically (`breakInterval`) to let block updates resolve, but the heavy hashing still occupies the thread it runs on.
 
 <!-- GENERATED:OPENRPC:START -->
 
@@ -338,17 +338,21 @@ Object whose values are `RPCMessage[]`.
 
 These run in the client process, not on the node, so they are not part of the OpenRPC spec.
 
-### `doPoW(category, data, limit?)`
+### `grind(category, data, limit?)`
 
 Grinds a valid proof-of-work message. Reads current difficulty from `status()` before starting, so the work is always valid for the live board settings. Returns `{ message, stats }` where `stats` includes `nonce`, `duration`, and the number of iterations. The `limit` parameter sets a maximum number of iterations — useful for streaming progress or cancellation in long-running environments.
 
+Since 0.0.33 the grind runs on the fastest engine available in your environment — the native/WASM `@msgboard/pow-grinder` if it loads, otherwise a pure-JS search — so a stamp is typically ~1–2s instead of tens of seconds. Pass a `stamper` in the client config to override the engine, or `stamper: null` to force the JS search.
+
+> `doPoW(category, data, limit?)` is a retained alias for `grind` — older code that calls `doPoW` keeps working unchanged.
+
 ### `getDifficulty(data)`
 
-Returns the difficulty threshold for a given payload hex string as a `bigint`. Helpful for estimating how long `doPoW` will take before committing to it.
+Returns the difficulty threshold for a given payload hex string as a `bigint`. Helpful for estimating how long `grind` will take before committing to it.
 
 ### `categoryHash(name)`
 
-Encodes a plain-text category name to the 32-byte hex hash the board stores. Pass the result directly to `doPoW` or `content()` filters.
+Encodes a plain-text category name to the 32-byte hex hash the board stores. Pass the result directly to `grind` or `content()` filters.
 
 ### `wrapLegacySend(provider)`
 
