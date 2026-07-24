@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Icon } from '@iconify/react'
 import { Chat } from './Chat'
 import { Interactive } from './Interactive'
 import { Arcade } from './Arcade'
+import { readDeepLink, writeDeepLink, currentShareUrl } from '../lib/deeplink'
 
 /**
  * The "Try it" shell — flippable sections over one board. The room comes first: a visitor's first
@@ -24,8 +25,24 @@ const SECTIONS: { id: SectionId; label: string; icon: string; blurb: string }[] 
 ]
 
 export function TryIt({ workerFactory }: { workerFactory?: () => Worker }) {
-  const [active, setActive] = useState<SectionId>('chat')
+  // A shared link (?tab=…) restores the section; it takes precedence over the default. Changing tab
+  // reflects into the URL via replaceState (no new history entry).
+  const [active, setActive] = useState<SectionId>(() => readDeepLink().tab ?? 'chat')
+  useEffect(() => writeDeepLink({ tab: active }), [active])
   const current = SECTIONS.find((s) => s.id === active)!
+
+  // "Copy link" — hands out the current deep-link URL so this exact view can be shared.
+  const [copied, setCopied] = useState(false)
+  const copyLink = async () => {
+    const url = currentShareUrl()
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      window.prompt('Copy this link:', url)
+    }
+  }
 
   // ONE container, ONE width for everything — the tab row AND every tab's content share the same
   // max-width and left edge, so nothing floats in a wider frame and nothing resizes when you switch
@@ -53,6 +70,14 @@ export function TryIt({ workerFactory }: { workerFactory?: () => Worker }) {
             </button>
           )
         })}
+        <button
+          type="button"
+          onClick={() => void copyLink()}
+          title="Copy a link to this exact view (tab + chat mode + demo)"
+          className="ml-auto inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium text-gray-500 ring-1 ring-gray-300 transition hover:text-gray-900 hover:ring-gray-400 dark:text-gray-400 dark:ring-gray-600 dark:hover:text-white">
+          <Icon icon={copied ? 'mdi:check' : 'mdi:link-variant'} className="size-4" />
+          {copied ? 'Copied' : 'Copy link'}
+        </button>
       </div>
       <p className="px-1 text-sm text-gray-500 dark:text-gray-400">{current.blurb}</p>
 
