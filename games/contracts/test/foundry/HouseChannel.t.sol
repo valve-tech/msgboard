@@ -4,7 +4,7 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {Chips} from "../../contracts/games/Chips.sol";
 import {HouseChannel, OpenTerms} from "../../contracts/games/HouseChannel.sol";
-import {SessionState} from "../../contracts/games/SessionState.sol";
+import {SessionState, SessionClose} from "../../contracts/games/SessionState.sol";
 
 contract HouseChannelTest is Test {
     Chips internal chips;
@@ -91,6 +91,23 @@ contract HouseChannelTest is Test {
         sh = abi.encodePacked(r2, ss2, v2);
     }
 
+    // a mutual-CLOSE authorization (settle's fast path) — distinct EIP-712 type from _state.
+    function _close(uint64 nonce, uint256 bp, uint256 bh) internal pure returns (SessionClose memory c) {
+        c.tableId = TID;
+        c.nonce = nonce;
+        c.balancePlayer = bp;
+        c.balanceHouse = bh;
+        c.gameId = 1;
+    }
+
+    function _coSignClose(SessionClose memory c) internal view returns (bytes memory sp, bytes memory sh) {
+        bytes32 d = ch.closeDigest(c);
+        (uint8 v1, bytes32 r1, bytes32 ss1) = vm.sign(pkPlayerKey, d);
+        (uint8 v2, bytes32 r2, bytes32 ss2) = vm.sign(pkHouse, d);
+        sp = abi.encodePacked(r1, ss1, v1);
+        sh = abi.encodePacked(r2, ss2, v2);
+    }
+
     event Opened(bytes32 indexed tableId, address indexed player, address playerKey, uint8 gameId, uint256 escrowPlayer, uint256 escrowHouse);
 
     // the indexer joins settlement rows by gameId, so Opened must carry it
@@ -112,35 +129,41 @@ contract HouseChannelTest is Test {
 
     function test_settlePaysFromEscrow() public {
         _open();
-        SessionState memory f = _state(5, 260, 140); // player won 60 within the 400 escrow
-        (bytes memory sp, bytes memory sh) = _coSign(f);
-        ch.settle(f, sp, sh);
+        SessionClose memory c = _close(5, 260, 140); // player won 60 within the 400 escrow
+        (bytes memory sp, bytes memory sh) = _coSignClose(c);
+        ch.settle(c, sp, sh);
         assertEq(chips.balanceOf(playerWallet), 800 + 260);
         assertEq(ch.housePool(), 9_800 + 140);
     }
 
     function test_settleRejectsConservation() public {
         _open();
-        SessionState memory f = _state(5, 260, 200); // 460 != 400
-        (bytes memory sp, bytes memory sh) = _coSign(f);
+        SessionClose memory c = _close(5, 260, 200); // 460 != 400
+        (bytes memory sp, bytes memory sh) = _coSignClose(c);
         vm.expectRevert(HouseChannel.ConservationViolated.selector);
-        ch.settle(f, sp, sh);
+        ch.settle(c, sp, sh);
     }
 
-    /// Free-roll guard: the nonce-0 OPEN state is co-signed by both parties at open (a full refund of
-    /// the player's escrow). A losing player must NOT be able to replay it through settle() to reclaim
-    /// their stake — settle() rejects nonce 0. A zero-round refund is only reachable via the
-    /// challenge-windowed disputeFromOpen path.
-    function test_settleRejectsOpenStateFreeRoll() public {
+    /// Free-roll / peak-lock guard: settle() takes a mutual SessionClose, a DISTINCT EIP-712 type from
+    /// the running SessionState co-signed every round. So a co-signature collected during play — the
+    /// nonce-0 OPEN refund, or an earlier-nonce peak — is simply not a valid SessionClose signature and
+    /// cannot be replayed on the fast path. A losing player who only holds running co-signs cannot
+    /// forge the house's close signature, so they cannot unilaterally settle a refund/peak.
+    function test_settleRejectsRunningCoSignAsClose() public {
         _open();
-        SessionState memory openState = _state(0, 200, 200); // nonce 0, full refund, conserves 400
-        (bytes memory sp, bytes memory sh) = _coSign(openState);
-        vm.expectRevert(HouseChannel.SettleBeforePlay.selector);
-        ch.settle(openState, sp, sh);
-        // the table is untouched and a real (nonce >= 1) settle still works
-        SessionState memory played = _state(1, 260, 140); // player won 60 in round 1
-        (bytes memory sp2, bytes memory sh2) = _coSign(played);
-        ch.settle(played, sp2, sh2);
+        // A player holds the full running co-sign for the nonce-0 open refund (bp = their escrow).
+        SessionState memory openState = _state(0, 200, 200);
+        (bytes memory rsp, bytes memory rsh) = _coSign(openState); // valid *running* co-sign
+        // Feeding those running sigs to settle() over a matching SessionClose fails: the digest is a
+        // different type, so ECDSA recovers the wrong key.
+        SessionClose memory asClose = _close(0, 200, 200);
+        vm.expectRevert(HouseChannel.BadSig.selector);
+        ch.settle(asClose, rsp, rsh);
+        // Only a genuine MUTUAL close (the house co-signs the true latest) settles — here the real
+        // round where the player won 60.
+        SessionClose memory latest = _close(1, 260, 140);
+        (bytes memory sp, bytes memory sh) = _coSignClose(latest);
+        ch.settle(latest, sp, sh);
         assertEq(chips.balanceOf(playerWallet), 800 + 260);
         assertEq(ch.housePool(), 9_800 + 140);
     }
@@ -156,11 +179,11 @@ contract HouseChannelTest is Test {
 
     function test_doubleSettleRejected() public {
         _open();
-        SessionState memory f = _state(5, 260, 140);
-        (bytes memory sp, bytes memory sh) = _coSign(f);
-        ch.settle(f, sp, sh);
+        SessionClose memory c = _close(5, 260, 140);
+        (bytes memory sp, bytes memory sh) = _coSignClose(c);
+        ch.settle(c, sp, sh);
         vm.expectRevert(HouseChannel.BadStatus.selector); // table now Settled
-        ch.settle(f, sp, sh);
+        ch.settle(c, sp, sh);
     }
 
     function test_disputeTimeoutPaysPostedState() public {
@@ -211,14 +234,14 @@ contract HouseChannelTest is Test {
         ch.respondWithState(older, sp2, sh2);
     }
 
-    // ---- audit finding I: a both-signed state for the WRONG game must not settle this table ----
+    // ---- audit finding I: a both-signed close for the WRONG game must not settle this table ----
     function test_settleRejectsWrongGameId() public {
         _open(); // table is gameId 1
-        SessionState memory f = _state(5, 260, 140);
-        f.gameId = 2; // conservation still holds (400); only the game differs
-        (bytes memory sp, bytes memory sh) = _coSign(f); // validly co-signed, wrong game
+        SessionClose memory c = _close(5, 260, 140);
+        c.gameId = 2; // conservation still holds (400); only the game differs
+        (bytes memory sp, bytes memory sh) = _coSignClose(c); // validly co-signed close, wrong game
         vm.expectRevert(HouseChannel.WrongGame.selector);
-        ch.settle(f, sp, sh);
+        ch.settle(c, sp, sh);
     }
 
     // the same guard lives in _checkCoSigned, so it also protects the dispute path, not just settle
@@ -261,5 +284,52 @@ contract HouseChannelTest is Test {
         vm.prank(address(0xDEAD));
         vm.expectRevert(HouseChannel.NotPlayer.selector);
         ch.disputeFromOpen(TID);
+    }
+
+    // ---- walk-away forfeiture: a player who abandons a table forfeits their escrow ----
+
+    // Player opens, plays nothing, and walks away. After the abandonment period + the challenge
+    // window with no response, the house claims the forfeit: the player loses their whole escrow.
+    function test_claimForfeitPaysHouseWhenAbandoned() public {
+        _open(); // player escrowed 200; balance now 800
+        vm.roll(block.number + CLOCK);            // abandonment period elapses (openedAt + clockBlocks)
+        vm.prank(house);
+        ch.claimForfeit(TID);                     // house opens the forfeit dispute
+        vm.roll(block.number + CLOCK + 1);        // challenge window expires unanswered
+        ch.resolveTimeout(TID);
+        assertEq(chips.balanceOf(playerWallet), 800);   // player forfeited their 200 escrow (no refund)
+        assertEq(ch.housePool(), 9_800 + 400);          // house reclaims its 200 + the player's 200
+    }
+
+    // The house cannot forfeit a fresh table — the player gets a full abandonment period first.
+    function test_claimForfeitTooEarlyReverts() public {
+        _open();
+        vm.roll(block.number + CLOCK - 1); // one block short of the abandonment threshold
+        vm.prank(house);
+        vm.expectRevert(HouseChannel.ForfeitTooEarly.selector);
+        ch.claimForfeit(TID);
+    }
+
+    // Forfeiture is house-only: a player (or stranger) cannot claim it against themselves/others.
+    function test_claimForfeitOnlyHouse() public {
+        _open();
+        vm.roll(block.number + CLOCK);
+        vm.prank(playerWallet);
+        vm.expectRevert(HouseChannel.NotHouse.selector);
+        ch.claimForfeit(TID);
+    }
+
+    // A PRESENT player never forfeits a real balance: within the challenge window they override the
+    // forfeit with their latest co-signed state (here a win) and settle the true balances.
+    function test_claimForfeitOverriddenByPresentPlayer() public {
+        _open();
+        vm.roll(block.number + CLOCK);
+        vm.prank(house);
+        ch.claimForfeit(TID); // proposes player -> 0, house -> 400
+        SessionState memory won = _state(3, 300, 100); // real co-signed round: player is up 100
+        (bytes memory sp, bytes memory sh) = _coSign(won);
+        ch.respondWithState(won, sp, sh);
+        assertEq(chips.balanceOf(playerWallet), 800 + 300); // player kept their winnings
+        assertEq(ch.housePool(), 9_800 + 100);
     }
 }
