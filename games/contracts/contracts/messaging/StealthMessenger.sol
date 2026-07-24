@@ -41,10 +41,14 @@ import {EIP712} from "solady/src/utils/EIP712.sol";
 /// external calls and holds no funds, so it is trivially reentrancy-free.
 contract StealthMessenger is EIP712 {
     error BadSig();
-    error EmptyMetaAddress();
+    error BadMetaAddressLength();
+    error Expired();
 
     /// ERC-5564 scheme id for the secp256k1 construction this contract + its off-chain lib implement.
     uint256 public constant SCHEME_ID = 1;
+
+    /// A schemeId-1 stealth meta-address is exactly spendingPubKey(33) ‖ viewingPubKey(33) compressed.
+    uint256 internal constant META_ADDRESS_LEN = 66;
 
     /// ERC-6538 registry: a registrant's published stealth meta-address (spendingPub ‖ viewingPub,
     /// 66 bytes compressed for schemeId 1). Senders read this to derive a fresh stealth address.
@@ -74,9 +78,10 @@ contract StealthMessenger is EIP712 {
         "Message(uint256 schemeId,address sender,address stealthAddress,bytes32 ephemeralPubKeyHash,bytes1 viewTag,bytes32 ciphertextHash)"
     );
 
-    /// EIP-712 type for a delegated (gasless) registration.
+    /// EIP-712 type for a delegated (gasless) registration. `deadline` bounds how long a signed-but-
+    /// unbroadcast registration stays submittable (a stale one can otherwise be forced on-chain later).
     bytes32 internal constant REGISTRATION_TYPEHASH = keccak256(
-        "Registration(address registrant,uint256 schemeId,bytes32 stealthMetaAddressHash,uint256 nonce)"
+        "Registration(address registrant,uint256 schemeId,bytes32 stealthMetaAddressHash,uint256 nonce,uint256 deadline)"
     );
 
     /// Domain: name "MsgBoardStealth", version "1". Solady EIP712 folds chainId + verifyingContract
@@ -90,7 +95,7 @@ contract StealthMessenger is EIP712 {
     /// Publish (or update) your stealth meta-address. For schemeId 1 this is the 66-byte
     /// `spendingPubKey(33) ‖ viewingPubKey(33)` compressed secp256k1 pair (see stealth.ts).
     function registerStealthMetaAddress(bytes calldata stealthMetaAddress) external {
-        if (stealthMetaAddress.length == 0) revert EmptyMetaAddress();
+        if (stealthMetaAddress.length != META_ADDRESS_LEN) revert BadMetaAddressLength();
         stealthMetaAddressOf[msg.sender] = stealthMetaAddress;
         emit StealthMetaAddressSet(msg.sender, SCHEME_ID, stealthMetaAddress);
     }
@@ -101,13 +106,15 @@ contract StealthMessenger is EIP712 {
     function registerStealthMetaAddressOnBehalf(
         address registrant,
         bytes calldata stealthMetaAddress,
+        uint256 deadline,
         bytes calldata sig
     ) external {
-        if (stealthMetaAddress.length == 0) revert EmptyMetaAddress();
+        if (stealthMetaAddress.length != META_ADDRESS_LEN) revert BadMetaAddressLength();
+        if (block.timestamp > deadline) revert Expired();
         bytes32 digest = _hashTypedData(
             keccak256(
                 abi.encode(
-                    REGISTRATION_TYPEHASH, registrant, SCHEME_ID, keccak256(stealthMetaAddress), nonces[registrant]
+                    REGISTRATION_TYPEHASH, registrant, SCHEME_ID, keccak256(stealthMetaAddress), nonces[registrant], deadline
                 )
             )
         );
@@ -121,7 +128,7 @@ contract StealthMessenger is EIP712 {
 
     /// The EIP-712 digest a registrant signs for `registerStealthMetaAddressOnBehalf` (off-chain
     /// parity + signing). Uses the registrant's CURRENT nonce.
-    function registrationDigest(address registrant, bytes calldata stealthMetaAddress)
+    function registrationDigest(address registrant, bytes calldata stealthMetaAddress, uint256 deadline)
         external
         view
         returns (bytes32)
@@ -129,7 +136,7 @@ contract StealthMessenger is EIP712 {
         return _hashTypedData(
             keccak256(
                 abi.encode(
-                    REGISTRATION_TYPEHASH, registrant, SCHEME_ID, keccak256(stealthMetaAddress), nonces[registrant]
+                    REGISTRATION_TYPEHASH, registrant, SCHEME_ID, keccak256(stealthMetaAddress), nonces[registrant], deadline
                 )
             )
         );
@@ -169,6 +176,14 @@ contract StealthMessenger is EIP712 {
     /// equals the claimed `sender` — so the emitted `sender` topic is a proven fact, and any tamper
     /// with the payload (which changes the digest) makes recovery miss `sender` and reverts.
     /// Anyone may relay a message on a sender's behalf, but nobody can forge WHO it is from.
+    ///
+    /// REPLAY: this is an event-only primitive (no funds, no per-message state), so it deliberately
+    /// keeps NO on-chain dedup — a relayer can re-emit an already-published tuple (and, since ECDSA is
+    /// malleable, a second valid `senderSig` exists for the same payload). Both cases emit an IDENTICAL
+    /// message. Consumers MUST therefore dedup announcements client-side on message CONTENT —
+    /// `keccak256(ephemeralPubKey ‖ ciphertext)` (or `(stealthAddress, keccak256(ciphertext))`) — which
+    /// collapses both verbatim replays and the malleability twin. On-chain suppression would cost an
+    /// SSTORE per message for no security gain over content-dedup on an event-only channel.
     function sendMessage(
         uint256 schemeId,
         address sender,
