@@ -37,6 +37,28 @@ describe('replaySession', () => {
     expect(r.rounds).toBe(4)
   })
 
+  it('surfaces the mutual-close authorization when the transcript carries a CLOSE envelope', async () => {
+    const s = await play(1)
+    await s.authorizeClose()
+    const r = await replaySession(s.transcript.toJSON(), {
+      parties: { player: player.address, house: house.address },
+      commit: s.chain.commit, game: dice, domain, settlementMode: 1,
+    })
+    expect(r.close).toBeDefined()
+    expect(r.close!.close.nonce).toBe(r.final.state.nonce)
+    expect(r.close!.close.balancePlayer).toBe(r.final.state.balancePlayer)
+    expect(r.close!.close.balanceHouse).toBe(r.final.state.balanceHouse)
+  })
+
+  it('leaves close undefined when no CLOSE envelope is present (dispute-only transcript)', async () => {
+    const s = await play(0)
+    const r = await replaySession(s.transcript.toJSON(), {
+      parties: { player: player.address, house: house.address },
+      commit: s.chain.commit, game: dice, domain, settlementMode: 0,
+    })
+    expect(r.close).toBeUndefined()
+  })
+
   it('rejects a tampered transcript', async () => {
     const s = await play(0)
     const obj = JSON.parse(s.transcript.toJSON())

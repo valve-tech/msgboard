@@ -1,9 +1,17 @@
 import { type Hex } from 'viem'
-import { type SessionState } from '@msgboard/games'
+import { type SessionState, type SessionClose } from '@msgboard/games'
 
 /** A both-signed state pulled from a retained transcript. */
 export interface CoSignedState {
   state: SessionState
+  sigPlayer: Hex
+  sigHouse: Hex
+}
+
+/** A both-signed mutual CLOSE (the DISTINCT SessionClose EIP-712 type) pulled from a retained
+ *  transcript's CLOSE envelope. Drives HouseChannel.settle(close, sigPlayer, sigHouse). */
+export interface CoSignedClose {
+  close: SessionClose
   sigPlayer: Hex
   sigHouse: Hex
 }

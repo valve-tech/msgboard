@@ -12,6 +12,7 @@ import {
   type Signer,
   type CoSignTransport,
   type SessionState,
+  type SessionClose,
   type RoundProof,
 } from '@msgboard/games'
 import { buildOpenRequest, DUMMY_SEED_TIP } from '../lib/playerCoSign'
@@ -487,12 +488,9 @@ export const useSession = <TParams>(config: UseSessionConfig<TParams>): SessionA
 function buildCoSignPair(
   onAccept?: (state: SessionState, proof?: RoundProof<unknown>) => void,
 ): { houseT: CoSignTransport; playerT: CoSignTransport } {
-  type Pending = {
-    state: SessionState
-    proof?: RoundProof<unknown>
-    resolve: (sig: viem.Hex) => void
-    reject: (err: unknown) => void
-  }
+  type Pending =
+    | { kind: 'state'; state: SessionState; proof?: RoundProof<unknown>; resolve: (sig: viem.Hex) => void; reject: (err: unknown) => void }
+    | { kind: 'close'; close: SessionClose; resolve: (sig: viem.Hex) => void; reject: (err: unknown) => void }
   const queue: Pending[] = []
   const waiters: Array<(p: Pending) => void> = []
 
@@ -510,26 +508,39 @@ function buildCoSignPair(
 
   const houseT: CoSignTransport = {
     request: (state, proof) =>
-      new Promise<viem.Hex>((resolve, reject) => push({ state, proof, resolve, reject })),
+      new Promise<viem.Hex>((resolve, reject) => push({ kind: 'state', state, proof, resolve, reject })),
+    // The house drives the mutual CLOSE after the final round (settle() takes a co-signed SessionClose).
+    requestClose: (close) =>
+      new Promise<viem.Hex>((resolve, reject) => push({ kind: 'close', close, resolve, reject })),
     serve: () => {
       throw new Error('houseT.serve is not used in this pair')
     },
   }
 
+  // The player's close signer (registered by runPlayerSide via serveClose); it signs a SessionClose
+  // ONLY for the exact latest running state it accepted, so a mismatched close is refused.
+  let closeSigner: ((c: SessionClose) => Promise<viem.Hex>) | undefined
+
   const playerT: CoSignTransport = {
     request: () => {
       throw new Error('playerT.request is not used in this pair')
     },
+    serveClose: (sign) => { closeSigner = sign },
     serve: (sign) => {
       const loop = async () => {
         for (;;) {
           const p = await pull()
           try {
-            const sig = await sign(p.state, p.proof)
-            // Notify the caller that the player accepted this state BEFORE resolving,
-            // so the caller can capture it before runHouseSide's await returns.
-            onAccept?.(p.state, p.proof)
-            p.resolve(sig)
+            if (p.kind === 'close') {
+              if (!closeSigner) throw new Error('player did not register a close signer')
+              p.resolve(await closeSigner(p.close))
+            } else {
+              const sig = await sign(p.state, p.proof)
+              // Notify the caller that the player accepted this state BEFORE resolving,
+              // so the caller can capture it before runHouseSide's await returns.
+              onAccept?.(p.state, p.proof)
+              p.resolve(sig)
+            }
           } catch (err) {
             p.reject(err)
           }

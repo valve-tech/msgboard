@@ -12,12 +12,14 @@
  * in a background loop. For a PUSH transport (LocalTransport) no poll is needed.
  */
 import type { Hex } from 'viem'
-import type { SessionState } from './sessionState'
+import type { SessionState, SessionClose } from './sessionState'
 import type { CoSignTransport, RoundProof } from './coSignTransport'
 import type { Transport } from './transport'
 
 interface CoSignReqMsg { kind: 'cosign-req'; reqId: string; state: SessionState; proof?: RoundProof<unknown> }
 interface CoSignRepMsg { kind: 'cosign-rep'; reqId: string; sig: Hex }
+interface CloseReqMsg { kind: 'close-req'; reqId: string; close: SessionClose }
+interface CloseRepMsg { kind: 'close-rep'; reqId: string; sig: Hex }
 
 // ── bigint-safe wire codec ────────────────────────────────────────────────────
 // SessionState (nonce, balances) and the round proof (stake, params.targetX100, …) carry bigints.
@@ -55,10 +57,19 @@ function reqIdOf(s: SessionState): string {
   return `${s.tableId}:${s.nonce}`
 }
 
+/** Close reqId is namespaced with `:close:` so it never collides with a running-state reqId. */
+function closeReqIdOf(c: SessionClose): string {
+  return `${c.tableId}:close:${c.nonce}`
+}
+
 const isReq = (m: unknown): m is CoSignReqMsg =>
   !!m && (m as CoSignReqMsg).kind === 'cosign-req' && typeof (m as CoSignReqMsg).reqId === 'string'
 const isRep = (m: unknown): m is CoSignRepMsg =>
   !!m && (m as CoSignRepMsg).kind === 'cosign-rep' && typeof (m as CoSignRepMsg).reqId === 'string' && typeof (m as CoSignRepMsg).sig === 'string'
+const isCloseReq = (m: unknown): m is CloseReqMsg =>
+  !!m && (m as CloseReqMsg).kind === 'close-req' && typeof (m as CloseReqMsg).reqId === 'string'
+const isCloseRep = (m: unknown): m is CloseRepMsg =>
+  !!m && (m as CloseRepMsg).kind === 'close-rep' && typeof (m as CloseRepMsg).reqId === 'string' && typeof (m as CloseRepMsg).sig === 'string'
 
 export interface BoardCoSignOpts {
   /** For a pull transport, the poll fn to drive (MsgBoardTransport.poll). Omit for push transports. */
@@ -91,33 +102,40 @@ export function makeBoardHouseCoSign(transport: Transport, opts: BoardCoSignOpts
 
   transport.onMessage((raw) => {
     if (isRep(raw)) pending.get(raw.reqId)?.(raw.sig)
+    else if (isCloseRep(raw)) pending.get(raw.reqId)?.(raw.sig)
   })
 
-  const sendReq = (reqId: string, state: SessionState, proof?: RoundProof<unknown>) =>
-    transport.send(toWire({ kind: 'cosign-req', reqId, state, proof }))
+  // Shared request/reply loop: post `out`, resolve when the matching reply lands under `reqId`.
+  const awaitHalf = async (reqId: string, out: unknown): Promise<Hex> => {
+    let settled = false
+    const reply = new Promise<Hex>((resolve, reject) => {
+      pending.set(reqId, (sig) => { settled = true; pending.delete(reqId); resolve(sig) })
+      setTimeout(() => {
+        if (!settled) { pending.delete(reqId); reject(new Error(`boardCoSign: timed out awaiting player half for ${reqId}`)) }
+      }, timeoutMs)
+    })
+    await transport.send(toWire(out))
+    // Drive polling on a pull transport until the reply lands (or the timeout rejects).
+    if (opts.poll) {
+      void (async () => {
+        while (!settled) {
+          try { await opts.poll!() } catch { /* transient poll failure — keep trying until timeout */ }
+          if (settled) break
+          await new Promise((r) => setTimeout(r, pollMs))
+        }
+      })()
+    }
+    return reply
+  }
 
   return {
     async request(state: SessionState, proof?: RoundProof<unknown>): Promise<Hex> {
       const reqId = reqIdOf(state)
-      let settled = false
-      const reply = new Promise<Hex>((resolve, reject) => {
-        pending.set(reqId, (sig) => { settled = true; pending.delete(reqId); resolve(sig) })
-        setTimeout(() => {
-          if (!settled) { pending.delete(reqId); reject(new Error(`boardCoSign: timed out awaiting player half for ${reqId}`)) }
-        }, timeoutMs)
-      })
-      await sendReq(reqId, state, proof)
-      // Drive polling on a pull transport until the reply lands (or the timeout rejects).
-      if (opts.poll) {
-        void (async () => {
-          while (!settled) {
-            try { await opts.poll!() } catch { /* transient poll failure — keep trying until timeout */ }
-            if (settled) break
-            await new Promise((r) => setTimeout(r, pollMs))
-          }
-        })()
-      }
-      return reply
+      return awaitHalf(reqId, { kind: 'cosign-req', reqId, state, proof })
+    },
+    async requestClose(close: SessionClose): Promise<Hex> {
+      const reqId = closeReqIdOf(close)
+      return awaitHalf(reqId, { kind: 'close-req', reqId, close })
     },
     serve() { throw new Error('boardCoSign: house end does not serve') },
   }
@@ -137,8 +155,10 @@ export function makeBoardPlayerCoSign(transport: Transport, opts: BoardCoSignOpt
   const pollMs = opts.pollMs ?? 1000
   const tableFilter = opts.tableId?.toLowerCase()
   let signer: ((s: SessionState, proof?: RoundProof<unknown>) => Promise<Hex>) | undefined
+  let closeSigner: ((c: SessionClose) => Promise<Hex>) | undefined
   const answered = new Set<string>()
   const buffered: CoSignReqMsg[] = [] // cosign-reqs that arrived before serve() registered a signer
+  const bufferedClose: CloseReqMsg[] = [] // close-reqs that arrived before serveClose() registered
 
   /** reqId is `${tableId}:${nonce}`; on a shared board category, only handle this table's reqs. */
   const forThisTable = (reqId: string) =>
@@ -163,11 +183,29 @@ export function makeBoardPlayerCoSign(transport: Transport, opts: BoardCoSignOpt
     })()
   }
 
+  const handleClose = (req: CloseReqMsg) => {
+    if (!forThisTable(req.reqId)) return
+    if (answered.has(req.reqId)) return
+    answered.add(req.reqId)
+    void (async () => {
+      try {
+        const sig = await closeSigner!(req.close)
+        await transport.send(toWire({ kind: 'close-rep', reqId: req.reqId, sig } satisfies CloseRepMsg))
+      } catch {
+        answered.delete(req.reqId) // player refused the close (nonce/balance mismatch); allow retry
+      }
+    })()
+  }
+
   transport.onMessage((raw) => {
-    const msg = fromWire(raw) // restore bigints in state/proof before verifying + signing
-    if (!isReq(msg)) return
-    if (!signer) { buffered.push(msg); return } // hold until serve() registers a signer
-    handle(msg)
+    const msg = fromWire(raw) // restore bigints in state/proof/close before verifying + signing
+    if (isReq(msg)) {
+      if (!signer) { buffered.push(msg); return } // hold until serve() registers a signer
+      handle(msg)
+    } else if (isCloseReq(msg)) {
+      if (!closeSigner) { bufferedClose.push(msg); return } // hold until serveClose() registers
+      handleClose(msg)
+    }
   })
 
   return {
@@ -175,6 +213,10 @@ export function makeBoardPlayerCoSign(transport: Transport, opts: BoardCoSignOpt
     serve(sign) {
       signer = sign
       while (buffered.length) handle(buffered.shift()!) // drain anything that arrived pre-serve
+    },
+    serveClose(sign) {
+      closeSigner = sign
+      while (bufferedClose.length) handleClose(bufferedClose.shift()!)
     },
     startServing(): () => void {
       if (!opts.poll) return () => {}

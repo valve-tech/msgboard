@@ -1,7 +1,8 @@
 import { keccak256, type Hex } from 'viem'
 import {
-  type SessionState, type GameDomain, type StateSigner,
+  type SessionState, type SessionClose, type GameDomain, type StateSigner,
   signSessionState, verifySessionStateSig,
+  closeFromState, signClose, closeToBody,
 } from './sessionState'
 import { buildSeedChain, verifyReveal, roundRandom, type SeedChain } from './rng'
 import {
@@ -35,6 +36,14 @@ export interface PlayInput<TParams> {
 }
 
 interface SigPair { player: Hex; house: Hex }
+
+/** A mutual-close authorization both parties signed (the DISTINCT SessionClose EIP-712 type), ready to
+ *  drive HouseChannel.settle(close, sigPlayer, sigHouse). Produced at cooperative close. */
+export interface CoSignedClose {
+  close: SessionClose
+  sigPlayer: Hex
+  sigHouse: Hex
+}
 
 /** Drives a player↔house session in-process (both signers local). A real deployment
  *  splits player and house across machines over a Transport; the co-sign logic is identical. */
@@ -135,6 +144,24 @@ export class HouseSession<TParams> {
     const confirmedAt = (await this.bothSigned(next)) ? this.now() : undefined
     this.transcript.append(withTiming(env, { offeredAt, signedAt, broadcastAt, confirmedAt }))
     this.state = next
+  }
+
+  /** Cooperative close handshake. BOTH in-process signers sign the SessionClose (the DISTINCT
+   *  EIP-712 type from the running SessionState) for the CURRENT final state, a CLOSE envelope is
+   *  appended to the transcript so replaySession / EscrowedSettlement.buildSettle can source the
+   *  close-auth, and the {close, sigPlayer, sigHouse} bundle is returned for the on-chain
+   *  HouseChannel.settle(close, sigPlayer, sigHouse) call. Mirrors coSign(), which signs running
+   *  states with both signers. */
+  async authorizeClose(): Promise<CoSignedClose> {
+    const close = closeFromState(this.state)
+    const sigPlayer = await signClose(this.cfg.player, this.cfg.domain, close)
+    const sigHouse = await signClose(this.cfg.house, this.cfg.domain, close)
+    const env = await makeEnvelope(
+      this.cfg.house, this.cfg.tableId, this.transcript.entries.length, this.transcript.head, 'CLOSE',
+      { close: closeToBody(close), sigs: { player: sigPlayer, house: sigHouse } },
+    )
+    this.transcript.append(env)
+    return { close, sigPlayer, sigHouse }
   }
 }
 

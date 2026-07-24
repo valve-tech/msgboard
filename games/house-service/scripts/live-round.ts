@@ -163,10 +163,12 @@ async function main(): Promise<void> {
     const ok = await verifyFinishedSession(transcriptJson, ctx)
     if (!ok) throw new Error('verifyFinishedSession returned false')
     const settleTx = await esc.buildSettle(transcriptJson)
-    const finalState = settleTx.args[0] as { nonce: bigint; balancePlayer: bigint; balanceHouse: bigint }
-    if (finalState.nonce !== 1n) throw new Error(`final state nonce ${finalState.nonce} != 1`)
-    const won = finalState.balancePlayer > terms.escrowPlayer
-    console.log(`[4/5] transcript verified; settle nonce=1 balancePlayer=${formatUnits(finalState.balancePlayer, 18)} → player ${won ? 'WON' : 'lost'}`)
+    // settle() now takes a co-signed SessionClose (both parties signed the mutual close of the final
+    // state over the board); args = [close, sigPlayerClose, sigHouseClose].
+    const close = settleTx.args[0] as { nonce: bigint; balancePlayer: bigint; balanceHouse: bigint }
+    if (close.nonce !== 1n) throw new Error(`close nonce ${close.nonce} != 1`)
+    const won = close.balancePlayer > terms.escrowPlayer
+    console.log(`[4/5] transcript verified; settle nonce=1 balancePlayer=${formatUnits(close.balancePlayer, 18)} → player ${won ? 'WON' : 'lost'}`)
 
     // 5. ON-CHAIN SETTLE + indexer — LIVE only.
     if (EXECUTE) {

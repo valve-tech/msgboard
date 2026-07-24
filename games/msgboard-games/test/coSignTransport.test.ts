@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { type Hex } from 'viem'
 import { verifyFinishedSession } from '../src/session'
 import { runHouseSide, runPlayerSide } from '../src/coSignTransport'
+import { TEST_DOMAIN, verifyCloseSig, closeFromBody } from '../src/sessionState'
 import { fixedDiceConfig } from './helpers'
 
 describe('co-sign over transport', () => {
@@ -11,6 +12,25 @@ describe('co-sign over transport', () => {
       runHouseSide(houseCfg, houseT, play),
       runPlayerSide(playerCfg, playerT),
     ])
+    expect(await verifyFinishedSession(transcriptJson, ctx)).toBe(true)
+  })
+
+  it('the house co-signs a mutual CLOSE over the transport after the final round', async () => {
+    const { houseCfg, playerCfg, houseT, playerT, play, ctx } = fixedDiceConfig()
+    const [transcriptJson] = await Promise.all([
+      runHouseSide(houseCfg, houseT, play),
+      runPlayerSide(playerCfg, playerT),
+    ])
+    const t = JSON.parse(transcriptJson)
+    const closeEnv = t.entries.find((e: { kind: string }) => e.kind === 'CLOSE')
+    expect(closeEnv).toBeDefined()
+    const close = closeFromBody(closeEnv.body.close)
+    // the close projects the final ROUND state (nonce 1, single roll)
+    expect(close.nonce).toBe(1n)
+    // both parties' close-sigs recover over the DISTINCT SessionClose type
+    expect(await verifyCloseSig(ctx.parties.player, TEST_DOMAIN, close, closeEnv.body.sigs.player)).toBe(true)
+    expect(await verifyCloseSig(ctx.parties.house, TEST_DOMAIN, close, closeEnv.body.sigs.house)).toBe(true)
+    // the transcript (now carrying OPEN + ROUND + CLOSE) still verifies whole
     expect(await verifyFinishedSession(transcriptJson, ctx)).toBe(true)
   })
 

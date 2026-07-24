@@ -1,6 +1,7 @@
 import { keccak256, type Hex } from 'viem'
 import {
-  type SessionState, signSessionState, verifySessionStateSig,
+  type SessionState, type SessionClose, signSessionState, verifySessionStateSig,
+  closeFromState, signClose, verifyCloseSig, closeToBody,
 } from './sessionState'
 import { buildSeedChain, verifyReveal, roundRandom } from './rng'
 import { Transcript, makeEnvelope, withTiming, systemClock, type Clock } from './transcript'
@@ -39,6 +40,11 @@ export interface CoSignTransport {
   request(stateNoSig: SessionState, proof?: RoundProof<unknown>): Promise<Hex>
   /** player side: register the signer invoked for each incoming request. */
   serve(sign: (s: SessionState, proof?: RoundProof<unknown>) => Promise<Hex>): void
+  /** house → player: ask the player to co-sign the mutual `close` (DISTINCT SessionClose type); resolves
+   *  with the player's EIP-712 close-half. Optional: a transport that only carries running states omits it. */
+  requestClose?(close: SessionClose): Promise<Hex>
+  /** player side: register the close signer invoked for each incoming close request. Optional. */
+  serveClose?(sign: (c: SessionClose) => Promise<Hex>): void
 }
 
 interface SigPair { player: Hex; house: Hex }
@@ -143,6 +149,27 @@ export async function runHouseSide<TParams>(
     offeredAt: roundOfferedAt, signedAt: roundSignedAt, broadcastAt: roundBroadcastAt, confirmedAt: roundConfirmedAt,
   }))
 
+  // ---- CLOSE (mutual close of the final state) ----
+  // Single roll per table ⇒ the ROUND we just co-signed IS the final state, so the house co-signs a
+  // SessionClose for it now (spec: settle() takes a DISTINCT SessionClose both parties sign only at
+  // mutual close). House signs its half locally; the player signs its half over the transport, exactly
+  // as running states are co-signed. A transport that cannot carry the close (requestClose absent)
+  // yields a transcript without a CLOSE envelope — settle() then has no fast-path auth, and the table
+  // must fall back to the dispute clock.
+  if (transport.requestClose) {
+    const close = closeFromState(next)
+    const playerCloseHalf = await transport.requestClose(close)
+    if (!(await verifyCloseSig(cfg.player.address, cfg.domain, close, playerCloseHalf))) {
+      throw new Error('coSign: player close-half did not recover to the player address')
+    }
+    const houseCloseHalf = await signClose(house, cfg.domain, close)
+    const closeEnv = await makeEnvelope(
+      house, cfg.tableId, transcript.entries.length, transcript.head, 'CLOSE',
+      { close: closeToBody(close), sigs: { player: playerCloseHalf, house: houseCloseHalf } },
+    )
+    transcript.append(closeEnv)
+  }
+
   return transcript.toJSON()
 }
 
@@ -163,6 +190,22 @@ export async function runPlayerSide<TParams>(
   // the PRIOR state it already accepted — never from the house's secret seed tip. It knows only
   // the published commit (carried on the OPEN state's rngCommit) and the per-round reveals.
   let prior: SessionState | undefined
+
+  // CLOSE handshake: the player co-signs a mutual SessionClose ONLY for the exact latest running state
+  // it already accepted (closeFromState(prior)). A close for any other nonce/balance is refused — this
+  // is what stops a stale-checkpoint or open-refund close being slipped past the player. Registered up
+  // front; the house requests it after the final ROUND, so `prior` is the final state by then.
+  transport.serveClose?.(async (close: SessionClose): Promise<Hex> => {
+    if (!prior) throw new Error('player: CLOSE requested before any state was co-signed')
+    const projected = closeFromState(prior)
+    if (
+      close.tableId !== projected.tableId || close.nonce !== projected.nonce ||
+      close.balancePlayer !== projected.balancePlayer || close.balanceHouse !== projected.balanceHouse ||
+      close.gameId !== projected.gameId
+    ) throw new Error('player: CLOSE does not match the latest co-signed state')
+    return signClose(player, cfg.domain, close)
+  })
+
   await new Promise<void>((resolve, reject) => {
     let signed = 0
     const total = 2 // OPEN + one ROUND (chainLength 1)
