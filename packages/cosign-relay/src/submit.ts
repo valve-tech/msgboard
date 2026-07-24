@@ -6,6 +6,7 @@ import {
   decodeEventLog,
   http,
   isAddressEqual,
+  parseGwei,
 } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { pulsechain, pulsechainV4 } from 'viem/chains'
@@ -99,11 +100,20 @@ export async function submitDeploy(args: { chainId: RelayChainId; initializer: H
   const walletClient = createWalletClient({ account, chain: cfg.chain, transport })
   const publicClient = createPublicClient({ chain: cfg.chain, transport })
 
+  // Fee FLOOR. The PulseChain nodes quote wei-level gas prices when the chain is idle; viem's
+  // auto fee estimation then produces a maxFeePerGas so low the deploy tx never mines, and the
+  // waitForTransactionReceipt below blocks until Cloudflare 524s the request (>100s). Floor
+  // anything under 0.1 gwei to 1 gwei — at PulseChain prices that rounds to nothing. (Same lesson
+  // as the games actor fleet's flooredFees; a gasless deploy that never confirms is a dead relay.)
+  const quoted = await publicClient.getGasPrice()
+  const gasPrice = quoted < parseGwei('0.1') ? parseGwei('1') : quoted
   const txHash = await walletClient.writeContract({
     address: SAFE_V141.factory,
     abi: PROXY_FACTORY_ABI,
     functionName: 'createProxyWithNonce',
     args: [SAFE_V141.singletonL2, initializer, saltNonce],
+    maxFeePerGas: gasPrice * 2n + gasPrice / 10n,
+    maxPriorityFeePerGas: gasPrice / 10n || 1n,
   })
 
   const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash })
