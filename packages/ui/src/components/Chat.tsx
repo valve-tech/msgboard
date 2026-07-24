@@ -62,6 +62,18 @@ import {
   deriveIdentityFromWallet,
 } from '../lib/wallet-identity'
 import {
+  deriveEncKeypair,
+  dmCategory,
+  encodeContact,
+  parseContact,
+  sealMessage,
+  openMessage,
+  isUndecryptable as isDmUndecryptable,
+  type Contact,
+  type EncKeypair,
+} from '../lib/dm-crypto'
+import { randomIdentity } from '../lib/zk-identity'
+import {
   decodePost,
   encodePost,
   nullifierHashOf,
@@ -77,8 +89,10 @@ import { BLOCK_RANGE_LIMIT } from '../lib/rpc'
 
 // ── mode selector ────────────────────────────────────────────────────────────────────────
 
-type Mode = 'public' | 'anonymous' | 'encrypted'
+type Mode = 'public' | 'anonymous' | 'encrypted' | 'direct'
 const MODE_KEY = 'msgboard.chat.mode'
+const isMode = (s: unknown): s is Mode =>
+  s === 'public' || s === 'anonymous' || s === 'encrypted' || s === 'direct'
 
 const MODES: { id: Mode; label: string; icon: string; explainer: string }[] = [
   {
@@ -99,6 +113,12 @@ const MODES: { id: Mode; label: string; icon: string; explainer: string }[] = [
     icon: 'mdi:lock',
     explainer: 'Hides what from outsiders — a shared-key private room. The sender is only a handle, not a proven identity.',
   },
+  {
+    id: 'direct',
+    label: 'Direct',
+    icon: 'mdi:email-lock',
+    explainer: 'Private messages encrypted to specific people — only they can read them. Senders are unverified.',
+  },
 ]
 
 /**
@@ -114,7 +134,13 @@ function ModeBar({ active, onChange }: { active: Mode; onChange: (m: Mode) => vo
         {MODES.map((m) => {
           const on = m.id === active
           const accent =
-            m.id === 'anonymous' ? 'bg-emerald-600' : m.id === 'encrypted' ? 'bg-emerald-700' : 'bg-indigo-600'
+            m.id === 'anonymous'
+              ? 'bg-emerald-600'
+              : m.id === 'encrypted'
+                ? 'bg-emerald-700'
+                : m.id === 'direct'
+                  ? 'bg-violet-600'
+                  : 'bg-indigo-600'
           return (
             <button
               key={m.id}
@@ -143,19 +169,42 @@ function ModeBar({ active, onChange }: { active: Mode; onChange: (m: Mode) => vo
 export function Chat({ workerFactory }: { workerFactory?: () => Worker }) {
   const [mode, setMode] = useState<Mode>(() => {
     const stored = localStorage.getItem(MODE_KEY)
-    return stored === 'public' || stored === 'anonymous' || stored === 'encrypted' ? stored : 'public'
+    return isMode(stored) ? stored : 'public'
   })
   useEffect(() => localStorage.setItem(MODE_KEY, mode), [mode])
+
+  // The "talk to yourself" two-user demo overlay — opened from Encrypted or Direct mode. It replaces
+  // the single-user view with two isolated participants exchanging REAL encrypted board posts. The
+  // value records which crypto path the demo is exercising; null → normal single-user view.
+  const [demo, setDemo] = useState<'encrypted' | 'direct' | null>(null)
+  if (demo) {
+    return (
+      <div className="flex w-full flex-col">
+        <TwoUserDemo kind={demo} onClose={() => setDemo(null)} workerFactory={workerFactory} />
+      </div>
+    )
+  }
 
   // The privacy toggle now lives INSIDE each pane's card (via ModeBar), so there is no second row of
   // tabs above the container. Each mode is its own self-contained pane driving the shared chain
   // store; remount-per-switch resets transient composer state cleanly. Public + Encrypted are the two
-  // Channel paths; Anonymous is the full Whisper (ZK) experience.
+  // Channel paths; Anonymous is the full Whisper (ZK) experience; Direct is per-recipient E2E DMs.
   return (
     <div className="flex w-full flex-col">
       {mode === 'public' && <ChannelPane mode="public" activeMode={mode} onMode={setMode} workerFactory={workerFactory} />}
-      {mode === 'encrypted' && <ChannelPane mode="encrypted" activeMode={mode} onMode={setMode} workerFactory={workerFactory} />}
+      {mode === 'encrypted' && (
+        <ChannelPane
+          mode="encrypted"
+          activeMode={mode}
+          onMode={setMode}
+          workerFactory={workerFactory}
+          onDemo={() => setDemo('encrypted')}
+        />
+      )}
       {mode === 'anonymous' && <AnonymousRoom activeMode={mode} onMode={setMode} workerFactory={workerFactory} />}
+      {mode === 'direct' && (
+        <DirectPane activeMode={mode} onMode={setMode} workerFactory={workerFactory} onDemo={() => setDemo('direct')} />
+      )}
     </div>
   )
 }
@@ -219,11 +268,14 @@ function ChannelPane({
   activeMode,
   onMode,
   workerFactory,
+  onDemo,
 }: {
   mode: 'public' | 'encrypted'
   activeMode: Mode
   onMode: (m: Mode) => void
   workerFactory?: () => Worker
+  /** Encrypted mode only: open the two-user "talk to yourself" demo. */
+  onDemo?: () => void
 }) {
   const publicMode = mode === 'public'
 
@@ -489,6 +541,15 @@ function ChannelPane({
             className="inline-flex items-center gap-1 rounded-full border border-dashed border-gray-300 px-2.5 py-1 text-gray-500 hover:border-emerald-500 hover:text-emerald-600 dark:border-gray-600 dark:text-gray-400">
             <Icon icon="mdi:link-variant" className="size-3.5" /> join
           </button>
+          {onDemo && (
+            <button
+              type="button"
+              onClick={onDemo}
+              title="Watch two freshly-generated identities exchange real end-to-end encrypted messages over this board."
+              className="ml-auto inline-flex items-center gap-1 rounded-full bg-violet-600 px-2.5 py-1 font-medium text-white hover:bg-violet-500">
+              <Icon icon="mdi:account-multiple" className="size-3.5" /> Demo: talk to yourself
+            </button>
+          )}
         </div>
       )}
 
@@ -644,6 +705,711 @@ function ChannelPane({
         </p>
       </div>
     </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// DIRECT — per-recipient end-to-end encrypted DMs (dm-crypto.ts)
+//
+// A 4th privacy mode. Where Encrypted uses ONE shared room key, Direct uses PUBLIC-KEY encryption to
+// named people: your DM address is an X25519 public key (your "contact card"), derived deterministic-
+// ally from your local identity. You add other people's contact cards, pick who a conversation is
+// with, and each message is sealed so ONLY those recipients (and you) can open it — with per-message
+// forward secrecy (a fresh ephemeral key every send). The conversation lives in a category derived
+// from the member pubkeys, so both sides converge on where to read/post. All crypto is in
+// dm-crypto.ts; this pane is just wiring + honest trust copy.
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+const DM_CONTACTS_KEY = 'msgboard.dm.contacts'
+const DM_NAME_KEY = 'msgboard.dm.name'
+
+/** The persisted shape of a contact (pubkey as base64url so it JSON-serialises). */
+interface StoredContact {
+  pubkey: string
+  label?: string
+}
+
+const loadContacts = (): Contact[] => {
+  try {
+    const raw = localStorage.getItem(DM_CONTACTS_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    const out: Contact[] = []
+    for (const c of parsed as StoredContact[]) {
+      if (!c || typeof c.pubkey !== 'string') continue
+      try {
+        const pubkey = base64urlnopad.decode(c.pubkey)
+        if (pubkey.length !== 32) continue
+        out.push(typeof c.label === 'string' && c.label ? { pubkey, label: c.label } : { pubkey })
+      } catch {
+        /* skip a corrupt entry */
+      }
+    }
+    return out
+  } catch {
+    return []
+  }
+}
+
+const saveContacts = (contacts: Contact[]): void => {
+  try {
+    const stored: StoredContact[] = contacts.map((c) => ({
+      pubkey: base64urlnopad.encode(c.pubkey),
+      ...(c.label ? { label: c.label } : {}),
+    }))
+    localStorage.setItem(DM_CONTACTS_KEY, JSON.stringify(stored))
+  } catch {
+    /* localStorage may be unavailable */
+  }
+}
+
+/** A short, human fingerprint of a pubkey — for chips/labels when no display name is set. */
+const pubkeyShort = (pubkey: Uint8Array): string => toHex(pubkey).slice(2, 10)
+
+function DirectPane({
+  activeMode,
+  onMode,
+  workerFactory,
+  onDemo,
+}: {
+  activeMode: Mode
+  onMode: (m: Mode) => void
+  workerFactory?: () => Worker
+  onDemo?: () => void
+}) {
+  const chainId = useChainStore((s) => selectChain(s)?.id ?? 943)
+  const transportUrl = useChainStore((s) => selectTransportUrl(s))
+  const rpcValid = useChainStore((s) => selectRpcValid(s))
+  const content = useChainStore((s) => s.content)
+  const latestBlock = useChainStore((s) => s.latestBlockNumber)
+  const workMultiplier = useChainStore((s) => s.globalWorkMultiplier)
+  const workDivisor = useChainStore((s) => s.globalWorkDivisor)
+
+  // Reuse the SAME local identity the Anonymous mode uses (zkchat:identity:v1) — a user with an
+  // identity already has a DM address. deriveEncKeypair turns those Semaphore secrets into a stable
+  // X25519 keypair (deterministic, so the contact card stays valid across sessions).
+  const [identity] = useState<ZkIdentity>(() => loadOrCreateIdentity())
+  const myKeypair = useMemo<EncKeypair>(() => deriveEncKeypair(identity), [identity])
+  const [myName, setMyName] = useState(() => localStorage.getItem(DM_NAME_KEY) ?? '')
+  useEffect(() => localStorage.setItem(DM_NAME_KEY, myName), [myName])
+
+  const [contacts, setContacts] = useState<Contact[]>(() => loadContacts())
+  useEffect(() => saveContacts(contacts), [contacts])
+  // The selected conversation members, as pubkey-hex keys (order-independent; a Set).
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+
+  const [draft, setDraft] = useState('')
+  const [sending, setSending] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const feedRef = useRef<HTMLDivElement>(null)
+
+  const myContact = useMemo(
+    () => encodeContact(myKeypair.publicKey, myName.trim() || undefined),
+    [myKeypair, myName],
+  )
+
+  // Resolve the selected pubkey-hex keys back to their Contact bytes.
+  const selectedContacts = useMemo(
+    () => contacts.filter((c) => selected.has(toHex(c.pubkey))),
+    [contacts, selected],
+  )
+
+  // The conversation category = dmCategory([me, ...them]). Null until at least one recipient is picked.
+  const category = useMemo<Hex | null>(() => {
+    if (selectedContacts.length === 0) return null
+    return dmCategory([myKeypair.publicKey, ...selectedContacts.map((c) => c.pubkey)])
+  }, [myKeypair, selectedContacts])
+
+  const messages = useMemo(() => {
+    if (!category) return []
+    const list = (content?.[category] as RPCMessage[] | undefined) ?? []
+    return [...list].sort(byBlockDesc)
+  }, [content, category])
+
+  const board = useMemo(() => {
+    if (!transportUrl) return null
+    return makeWorkerBoard({
+      rpc: transportUrl,
+      chainId,
+      workMultiplier: workMultiplier != null ? Number(workMultiplier) : 1,
+      workDivisor: workDivisor != null ? Number(workDivisor) : 1,
+      workerFactory,
+    })
+  }, [transportUrl, chainId, workMultiplier, workDivisor, workerFactory])
+
+  const canPost = rpcValid && !!category && !!board
+
+  const copyMyCard = async () => {
+    try {
+      await navigator.clipboard.writeText(myContact)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      window.prompt('Copy your contact card:', myContact)
+    }
+  }
+
+  const addContact = () => {
+    const raw = window.prompt('Paste a contact card (msgboard-contact:v1:…):')?.trim()
+    if (!raw) return
+    const parsed = parseContact(raw)
+    if (!parsed) {
+      window.alert('That contact card is malformed — nothing added.')
+      return
+    }
+    if (toHex(parsed.pubkey) === toHex(myKeypair.publicKey)) {
+      window.alert('That is your own contact card.')
+      return
+    }
+    setContacts((cs) => {
+      const key = toHex(parsed.pubkey)
+      if (cs.some((c) => toHex(c.pubkey) === key)) return cs // already known
+      const label = parsed.label || window.prompt('Name this contact (local label):')?.trim() || undefined
+      return [...cs, label ? { pubkey: parsed.pubkey, label } : { pubkey: parsed.pubkey }]
+    })
+    // Auto-select the just-added contact for a fresh 1:1 conversation.
+    setSelected(new Set([toHex(parsed.pubkey)]))
+  }
+
+  const toggleContact = (pubkey: Uint8Array) => {
+    const key = toHex(pubkey)
+    setSelected((s) => {
+      const next = new Set(s)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  const removeContact = (pubkey: Uint8Array) => {
+    const key = toHex(pubkey)
+    setContacts((cs) => cs.filter((c) => toHex(c.pubkey) !== key))
+    setSelected((s) => {
+      const next = new Set(s)
+      next.delete(key)
+      return next
+    })
+  }
+
+  const send = async () => {
+    const text = draft.trim()
+    if (!text || !board || sending || !category || selectedContacts.length === 0) return
+    const data = sealMessage(
+      myKeypair.privateKey,
+      myKeypair.publicKey,
+      selectedContacts.map((c) => c.pubkey),
+      category,
+      text,
+      myName.trim() || undefined,
+    )
+    setSending(true)
+    try {
+      await board.addMessage({ category, data })
+      setDraft('')
+      await new Promise((r) => setTimeout(r, 1000))
+      await useChainStore.getState().loadContent()
+      feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight })
+    } catch (err) {
+      if (err) console.error(err)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const blocksAgo = (bn: string): string => {
+    if (latestBlock == null) return ''
+    const d = Number(latestBlock - BigInt(bn))
+    return d <= 0 ? 'now' : `${d} blk${d === 1 ? '' : 's'} ago`
+  }
+
+  const convoLabel =
+    selectedContacts.length === 0
+      ? null
+      : selectedContacts.length === 1
+        ? selectedContacts[0]!.label || `contact ${pubkeyShort(selectedContacts[0]!.pubkey)}`
+        : `group of ${selectedContacts.length + 1}`
+
+  return (
+    <div className="flex w-full flex-col overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 dark:bg-gray-800 dark:ring-gray-700">
+      <ModeBar active={activeMode} onChange={onMode} />
+
+      {/* your contact card (your DM address) */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-gray-200 px-4 py-2.5 dark:border-gray-700">
+        <Icon icon="mdi:email-lock" className="size-5 shrink-0 text-violet-600 dark:text-violet-400" />
+        <span className="shrink-0 text-xs text-gray-400">your card</span>
+        <code
+          className="min-w-0 flex-1 truncate rounded bg-gray-100 px-2 py-1 font-mono text-[11px] text-gray-700 select-all dark:bg-gray-900 dark:text-gray-200"
+          title={myContact}>
+          {myContact}
+        </code>
+        <button
+          type="button"
+          onClick={() => void copyMyCard()}
+          className="inline-flex shrink-0 items-center gap-1 rounded-md bg-violet-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-violet-500">
+          <Icon icon={copied ? 'mdi:check' : 'mdi:content-copy'} className="size-3.5" />
+          {copied ? 'copied' : 'copy'}
+        </button>
+      </div>
+
+      {/* display name + contacts strip */}
+      <div className="flex flex-wrap items-center gap-1.5 border-b border-gray-200 px-4 py-2 text-xs dark:border-gray-700">
+        <span className="inline-flex items-center gap-1 text-gray-400">
+          <Icon icon="mdi:account-multiple-outline" className="size-3.5" /> to
+        </span>
+        {contacts.length === 0 && (
+          <span className="text-gray-400">no contacts yet — add one you were sent</span>
+        )}
+        {contacts.map((c) => {
+          const key = toHex(c.pubkey)
+          const on = selected.has(key)
+          return (
+            <span
+              key={key}
+              className={`group inline-flex items-center gap-1 rounded-full px-2.5 py-1 font-medium ${
+                on
+                  ? 'bg-violet-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600'
+              }`}>
+              <button
+                type="button"
+                onClick={() => toggleContact(c.pubkey)}
+                title={on ? 'in this conversation — click to remove' : `add ${c.label ?? key} to the conversation`}
+                className="inline-flex items-center gap-1">
+                <Icon icon={on ? 'mdi:check-circle' : 'mdi:circle-outline'} className="size-3" />
+                <span className="max-w-[9rem] truncate">{c.label || `contact ${pubkeyShort(c.pubkey)}`}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => removeContact(c.pubkey)}
+                title="forget this contact"
+                className={`opacity-0 transition group-hover:opacity-100 ${on ? 'text-white/80 hover:text-white' : 'text-gray-400 hover:text-red-500'}`}>
+                <Icon icon="mdi:close" className="size-3" />
+              </button>
+            </span>
+          )
+        })}
+        <button
+          type="button"
+          onClick={addContact}
+          className="inline-flex items-center gap-1 rounded-full border border-dashed border-gray-300 px-2.5 py-1 text-gray-500 hover:border-violet-500 hover:text-violet-600 dark:border-gray-600 dark:text-gray-400">
+          <Icon icon="mdi:account-plus" className="size-3.5" /> add contact
+        </button>
+        <input
+          className="ml-auto w-32 rounded-md bg-gray-50 px-2 py-0.5 text-xs text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus:-outline-offset-2 focus:outline-violet-600 dark:bg-gray-900 dark:text-gray-100 dark:outline-gray-600"
+          placeholder="your display name"
+          value={myName}
+          maxLength={24}
+          onChange={(e) => setMyName(e.target.value.slice(0, 24))}
+          aria-label="your display name"
+        />
+        {onDemo && (
+          <button
+            type="button"
+            onClick={onDemo}
+            title="Watch two freshly-generated identities exchange real end-to-end encrypted DMs over this board."
+            className="inline-flex items-center gap-1 rounded-full bg-violet-600 px-2.5 py-1 font-medium text-white hover:bg-violet-500">
+            <Icon icon="mdi:account-multiple" className="size-3.5" /> Demo: talk to yourself
+          </button>
+        )}
+      </div>
+
+      {/* honest trust model — unmissable */}
+      <div className="border-b border-violet-200 bg-violet-50 px-4 py-2.5 text-[11px] leading-relaxed text-violet-900 dark:border-violet-900/50 dark:bg-violet-950/40 dark:text-violet-200">
+        <p className="font-semibold">
+          <Icon icon="mdi:shield-lock" className="inline size-3.5" /> End-to-end encrypted to the
+          named recipients (X25519 + XChaCha20-Poly1305). Each message uses a fresh ephemeral key, so
+          compromising one message&apos;s transient keys doesn&apos;t expose the others.
+        </p>
+        <p className="mt-1 text-violet-800 dark:text-violet-300/90">
+          Be honest about the limits. <strong>The sender is not authenticated</strong> — the name on
+          a message is a self-typed label inside the ciphertext, and anyone who can address this
+          conversation could send under any name. Treat identities as unverified.{' '}
+          <strong>No full forward secrecy</strong>: your long-term DM key is derived from your local
+          identity and never rotates, so if that identity secret is compromised, all your DMs — past
+          and future — can be read (losing it also loses the messages). <strong>Metadata leaks</strong>:
+          the board is public, so a conversation&apos;s existence in this derived category, timing,
+          sizes, recipient count and PoW stamps are visible, and anyone who knows all participants&apos;
+          pubkeys can locate the category (they still can&apos;t read it). <strong>Recipients are
+          fixed at send</strong> — no group re-key or revocation yet.
+        </p>
+      </div>
+
+      {/* feed */}
+      <div
+        ref={feedRef}
+        className="flex h-80 flex-col-reverse gap-0.5 overflow-y-auto px-4 py-3 font-mono text-sm">
+        {!category ? (
+          <div className="m-auto max-w-xs text-center text-gray-400">
+            <Icon icon="mdi:email-lock-outline" className="mx-auto mb-2 size-7 opacity-60" />
+            <p className="text-sm">No conversation selected.</p>
+            <p className="mt-1 text-xs">
+              Share <strong>your card</strong> above, <strong>add</strong> someone else's, then pick
+              them to start a conversation. Only the people you pick can read what you send.
+            </p>
+          </div>
+        ) : messages.length === 0 ? (
+          <div className="m-auto max-w-xs text-center text-gray-400">
+            <Icon icon="mdi:lock-outline" className="mx-auto mb-2 size-7 opacity-60" />
+            <p className="text-sm">
+              <span className="text-gray-500 dark:text-gray-300">{convoLabel}</span> is quiet.
+            </p>
+            <p className="mt-1 text-xs">
+              The board keeps only the last ~120 blocks. Say something — it's sealed to{' '}
+              {selectedContacts.length === 1 ? 'this recipient' : 'these recipients'} before the PoW
+              stamp admits it.
+            </p>
+          </div>
+        ) : (
+          messages.map((m) => {
+            const decoded = openMessage(myKeypair.privateKey, myKeypair.publicKey, category, m.data as Hex)
+            if (isDmUndecryptable(decoded)) {
+              const anon = anonHandle(m.hash as Hex)
+              return (
+                <div
+                  key={m.hash}
+                  className="flex items-baseline gap-2 rounded px-1 py-0.5 text-gray-400"
+                  title="a sealed message you are not a recipient of (or from another conversation)">
+                  <span className="inline-flex shrink-0 items-center gap-1 font-semibold text-gray-400">
+                    <Icon icon="mdi:lock-alert" className="size-3.5" /> not for you
+                  </span>
+                  <span className="min-w-0 flex-1 truncate italic">{anon.name}</span>
+                  <span className="shrink-0 text-[11px] text-gray-400" title={`${short(m.hash)} · block ${m.blockNumber}`}>
+                    {blocksAgo(m.blockNumber)}
+                  </span>
+                </div>
+              )
+            }
+            const { handle: h, text } = decoded
+            // The handle is a self-asserted label inside the ciphertext — NOT an authenticated
+            // sender (audit MEDIUM 2). Render it muted, not as a confident coloured identity, and
+            // mark it unverified so a reader never mistakes it for a proven name.
+            const who = h && h.length ? { name: h } : anonHandle(m.hash as Hex)
+            return (
+              <div key={m.hash} className="flex items-baseline gap-2 rounded px-1 py-0.5 hover:bg-gray-50 dark:hover:bg-gray-700/40">
+                <span className="shrink-0 font-medium text-gray-500 dark:text-gray-400" title="unverified sender — a self-typed label inside the encrypted body, not a proven identity">
+                  {who.name}
+                  <span className="ml-0.5 text-[9px] font-normal text-gray-400" aria-hidden>~</span>
+                </span>
+                <span className="min-w-0 flex-1 break-words text-gray-800 dark:text-gray-100">{text}</span>
+                <span className="shrink-0 text-[11px] text-gray-400" title={`${short(m.hash)} · block ${m.blockNumber}`}>
+                  {blocksAgo(m.blockNumber)}
+                </span>
+              </div>
+            )
+          })
+        )}
+      </div>
+
+      {/* composer */}
+      <div className="border-t border-gray-200 dark:border-gray-700">
+        <form
+          className="flex items-center gap-2 px-4 py-2.5"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void send()
+          }}>
+          <input
+            className="min-w-0 flex-1 rounded-md bg-gray-50 px-3 py-2 text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus:-outline-offset-2 focus:outline-violet-600 disabled:opacity-60 dark:bg-gray-900 dark:text-gray-100 dark:outline-gray-600"
+            placeholder={
+              !rpcValid
+                ? 'point at a board-serving RPC to post'
+                : !category
+                  ? 'pick a contact to message'
+                  : `encrypted message to ${convoLabel}`
+            }
+            value={draft}
+            disabled={!canPost || sending}
+            onChange={(e) => setDraft(e.target.value)}
+            aria-label="message"
+          />
+          <button
+            type="submit"
+            disabled={!canPost || sending || !draft.trim()}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-violet-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50">
+            {sending ? (
+              <>
+                <Icon icon="mdi:pickaxe" className="size-4 animate-pulse" /> grinding…
+              </>
+            ) : (
+              <>
+                <Icon icon="mdi:send-lock" className="size-4" /> seal &amp; send
+              </>
+            )}
+          </button>
+        </form>
+        <p className="px-4 pb-2.5 text-[11px] text-gray-400">
+          Each message is sealed to {selectedContacts.length <= 1 ? 'your recipient' : 'your recipients'} (and to
+          you, so you keep a readable copy) with a fresh ephemeral key, then stamped with ~a second of
+          PoW off this thread. The board only ever sees ciphertext.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// TWO-USER DEMO — "talk to yourself" over the REAL board
+//
+// Instantiates TWO genuinely independent participants (Alice + Bob), each with its own freshly
+// generated in-memory identity + enc keypair — NOT shared localStorage, so they are two different
+// users. Both are wired to the same conversation: for `encrypted`, a shared room key; for `direct`,
+// each is the other's recipient (category from both pubkeys). You send from one composer; the crypto
+// runs for real, the ciphertext is posted to the board, and it appears DECRYPTED in the other pane.
+// No faking: real keys, real board posts, real decrypt. "Close demo" returns to the single-user view.
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+/** One demo participant's fixed, in-memory crypto material (regenerated per demo, never persisted). */
+interface DemoParticipant {
+  name: string
+  identity: ZkIdentity
+  keypair: EncKeypair
+}
+
+function TwoUserDemo({
+  kind,
+  onClose,
+  workerFactory,
+}: {
+  kind: 'encrypted' | 'direct'
+  onClose: () => void
+  workerFactory?: () => Worker
+}) {
+  const chainId = useChainStore((s) => selectChain(s)?.id ?? 943)
+  const transportUrl = useChainStore((s) => selectTransportUrl(s))
+  const rpcValid = useChainStore((s) => selectRpcValid(s))
+  const content = useChainStore((s) => s.content)
+  const latestBlock = useChainStore((s) => s.latestBlockNumber)
+  const workMultiplier = useChainStore((s) => s.globalWorkMultiplier)
+  const workDivisor = useChainStore((s) => s.globalWorkDivisor)
+
+  // Two isolated participants + (for encrypted) a shared room key — generated ONCE per demo mount.
+  // useRef so a re-render never regenerates keys mid-conversation.
+  const setup = useRef<{
+    alice: DemoParticipant
+    bob: DemoParticipant
+    roomKey: Uint8Array
+    category: Hex
+  }>()
+  if (!setup.current) {
+    const mk = (name: string): DemoParticipant => {
+      const identity = randomIdentity()
+      return { name, identity, keypair: deriveEncKeypair(identity) }
+    }
+    const alice = mk('Alice')
+    const bob = mk('Bob')
+    const roomKey = mintRoomKey()
+    const category =
+      kind === 'encrypted'
+        ? deriveCategory(roomKey)
+        : dmCategory([alice.keypair.publicKey, bob.keypair.publicKey])
+    setup.current = { alice, bob, roomKey, category }
+  }
+  const { alice, bob, roomKey, category } = setup.current
+
+  const board = useMemo(() => {
+    if (!transportUrl) return null
+    return makeWorkerBoard({
+      rpc: transportUrl,
+      chainId,
+      workMultiplier: workMultiplier != null ? Number(workMultiplier) : 1,
+      workDivisor: workDivisor != null ? Number(workDivisor) : 1,
+      workerFactory,
+    })
+  }, [transportUrl, chainId, workMultiplier, workDivisor, workerFactory])
+
+  const messages = useMemo(() => {
+    const list = (content?.[category] as RPCMessage[] | undefined) ?? []
+    return [...list].sort(byBlockDesc)
+  }, [content, category])
+
+  // Seal a message AS a participant (real crypto for the chosen path).
+  const sealAs = (from: DemoParticipant, to: DemoParticipant, text: string): Hex =>
+    kind === 'encrypted'
+      ? encryptMessage(roomKey, category, text, from.name)
+      : sealMessage(from.keypair.privateKey, from.keypair.publicKey, [to.keypair.publicKey], category, text, from.name)
+
+  // Open a message AS a participant (their own key). Both parties can read every message in the demo.
+  const openAs = (who: DemoParticipant, dataHex: Hex): { handle?: string; text: string } | { undecryptable: true } =>
+    kind === 'encrypted'
+      ? decryptMessage(roomKey, category, dataHex)
+      : openMessage(who.keypair.privateKey, who.keypair.publicKey, category, dataHex)
+
+  const [sendingFrom, setSendingFrom] = useState<string | null>(null)
+
+  const post = async (from: DemoParticipant, to: DemoParticipant, text: string) => {
+    if (!board || !text.trim() || sendingFrom) return
+    setSendingFrom(from.name)
+    try {
+      await board.addMessage({ category, data: sealAs(from, to, text.trim()) })
+      await new Promise((r) => setTimeout(r, 1000))
+      await useChainStore.getState().loadContent()
+    } catch (err) {
+      if (err) console.error(err)
+    } finally {
+      setSendingFrom(null)
+    }
+  }
+
+  const blocksAgo = (bn: string): string => {
+    if (latestBlock == null) return ''
+    const d = Number(latestBlock - BigInt(bn))
+    return d <= 0 ? 'now' : `${d} blk${d === 1 ? '' : 's'} ago`
+  }
+
+  return (
+    <div className="flex w-full flex-col overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 dark:bg-gray-800 dark:ring-gray-700">
+      {/* demo header */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-violet-200 bg-violet-50 px-4 py-2.5 dark:border-violet-900/50 dark:bg-violet-950/40">
+        <Icon icon="mdi:account-multiple" className="size-5 shrink-0 text-violet-600 dark:text-violet-400" />
+        <span className="font-semibold text-violet-900 dark:text-violet-100">
+          Demo: talk to yourself — {kind === 'encrypted' ? 'shared-key room' : 'per-recipient DM'}
+        </span>
+        <span className="min-w-0 flex-1 text-[11px] text-violet-800 dark:text-violet-300/90">
+          Two independent identities exchanging <strong>real</strong> end-to-end encrypted messages
+          over this board. Send from either side; watch it decrypt on the other.
+        </span>
+        <button
+          type="button"
+          onClick={onClose}
+          className="inline-flex shrink-0 items-center gap-1 rounded-md bg-white px-2.5 py-1 text-xs font-medium text-violet-700 ring-1 ring-violet-300 hover:bg-violet-100 dark:bg-gray-800 dark:text-violet-200 dark:ring-violet-800 dark:hover:bg-gray-700">
+          <Icon icon="mdi:close" className="size-3.5" /> close demo
+        </button>
+      </div>
+
+      {!rpcValid && (
+        <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800 dark:border-amber-800/60 dark:bg-amber-900/20 dark:text-amber-300">
+          Point at a board-serving RPC to run the demo — the exchange posts real messages to the board.
+        </div>
+      )}
+
+      {/* two panes side by side */}
+      <div className="grid grid-cols-1 sm:grid-cols-2">
+        {[
+          { self: alice, other: bob },
+          { self: bob, other: alice },
+        ].map(({ self, other }, i) => (
+          <DemoPane
+            key={self.name}
+            self={self}
+            other={other}
+            messages={messages}
+            openAs={openAs}
+            onSend={(text) => void post(self, other, text)}
+            sending={sendingFrom === self.name}
+            disabled={!rpcValid || !board || sendingFrom != null}
+            blocksAgo={blocksAgo}
+            className={i === 0 ? 'sm:border-r border-gray-200 dark:border-gray-700' : ''}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** One side of the two-user demo: that participant's view of the shared conversation + a composer. */
+function DemoPane({
+  self,
+  other,
+  messages,
+  openAs,
+  onSend,
+  sending,
+  disabled,
+  blocksAgo,
+  className,
+}: {
+  self: DemoParticipant
+  other: DemoParticipant
+  messages: RPCMessage[]
+  openAs: (who: DemoParticipant, dataHex: Hex) => { handle?: string; text: string } | { undecryptable: true }
+  onSend: (text: string) => void
+  sending: boolean
+  disabled: boolean
+  blocksAgo: (bn: string) => string
+  className?: string
+}) {
+  const [draft, setDraft] = useState('')
+  const feedRef = useRef<HTMLDivElement>(null)
+  const submit = () => {
+    if (!draft.trim() || disabled) return
+    onSend(draft)
+    setDraft('')
+  }
+  return (
+    <section className={`flex min-w-0 flex-col ${className ?? ''}`} aria-label={`${self.name} pane`}>
+      <div className="flex items-center gap-2 border-b border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/50">
+        <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-violet-600 text-xs font-bold text-white">
+          {self.name[0]}
+        </span>
+        <span className="font-semibold text-gray-800 dark:text-gray-100">{self.name}</span>
+        <code
+          className="ml-auto truncate font-mono text-[10px] text-gray-400"
+          title={`X25519 pubkey ${toHex(self.keypair.publicKey)}`}>
+          {pubkeyShort(self.keypair.publicKey)}
+        </code>
+      </div>
+
+      <div
+        ref={feedRef}
+        className="flex h-72 flex-col-reverse gap-0.5 overflow-y-auto px-3 py-3 font-mono text-sm">
+        {messages.length === 0 ? (
+          <div className="m-auto max-w-[14rem] text-center text-xs text-gray-400">
+            Nothing yet. Send from either side — the ciphertext hits the board, then decrypts here.
+          </div>
+        ) : (
+          messages.map((m) => {
+            const decoded = openAs(self, m.data as Hex)
+            const mine = !isDmUndecryptable(decoded) && decoded.handle === self.name
+            if (isDmUndecryptable(decoded)) {
+              return (
+                <div key={m.hash} className="flex items-baseline gap-2 rounded px-1 py-0.5 text-gray-400" title="not addressed to this participant">
+                  <span className="inline-flex shrink-0 items-center gap-1 font-semibold">
+                    <Icon icon="mdi:lock-alert" className="size-3.5" /> can’t open
+                  </span>
+                  <span className="shrink-0 text-[11px]">{blocksAgo(m.blockNumber)}</span>
+                </div>
+              )
+            }
+            return (
+              <div
+                key={m.hash}
+                className={`flex items-baseline gap-2 rounded px-1 py-0.5 ${mine ? 'flex-row-reverse text-right' : ''}`}>
+                <span className={`shrink-0 font-semibold ${mine ? 'text-violet-600 dark:text-violet-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                  {decoded.handle || other.name}
+                </span>
+                <span className="min-w-0 flex-1 break-words text-gray-800 dark:text-gray-100">{decoded.text}</span>
+                <span className="shrink-0 text-[11px] text-gray-400" title={`block ${m.blockNumber}`}>
+                  {blocksAgo(m.blockNumber)}
+                </span>
+              </div>
+            )
+          })
+        )}
+      </div>
+
+      <form
+        className="flex items-center gap-2 border-t border-gray-200 px-3 py-2.5 dark:border-gray-700"
+        onSubmit={(e) => {
+          e.preventDefault()
+          submit()
+        }}>
+        <input
+          className="min-w-0 flex-1 rounded-md bg-gray-50 px-3 py-2 text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus:-outline-offset-2 focus:outline-violet-600 disabled:opacity-60 dark:bg-gray-900 dark:text-gray-100 dark:outline-gray-600"
+          placeholder={`message as ${self.name}…`}
+          value={draft}
+          disabled={disabled}
+          onChange={(e) => setDraft(e.target.value)}
+          aria-label={`message as ${self.name}`}
+        />
+        <button
+          type="submit"
+          disabled={disabled || !draft.trim()}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-violet-600 px-3 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50">
+          {sending ? <Icon icon="mdi:pickaxe" className="size-4 animate-pulse" /> : <Icon icon="mdi:send-lock" className="size-4" />}
+        </button>
+      </form>
+    </section>
   )
 }
 
