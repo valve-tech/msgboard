@@ -103,7 +103,7 @@ type Content = { [category: Hex]: RPCMessage[] }`,
         res: curlResponse(keccak256(numberToHex(Date.now()))),
       },
       typescript: {
-        req: `const work = await client.doPoW(category, data)
+        req: `const work = await client.grind(category, data)
 const hash = await client.addMessage(work.message)`,
         res: `type Hash = Hex`,
       },
