@@ -276,7 +276,9 @@ const main = async () => {
         if (Array.isArray(cfg.chains) && cfg.chains.includes(CHAIN)) {
           const powBits = typeof cfg.powBits === 'number' ? cfg.powBits : 20
           const digest = deployRequestDigest({ chainId: CHAIN, singleton: SAFE_V141.singletonL2, initializer, saltNonce })
-          const signature = await signers[0]!.account.sign!({ hash: digest })
+          // EIP-191 personal-sign over the raw digest — the relay recovers with
+          // recoverMessageAddress({ message: { raw } }), so a bare-hash ECDSA sign recovers a stranger.
+          const signature = await signers[0]!.account.signMessage!({ message: { raw: digest } })
           const powNonce = await solveDeployPow(digest, powBits)
           const res = await fetch(`${RELAY_URL}/deploy-safe`, {
             method: 'POST',
