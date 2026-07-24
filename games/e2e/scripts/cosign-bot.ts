@@ -63,7 +63,6 @@ import {
   type BoardClient,
   type CosignAdapter,
   type SafePublicClient,
-  type SafeTx,
   type SignatureRecord,
   SCHEME,
   makeSafeAdapter,
@@ -258,8 +257,11 @@ const main = async () => {
   /** Bootstrap-deploy the derived Safe. Returns true on success; false (with a loud line) on skip. */
   const ensureSafe = async (): Promise<boolean> => {
     if (await isDeployed(safe)) return true
-    if (SAFE_PINNED) {
-      console.error(`cosign: SAFE_943 ${safe} has no code on chain ${CHAIN} — is it deployed on this chain? skipping tick`)
+    // A pinned Safe we can still CREATE: when the pin equals the address our own owner set derives,
+    // the deploy below lands exactly there (CREATE2), so fall through and bootstrap it. Only a
+    // FOREIGN pin — an address our params can't produce — is undeployable from here.
+    if (SAFE_PINNED && !viem.isAddressEqual(safe, derivedSafe)) {
+      console.error(`cosign: SAFE_943 ${safe} has no code on chain ${CHAIN} and is not our derived Safe (${derivedSafe}) — cannot deploy it; skipping tick`)
       return false
     }
     const initializer = buildSetup(owners, THRESHOLD)
