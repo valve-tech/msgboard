@@ -116,6 +116,87 @@
       }
       input:focus { outline: 1px solid var(--brass-soft); }
 
+      /* ---------- the landing floor ---------- */
+      .lobby-hero { padding: 2.2rem 0 1.4rem; }
+      .lobby-eyebrow {
+        color: var(--brass-soft); font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase;
+        word-break: keep-all; overflow-wrap: normal;
+      }
+      .lobby-headline {
+        display: block; /* the global h2 is a flex row with a trailing rule — not here */
+        margin: 0.5rem 0 0.9rem;
+        font: 640 clamp(2.6rem, 7.5vw, 4.4rem)/0.98 var(--serif);
+        font-variation-settings: 'SOFT' 40, 'WONK' 1, 'opsz' 100;
+        letter-spacing: -0.015em;
+        color: var(--cream);
+      }
+      .lobby-headline::after {
+        content: ''; display: block; flex: none; width: 4.5rem; height: 3px; margin-top: 1.05rem;
+        background: linear-gradient(90deg, var(--brass), transparent);
+      }
+      .lobby-sub { max-width: 34rem; color: var(--cream-dim); margin: 0 0 1.1rem; }
+      .lobby-meta-links { display: flex; gap: 0.6rem; }
+      /* The receipt rail — real settlements off the indexer, ticking past as printed slips
+         (the same cream ticket stock as the verify panel's .receipt, cut smaller). */
+      .rail {
+        overflow: hidden; white-space: nowrap;
+        padding: 0.55rem 0; margin: 0.4rem 0 1.6rem;
+        mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+      }
+      .rail-track { display: inline-flex; animation: rail 55s linear infinite; }
+      .rail:hover .rail-track { animation-play-state: paused; }
+      .rail-set { display: inline-flex; }
+      .rail-slip {
+        color: var(--ink); font-size: 0.75rem;
+        background: repeating-linear-gradient(0deg, transparent 0 3px, rgba(0,0,0,0.03) 3px 6px), var(--cream);
+        border-radius: 2px; padding: 0.34rem 0.8rem; margin: 0 0.45rem;
+        box-shadow: 0 3px 9px rgba(0, 0, 0, 0.35);
+      }
+      .rail-game { color: #7a5c10; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; }
+      @keyframes rail { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+      @media (prefers-reduced-motion: reduce) {
+        .rail-track { animation: none; }
+        .rail { overflow-x: auto; }
+      }
+      .floor-section { margin: 0 0 1.6rem; }
+      .floor-title {
+        font: 600 1.05rem var(--serif); color: var(--cream); margin: 0 0 0.6rem;
+        display: flex; align-items: baseline; gap: 0.7rem; flex-wrap: wrap;
+      }
+      .floor-blurb {
+        font: 400 0.74rem var(--sans); color: var(--brass-soft);
+        letter-spacing: 0.06em; text-transform: uppercase;
+      }
+      .tile-grid {
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(9.6rem, 1fr)); gap: 0.6rem;
+      }
+      .tile {
+        position: relative;
+        display: flex; flex-direction: column; align-items: flex-start; gap: 0.55rem;
+        padding: 0.85rem 0.85rem 0.75rem;
+        background: linear-gradient(160deg, var(--felt-700), var(--felt-800));
+        border: 1px solid var(--line); border-radius: 6px;
+        color: var(--cream); text-align: left; box-shadow: none;
+        transition: transform 0.14s ease, border-color 0.14s ease;
+      }
+      .tile:hover { transform: translateY(-2px); border-color: var(--brass-soft); filter: none; }
+      .tile:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+      .tile-glyph { font-size: 1.9rem; line-height: 1; filter: drop-shadow(0 3px 5px rgba(0,0,0,0.45)); transition: transform 0.14s ease; }
+      .tile:hover .tile-glyph { transform: rotate(-6deg) scale(1.06); }
+      @media (prefers-reduced-motion: reduce) {
+        .tile, .tile-glyph { transition: none; }
+        .tile:hover { transform: none; }
+        .tile:hover .tile-glyph { transform: none; }
+      }
+      .tile-name { font: 600 0.98rem var(--serif); }
+      .tile-seal {
+        position: absolute; top: 0.5rem; right: 0.55rem;
+        font-size: 0.72rem; color: var(--brass-soft);
+        border: 1px solid var(--line); border-radius: 999px;
+        width: 1.35rem; height: 1.35rem; display: inline-flex; align-items: center; justify-content: center;
+        background: var(--felt-900);
+      }
+
       /* ---------- the house toggle (no native checkboxes either) ---------- */
       .toggle {
         display: inline-flex; align-items: center; gap: 0.45rem;
