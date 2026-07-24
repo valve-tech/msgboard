@@ -1,36 +1,39 @@
 import { useState } from 'react'
 import { Icon } from '@iconify/react'
-import { Channel } from './Channel'
-import { Whisper } from './Whisper'
+import { Chat } from './Chat'
 import { Interactive } from './Interactive'
 
 /**
  * The "Try it" shell — flippable sections over one board. The room comes first: a visitor's first
- * question is "what is everyone saying?", not "how is a message encoded?" So Channel (a live IRC
- * room) leads, ZK Chat (post anonymously behind a membership proof) sits beside it, and the raw
- * compose-and-inspect mechanics move to their own tab for people who want to see the wire format.
+ * question is "what is everyone saying?", not "how is a message encoded?" So Chat (a live room with
+ * a privacy-mode toggle — Public / Anonymous / Encrypted, absorbing the former Channel + Whisper)
+ * leads, and the raw compose-and-inspect mechanics move to their own tab for people who want to see
+ * the wire format.
  *
  * Each tab is a self-contained experience that drives the shared chain store; switching is free
  * (the board content is polled once for the whole page).
  */
 
-type SectionId = 'channel' | 'zk' | 'mechanics'
+type SectionId = 'chat' | 'mechanics'
 
 const SECTIONS: { id: SectionId; label: string; icon: string; blurb: string }[] = [
-  { id: 'channel', label: 'Channel', icon: 'mdi:pound', blurb: 'a live room — join a channel, read it, say something' },
-  { id: 'zk', label: 'Whisper', icon: 'mdi:incognito', blurb: 'an anonymous room — post behind a zero-knowledge membership proof, no wallet' },
+  { id: 'chat', label: 'Chat', icon: 'mdi:chat-outline', blurb: 'a live room — pick a privacy mode (public, anonymous, or encrypted) and say something' },
   { id: 'mechanics', label: 'Mechanics', icon: 'mdi:cog-outline', blurb: 'compose a raw message and watch the proof-of-work + wire format' },
+  // FUTURE: a "featured app" tab would slot in here — a showcase built on the board transport
+  // (e.g. a game or a mini-app). Add its { id, label, icon, blurb } entry, widen the SectionId
+  // union, give it a content width below, and render its component in the switch. Do not build it
+  // now — this comment marks the seam.
 ]
 
 export function TryIt({ workerFactory }: { workerFactory?: () => Worker }) {
-  const [active, setActive] = useState<SectionId>('channel')
+  const [active, setActive] = useState<SectionId>('chat')
   const current = SECTIONS.find((s) => s.id === active)!
 
   // The OUTER shell is a constant width so the tab row never shifts when you switch tabs; each
-  // tab's content chooses its own width and centers within (Mechanics is a data-dense compose +
-  // terminal + tree layout that wants room; the chat tabs read best as a narrower column).
-  const contentWidth =
-    active === 'mechanics' ? 'max-w-6xl' : active === 'zk' ? 'max-w-5xl' : 'max-w-3xl'
+  // tab's content chooses its own width and centers within. Mechanics is a data-dense compose +
+  // terminal + tree layout that wants room (max-w-6xl); Chat wants a comfortable width so the
+  // Anonymous mode's room ‖ inspector split has room (max-w-5xl).
+  const contentWidth = active === 'mechanics' ? 'max-w-6xl' : 'max-w-5xl'
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 p-4">
@@ -60,8 +63,7 @@ export function TryIt({ workerFactory }: { workerFactory?: () => Worker }) {
           never shifts. Each section stays mounted-per-switch (simple remount) — cheap, and it
           resets transient composer state cleanly when you flip away and back. */}
       <div className={`mx-auto w-full ${contentWidth}`}>
-        {active === 'channel' && <Channel workerFactory={workerFactory} />}
-        {active === 'zk' && <Whisper />}
+        {active === 'chat' && <Chat workerFactory={workerFactory} />}
         {active === 'mechanics' && <Interactive workerFactory={workerFactory} />}
       </div>
     </div>
