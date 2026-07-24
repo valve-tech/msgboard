@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Icon } from '@iconify/react'
 import { Channel } from './Channel'
-import { ZkChat } from './ZkChat'
+import { Whisper } from './Whisper'
 import { Interactive } from './Interactive'
 
 /**
@@ -18,7 +18,7 @@ type SectionId = 'channel' | 'zk' | 'mechanics'
 
 const SECTIONS: { id: SectionId; label: string; icon: string; blurb: string }[] = [
   { id: 'channel', label: 'Channel', icon: 'mdi:pound', blurb: 'a live room — join a channel, read it, say something' },
-  { id: 'zk', label: 'ZK Chat', icon: 'mdi:incognito', blurb: 'post anonymously behind a zero-knowledge membership proof' },
+  { id: 'zk', label: 'Whisper', icon: 'mdi:incognito', blurb: 'an anonymous room — post behind a zero-knowledge membership proof, no wallet' },
   { id: 'mechanics', label: 'Mechanics', icon: 'mdi:cog-outline', blurb: 'compose a raw message and watch the proof-of-work + wire format' },
 ]
 
@@ -29,7 +29,10 @@ export function TryIt({ workerFactory }: { workerFactory?: () => Worker }) {
   return (
     // The chat tabs read best at a column width; Mechanics is a data-dense compose + terminal +
     // tree layout, so give it room to breathe.
-    <div className={`mx-auto flex w-full flex-col gap-3 p-4 ${active === 'mechanics' ? 'max-w-6xl' : 'max-w-3xl'}`}>
+    <div
+      className={`mx-auto flex w-full flex-col gap-3 p-4 ${
+        active === 'mechanics' ? 'max-w-6xl' : active === 'zk' ? 'max-w-5xl' : 'max-w-3xl'
+      }`}>
       <div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="try it sections">
         {SECTIONS.map((s) => {
           const on = s.id === active
@@ -55,7 +58,7 @@ export function TryIt({ workerFactory }: { workerFactory?: () => Worker }) {
       {/* Each section stays mounted-per-switch (simple remount) — cheap, and it resets transient
           composer state cleanly when you flip away and back. */}
       {active === 'channel' && <Channel workerFactory={workerFactory} />}
-      {active === 'zk' && <ZkChat />}
+      {active === 'zk' && <Whisper />}
       {active === 'mechanics' && <Interactive workerFactory={workerFactory} />}
     </div>
   )

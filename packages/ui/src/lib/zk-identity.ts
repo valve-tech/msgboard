@@ -13,7 +13,8 @@
  * from that nullifierHash — so two posts by the same anonymous member look consistent
  * within an epoch, but nothing links them to an on-chain address.
  */
-import { toHex } from 'viem'
+import { toHex, sha256 } from 'viem'
+import { createBase58check } from '@scure/base'
 import { SNARK_FIELD } from './zk-post'
 
 /** A member's secret identity. Keep both secrets private; publish only the commitment. */
@@ -76,6 +77,90 @@ export const rotateIdentity = (): ZkIdentity => {
   const identity = randomIdentity()
   persistIdentity(identity)
   return identity
+}
+
+// ── recovery key: the ONE copy-pasteable secret that IS this identity ─────────────────
+//
+// THE ENCODING. A ZkIdentity is two field-element secrets (nullifier, trapdoor), each a
+// BN254 scalar in [1, SNARK_FIELD) — i.e. < 2^254, so each fits exactly in 32 big-endian
+// bytes. We serialise `version(1) ‖ nullifier(32 BE) ‖ trapdoor(32 BE)` = 65 bytes and
+// Base58Check-encode it (Bitcoin alphabet, 4-byte double-SHA256… — here the single-hash
+// checksum @scure/base's createBase58check provides). Why Base58Check and not a BIP39
+// mnemonic: a mnemonic is a clean bijection only for *round* entropy sizes (16–32 B) with a
+// bit-checksum; two independent 254-bit field elements are NOT a round entropy size (all-
+// 256-bit patterns aren't valid — they must be range-checked < field), so a mnemonic here
+// would be a hacked-together 48-word double-phrase, not an honest bijection. Base58Check is
+// compact (~93 chars, one token), copy-paste-robust, alphabet avoids look-alike chars, and
+// its checksum catches typos on import. The mapping is an EXACT round-trip of the real
+// secrets — nothing is derived, hashed-away, or approximated.
+const RECOVERY_VERSION = 1
+/** Human label so the string is self-identifying; stripped (case-insensitively) on import. */
+const RECOVERY_PREFIX = 'whisper1'
+/** Base58Check codec with viem's SHA-256 as the checksum hash (no extra crypto dep). */
+const b58check = createBase58check((data: Uint8Array) => sha256(data, 'bytes'))
+
+/** A field-element secret → 32 big-endian bytes (throws if it somehow exceeds 2^256). */
+const toBytes32BE = (n: bigint): Uint8Array => {
+  const out = new Uint8Array(32)
+  let v = n
+  for (let i = 31; i >= 0; i--) {
+    out[i] = Number(v & 0xffn)
+    v >>= 8n
+  }
+  if (v !== 0n) throw new Error('secret exceeds 32 bytes')
+  return out
+}
+
+/** 32 big-endian bytes → bigint. */
+const fromBytes32BE = (b: Uint8Array): bigint => {
+  let v = 0n
+  for (const byte of b) v = (v << 8n) | BigInt(byte)
+  return v
+}
+
+/**
+ * Serialises an identity to its recovery key: the ONE secret string that IS this pseudonym.
+ * Anyone holding it can post as you. It is a LOCAL secret — never posted, never sent.
+ * `importIdentity(exportIdentity(id))` reproduces `id` exactly.
+ */
+export const exportIdentity = (id: ZkIdentity): string => {
+  const payload = new Uint8Array(65)
+  payload[0] = RECOVERY_VERSION
+  payload.set(toBytes32BE(id.nullifier), 1)
+  payload.set(toBytes32BE(id.trapdoor), 33)
+  return `${RECOVERY_PREFIX}${b58check.encode(payload)}`
+}
+
+/**
+ * Parses a recovery key back into an identity, or returns null on ANY invalid input:
+ * bad Base58/checksum, wrong length/version, or a secret out of the SNARK field. Never
+ * throws. Tolerant of surrounding whitespace and the optional `whisper1` label.
+ */
+export const importIdentity = (str: string): ZkIdentity | null => {
+  try {
+    const trimmed = str.trim()
+    const body = trimmed.toLowerCase().startsWith(RECOVERY_PREFIX)
+      ? trimmed.slice(RECOVERY_PREFIX.length)
+      : trimmed
+    const bytes = b58check.decode(body)
+    if (bytes.length !== 65) return null
+    if (bytes[0] !== RECOVERY_VERSION) return null
+    const nullifier = fromBytes32BE(bytes.subarray(1, 33))
+    const trapdoor = fromBytes32BE(bytes.subarray(33, 65))
+    // Range-check both secrets in the BN254 scalar field (reject 0 and >= field).
+    if (nullifier <= 0n || nullifier >= SNARK_FIELD) return null
+    if (trapdoor <= 0n || trapdoor >= SNARK_FIELD) return null
+    return { nullifier, trapdoor }
+  } catch {
+    return null
+  }
+}
+
+/** Imports a recovery key AND persists it as the active identity, or null if invalid. */
+export const importAndPersistIdentity = (str: string): ZkIdentity | null => {
+  const id = importIdentity(str)
+  if (id) persistIdentity(id)
+  return id
 }
 
 // ── anonymous author presentation, derived from the nullifierHash ────────────────────
