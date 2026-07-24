@@ -14,7 +14,7 @@
     "lint": "prettier --check ."
   },
   "dependencies": {
-    "@iconify/react": "^5.0.2",
+    "@iconify/react": "^6.0.2",
     "@msgboard/sdk": "^0.0.33",
     "@noble/ciphers": "^0.6.0",
     "@scure/base": "^1.2.5",
