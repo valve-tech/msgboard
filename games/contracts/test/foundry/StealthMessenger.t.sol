@@ -105,36 +105,51 @@ contract StealthMessengerTest is Test {
         assertEq(m.stealthMetaAddressOf(sender), metaAddress);
     }
 
-    function test_registerRejectsEmpty() public {
-        vm.prank(sender);
-        vm.expectRevert(StealthMessenger.EmptyMetaAddress.selector);
-        m.registerStealthMetaAddress("");
+    function test_registerRejectsBadLength() public {
+        vm.startPrank(sender);
+        vm.expectRevert(StealthMessenger.BadMetaAddressLength.selector);
+        m.registerStealthMetaAddress(""); // 0 != 66
+        vm.expectRevert(StealthMessenger.BadMetaAddressLength.selector);
+        m.registerStealthMetaAddress(hex"0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"); // 33 != 66
+        vm.stopPrank();
     }
 
     // ── registry: on-behalf (EIP-712) ─────────────────────────────────────────────────────────
 
     function test_registerOnBehalf() public {
-        bytes memory sig = _sign(pkSender, m.registrationDigest(sender, metaAddress));
+        uint256 dl = block.timestamp + 1 hours;
+        bytes memory sig = _sign(pkSender, m.registrationDigest(sender, metaAddress, dl));
         // relayed by this contract (address(this)), authorized by `sender`'s signature
         vm.expectEmit(true, false, false, true, address(m));
         emit StealthMetaAddressSet(sender, 1, metaAddress);
-        m.registerStealthMetaAddressOnBehalf(sender, metaAddress, sig);
+        m.registerStealthMetaAddressOnBehalf(sender, metaAddress, dl, sig);
         assertEq(m.stealthMetaAddressOf(sender), metaAddress);
         assertEq(m.nonces(sender), 1);
     }
 
     function test_registerOnBehalfRejectsBadSig() public {
-        bytes memory sig = _sign(pkOther, m.registrationDigest(sender, metaAddress)); // wrong signer
+        uint256 dl = block.timestamp + 1 hours;
+        bytes memory sig = _sign(pkOther, m.registrationDigest(sender, metaAddress, dl)); // wrong signer
         vm.expectRevert(StealthMessenger.BadSig.selector);
-        m.registerStealthMetaAddressOnBehalf(sender, metaAddress, sig);
+        m.registerStealthMetaAddressOnBehalf(sender, metaAddress, dl, sig);
     }
 
     /// The nonce advances, so a captured on-behalf signature cannot be replayed to overwrite a later
     /// meta-address.
     function test_registerOnBehalfReplayRejected() public {
-        bytes memory sig = _sign(pkSender, m.registrationDigest(sender, metaAddress));
-        m.registerStealthMetaAddressOnBehalf(sender, metaAddress, sig);
+        uint256 dl = block.timestamp + 1 hours;
+        bytes memory sig = _sign(pkSender, m.registrationDigest(sender, metaAddress, dl));
+        m.registerStealthMetaAddressOnBehalf(sender, metaAddress, dl, sig);
         vm.expectRevert(StealthMessenger.BadSig.selector); // nonce is now 1; old digest no longer valid
-        m.registerStealthMetaAddressOnBehalf(sender, metaAddress, sig);
+        m.registerStealthMetaAddressOnBehalf(sender, metaAddress, dl, sig);
+    }
+
+    /// A stale (signed-but-unbroadcast) registration can't be forced on-chain after its deadline.
+    function test_registerOnBehalfExpiredRejected() public {
+        uint256 dl = block.timestamp + 1 hours;
+        bytes memory sig = _sign(pkSender, m.registrationDigest(sender, metaAddress, dl));
+        vm.warp(dl + 1);
+        vm.expectRevert(StealthMessenger.Expired.selector);
+        m.registerStealthMetaAddressOnBehalf(sender, metaAddress, dl, sig);
     }
 }
