@@ -86,6 +86,7 @@ import {
 } from '../lib/zk-post'
 import { formatBlocksRemaining } from '../lib/tree'
 import { BLOCK_RANGE_LIMIT } from '../lib/rpc'
+import { readDeepLink, writeDeepLink, currentShareUrl } from '../lib/deeplink'
 
 // ── mode selector ────────────────────────────────────────────────────────────────────────
 
@@ -167,16 +168,25 @@ function ModeBar({ active, onChange }: { active: Mode; onChange: (m: Mode) => vo
 }
 
 export function Chat({ workerFactory }: { workerFactory?: () => Worker }) {
+  // A shared deep-link (?mode=…&demo=…) wins over the localStorage default; otherwise fall back to the
+  // last-used mode, then 'public'. Every mode change is mirrored to BOTH localStorage and the URL.
   const [mode, setMode] = useState<Mode>(() => {
+    const link = readDeepLink().mode
+    if (link) return link
     const stored = localStorage.getItem(MODE_KEY)
     return isMode(stored) ? stored : 'public'
   })
-  useEffect(() => localStorage.setItem(MODE_KEY, mode), [mode])
+  useEffect(() => {
+    localStorage.setItem(MODE_KEY, mode)
+    writeDeepLink({ mode })
+  }, [mode])
 
   // The "talk to yourself" two-user demo overlay — opened from Encrypted or Direct mode. It replaces
   // the single-user view with two isolated participants exchanging REAL encrypted board posts. The
-  // value records which crypto path the demo is exercising; null → normal single-user view.
-  const [demo, setDemo] = useState<'encrypted' | 'direct' | null>(null)
+  // value records which crypto path the demo is exercising; null → normal single-user view. It is
+  // deep-linkable (?demo=…), so a shared URL can land straight on the demo pane.
+  const [demo, setDemo] = useState<'encrypted' | 'direct' | null>(() => readDeepLink().demo ?? null)
+  useEffect(() => writeDeepLink({ demo }), [demo])
   if (demo) {
     return (
       <div className="flex w-full flex-col">
@@ -561,15 +571,24 @@ function ChannelPane({
             (XChaCha20-Poly1305). Outsiders can’t read this room and it’s unlinkable by name.
           </p>
           <p className="mt-1 text-emerald-800 dark:text-emerald-300/90">
-            But be honest about the limits: the <strong>shared key means any invite-holder can read
-            AND post as any handle</strong> (no per-sender identity yet). There is{' '}
-            <strong>no forward secrecy</strong> — a leaked invite exposes all past and future
-            messages, so mint a new room to rotate. And <strong>metadata is public</strong>: the
-            board still shows that a conversation is happening, when, how big, and its PoW stamps —
-            encryption hides content, not activity. Outsiders can also <strong>replay old
-            ciphertext</strong> (not read or alter it — just re-post a copy), so treat message
-            timing as approximate. Keep your invite secret; lose it and the room is unrecoverable.
+            Shared key — any invite-holder can read and post · no forward secrecy · metadata is public.
           </p>
+          <details className="group mt-1">
+            <summary className="cursor-pointer list-none font-medium text-emerald-700 hover:underline dark:text-emerald-300">
+              <Icon icon="mdi:chevron-right" className="inline size-3.5 transition group-open:rotate-90" />
+              Details
+            </summary>
+            <p className="mt-1 text-emerald-800 dark:text-emerald-300/90">
+              The <strong>shared key means any invite-holder can read AND post as any handle</strong>{' '}
+              (no per-sender identity yet). There is <strong>no forward secrecy</strong> — a leaked
+              invite exposes all past and future messages, so mint a new room to rotate. And{' '}
+              <strong>metadata is public</strong>: the board still shows that a conversation is
+              happening, when, how big, and its PoW stamps — encryption hides content, not activity.
+              Outsiders can also <strong>replay old ciphertext</strong> (not read or alter it — just
+              re-post a copy), so treat message timing as approximate. Keep your invite secret; lose
+              it and the room is unrecoverable.
+            </p>
+          </details>
         </div>
       )}
 
@@ -1022,17 +1041,26 @@ function DirectPane({
           compromising one message&apos;s transient keys doesn&apos;t expose the others.
         </p>
         <p className="mt-1 text-violet-800 dark:text-violet-300/90">
-          Be honest about the limits. <strong>The sender is not authenticated</strong> — the name on
-          a message is a self-typed label inside the ciphertext, and anyone who can address this
-          conversation could send under any name. Treat identities as unverified.{' '}
-          <strong>No full forward secrecy</strong>: your long-term DM key is derived from your local
-          identity and never rotates, so if that identity secret is compromised, all your DMs — past
-          and future — can be read (losing it also loses the messages). <strong>Metadata leaks</strong>:
-          the board is public, so a conversation&apos;s existence in this derived category, timing,
-          sizes, recipient count and PoW stamps are visible, and anyone who knows all participants&apos;
-          pubkeys can locate the category (they still can&apos;t read it). <strong>Recipients are
-          fixed at send</strong> — no group re-key or revocation yet.
+          Unverified senders · metadata is public · keys don&apos;t rotate.
         </p>
+        <details className="group mt-1">
+          <summary className="cursor-pointer list-none font-medium text-violet-700 hover:underline dark:text-violet-300">
+            <Icon icon="mdi:chevron-right" className="inline size-3.5 transition group-open:rotate-90" />
+            Details
+          </summary>
+          <p className="mt-1 text-violet-800 dark:text-violet-300/90">
+            <strong>The sender is not authenticated</strong> — the name on a message is a self-typed
+            label inside the ciphertext, and anyone who can address this conversation could send under
+            any name. Treat identities as unverified. <strong>No full forward secrecy</strong>: your
+            long-term DM key is derived from your local identity and never rotates, so if that
+            identity secret is compromised, all your DMs — past and future — can be read (losing it
+            also loses the messages). <strong>Metadata leaks</strong>: the board is public, so a
+            conversation&apos;s existence in this derived category, timing, sizes, recipient count and
+            PoW stamps are visible, and anyone who knows all participants&apos; pubkeys can locate the
+            category (they still can&apos;t read it). <strong>Recipients are fixed at send</strong> —
+            no group re-key or revocation yet.
+          </p>
+        </details>
       </div>
 
       {/* feed */}
@@ -1237,6 +1265,20 @@ function TwoUserDemo({
 
   const [sendingFrom, setSendingFrom] = useState<string | null>(null)
 
+  // "Copy link" — this demo is the thing people most want to share ("talk to yourself"), and the URL
+  // already carries ?demo=… (written by Chat), so the current href lands a visitor right back here.
+  const [copied, setCopied] = useState(false)
+  const copyLink = async () => {
+    const url = currentShareUrl()
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      window.prompt('Copy this link:', url)
+    }
+  }
+
   const post = async (from: DemoParticipant, to: DemoParticipant, text: string) => {
     if (!board || !text.trim() || sendingFrom) return
     setSendingFrom(from.name)
@@ -1269,6 +1311,13 @@ function TwoUserDemo({
           Two independent identities exchanging <strong>real</strong> end-to-end encrypted messages
           over this board. Send from either side; watch it decrypt on the other.
         </span>
+        <button
+          type="button"
+          onClick={() => void copyLink()}
+          title="Copy a link that reopens this demo"
+          className="inline-flex shrink-0 items-center gap-1 rounded-md bg-white px-2.5 py-1 text-xs font-medium text-violet-700 ring-1 ring-violet-300 hover:bg-violet-100 dark:bg-gray-800 dark:text-violet-200 dark:ring-violet-800 dark:hover:bg-gray-700">
+          <Icon icon={copied ? 'mdi:check' : 'mdi:link-variant'} className="size-3.5" /> {copied ? 'copied' : 'copy link'}
+        </button>
         <button
           type="button"
           onClick={onClose}
