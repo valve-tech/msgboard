@@ -393,7 +393,7 @@ function ChannelPane({
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 dark:bg-gray-800 dark:ring-gray-700">
+    <div className="flex w-full flex-col overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 dark:bg-gray-800 dark:ring-gray-700">
       <ModeBar active={activeMode} onChange={onMode} />
       {/* channel / room bar */}
       <div className="flex items-center gap-3 border-b border-gray-200 px-4 py-2.5 dark:border-gray-700">
@@ -846,7 +846,7 @@ function AnonymousRoom({ activeMode, onMode, workerFactory, zkWorkerFactory }: A
   const disabled = working || !rpcValid || !board || provingUnavailable
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 dark:bg-gray-800 dark:ring-gray-700">
+    <div className="flex w-full flex-col overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 dark:bg-gray-800 dark:ring-gray-700">
       <ModeBar active={activeMode} onChange={onMode} />
       {/* header bar — room identity + prover state + narrow-screen view toggle */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-gray-200 px-4 py-2.5 dark:border-gray-700">
