@@ -58,6 +58,10 @@ services:
       INTERVAL_MS: "3600000"
       THRESHOLD: "2"
       COSIGN_INDICES: "40,41,42"
+      # The deterministic fleet Safe (derived from the signer set — logged by the bot on first
+      # boot) and the live gasless-deploy relay. Both public config, so they live here, not .env.
+      SAFE_943: "0x67D4FBA30DFeFb1AA2d199c33e239dc6BCAfF705"
+      RELAY_URL: "https://cosign.msgboard.xyz/relay"
     command: node cosign-bot.mjs
   cast-watcher-369:
     image: node:24-alpine
