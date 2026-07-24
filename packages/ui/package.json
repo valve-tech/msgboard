@@ -21,7 +21,8 @@
     "react-dom": "^18.3.1",
     "shiki": "^3.4.1",
     "viem": "^2.25.0",
-    "zustand": "^4.5.5"
+    "zustand": "^4.5.5",
+    "@msgboard/pow-grinder": "^0.1.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.51.1",
