@@ -37,6 +37,7 @@ import { SudokuScreen } from './components/SudokuScreen'
 import { WordleScreen } from './components/WordleScreen'
 import { LiveFeed } from './components/LiveFeed'
 import { StandingsScreen } from './components/StandingsScreen'
+import { Lobby } from './components/Lobby'
 import { Menu } from './components/Menu'
 
 const short = (a?: viem.Hex) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '')
@@ -48,6 +49,7 @@ const chainIcon = (chainId: number): string | undefined =>
 
 /** The venue's table list — too many for a tab strip now, so the picker is a select-style Menu. */
 const GAMES = [
+  { id: 'lobby', label: '🏛 The Floor' },
   { id: 'coinflip', label: '🪙 Coin Flip' },
   { id: 'flipx', label: '✍️ Signed Flips' },
   { id: 'raffle', label: '🎟 The Numbers' },
@@ -92,7 +94,7 @@ const VALIDATOR_GAMES = new Set<Tab>(['raffle'])
 const P2P_GAMES = new Set<Tab>(['coinflip', 'flipx'])
 const ZK_GAMES = new Set<Tab>(['sudoku', 'wordle'])
 const trustModelFor = (tab: Tab): TrustModel | null =>
-  tab === 'live' || tab === 'standings'
+  tab === 'live' || tab === 'standings' || tab === 'lobby'
     ? null
     : VALIDATOR_GAMES.has(tab)
       ? 'validator'
@@ -107,7 +109,7 @@ const trustModelFor = (tab: Tab): TrustModel | null =>
 const readParams = () => new URLSearchParams(window.location.search)
 const initialTab = (): Tab => {
   const g = readParams().get('game')
-  return GAMES.some((x) => x.id === g) ? (g as Tab) : 'coinflip'
+  return GAMES.some((x) => x.id === g) ? (g as Tab) : 'lobby'
 }
 const initialDeploymentIndex = (): number => {
   const c = readParams().get('chain')
@@ -257,6 +259,14 @@ export const App = () => {
           deployment={deployment}
           model={trustModel}
           onAcknowledged={() => setTrustAcknowledged(true)}
+        />
+      )}
+      {tab === 'lobby' && (
+        <Lobby
+          deployment={deployment}
+          games={GAMES.filter((g) => !['lobby', 'standings', 'live'].includes(g.id))}
+          trustFor={(id) => trustModelFor(id as Tab)}
+          onPick={(id) => setTab(id as Tab)}
         />
       )}
       {tab === 'coinflip' && (
