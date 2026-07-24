@@ -41,11 +41,11 @@ const cards: Card[] = [
 /** Ported from `SalesPitch.svelte` — the four-up value-prop grid. */
 export function SalesPitch() {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 px-8 py-12 max-w-7xl mx-auto">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-4 px-8 py-12 max-w-7xl mx-auto">
       {cards.map((c) => (
         <div
           key={c.title}
-          className="group flex-1 text-center p-6 rounded-xl transition-all duration-200 hover:-translate-y-1 border border-slate-200/10">
+          className="group flex-1 text-center p-6 rounded-xl transition-all duration-200 hover:-translate-y-1 bg-slate-500/[0.03] ring-1 ring-inset ring-slate-200/10 hover:ring-emerald-500/30">
           <div className="flex justify-center mb-4">
             <Icon
               icon={c.icon}

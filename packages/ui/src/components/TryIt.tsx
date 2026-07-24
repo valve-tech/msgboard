@@ -27,7 +27,9 @@ export function TryIt({ workerFactory }: { workerFactory?: () => Worker }) {
   const current = SECTIONS.find((s) => s.id === active)!
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 p-4">
+    // The chat tabs read best at a column width; Mechanics is a data-dense compose + terminal +
+    // tree layout, so give it room to breathe.
+    <div className={`mx-auto flex w-full flex-col gap-3 p-4 ${active === 'mechanics' ? 'max-w-6xl' : 'max-w-3xl'}`}>
       <div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="try it sections">
         {SECTIONS.map((s) => {
           const on = s.id === active
