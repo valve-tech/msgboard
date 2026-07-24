@@ -1,6 +1,6 @@
 {
   "name": "@msgboard/sdk",
-  "version": "0.0.33",
+  "version": "0.0.34",
   "description": "MsgBoard client SDK for the msgboard_ JSON-RPC module",
   "repository": "github:valve-tech/msgboard",
   "author": "MsgBoard",
