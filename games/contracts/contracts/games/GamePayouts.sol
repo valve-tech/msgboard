@@ -92,6 +92,8 @@ library GamePayouts {
             payout = _andarBahar(r, params, stake);
         } else if (gameId == 24) {
             payout = _cascade(r, stake);
+        } else if (gameId == 25) {
+            payout = _roulette(r, params, stake);
         } else {
             revert UnknownGame();
         }
@@ -480,5 +482,73 @@ library GamePayouts {
 
         uint256 mult = _edgedX100(GameTables.kenoFair(p, hits));
         return mult > HUNDREDTHS ? stake * mult / HUNDREDTHS : 0;
+    }
+
+    // ================================ roulette (gameId 25) ================================
+
+    /// European single-zero roulette — mirror src/games/roulette.ts. 37 pockets (0..36); the winning
+    /// pocket is r % 37. Each bet is resolved independently against that pocket and the round payout is
+    /// the SUM of the winning bets (multi-bet). The house edge is STRUCTURAL (the single green zero), so
+    /// these are the TRUE European multiples with NO edge helper: straight-up 36×, dozen/column 3×,
+    /// even-money 2×. `stake` (escrowPlayer) must equal the sum of bet stakes.
+    uint256 internal constant ROULETTE_POCKETS = 37;
+    /// red pockets as a bitmask (bit n set ⇒ n is red) — mirror RED_MASK in roulette.ts.
+    uint256 internal constant ROULETTE_RED_MASK = 91447186090;
+    uint256 internal constant ROULETTE_MAX_BETS = 64;
+
+    /// params tuple element — mirror RouletteBet {type, selection, stake} (viem tuple[] positional).
+    struct RouletteBet {
+        uint8 betType;
+        uint8 selection;
+        uint256 stake;
+    }
+
+    function _rouletteIsRed(uint256 p) private pure returns (bool) {
+        if (p < 1 || p > 36) return false;
+        return ((ROULETTE_RED_MASK >> p) & 1) == 1;
+    }
+
+    /// Does a bet win against the spun `pocket`? Mirror betWins in roulette.ts.
+    function _rouletteBetWins(uint8 betType, uint8 selection, uint256 p) private pure returns (bool) {
+        if (betType == 0) return p == selection;                          // straight
+        if (betType == 1) return _rouletteIsRed(p);                       // red
+        if (betType == 2) return p >= 1 && p <= 36 && !_rouletteIsRed(p); // black
+        if (betType == 3) return p >= 1 && p <= 36 && p % 2 == 1;         // odd
+        if (betType == 4) return p >= 1 && p <= 36 && p % 2 == 0;         // even
+        if (betType == 5) return p >= 19 && p <= 36;                      // high
+        if (betType == 6) return p >= 1 && p <= 18;                       // low
+        if (betType == 7) return p >= 1 && p <= 36 && (p - 1) / 12 == selection; // dozen
+        if (betType == 8) return p >= 1 && p <= 36 && (p - 1) % 3 == selection;  // column
+        return false;
+    }
+
+    /// stake-inclusive payout multiple (×100) a bet type pays when it wins — mirror rouletteBetPayoutX100.
+    function _rouletteBetPayoutX100(uint8 betType) private pure returns (uint256) {
+        if (betType == 0) return 3600;            // straight 35:1
+        if (betType == 7 || betType == 8) return 300; // dozen/column 2:1
+        return 200;                               // even money 1:1
+    }
+
+    function _roulette(uint256 r, bytes memory params, uint256 stake) private pure returns (uint256) {
+        RouletteBet[] memory bets = abi.decode(params, (RouletteBet[]));
+        require(bets.length >= 1 && bets.length <= ROULETTE_MAX_BETS, "roulette: bad bet count");
+        uint256 pocket = r % ROULETTE_POCKETS;
+        uint256 totalStake = 0;
+        uint256 payout = 0;
+        for (uint256 i = 0; i < bets.length; i++) {
+            uint8 bt = bets[i].betType;
+            uint8 sel = bets[i].selection;
+            require(bt <= 8, "roulette: bad bet type");
+            require(bets[i].stake > 0, "roulette: zero stake");
+            if (bt == 0) require(sel < 37, "roulette: bad straight selection");
+            else if (bt == 7 || bt == 8) require(sel < 3, "roulette: bad dozen/column selection");
+            else require(sel == 0, "roulette: selection must be 0");
+            totalStake += bets[i].stake;
+            if (_rouletteBetWins(bt, sel, pocket)) {
+                payout += bets[i].stake * _rouletteBetPayoutX100(bt) / HUNDREDTHS;
+            }
+        }
+        require(totalStake == stake, "roulette: stake must equal sum of bets");
+        return payout;
     }
 }
