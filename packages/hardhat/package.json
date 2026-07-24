@@ -40,7 +40,7 @@
     "dist"
   ],
   "devDependencies": {
-    "@nomicfoundation/hardhat-network-helpers": "^1.0.8",
+    "@nomicfoundation/hardhat-network-helpers": "^3.0.11",
     "hardhat": "^2.16.1",
     "nyc": "^17.1.0",
     "solidity-coverage": "^0.8.15",
