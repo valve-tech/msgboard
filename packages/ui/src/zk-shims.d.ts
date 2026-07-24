@@ -1,4 +1,4 @@
-// snarkjs and circomlibjs ship no TypeScript declarations. ZkChat's proving/verifying Web
+// snarkjs and circomlibjs ship no TypeScript declarations. Whisper's proving/verifying Web
 // Worker (src/worker/zk-worker.ts) dynamically imports snarkjs (Groth16 fullProve/verify)
 // and statically imports circomlibjs (buildPoseidon, for the identity commitment + Merkle
 // tree). Mirror of games/web/src/zk-shims.d.ts so those imports typecheck here.

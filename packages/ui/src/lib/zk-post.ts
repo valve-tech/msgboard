@@ -6,7 +6,7 @@
  * module: same `ZkPost` shape, same `[root, nullifierHash, externalNullifier, signalHash]`
  * public-signal order, same `encodePost = toHex(JSON.stringify(post))`, same `decodePost`
  * validation, and the same `signalHash`/`externalNullifier` keccak reductions. A message
- * posted by ZkChat therefore decodes and verifies under the EXISTING zk-msgboard watcher /
+ * posted by Whisper therefore decodes and verifies under the EXISTING zk-msgboard watcher /
  * archive (packages/examples), and vice-versa.
  *
  * Everything here uses only viem (keccak256) — NO circomlibjs/snarkjs — so it is safe to
