@@ -14,12 +14,14 @@ import { CrashScreen } from './components/CrashScreen'
 import { PlinkoScreen } from './components/PlinkoScreen'
 import { PachinkoScreen } from './components/PachinkoScreen'
 import { WheelScreen } from './components/WheelScreen'
+import { RouletteScreen } from './components/RouletteScreen'
 import { MonteScreen } from './components/MonteScreen'
 import { BaccaratScreen } from './components/BaccaratScreen'
 import { DragonTigerScreen } from './components/DragonTigerScreen'
 import { AndarBaharScreen } from './components/AndarBaharScreen'
 import { CrapsScreen } from './components/CrapsScreen'
 import { ThreeCardPokerScreen } from './components/ThreeCardPokerScreen'
+import { PaiGowScreen } from './components/PaiGowScreen'
 import { VideoPokerScreen } from './components/VideoPokerScreen'
 import { BlackjackScreen } from './components/BlackjackScreen'
 import { KenoScreen } from './components/KenoScreen'
@@ -28,6 +30,7 @@ import { TowersScreen } from './components/TowersScreen'
 import { ChickenScreen } from './components/ChickenScreen'
 import { FirewalkScreen } from './components/FirewalkScreen'
 import { HeistScreen } from './components/HeistScreen'
+import { CipherScreen } from './components/CipherScreen'
 import { HiLoScreen } from './components/HiLoScreen'
 import { GreedDiceScreen } from './components/GreedDiceScreen'
 import { CascadeScreen } from './components/CascadeScreen'
@@ -60,12 +63,14 @@ const GAMES = [
   { id: 'plinko', label: '⚪ Plinko' },
   { id: 'pachinko', label: '🔴 Pachinko' },
   { id: 'wheel', label: '🎡 Wheel' },
+  { id: 'roulette', label: '🎯 Roulette' },
   { id: 'monte', label: '🃏 Monte' },
   { id: 'baccarat', label: '🀄 Baccarat' },
   { id: 'dragon-tiger', label: '🐲 Dragon Tiger' },
   { id: 'andar-bahar', label: '🎴 Andar Bahar' },
   { id: 'craps', label: '🎲 Craps' },
   { id: 'three-card', label: '🃏 Three Card Poker' },
+  { id: 'pai-gow', label: '🀄 Pai Gow' },
   { id: 'video-poker', label: '🎰 Video Poker' },
   { id: 'blackjack', label: '🂡 Blackjack' },
   { id: 'keno', label: '🔢 Keno' },
@@ -74,6 +79,7 @@ const GAMES = [
   { id: 'chicken', label: '🐔 Chicken' },
   { id: 'firewalk', label: '🔥 Firewalk' },
   { id: 'heist', label: '💰 Heist' },
+  { id: 'cipher', label: '🔐 Cipher' },
   { id: 'hilo-ladder', label: '🔼 Hi-Lo' },
   { id: 'greed-dice', label: '🎲 Greed Dice' },
   { id: 'cascade', label: '🍒 Cascade' },
@@ -350,6 +356,14 @@ export const App = () => {
           myAddress={wallet.address}
         />
       )}
+      {tab === 'roulette' && (
+        <RouletteScreen
+          deployment={deployment}
+          walletClient={wallet.walletClient}
+          trustAcknowledged={trustAcknowledged}
+          myAddress={wallet.address}
+        />
+      )}
       {tab === 'monte' && (
         <MonteScreen
           deployment={deployment}
@@ -392,6 +406,14 @@ export const App = () => {
       )}
       {tab === 'three-card' && (
         <ThreeCardPokerScreen
+          deployment={deployment}
+          walletClient={wallet.walletClient}
+          trustAcknowledged={trustAcknowledged}
+          myAddress={wallet.address}
+        />
+      )}
+      {tab === 'pai-gow' && (
+        <PaiGowScreen
           deployment={deployment}
           walletClient={wallet.walletClient}
           trustAcknowledged={trustAcknowledged}
@@ -456,6 +478,14 @@ export const App = () => {
       )}
       {tab === 'heist' && (
         <HeistScreen
+          deployment={deployment}
+          walletClient={wallet.walletClient}
+          trustAcknowledged={trustAcknowledged}
+          myAddress={wallet.address}
+        />
+      )}
+      {tab === 'cipher' && (
+        <CipherScreen
           deployment={deployment}
           walletClient={wallet.walletClient}
           trustAcknowledged={trustAcknowledged}

@@ -9,13 +9,13 @@
 # mnemonic, NOT the contracts deployer) is never written by this play, only asserted present.
 #
 #   ansible-playbook deploy-games-actors.yml [-e games_repo=/path/to/msgboard]
-- name: Deploy the games actor fleet (cast-watcher + player-bots + flipbook-bots + cosign-bot)
+- name: Deploy the games actor fleet (cast-watcher + player-bots + flipbook-bots + cosign-bot + session-bots)
   hosts: msgboard
   gather_facts: false
   vars:
     games_repo: "{{ playbook_dir }}/.."
     actors_dir: /opt/games-actors
-    bundles: [cast-watcher, player-bots, flipbook-bots, cosign-bot]
+    bundles: [cast-watcher, player-bots, flipbook-bots, cosign-bot, session-bots]
   tasks:
     - name: The actor sources must exist locally
       ansible.builtin.stat:
@@ -35,7 +35,7 @@
         cmd: >-
           npx esbuild scripts/{{ item }}.ts --bundle --platform=node --target=node24
           --format=esm
-          --banner:js="import { createRequire } from 'module'; const require = createRequire(import.meta.url);"
+          --banner:js="import { createRequire as __esbuildCreateRequire } from 'module'; const require = __esbuildCreateRequire(import.meta.url);"
           --outfile=/tmp/games-actors-build/{{ item }}.mjs
         chdir: "{{ games_repo }}/games/e2e"
       loop: "{{ bundles }}"
@@ -86,10 +86,11 @@
           {{ (['cast-watcher', 'cast-watcher-369'] if 'cast-watcher' in changed_bundles else [])
            + (['player-bots', 'player-bots-369'] if 'player-bots' in changed_bundles else [])
            + (['flipbook-bots'] if 'flipbook-bots' in changed_bundles else [])
-           + (['cosign-bot'] if 'cosign-bot' in changed_bundles else []) }}
+           + (['cosign-bot'] if 'cosign-bot' in changed_bundles else [])
+           + (['session-bots'] if 'session-bots' in changed_bundles else []) }}
       when: restart_targets | length > 0
 
-    - name: Smoke — all six services are up
+    - name: Smoke — all seven services are up
       ansible.builtin.shell: >-
         set -o pipefail;
         docker compose ps --format '{{ '{{' }}.Service{{ '}}' }} {{ '{{' }}.State{{ '}}' }}' | sort
@@ -99,7 +100,7 @@
       register: fleet
       changed_when: false
       failed_when: >-
-        fleet.stdout_lines | select('search', ' running') | list | length != 6
+        fleet.stdout_lines | select('search', ' running') | list | length != 7
 
     # No --tail: the banner prints once at startup, and a long-running unchanged service (no
     # restart this run — by design) has it far beyond any tail window. NO pipefail here — grep -q
@@ -119,6 +120,7 @@
         - { svc: cast-watcher-369, banner: "cast watcher on chain 369" }
         - { svc: player-bots-369, banner: "player bots on chain 369" }
         - { svc: cosign-bot, banner: "cosign bot on chain 943" }
+        - { svc: session-bots, banner: "session bots on chain 943" }
       changed_when: false
       register: banner
       retries: 2

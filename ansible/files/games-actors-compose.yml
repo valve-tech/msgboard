@@ -63,6 +63,24 @@ services:
       SAFE_943: "0x67D4FBA30DFeFb1AA2d199c33e239dc6BCAfF705"
       RELAY_URL: "https://cosign.msgboard.xyz/relay"
     command: node cosign-bot.mjs
+  # Off-chain session tables: keeps every @msgboard/games table alive on 943 — all 16 single-draw
+  # games (dice/limbo/plinko/keno/crash/pachinko/wheel/monte/dicex2/baccarat/dragonTiger/andarBahar/
+  # cascade/roulette + wordle), all 7 ladder games (towers/chicken/firewalk/heist/hilo/greedDice/
+  # cipher), the decision card games (blackjack/threeCardPoker/videoPoker/paiGow), stateful mines,
+  # the sudoku solver, and the two-peer hilo-war ZK duel. In-process HouseSession co-sign (no on-chain
+  # tx, no funded key — just MNEMONIC at addressIndex 30). BOARD_FEED is off by default; set it to "1"
+  # once the WASM grinder is wired into the bundle to light up the games.msgboard.xyz:lobby:943 feed.
+  session-bots:
+    image: node:24-alpine
+    restart: unless-stopped
+    working_dir: /app
+    volumes: [ "./:/app" ]
+    env_file: .env
+    environment:
+      CHAIN: "943"
+      CONFIG: /app/943-deployment.json
+      RPC: "https://one.valve.city/rpc/${VALVE_RPC_KEY}/evm/943"
+    command: node session-bots.mjs
   cast-watcher-369:
     image: node:24-alpine
     restart: unless-stopped
