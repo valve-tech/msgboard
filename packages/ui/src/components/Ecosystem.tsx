@@ -23,7 +23,7 @@ const products: Product[] = [
     external: true,
   },
   {
-    title: 'The archive',
+    title: 'The Archive',
     description:
       'The board keeps only the last ~120 blocks, so history is captured off to the side. The archive is the durable, read-only GraphQL record of every message that has crossed the board — query it by category, content, or time.',
     icon: 'mdi:database-clock-outline',
@@ -56,7 +56,7 @@ const products: Product[] = [
 export function Ecosystem() {
   return (
     <div className="flex flex-col gap-4 text-center py-16 px-4">
-      <h2 className="text-3xl font-bold text-slate-900 dark:text-gray-100 pb-1">The ecosystem</h2>
+      <h2 className="text-3xl font-bold text-slate-900 dark:text-gray-100 pb-1">The Ecosystem</h2>
       <p className="mx-auto max-w-2xl text-slate-600 dark:text-gray-300 pb-4">
         Apps and archives built on the board — live today, or runnable as a pattern.
       </p>
