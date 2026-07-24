@@ -59,7 +59,10 @@ jobs:
 
   games-node:
     # The games platform's engine suite (@msgboard/games — RNG/payout/fairness for all 30 games,
-    # incl. the keno drain regression) + typechecks for the games engine and the actor/bot scripts.
+    # incl. the keno drain regression) + the engine typecheck. The @msgboard/games-e2e typecheck is
+    # intentionally excluded: it pulls in built @msgboard/games-contracts artifacts (hardhat compile)
+    # and @msgboard/cosign dist, which the games-foundry job already validates the contract side of;
+    # the actor/bot scripts are typechecked locally and exercised by the live deploy smoke.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -69,7 +72,6 @@ jobs:
       - run: npm ci
       - run: npm run test --workspace @msgboard/games
       - run: npm run typecheck --workspace @msgboard/games
-      - run: npm run typecheck --workspace @msgboard/games-e2e
 
   games-foundry:
     # The games contracts' fuzz + invariant suite (HouseChannel/GamePayouts/… — incl. the
