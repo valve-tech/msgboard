@@ -2,7 +2,7 @@ import { Welcome } from '../components/Welcome'
 import { FullScreen } from '../components/FullScreen'
 import { SalesPitch } from '../components/SalesPitch'
 import { ProtocolComparison } from '../components/ProtocolComparison'
-import { Interactive } from '../components/Interactive'
+import { TryIt } from '../components/TryIt'
 import { NextSteps } from '../components/NextSteps'
 import { Footer } from '../components/Footer'
 import { Docs } from '../components/Docs'
@@ -38,7 +38,7 @@ export function Home() {
         <FullScreen
           id="interactive-container"
           className="flex bg-gray-50 dark:bg-gray-900 w-full flex-row items-center justify-center shadow">
-          <Interactive />
+          <TryIt />
         </FullScreen>
       </section>
       <section id="use-cases" className="scroll-mt-16">
