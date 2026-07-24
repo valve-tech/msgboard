@@ -1,6 +1,6 @@
 {
   "name": "@msgboard/sdk",
-  "version": "0.0.32",
+  "version": "0.0.33",
   "description": "MsgBoard client SDK for the msgboard_ JSON-RPC module",
   "repository": "github:valve-tech/msgboard",
   "author": "MsgBoard",
@@ -65,6 +65,7 @@
     "bn.js": "^5.2.1",
     "debug": "^4.4.0",
     "elliptic": "^6.6.1",
-    "viem": "^2.25.0"
+    "viem": "^2.25.0",
+    "@msgboard/pow-grinder": "^0.1.0"
   }
 }

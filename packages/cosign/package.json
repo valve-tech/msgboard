@@ -1,6 +1,6 @@
 {
   "name": "@msgboard/cosign",
-  "version": "0.0.32",
+  "version": "0.0.33",
   "description": "Generic signature-share SDK over MsgBoard, bucketed under rotating day-granular category keys",
   "repository": "github:valve-tech/msgboard",
   "author": "MsgBoard",
@@ -39,7 +39,7 @@
     "dist/"
   ],
   "dependencies": {
-    "@msgboard/sdk": "^0.0.32",
+    "@msgboard/sdk": "^0.0.33",
     "viem": "^2.25.0"
   },
   "devDependencies": {

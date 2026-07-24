@@ -15,8 +15,18 @@ import type {
   WorkStats,
 } from '@msgboard/core'
 import { categoryHash, createChallengeSearch, difficulty, encodeData, toRLP } from '@msgboard/core'
+import { loadDefaultStamper, type Stamper } from './grinder.js'
 
 export * from '@msgboard/core'
+export { loadDefaultStamper, wrapEngineStamp, type Stamp, type StampInput, type Stamper } from './grinder.js'
+
+/**
+ * Client config, extended with the fast-grind seam:
+ * - `stamper` omitted (undefined) → auto-detect the fastest engine (native → WASM → JS grind);
+ * - `stamper: fn` → use the given engine (e.g. a bundler-resolved WASM `wrapEngineStamp`);
+ * - `stamper: null` → force the pure-JS grind (the pre-0.0.33 behavior).
+ */
+export type ClientConfig = Config & { stamper?: Stamper | null }
 
 const veryHighLimit = 100_000_000n
 
@@ -42,7 +52,7 @@ export class MsgBoardClient {
 
   constructor(
     protected provider: Provider,
-    config: Config = {},
+    config: ClientConfig = {},
   ) {
     this._difficultyFactors = {
       workMultiplier: 10_000n,
@@ -52,6 +62,21 @@ export class MsgBoardClient {
     this.log = config.logger || defaultLogger
     this.breakInterval = config.breakInterval || 10_000n
     this.progressHandler = config.progress || (() => {})
+    this.configuredStamper = config.stamper
+  }
+
+  /** The `stamper` config verbatim: undefined = auto-detect, null = JS grind, fn = use it. */
+  private configuredStamper: Stamper | null | undefined
+
+  private stamperPromise: Promise<Stamper | null> | undefined
+
+  /** Resolve the fast engine once per client (never throws — null means JS grind). */
+  private resolveStamper(): Promise<Stamper | null> {
+    this.stamperPromise ??=
+      this.configuredStamper !== undefined
+        ? Promise.resolve(this.configuredStamper)
+        : loadDefaultStamper().catch(() => null)
+    return this.stamperPromise
   }
 
   get difficultyFactors() {
@@ -81,6 +106,11 @@ export class MsgBoardClient {
    * @returns a promise that will resolve with a valid work object, containing a pow
    * message that can be submitted to the API and a stats object about the work that was done
    */
+  /** Preferred name for {@link doPoW}: grind a valid proof-of-work stamp for the message. */
+  grind(category: Hex | string, data: Hex | string, limit = veryHighLimit): Promise<WorkResult> {
+    return this.doPoW(category, data, limit)
+  }
+
   async doPoW(category: Hex | string, data: Hex | string, limit = veryHighLimit): Promise<WorkResult> {
     this.log('starting pow on message')
     this.cancelled = false
@@ -127,6 +157,41 @@ export class MsgBoardClient {
     const { breakInterval } = this
     const start = Date.now()
     this.progressHandler({ ...stats })
+
+    // ── fast path: the pow-grinder engine (native or WASM), ~1-2s per stamp vs the JS loop's
+    // tens of seconds. The engine grinds against a SNAPSHOT of the block info (a stamp stays
+    // valid for the board's ~120-block window, so mid-grind block updates don't matter the way
+    // they do for the long JS grind). Any engine failure falls through to the JS loop below.
+    const stamper = await this.resolveStamper()
+    if (stamper) {
+      try {
+        const blockHash = message.blockHash
+        const blockNumber = message.blockNumber
+        const { nonce, hash } = await stamper({
+          category: message.category,
+          data: message.data,
+          workMultiplier: message.workMultiplier,
+          workDivisor: message.workDivisor,
+          blockHash,
+        })
+        if (!this.cancelled) {
+          message.nonce = nonce
+          message.hash = hash
+          message.blockHash = blockHash
+          message.blockNumber = blockNumber
+          stats.iterations = nonce + 1n // the engine searches consecutive nonces from 0
+          stats.duration = Date.now() - start
+          stats.isValid = true
+          this.progressHandler({ ...stats })
+          killPoll = true
+          return { message, stats }
+        }
+        killPoll = true
+        return { message, stats }
+      } catch (err) {
+        this.log('pow-grinder engine failed, falling back to JS grind: %o', err)
+      }
+    }
 
     // Incremental challenge search: advances the challenge point by one curve ADDITION
     // per nonce instead of a full scalar MULTIPLY, ~10x faster while staying bit-identical
