@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Icon } from '@iconify/react'
 import { Chat } from './Chat'
 import { Interactive } from './Interactive'
+import { Arcade } from './Arcade'
 
 /**
  * The "Try it" shell — flippable sections over one board. The room comes first: a visitor's first
@@ -14,15 +15,12 @@ import { Interactive } from './Interactive'
  * (the board content is polled once for the whole page).
  */
 
-type SectionId = 'chat' | 'mechanics'
+type SectionId = 'chat' | 'mechanics' | 'arcade'
 
 const SECTIONS: { id: SectionId; label: string; icon: string; blurb: string }[] = [
   { id: 'chat', label: 'Chat', icon: 'mdi:chat-outline', blurb: 'a live room — pick a privacy mode (public, anonymous, or encrypted) and say something' },
   { id: 'mechanics', label: 'Mechanics', icon: 'mdi:cog-outline', blurb: 'compose a raw message and watch the proof-of-work + wire format' },
-  // FUTURE: a "featured app" tab would slot in here — a showcase built on the board transport
-  // (e.g. a game or a mini-app). Add its { id, label, icon, blurb } entry, widen the SectionId
-  // union, give it a content width below, and render its component in the switch. Do not build it
-  // now — this comment marks the seam.
+  { id: 'arcade', label: 'Arcade', icon: 'mdi:dice-multiple', blurb: 'a provably-fair coin flip over the board — the arcade\'s whole thesis in one tab' },
 ]
 
 export function TryIt({ workerFactory }: { workerFactory?: () => Worker }) {
@@ -63,6 +61,7 @@ export function TryIt({ workerFactory }: { workerFactory?: () => Worker }) {
           when you flip away and back. */}
       {active === 'chat' && <Chat workerFactory={workerFactory} />}
       {active === 'mechanics' && <Interactive workerFactory={workerFactory} />}
+      {active === 'arcade' && <Arcade workerFactory={workerFactory} />}
     </div>
   )
 }
