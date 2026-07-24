@@ -26,13 +26,14 @@ export function TryIt({ workerFactory }: { workerFactory?: () => Worker }) {
   const [active, setActive] = useState<SectionId>('channel')
   const current = SECTIONS.find((s) => s.id === active)!
 
+  // The OUTER shell is a constant width so the tab row never shifts when you switch tabs; each
+  // tab's content chooses its own width and centers within (Mechanics is a data-dense compose +
+  // terminal + tree layout that wants room; the chat tabs read best as a narrower column).
+  const contentWidth =
+    active === 'mechanics' ? 'max-w-6xl' : active === 'zk' ? 'max-w-5xl' : 'max-w-3xl'
+
   return (
-    // The chat tabs read best at a column width; Mechanics is a data-dense compose + terminal +
-    // tree layout, so give it room to breathe.
-    <div
-      className={`mx-auto flex w-full flex-col gap-3 p-4 ${
-        active === 'mechanics' ? 'max-w-6xl' : active === 'zk' ? 'max-w-5xl' : 'max-w-3xl'
-      }`}>
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 p-4">
       <div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="try it sections">
         {SECTIONS.map((s) => {
           const on = s.id === active
@@ -55,11 +56,14 @@ export function TryIt({ workerFactory }: { workerFactory?: () => Worker }) {
       </div>
       <p className="px-1 text-sm text-gray-500 dark:text-gray-400">{current.blurb}</p>
 
-      {/* Each section stays mounted-per-switch (simple remount) — cheap, and it resets transient
-          composer state cleanly when you flip away and back. */}
-      {active === 'channel' && <Channel workerFactory={workerFactory} />}
-      {active === 'zk' && <Whisper />}
-      {active === 'mechanics' && <Interactive workerFactory={workerFactory} />}
+      {/* Content centers at its own width WITHIN the constant-width shell, so the tab row above
+          never shifts. Each section stays mounted-per-switch (simple remount) — cheap, and it
+          resets transient composer state cleanly when you flip away and back. */}
+      <div className={`mx-auto w-full ${contentWidth}`}>
+        {active === 'channel' && <Channel workerFactory={workerFactory} />}
+        {active === 'zk' && <Whisper />}
+        {active === 'mechanics' && <Interactive workerFactory={workerFactory} />}
+      </div>
     </div>
   )
 }
