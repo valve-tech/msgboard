@@ -22,9 +22,17 @@ export class EscrowedSettlement<TParams> implements Settlement {
     return { address: this.cfg.channel, abi: houseChannelAbi, functionName: 'open', args: [terms, houseSig] }
   }
 
+  /** Build the cooperative HouseChannel.settle(close, sigPlayer, sigHouse) call. settle() now takes a
+   *  DISTINCT SessionClose both parties sign ONLY at mutual close — NOT the running SessionState — so
+   *  the transcript MUST carry a CLOSE envelope (HouseSession.authorizeClose / the house's close
+   *  handshake in runHouseSide). Without it the cooperative fast path is unavailable and the table must
+   *  fall back to dispute()/the clock. */
   async buildSettle(transcriptJson: string): Promise<TxRequest> {
-    const { final } = await replaySession(transcriptJson, this.cfg)
-    return { address: this.cfg.channel, abi: houseChannelAbi, functionName: 'settle', args: [final.state, final.sigPlayer, final.sigHouse] }
+    const { close } = await replaySession(transcriptJson, this.cfg)
+    if (!close) {
+      throw new Error('escrowed: transcript carries no mutual-close authorization — settle() needs a co-signed SessionClose (call authorizeClose / have the house co-sign the close at mutual close)')
+    }
+    return { address: this.cfg.channel, abi: houseChannelAbi, functionName: 'settle', args: [close.close, close.sigPlayer, close.sigHouse] }
   }
 
   /** Build a dispute() call posting the latest both-signed state. */

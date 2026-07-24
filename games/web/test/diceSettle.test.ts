@@ -25,6 +25,7 @@ import {
   type SessionConfig,
   type VerifyContext,
   type SessionState,
+  type SessionClose,
   type RoundProof,
   type CoSignTransport,
 } from '@msgboard/games'
@@ -99,12 +100,9 @@ function makeVerifyCtx(): VerifyContext<{ targetX100: bigint }> {
 function buildCoSignPair(
   onAccept?: (state: SessionState, proof?: RoundProof<unknown>) => void,
 ): { houseT: CoSignTransport; playerT: CoSignTransport } {
-  type Pending = {
-    state: SessionState
-    proof?: RoundProof<unknown>
-    resolve: (sig: Hex) => void
-    reject: (err: unknown) => void
-  }
+  type Pending =
+    | { kind: 'state'; state: SessionState; proof?: RoundProof<unknown>; resolve: (sig: Hex) => void; reject: (err: unknown) => void }
+    | { kind: 'close'; close: SessionClose; resolve: (sig: Hex) => void; reject: (err: unknown) => void }
   const queue: Pending[] = []
   const waiters: Array<(p: Pending) => void> = []
 
@@ -122,20 +120,30 @@ function buildCoSignPair(
 
   const houseT: CoSignTransport = {
     request: (state, proof) =>
-      new Promise<Hex>((resolve, reject) => push({ state, proof, resolve, reject })),
+      new Promise<Hex>((resolve, reject) => push({ kind: 'state', state, proof, resolve, reject })),
+    requestClose: (close) =>
+      new Promise<Hex>((resolve, reject) => push({ kind: 'close', close, resolve, reject })),
     serve: () => { throw new Error('houseT.serve not used') },
   }
 
+  let closeSigner: ((c: SessionClose) => Promise<Hex>) | undefined
+
   const playerT: CoSignTransport = {
     request: () => { throw new Error('playerT.request not used') },
+    serveClose: (sign) => { closeSigner = sign },
     serve: (sign) => {
       const loop = async () => {
         for (;;) {
           const p = await pull()
           try {
-            const sig = await sign(p.state, p.proof)
-            onAccept?.(p.state, p.proof)
-            p.resolve(sig)
+            if (p.kind === 'close') {
+              if (!closeSigner) throw new Error('player did not register a close signer')
+              p.resolve(await closeSigner(p.close))
+            } else {
+              const sig = await sign(p.state, p.proof)
+              onAccept?.(p.state, p.proof)
+              p.resolve(sig)
+            }
           } catch (err) {
             p.reject(err)
           }
@@ -335,11 +343,13 @@ describe('Through-useSession settle path — mode-1 end-to-end regression guard 
     })
     const tx = await esc.buildSettle(transcriptJson)
     expect(tx.functionName).toBe('settle')
-    const [finalState] = tx.args as [SessionState, ...unknown[]]
-    expect(finalState.nonce).toBe(1n)
-    expect(finalState.settlementMode).toBe(SETTLEMENT_MODE)
-    expect(finalState.balancePlayer).toBe(acceptedRound.balancePlayer)
-    expect(finalState.balanceHouse).toBe(acceptedRound.balanceHouse)
+    // settle() now takes (SessionClose, sigPlayer, sigHouse). SessionClose omits settlementMode by
+    // design (the type itself is the escrowed-close authorization); the mode-1 guard is the OPEN-entry
+    // settlementMode assertion above (a mode-0 regression would make replaySession throw before here).
+    const [close] = tx.args as [SessionClose, ...unknown[]]
+    expect(close.nonce).toBe(1n)
+    expect(close.balancePlayer).toBe(acceptedRound.balancePlayer)
+    expect(close.balanceHouse).toBe(acceptedRound.balanceHouse)
   })
 })
 

@@ -2,7 +2,7 @@ import * as viem from 'viem'
 import { expect } from 'chai'
 import hre from 'hardhat'
 import { privateKeyToAccount } from 'viem/accounts'
-import { HouseSession, dice, makeDomain } from '@msgboard/games'
+import { HouseSession, dice, makeDomain, hashSessionClose, closeFromState, type SessionClose } from '@msgboard/games'
 import { OptimisticSettlement, EscrowedSettlement, signOpenTerms, paramsHashOf, type OpenTerms } from '@msgboard/settle'
 
 const playerKey = privateKeyToAccount(`0x${'11'.repeat(32)}`)
@@ -104,14 +104,54 @@ describe('MsgBoard settlement E2E', () => {
     const houseSig = await signOpenTerms(houseKey, domain, terms)
     await playerWallet.writeContract({ address: ch.address, abi: ch.abi, functionName: 'open', args: [terms, houseSig] })
 
+    // Mutual close: both parties co-sign the DISTINCT SessionClose for the final state (appends a
+    // CLOSE envelope to the transcript). settle() now pays from this close, NOT the running state.
+    await s.authorizeClose()
+
     const esc = new EscrowedSettlement({
       parties: { player: playerKey.address, house: houseKey.address }, commit: s.chain.commit,
       game: dice, domain, settlementMode: 1, channel: ch.address,
     })
     const tx = await esc.buildSettle(s.transcript.toJSON())
+    // args are now [SessionClose, sigPlayerClose, sigHouseClose] — the co-signed mutual close.
     await house.writeContract({ address: tx.address, abi: tx.abi as viem.Abi, functionName: tx.functionName, args: tx.args })
 
     const bal = await chips.read.balanceOf([playerKey.address])
     expect(bal).to.equal(1_000n - 200n + s.state.balancePlayer)
+  })
+
+  // CRITICAL PARITY: the off-chain SessionClose EIP-712 digest MUST equal the on-chain closeDigest(),
+  // or the close-signatures the off-chain builds would never recover to the parties in
+  // _checkCloseCoSigned and the escrowed settle path would be unspendable. Deploy HouseChannel, build a
+  // sample SessionClose, and assert hashSessionClose(domain, close) === ch.closeDigest(close) on-chain.
+  it('escrowed: off-chain SessionClose digest EQUALS on-chain closeDigest() (signature-recovery parity)', async () => {
+    const publicClient = await hre.viem.getPublicClient()
+    const chainId = await publicClient.getChainId()
+
+    const chips = await hre.viem.deployContract('Chips')
+    const ch = await hre.viem.deployContract('HouseChannel', [chips.address])
+    const domain = makeDomain(chainId, ch.address)
+
+    const close: SessionClose = {
+      tableId: viem.keccak256(viem.toHex('parity-table')),
+      nonce: 5n,
+      balancePlayer: 260n,
+      balanceHouse: 140n,
+      gameId: 1,
+    }
+
+    const offChain = hashSessionClose(domain, close)
+    const onChain = await ch.read.closeDigest([close])
+    expect(offChain).to.equal(onChain)
+
+    // And a projection of a real running state hashes identically — the exact bytes settle() recovers.
+    const s = new HouseSession({
+      domain, tableId: close.tableId, game: dice, player: playerKey, house: houseKey,
+      seedTip: tip, chainLength: 4, openBalances: { player: 200n, house: 200n }, settlementMode: 1,
+    })
+    await s.open()
+    await s.playRound({ stake: 20n, params: { targetX100: 5000n }, clientSeed: `0x${'01'.repeat(32)}` as viem.Hex })
+    const projected = closeFromState(s.state)
+    expect(hashSessionClose(domain, projected)).to.equal(await ch.read.closeDigest([projected]))
   })
 })

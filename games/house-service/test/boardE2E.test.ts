@@ -19,7 +19,7 @@ import { privateKeyToAccount } from 'viem/accounts'
 import type { Hex } from 'viem'
 import {
   commitSeed, buildSeedChain, makeDomain, dice, limbo,
-  runPlayerSide, verifyFinishedSession,
+  runPlayerSide, verifyFinishedSession, verifyCloseSig,
   type BoardClient, type VerifyContext, type DiceParams, type LimboParams,
 } from '@msgboard/games'
 import { makeBoardPlayerSession, EscrowedSettlement } from '@msgboard/settle'
@@ -128,10 +128,16 @@ describe('board E2E — real startHouse ↔ real board player session', () => {
     })
     const settleTx = await esc.buildSettle(transcriptJson)
     expect(settleTx.functionName).toBe('settle')
-    const finalState = settleTx.args[0] as { nonce: bigint; balancePlayer: bigint; balanceHouse: bigint }
-    expect(finalState.nonce).toBe(1n) // one roll per table → final state is nonce 1
+    // settle() now takes (SessionClose, sigPlayer, sigHouse). The house co-signed the mutual close over
+    // the board (close-req/close-rep) after the final round, so buildSettle has real close-sigs.
+    const close = settleTx.args[0] as { tableId: `0x${string}`; nonce: bigint; balancePlayer: bigint; balanceHouse: bigint; gameId: number }
+    expect(close.nonce).toBe(1n) // one roll per table → mutual close of the nonce-1 final state
     // conservation: the round only moves chips between the two parties; the pot is constant.
-    expect(finalState.balancePlayer + finalState.balanceHouse).toBe(terms.escrowPlayer + terms.escrowHouse)
+    expect(close.balancePlayer + close.balanceHouse).toBe(terms.escrowPlayer + terms.escrowHouse)
+    // both close-sigs recover to the parties over the DISTINCT SessionClose type — the exact bytes the
+    // HouseChannel contract's _checkCloseCoSigned recovers on-chain.
+    expect(await verifyCloseSig(playerAccount.address, domain, close, settleTx.args[1] as `0x${string}`)).toBe(true)
+    expect(await verifyCloseSig(houseAccount.address, domain, close, settleTx.args[2] as `0x${string}`)).toBe(true)
 
     // onAccept observed the player co-signing both the OPEN (nonce 0) and ROUND (nonce 1) states —
     // the capture path the web receipt relies on.
@@ -214,9 +220,12 @@ describe('board E2E — real startHouse ↔ real board player session', () => {
     })
     const settleTx = await esc.buildSettle(transcriptJson)
     expect(settleTx.functionName).toBe('settle')
-    const finalState = settleTx.args[0] as { nonce: bigint; balancePlayer: bigint; balanceHouse: bigint }
-    expect(finalState.nonce).toBe(1n)
-    expect(finalState.balancePlayer + finalState.balanceHouse).toBe(terms.escrowPlayer + terms.escrowHouse)
+    const close = settleTx.args[0] as { tableId: `0x${string}`; nonce: bigint; balancePlayer: bigint; balanceHouse: bigint; gameId: number }
+    expect(close.nonce).toBe(1n)
+    expect(close.balancePlayer + close.balanceHouse).toBe(terms.escrowPlayer + terms.escrowHouse)
+    expect(close.gameId).toBe(limbo.gameId)
+    expect(await verifyCloseSig(playerAccount.address, domain, close, settleTx.args[1] as `0x${string}`)).toBe(true)
+    expect(await verifyCloseSig(houseAccount.address, domain, close, settleTx.args[2] as `0x${string}`)).toBe(true)
     expect(accepted.map((s) => s.nonce)).toEqual([0n, 1n])
 
     stopServing()

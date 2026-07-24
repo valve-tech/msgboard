@@ -6,7 +6,7 @@ import { dice } from '../src/games/dice'
 import { limbo } from '../src/games/limbo'
 import { plinko } from '../src/games/plinko'
 import { keno } from '../src/games/keno'
-import { TEST_DOMAIN } from '../src/sessionState'
+import { TEST_DOMAIN, verifyCloseSig, closeFromState } from '../src/sessionState'
 
 const player = privateKeyToAccount(`0x${'11'.repeat(32)}`)
 const house = privateKeyToAccount(`0x${'22'.repeat(32)}`)
@@ -117,6 +117,24 @@ describe('HouseSession', () => {
     await expect(
       s.playRound({ stake: 10n, params: { targetX100: 5000n }, clientSeed: `0x${'33'.repeat(32)}` }),
     ).rejects.toThrow()
+  })
+
+  it('authorizeClose has both signers co-sign the SessionClose for the final state', async () => {
+    const s = newSession(dice)
+    await s.open()
+    for (let i = 0; i < 3; i++) {
+      await s.playRound({ stake: 50n, params: { targetX100: 4000n }, clientSeed: `0x${'55'.repeat(32)}` })
+    }
+    const { close, sigPlayer, sigHouse } = await s.authorizeClose()
+    // the close projects the final running state
+    expect(close).toEqual(closeFromState(s.state))
+    // both parties' close-sigs recover to their addresses over the DISTINCT SessionClose type
+    expect(await verifyCloseSig(player.address, TEST_DOMAIN, close, sigPlayer)).toBe(true)
+    expect(await verifyCloseSig(house.address, TEST_DOMAIN, close, sigHouse)).toBe(true)
+    // a CLOSE envelope was appended and the transcript still verifies whole
+    const obj = JSON.parse(s.transcript.toJSON())
+    expect(obj.entries.at(-1).kind).toBe('CLOSE')
+    expect(await verifyFinishedSession(s.transcript.toJSON(), ctxFor(dice, s.chain.commit))).toBe(true)
   })
 
   it('throws on balance underflow regardless of win or loss', async () => {

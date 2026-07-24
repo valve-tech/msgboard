@@ -1,10 +1,10 @@
 import { keccak256, type Hex } from 'viem'
 import {
-  type SessionState, type GameDomain, type Game,
-  roundRandom, verifyReveal, verifySessionStateSig,
+  type SessionState, type SessionClose, type GameDomain, type Game, type CloseBody,
+  roundRandom, verifyReveal, verifySessionStateSig, verifyCloseSig, closeFromState, closeFromBody,
   Transcript,
 } from '@msgboard/games'
-import { type CoSignedState } from './settlement'
+import { type CoSignedState, type CoSignedClose } from './settlement'
 
 const ZERO32 = `0x${'00'.repeat(32)}` as Hex
 
@@ -20,11 +20,16 @@ export interface ReplayResult {
   open: CoSignedState
   final: CoSignedState
   rounds: number
+  /** The mutual-close authorization, present iff the transcript carries a CLOSE envelope (both parties
+   *  signed the SessionClose for the final state). EscrowedSettlement.settle() requires it; the dispute
+   *  path (running state) does not. */
+  close?: CoSignedClose
 }
 
 interface SigPair { player: Hex; house: Hex }
 interface OpenBody { rngCommit?: Hex; settlementMode?: number; gameId?: number; balances?: { player?: string; house?: string }; sigs?: SigPair }
 interface RoundBody { round: number; stake: string; clientSeed: Hex; serverSeed: Hex; params: Record<string, string>; outcome: { win: boolean; playerDelta: string; multiplierX100: string }; sigs?: SigPair }
+interface CloseEnvBody { close: CloseBody; sigs: SigPair }
 
 /**
  * Inverse of coSignTransport's serializeParams — restores each field to its original type.
@@ -101,7 +106,30 @@ export async function replaySession<TParams>(transcriptJson: string, ctx: Replay
     rounds++
   }
   if (rounds === 0) throw new Error('replay: no ROUND entries to settle')
-  return { open, final, rounds }
+
+  // ---- CLOSE (mutual-close authorization), if the transcript carries one ----
+  // Both parties sign a DISTINCT SessionClose EIP-712 type at cooperative close; it drives
+  // HouseChannel.settle(). We accept it ONLY if it projects the final running state exactly (same
+  // tableId/nonce/balances/gameId) AND both close-sigs recover to the parties — so a close for a stale
+  // checkpoint or a mismatched balance is rejected before it can become settle calldata.
+  let close: CoSignedClose | undefined
+  const closeEnv = t.entries.find((e) => e.kind === 'CLOSE')
+  if (closeEnv) {
+    const cb = closeEnv.body as CloseEnvBody
+    if (!cb.close || !cb.sigs) throw new Error('replay: CLOSE envelope missing close/sigs')
+    const c: SessionClose = closeFromBody(cb.close)
+    const projected = closeFromState(final.state)
+    if (
+      c.tableId !== projected.tableId || c.nonce !== projected.nonce ||
+      c.balancePlayer !== projected.balancePlayer || c.balanceHouse !== projected.balanceHouse ||
+      c.gameId !== projected.gameId
+    ) throw new Error('replay: CLOSE does not match the final co-signed state')
+    if (!(await verifyCloseSig(ctx.parties.player, ctx.domain, c, cb.sigs.player))) throw new Error('replay: bad player close-sig')
+    if (!(await verifyCloseSig(ctx.parties.house, ctx.domain, c, cb.sigs.house))) throw new Error('replay: bad house close-sig')
+    close = { close: c, sigPlayer: cb.sigs.player, sigHouse: cb.sigs.house }
+  }
+
+  return { open, final, rounds, close }
 }
 
 async function assertPair<TParams>(state: SessionState, sigs: SigPair, ctx: ReplayContext<TParams>): Promise<void> {

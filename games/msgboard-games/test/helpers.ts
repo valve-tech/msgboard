@@ -5,7 +5,7 @@ import { buildSeedChain } from '../src/rng'
 import { TEST_DOMAIN } from '../src/sessionState'
 import type { SessionConfig, PlayInput, VerifyContext } from '../src/session'
 import type { DiceParams } from '../src/games/dice'
-import type { SessionState } from '../src/sessionState'
+import type { SessionState, SessionClose } from '../src/sessionState'
 import type { CoSignTransport, RoundProof } from '../src/coSignTransport'
 
 const player = privateKeyToAccount(`0x${'11'.repeat(32)}`)
@@ -20,12 +20,9 @@ const tip = `0x${'77'.repeat(32)}` as Hex
  * request, player picks it up, signs, and resolves it.
  */
 export function memoryCoSignPair(): { houseT: CoSignTransport; playerT: CoSignTransport } {
-  type Pending = {
-    state: SessionState
-    proof?: RoundProof<unknown>
-    resolve: (sig: Hex) => void
-    reject: (err: unknown) => void
-  }
+  type Pending =
+    | { kind: 'state'; state: SessionState; proof?: RoundProof<unknown>; resolve: (sig: Hex) => void; reject: (err: unknown) => void }
+    | { kind: 'close'; close: SessionClose; resolve: (sig: Hex) => void; reject: (err: unknown) => void }
   const queue: Pending[] = []
   const waiters: Array<(p: Pending) => void> = []
 
@@ -42,21 +39,30 @@ export function memoryCoSignPair(): { houseT: CoSignTransport; playerT: CoSignTr
     })
 
   const houseT: CoSignTransport = {
-    request: (state, proof) => new Promise<Hex>((resolve, reject) => push({ state, proof, resolve, reject })),
+    request: (state, proof) => new Promise<Hex>((resolve, reject) => push({ kind: 'state', state, proof, resolve, reject })),
+    requestClose: (close) => new Promise<Hex>((resolve, reject) => push({ kind: 'close', close, resolve, reject })),
     serve: () => { throw new Error('houseT.serve is not used in this pair') },
   }
 
+  let closeSigner: ((c: SessionClose) => Promise<Hex>) | undefined
+
   const playerT: CoSignTransport = {
     request: () => { throw new Error('playerT.request is not used in this pair') },
+    serveClose: (sign) => { closeSigner = sign },
     serve: (sign) => {
       // Park on the shared queue and answer each request as it arrives. After the session's last
       // request (ROUND), the loop simply awaits the next pull forever — harmless; the test resolves
-      // via runPlayerSide's own completion latch.
+      // via runPlayerSide's own completion latch. A CLOSE request is routed to the close signer.
       const loop = async () => {
         for (;;) {
           const p = await pull()
           try {
-            p.resolve(await sign(p.state, p.proof))
+            if (p.kind === 'close') {
+              if (!closeSigner) throw new Error('player did not register a close signer')
+              p.resolve(await closeSigner(p.close))
+            } else {
+              p.resolve(await sign(p.state, p.proof))
+            }
           } catch (err) {
             // an honest player that refuses to sign rejects the house's pending request too,
             // so the house side fails fast instead of hanging on an unresolved promise.
