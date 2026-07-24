@@ -29,14 +29,12 @@ export function TryIt({ workerFactory }: { workerFactory?: () => Worker }) {
   const [active, setActive] = useState<SectionId>('chat')
   const current = SECTIONS.find((s) => s.id === active)!
 
-  // The OUTER shell is a constant width so the tab row never shifts when you switch tabs; each
-  // tab's content chooses its own width and centers within. Mechanics is a data-dense compose +
-  // terminal + tree layout that wants room (max-w-6xl); Chat wants a comfortable width so the
-  // Anonymous mode's room ‖ inspector split has room (max-w-5xl).
-  const contentWidth = active === 'mechanics' ? 'max-w-6xl' : 'max-w-4xl'
-
+  // ONE container, ONE width for everything — the tab row AND every tab's content share the same
+  // max-width and left edge, so nothing floats in a wider frame and nothing resizes when you switch
+  // tabs or chat modes. Content fills the container (no per-tab width, no re-centering); the inner
+  // cards are w-full so they span it too.
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 p-4">
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-3 p-4">
       <div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="try it sections">
         {SECTIONS.map((s) => {
           const on = s.id === active
@@ -60,13 +58,11 @@ export function TryIt({ workerFactory }: { workerFactory?: () => Worker }) {
       </div>
       <p className="px-1 text-sm text-gray-500 dark:text-gray-400">{current.blurb}</p>
 
-      {/* Content centers at its own width WITHIN the constant-width shell, so the tab row above
-          never shifts. Each section stays mounted-per-switch (simple remount) — cheap, and it
-          resets transient composer state cleanly when you flip away and back. */}
-      <div className={`mx-auto w-full ${contentWidth}`}>
-        {active === 'chat' && <Chat workerFactory={workerFactory} />}
-        {active === 'mechanics' && <Interactive workerFactory={workerFactory} />}
-      </div>
+      {/* Content fills the same container as the tabs (one width, one left edge). Each section stays
+          mounted-per-switch (simple remount) — cheap, and it resets transient composer state cleanly
+          when you flip away and back. */}
+      {active === 'chat' && <Chat workerFactory={workerFactory} />}
+      {active === 'mechanics' && <Interactive workerFactory={workerFactory} />}
     </div>
   )
 }
