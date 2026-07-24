@@ -4,7 +4,7 @@ pragma solidity ^0.8.24;
 import {ECDSA} from "solady/src/utils/ECDSA.sol";
 import {SafeTransferLib} from "solady/src/utils/SafeTransferLib.sol";
 import {Ownable} from "solady/src/auth/Ownable.sol";
-import {SessionState, SessionStateLib, SessionStateEIP712} from "./SessionState.sol";
+import {SessionState, SessionStateLib, SessionClose, SessionCloseLib, SessionStateEIP712} from "./SessionState.sol";
 import {GamePayouts} from "./GamePayouts.sol";
 
 /// On-chain UltraHonk verifier interface (mode-2 ZK settle). The generated
@@ -58,6 +58,7 @@ library OpenTermsLib {
 contract HouseChannel is SessionStateEIP712, Ownable {
     using SafeTransferLib for address;
     using SessionStateLib for SessionState;
+    using SessionCloseLib for SessionClose;
     using OpenTermsLib for OpenTerms;
 
     error BadStatus();
@@ -75,7 +76,8 @@ contract HouseChannel is SessionStateEIP712, Ownable {
     error BadReveal();
     error BadParams();
     error NoVerifier();
-    error SettleBeforePlay();
+    error NotHouse();
+    error ForfeitTooEarly();
     error BadProof();
     error PayoutExceedsPot();
 
@@ -89,6 +91,7 @@ contract HouseChannel is SessionStateEIP712, Ownable {
         uint8 gameId;
         Status status;
         uint64 clockBlocks;
+        uint64 openedAtBlock;     // block the table opened; gates house forfeiture of an abandoned table
         uint64 checkpointNonce;
         bool hasCheckpoint;
         uint64 disputeDeadline;
@@ -123,6 +126,7 @@ contract HouseChannel is SessionStateEIP712, Ownable {
     event DisputeOpened(bytes32 indexed tableId, uint8 disputant, uint64 nonce, uint64 deadline);
     event DisputeAnsweredWithState(bytes32 indexed tableId, uint64 nonce);
     event DisputeForfeited(bytes32 indexed tableId, uint256 payoutPlayer, uint256 payoutHouse);
+    event ForfeitClaimed(bytes32 indexed tableId, uint256 playerEscrowAtStake, uint64 deadline);
 
     constructor(address chips_) {
         chips = chips_;
@@ -186,6 +190,7 @@ contract HouseChannel is SessionStateEIP712, Ownable {
         t.escrowHouse = terms.escrowHouse;
         t.gameId = terms.gameId;
         t.clockBlocks = terms.clockBlocks;
+        t.openedAtBlock = uint64(block.number);
         t.rngCommit = terms.rngCommit;
         t.clientSeedCommit = terms.clientSeedCommit;
         t.paramsHash = terms.paramsHash;
@@ -195,28 +200,25 @@ contract HouseChannel is SessionStateEIP712, Ownable {
         emit Opened(terms.tableId, msg.sender, terms.playerKey, terms.gameId, terms.escrowPlayer, terms.escrowHouse);
     }
 
-    /// Cooperative settle: anyone submits the final both-signed state. Pays from locked escrow.
+    /// Cooperative close: both parties submit a co-signed SessionClose — a DISTINCT EIP-712
+    /// authorization they produce ONLY when they mutually agree to finalize the table NOW at these
+    /// balances. Pays from locked escrow.
     ///
-    /// SECURITY: the nonce-0 OPEN state is co-signed by BOTH parties at open (settlementMode == 1,
-    /// balances == the two escrows — a full refund of the player's stake). Because the house signs
-    /// every running state as play proceeds, a losing player could otherwise replay that co-signed
-    /// OPEN state here to reclaim their whole stake with certainty (a risk-free free-roll: settle the
-    /// nonce-1 loss as a nonce-0 refund). We reject nonce 0 outright — a settled state must reflect at
-    /// least one played round. A genuine zero-round cancel goes through `disputeFromOpen`, which gives
-    /// the counterparty a challenge window to post a newer state before the refund stands.
-    ///
-    /// NOTE: this closes the *guaranteed* free-roll. The cooperative fast-path still trusts the
-    /// submitter to bring the LATEST co-signed state (a player who was ahead at an earlier nonce could
-    /// submit that peak). Finalizing a suspected-stale state safely requires the dispute clock
-    /// (`dispute` → `respondWithState`); route closes through it, or add a final-close handshake,
-    /// before enabling real funds. Tracked as a pre-real-money protocol decision.
-    function settle(SessionState calldata s, bytes calldata sigPlayer, bytes calldata sigHouse) external {
-        Table storage t = tables[s.tableId];
+    /// SECURITY: a running-play SessionState co-signature (collected every round for the dispute path)
+    /// is a different EIP-712 type, so it can never be replayed here. That closes two holes at once:
+    ///   - the nonce-0 OPEN free-roll (a losing player replaying the open co-sign as a full refund);
+    ///   - the peak-lock (a player who was ahead at an earlier nonce replaying that state).
+    /// The house only ever signs a SessionClose for the state it agrees is the true latest, so a
+    /// unilaterally-held stale co-signature is useless on this fast path. A genuine zero-round cancel
+    /// is a mutual close at nonce 0 (both sign it) — or the player's own `disputeFromOpen` refund.
+    /// If a counterparty WON'T co-sign a close (walks away), use the dispute clock: `dispute` +
+    /// `respondWithState` (adversarial, latest-state-wins), or the house's `claimForfeit`.
+    function settle(SessionClose calldata c, bytes calldata sigPlayer, bytes calldata sigHouse) external {
+        Table storage t = tables[c.tableId];
         if (t.status != Status.Live) revert BadStatus();
-        if (s.nonce == 0) revert SettleBeforePlay();
-        _checkCoSigned(t, s, sigPlayer, sigHouse);
-        if (t.hasCheckpoint && s.nonce <= t.checkpointNonce) revert StaleNonce();
-        _payout(t, s.tableId, s.balancePlayer, s.balanceHouse);
+        _checkCloseCoSigned(t, c, sigPlayer, sigHouse);
+        if (t.hasCheckpoint && c.nonce <= t.checkpointNonce) revert StaleNonce();
+        _payout(t, c.tableId, c.balancePlayer, c.balanceHouse);
     }
 
     /// Permissionless trustless settle: anyone submits the two revealed seeds + the round params. The
@@ -370,6 +372,44 @@ contract HouseChannel is SessionStateEIP712, Ownable {
         emit DisputeOpened(tableId, seat, 0, t.disputeDeadline);
     }
 
+    /// WALK-AWAY FORFEITURE. A player who opens a table but then walks away without cooperatively
+    /// closing leaves the house's escrow locked. Once the table has sat open for a full abandonment
+    /// period (`openedAtBlock + clockBlocks`), the house may force a forfeit: it posts a synthetic
+    /// terminal state where the player forfeits their ENTIRE escrow to the house (balancePlayer = 0,
+    /// balanceHouse = pot) and starts the challenge clock. This is house-only — the player already has
+    /// `disputeFromOpen` (a refund, not a forfeit) as their own walk-away recourse.
+    ///
+    /// A PRESENT player never loses a real balance: within the challenge window they override the
+    /// forfeit with their latest co-signed running state via `respondWithState` (nonce ≥ 1 > 0), which
+    /// settles the true balances (including any winnings). Only a genuinely absent player — who did not
+    /// respond across BOTH the abandonment period AND the challenge window — forfeits, and forfeits
+    /// exactly what they escrowed (never more; the synthetic state conserves the pot). So: walk away
+    /// from a table and, win or lose, you can forfeit your tokens.
+    function claimForfeit(bytes32 tableId) external {
+        Table storage t = tables[tableId];
+        if (t.status != Status.Live) revert BadStatus();
+        if (_seatOf(t, msg.sender) != 2) revert NotHouse();
+        // The table must be demonstrably abandoned: open for at least one full clock with no
+        // cooperative close and no dispute. This gives the player a full clock to play/settle/refund
+        // BEFORE forfeiture is even possible, on top of the challenge window that follows.
+        if (uint64(block.number) < t.openedAtBlock + t.clockBlocks) revert ForfeitTooEarly();
+        uint256 pot = t.escrowPlayer + t.escrowHouse;
+        SessionState memory s;
+        s.tableId = tableId;
+        s.nonce = 0;
+        s.balancePlayer = 0;      // the absent player forfeits their escrow…
+        s.balanceHouse = pot;     // …to the house
+        s.settlementMode = 1;
+        s.gameId = t.gameId;
+        t.status = Status.Disputed;
+        t.disputant = 2;
+        t.disputeState = s;
+        t.checkpointNonce = 0;
+        t.hasCheckpoint = true;
+        t.disputeDeadline = uint64(block.number) + t.clockBlocks;
+        emit ForfeitClaimed(tableId, t.escrowPlayer, t.disputeDeadline);
+    }
+
     /// Override a dispute with a strictly-newer both-signed state — which IS the true latest, so
     /// it settles immediately (single-draw games have no further play to resume).
     function respondWithState(SessionState calldata s, bytes calldata sigPlayer, bytes calldata sigHouse) external {
@@ -396,6 +436,18 @@ contract HouseChannel is SessionStateEIP712, Ownable {
         if (s.settlementMode != 1) revert BadMode();
         if (s.balancePlayer + s.balanceHouse != t.escrowPlayer + t.escrowHouse) revert ConservationViolated();
         bytes32 digest = _hashTypedData(s.structHash());
+        if (ECDSA.recoverCalldata(digest, sigPlayer) != t.playerKey) revert BadSig();
+        if (ECDSA.recoverCalldata(digest, sigHouse) != houseKey) revert BadSig();
+    }
+
+    /// Verify a mutual-CLOSE authorization (settle's fast path). Same checks as a co-signed state,
+    /// minus settlementMode (a SessionClose has no such field — the type itself is the escrowed-close
+    /// authorization), and over the DISTINCT SessionClose digest so no running co-sign can substitute.
+    function _checkCloseCoSigned(Table storage t, SessionClose calldata c, bytes calldata sigPlayer, bytes calldata sigHouse) internal view {
+        if (c.tableId == bytes32(0) || t.status == Status.None) revert WrongTable();
+        if (c.gameId != t.gameId) revert WrongGame();
+        if (c.balancePlayer + c.balanceHouse != t.escrowPlayer + t.escrowHouse) revert ConservationViolated();
+        bytes32 digest = _hashTypedData(c.structHash());
         if (ECDSA.recoverCalldata(digest, sigPlayer) != t.playerKey) revert BadSig();
         if (ECDSA.recoverCalldata(digest, sigHouse) != houseKey) revert BadSig();
     }
