@@ -116,6 +116,23 @@
       }
       input:focus { outline: 1px solid var(--brass-soft); }
 
+      /* ---------- the house toggle (no native checkboxes either) ---------- */
+      .toggle {
+        display: inline-flex; align-items: center; gap: 0.45rem;
+        background: transparent; border: none; box-shadow: none; padding: 0;
+        color: var(--cream); opacity: 0.85;
+        font: 500 0.9rem var(--sans); text-align: left;
+      }
+      .toggle:hover:not(:disabled) { opacity: 1; filter: none; }
+      .toggle-box {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 1.05rem; height: 1.05rem; flex: none;
+        border: 1px solid var(--line); border-radius: 3px;
+        background: var(--felt-900);
+        color: var(--brass); font-size: 0.8rem; line-height: 1;
+      }
+      .toggle.on .toggle-box { border-color: var(--brass-soft); }
+
       /* ---------- the house menu (no native selects in this establishment) ---------- */
       .menu { position: relative; display: inline-block; }
       .menu-trigger {

@@ -40,7 +40,7 @@
   ],
   "dependencies": {
     "@msgboard/history": "^0.0.32",
-    "@msgboard/sdk": "^0.0.32",
+    "@msgboard/sdk": "^0.0.33",
     "viem": "^2.25.0"
   },
   "peerDependencies": {

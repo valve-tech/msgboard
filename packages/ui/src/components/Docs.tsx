@@ -1,3 +1,4 @@
+import { Menu } from './Menu'
 import { useEffect, useState } from 'react'
 import { keccak256, numberToHex, stringToHex } from 'viem'
 import { Icon } from '@iconify/react'
@@ -165,58 +166,18 @@ type Message = MessageSeed & {
         </a>
       </div>
       <div className="flex flex-row items-end gap-2">
-        <div className="grid grid-cols-1 gap-2 min-w-32">
-          <select
-            id="lang"
-            name="lang"
-            value={lang}
-            aria-label="language"
-            className="col-start-1 row-start-1 w-full appearance-none rounded-md bg-white dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100 py-1 pl-3 pr-8 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 dark:outline-gray-600 focus:-outline-offset-2 focus:outline-indigo-600 sm:text-sm/6"
-            onChange={(e) => setLang(e.target.value as Lang)}>
-            {languages.map((key) => (
-              <option key={key} value={key}>
-                {key}
-              </option>
-            ))}
-          </select>
-          <svg
-            className="pointer-events-none col-start-1 row-start-1 mr-2 size-5 self-center justify-self-end text-gray-500 dark:text-gray-400 sm:size-4"
-            viewBox="0 0 16 16"
-            fill="currentColor"
-            aria-hidden="true">
-            <path
-              fillRule="evenodd"
-              d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z"
-              clipRule="evenodd"
-            />
-          </svg>
-        </div>
-        <div className="grid grid-cols-1 min-w-32">
-          <select
-            id="method"
-            name="method"
-            value={method}
-            aria-label="method"
-            className="col-start-1 row-start-1 w-full appearance-none rounded-md bg-white dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100 py-1 pl-3 pr-8 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 dark:outline-gray-600 focus:-outline-offset-2 focus:outline-indigo-600 sm:text-sm/6"
-            onChange={(e) => setMethod(e.target.value as Method)}>
-            {methods.map((key) => (
-              <option key={key} value={key}>
-                {key}
-              </option>
-            ))}
-          </select>
-          <svg
-            className="pointer-events-none col-start-1 row-start-1 mr-2 size-5 self-center justify-self-end text-gray-500 dark:text-gray-400 sm:size-4"
-            viewBox="0 0 16 16"
-            fill="currentColor"
-            aria-hidden="true">
-            <path
-              fillRule="evenodd"
-              d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z"
-              clipRule="evenodd"
-            />
-          </svg>
-        </div>
+        <Menu
+          label="language"
+          options={languages.map(String)}
+          value={Math.max(0, languages.indexOf(lang))}
+          onChange={(i) => setLang(languages[i]!)}
+        />
+        <Menu
+          label="method"
+          options={methods.map(String)}
+          value={Math.max(0, methods.indexOf(method))}
+          onChange={(i) => setMethod(methods[i]!)}
+        />
       </div>
       <div className="flex flex-col gap-6 w-full max-w-144 items-center">
         <div className="flex w-full flex-col group relative">

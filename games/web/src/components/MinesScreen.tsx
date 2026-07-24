@@ -1,3 +1,4 @@
+import { Menu } from './Menu'
 import { useMemo, useState } from 'react'
 import * as viem from 'viem'
 import {
@@ -136,19 +137,13 @@ export const MinesScreen = ({
           <StakeInput value={amount} onChange={setAmount} />
           <label className="threshold-label">
             tiles
-            <select
-              value={tiles}
-              onChange={(e) => onTiles(Number(e.target.value))}
+            <Menu
+              label="tiles"
+              options={TILE_OPTIONS.map(String)}
+              value={Math.max(0, (TILE_OPTIONS as readonly number[]).indexOf(tiles))}
+              onChange={(i) => onTiles(TILE_OPTIONS[i] as (typeof TILE_OPTIONS)[number])}
               disabled={playing}
-              style={{ width: '5rem' }}
-              aria-label="tiles"
-            >
-              {TILE_OPTIONS.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
+            />
           </label>
           <label className="threshold-label">
             mines

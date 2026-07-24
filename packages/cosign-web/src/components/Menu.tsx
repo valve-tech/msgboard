@@ -1,17 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 
-export type MenuOption = {
-  label: string
-  icon?: string
-  /** Small right-aligned emoji badge (e.g. the game's trust-model icon) with a hover title. */
-  badge?: string
-  badgeTitle?: string
-}
-
 /**
- * The house menu — a div-reveal replacement for native <select> (the venue doesn't do
- * native selects). Trigger button + positioned options panel, click-outside and Escape
- * close, arrow keys move, Enter/Space picks. Options may carry an icon URL.
+ * The house menu — a div-reveal replacement for native <select> (native form controls can't be
+ * styled and are banned across the msgboard apps; same pattern as the games venue's Menu).
+ * Trigger button + positioned options panel, click-outside and Escape close, arrow keys move,
+ * Enter/Space picks.
  */
 export const Menu = ({
   label,
@@ -21,7 +14,7 @@ export const Menu = ({
   disabled,
 }: {
   label: string
-  options: (string | MenuOption)[]
+  options: string[]
   value: number
   onChange: (index: number) => void
   disabled?: boolean
@@ -30,9 +23,7 @@ export const Menu = ({
   const [highlight, setHighlight] = useState(value)
   const rootRef = useRef<HTMLSpanElement>(null)
   const panelRef = useRef<HTMLSpanElement>(null)
-  const items: MenuOption[] = options.map((o) => (typeof o === 'string' ? { label: o } : o))
 
-  // Keep the highlighted option in view when the (now height-capped) panel scrolls.
   useEffect(() => {
     if (!open) return
     panelRef.current?.children[highlight]?.scrollIntoView({ block: 'nearest' })
@@ -66,7 +57,7 @@ export const Menu = ({
     if (!open) return
     if (e.key === 'ArrowDown') {
       e.preventDefault()
-      setHighlight((h) => Math.min(h + 1, items.length - 1))
+      setHighlight((h) => Math.min(h + 1, options.length - 1))
     } else if (e.key === 'ArrowUp') {
       e.preventDefault()
       setHighlight((h) => Math.max(h - 1, 0))
@@ -75,18 +66,6 @@ export const Menu = ({
       pick(highlight)
     }
   }
-
-  const OptionFace = ({ option }: { option: MenuOption }) => (
-    <>
-      {option.icon && <img className="menu-icon" src={option.icon} alt="" loading="lazy" />}
-      <span>{option.label}</span>
-      {option.badge && (
-        <span className="menu-badge" title={option.badgeTitle} aria-label={option.badgeTitle}>
-          {option.badge}
-        </span>
-      )}
-    </>
-  )
 
   return (
     <span className="menu" ref={rootRef} onKeyDown={onKeyDown}>
@@ -102,16 +81,16 @@ export const Menu = ({
           setOpen((o) => !o)
         }}
       >
-        <OptionFace option={items[value] ?? { label: '' }} />
+        <span>{options[value] ?? ''}</span>
         <span className="menu-caret" aria-hidden>
           ▾
         </span>
       </button>
       {open && (
         <span className="menu-panel" role="listbox" aria-label={label} ref={panelRef}>
-          {items.map((option, i) => (
+          {options.map((option, i) => (
             <button
-              key={option.label}
+              key={option}
               type="button"
               role="option"
               aria-selected={i === value}
@@ -119,7 +98,7 @@ export const Menu = ({
               onPointerEnter={() => setHighlight(i)}
               onClick={() => pick(i)}
             >
-              <OptionFace option={option} />
+              {option}
             </button>
           ))}
         </span>
@@ -127,3 +106,30 @@ export const Menu = ({
     </span>
   )
 }
+
+/** The house toggle — a button-reveal replacement for native checkboxes. */
+export const Toggle = ({
+  checked,
+  onChange,
+  disabled,
+  children,
+}: {
+  checked: boolean
+  onChange: (next: boolean) => void
+  disabled?: boolean
+  children: React.ReactNode
+}) => (
+  <button
+    type="button"
+    className={`toggle${checked ? ' on' : ''}`}
+    role="switch"
+    aria-checked={checked}
+    disabled={disabled}
+    onClick={() => onChange(!checked)}
+  >
+    <span className="toggle-box" aria-hidden>
+      {checked ? '✓' : ''}
+    </span>
+    <span>{children}</span>
+  </button>
+)

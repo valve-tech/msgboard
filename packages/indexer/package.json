@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "@msgboard/relayer": "^0.0.32",
-    "@msgboard/sdk": "^0.0.32",
+    "@msgboard/sdk": "^0.0.33",
     "pg": "^8.14.1",
     "tsx": "^4.19.3",
     "viem": "^2.25.0"
