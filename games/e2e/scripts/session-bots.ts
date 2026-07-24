@@ -295,10 +295,10 @@ const fmt = (wei: bigint) => viem.formatEther(wei)
 // endpoint built from VALVE_RPC_KEY; absent both, bots run in-process only.
 //
 // OPT-IN: the lobby feed is gated behind BOARD_FEED=1 and is OFF by default. The PoW stamp runs in
-// pow-worker via @msgboard/pow-grinder's NATIVE addon (a linux .node CI build) — which is NOT present
-// in the self-contained esbuild bundle the fleet ships, so on the box the worker would throw and each
-// post would log a failure. Play never depends on it, so we default the feed off for a clean deploy;
-// set BOARD_FEED=1 (with the WASM grinder wired into the bundle) to light up the lobby feed.
+// pow-worker via @msgboard/pow-grinder's PORTABLE WASM engine — its bytes are embedded in the bundle
+// (pow-grinder-wasm-b64.ts), so it works inside the self-contained esbuild .mjs the fleet ships (the
+// native .node addon is NOT in that bundle). Play never depends on the feed, so it stays off by
+// default; set BOARD_FEED=1 to light up the lobby feed on a deploy.
 const BOARD_FEED_ON = env.BOARD_FEED === '1'
 const BOARD_RPC = !BOARD_FEED_ON
   ? ''
@@ -306,13 +306,13 @@ const BOARD_RPC = !BOARD_FEED_ON
 const board = BOARD_RPC ? createMsgBoardClient(BOARD_RPC) : null
 // All lifecycle notices go to ONE shared, discoverable category so a viewer (the web app, the archive,
 // anyone) can poll a single category to watch every table on the chain; the per-table id rides in the
-// body. The proof-of-work STAMP (the slow part) is minted in a worker_threads grinder (native Rust
-// @msgboard/pow-grinder, ~0.7s) so it never starves the game loops on this thread — the worker gets only
+// body. The proof-of-work STAMP (the slow part) is minted in a worker_threads grinder (Rust→WASM
+// @msgboard/pow-grinder, ~1.2–1.8s) so it never starves the game loops on this thread — the worker gets only
 // encoded bytes, never a key. The thin RPC bits (read difficulty + head, then submit) run here via
 // `post`. One post in flight at a time; notices arriving mid-stamp are dropped (drop-if-busy) — the
 // games turn over faster than a post, and the board is a live signal, not a log.
 const LOBBY_CATEGORY = `games.msgboard.xyz:lobby:${CHAIN}`
-const STAMP_MAX_ITERS = 50_000_000 // ample for the 943 floor (~190k iters); native finds it in ~0.7s
+const STAMP_MAX_ITERS = 50_000_000 // ample for the 943 floor (~190k iters); the wasm grinder finds it in ~1-2s
 
 let powWorker: Worker | null = null
 let posting = false
@@ -336,7 +336,7 @@ if (board) {
     stampJobs.clear()
   })
   powWorker.unref() // don't keep the process alive solely for the grinder
-  console.log(`[board] live feed → ${LOBBY_CATEGORY} via ${BOARD_RPC.replace(/\/rpc\/[^/]+\//, '/rpc/<key>/')} [native stamp worker]`)
+  console.log(`[board] live feed → ${LOBBY_CATEGORY} via ${BOARD_RPC.replace(/\/rpc\/[^/]+\//, '/rpc/<key>/')} [wasm stamp worker]`)
 }
 
 /** Mint the PoW stamp in the worker (off the main loop). Pure compute — no key crosses over. */

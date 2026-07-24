@@ -56,3 +56,37 @@ jobs:
           forge install foundry-rs/forge-std --no-git
           forge install witnet/elliptic-curve-solidity --no-git
           forge test --match-path "test/integration/*" -vv
+
+  games-node:
+    # The games platform's engine suite (@msgboard/games — RNG/payout/fairness for all 30 games,
+    # incl. the keno drain regression) + typechecks for the games engine and the actor/bot scripts.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: '.nvmrc'
+      - run: npm ci
+      - run: npm run test --workspace @msgboard/games
+      - run: npm run typecheck --workspace @msgboard/games
+      - run: npm run typecheck --workspace @msgboard/games-e2e
+
+  games-foundry:
+    # The games contracts' fuzz + invariant suite (HouseChannel/GamePayouts/… — incl. the
+    # settle() nonce-0 free-roll regression). Default profile remaps forge-std -> repo-root lib
+    # and solady -> node_modules, so it needs both npm ci and forge-std at the root.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: '.nvmrc'
+      - run: npm ci
+      - uses: foundry-rs/foundry-toolchain@v1
+      - name: install forge-std at repo root (games/contracts remaps to ../../lib)
+        run: forge install foundry-rs/forge-std --no-git
+      - name: forge build + test (games/contracts)
+        working-directory: games/contracts
+        run: |
+          forge build
+          forge test -vv

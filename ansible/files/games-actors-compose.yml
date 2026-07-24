@@ -80,6 +80,10 @@ services:
       CHAIN: "943"
       CONFIG: /app/943-deployment.json
       RPC: "https://one.valve.city/rpc/${VALVE_RPC_KEY}/evm/943"
+      # Lobby feed ON: pow-worker stamps via the portable WASM grinder (base64-embedded in the
+      # bundle, no native addon), so table open/summary notices post to games.msgboard.xyz:lobby:943.
+      # BOARD_RPC resolves from VALVE_RPC_KEY (.env). Posts are best-effort + serialized (drop-if-busy).
+      BOARD_FEED: "1"
     command: node session-bots.mjs
   cast-watcher-369:
     image: node:24-alpine

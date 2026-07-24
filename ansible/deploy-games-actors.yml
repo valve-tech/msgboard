@@ -15,7 +15,7 @@
   vars:
     games_repo: "{{ playbook_dir }}/.."
     actors_dir: /opt/games-actors
-    bundles: [cast-watcher, player-bots, flipbook-bots, cosign-bot, session-bots]
+    bundles: [cast-watcher, player-bots, flipbook-bots, cosign-bot, session-bots, pow-worker]
   tasks:
     - name: The actor sources must exist locally
       ansible.builtin.stat:
@@ -87,7 +87,7 @@
            + (['player-bots', 'player-bots-369'] if 'player-bots' in changed_bundles else [])
            + (['flipbook-bots'] if 'flipbook-bots' in changed_bundles else [])
            + (['cosign-bot'] if 'cosign-bot' in changed_bundles else [])
-           + (['session-bots'] if 'session-bots' in changed_bundles else []) }}
+           + (['session-bots'] if ('session-bots' in changed_bundles or 'pow-worker' in changed_bundles) else []) }}
       when: restart_targets | length > 0
 
     - name: Smoke — all seven services are up
