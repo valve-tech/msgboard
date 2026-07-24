@@ -43,6 +43,22 @@ services:
       INTERVAL_MS: "180000"
       SELF_PLAY_INTERVAL_MS: "600000"
     command: node flipbook-bots.mjs
+  # Continuously exercises the cosign.msgboard.xyz co-sign-over-board flow on 943: one
+  # propose/cosign/threshold-reach session per hour. SAFE_943 + RELAY_URL are pinned by the
+  # operator later — this actor is inert (no target Safe) until they're set on the box .env.
+  cosign-bot:
+    image: node:24-alpine
+    restart: unless-stopped
+    working_dir: /app
+    volumes: [ "./:/app" ]
+    env_file: .env
+    environment:
+      CHAIN: "943"
+      RPC: "https://one.valve.city/rpc/${VALVE_RPC_KEY}/evm/943"
+      INTERVAL_MS: "3600000"
+      THRESHOLD: "2"
+      COSIGN_INDICES: "40,41,42"
+    command: node cosign-bot.mjs
   cast-watcher-369:
     image: node:24-alpine
     restart: unless-stopped

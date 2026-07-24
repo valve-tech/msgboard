@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@msgboard/coinflip": "*",
+    "@msgboard/cosign": "*",
     "@msgboard/games-core": "*",
     "@msgboard/hilo-war": "*",
     "@msgboard/games": "*",
