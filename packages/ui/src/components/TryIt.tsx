@@ -33,7 +33,7 @@ export function TryIt({ workerFactory }: { workerFactory?: () => Worker }) {
   // tab's content chooses its own width and centers within. Mechanics is a data-dense compose +
   // terminal + tree layout that wants room (max-w-6xl); Chat wants a comfortable width so the
   // Anonymous mode's room ‖ inspector split has room (max-w-5xl).
-  const contentWidth = active === 'mechanics' ? 'max-w-6xl' : 'max-w-5xl'
+  const contentWidth = active === 'mechanics' ? 'max-w-6xl' : 'max-w-4xl'
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 p-4">
@@ -45,6 +45,7 @@ export function TryIt({ workerFactory }: { workerFactory?: () => Worker }) {
               key={s.id}
               role="tab"
               aria-selected={on}
+              title={s.blurb}
               onClick={() => setActive(s.id)}
               className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition ${
                 on
