@@ -1,0 +1,6 @@
+# circom/PLONK measurement-spike build artifacts (regenerate via the commands in README)
+tableLookup_js/
+*.r1cs
+*.zkey
+*.sym
+TableLookupPlonkVerifier.sol

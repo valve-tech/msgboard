@@ -31,6 +31,7 @@
     "packages/pow-grinder",
     "games/zk-core",
     "games/zk-settle",
+    "games/zk-table-settle",
     "games/zk-skill",
     "games/e2e",
     "games/web"
