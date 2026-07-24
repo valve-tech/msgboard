@@ -101,57 +101,61 @@ const MODES: { id: Mode; label: string; icon: string; explainer: string }[] = [
   },
 ]
 
+/**
+ * The privacy-mode toggle — lives as a thin toolbar strip INSIDE the message card (not a second row
+ * of tabs above it). Active mode is filled + labeled; the others are icon-only on small screens with
+ * the explainer on hover. The current mode's explainer trails as subtle text.
+ */
+function ModeBar({ active, onChange }: { active: Mode; onChange: (m: Mode) => void }) {
+  const current = MODES.find((m) => m.id === active)!
+  return (
+    <div className="flex items-center gap-2 border-b border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/50">
+      <div className="inline-flex shrink-0 gap-0.5 rounded-md bg-gray-200/70 p-0.5 dark:bg-gray-800" role="group" aria-label="privacy mode">
+        {MODES.map((m) => {
+          const on = m.id === active
+          const accent =
+            m.id === 'anonymous' ? 'bg-emerald-600' : m.id === 'encrypted' ? 'bg-emerald-700' : 'bg-indigo-600'
+          return (
+            <button
+              key={m.id}
+              type="button"
+              aria-pressed={on}
+              title={m.explainer}
+              onClick={() => onChange(m.id)}
+              className={`inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium transition ${
+                on
+                  ? `${accent} text-white`
+                  : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100'
+              }`}>
+              <Icon icon={m.icon} className="size-3.5" />
+              <span className={on ? '' : 'hidden sm:inline'}>{m.label}</span>
+            </button>
+          )
+        })}
+      </div>
+      <span className="min-w-0 flex-1 truncate text-[11px] text-gray-400" title={current.explainer}>
+        {current.explainer}
+      </span>
+    </div>
+  )
+}
+
 export function Chat({ workerFactory }: { workerFactory?: () => Worker }) {
   const [mode, setMode] = useState<Mode>(() => {
     const stored = localStorage.getItem(MODE_KEY)
     return stored === 'public' || stored === 'anonymous' || stored === 'encrypted' ? stored : 'public'
   })
   useEffect(() => localStorage.setItem(MODE_KEY, mode), [mode])
-  const current = MODES.find((m) => m.id === mode)!
 
+  // The privacy toggle now lives INSIDE each pane's card (via ModeBar), so there is no second row of
+  // tabs above the container. Each mode is its own self-contained pane driving the shared chain
+  // store; remount-per-switch resets transient composer state cleanly. Public + Encrypted are the two
+  // Channel paths; Anonymous is the full Whisper (ZK) experience.
   return (
-    <div className="flex w-full flex-col gap-3">
-      {/* privacy-mode selector — the one control that decides how you identify + whether bodies
-          are encrypted + the room concept. Everything below shares the room/feed/composer chrome. */}
-      <div>
-        <div
-          className="inline-flex w-full flex-wrap gap-1 rounded-lg bg-gray-100 p-1 sm:w-auto dark:bg-gray-800"
-          role="tablist"
-          aria-label="privacy mode">
-          {MODES.map((m) => {
-            const on = m.id === mode
-            const accent =
-              m.id === 'anonymous'
-                ? 'bg-emerald-600'
-                : m.id === 'encrypted'
-                  ? 'bg-emerald-700'
-                  : 'bg-indigo-600'
-            return (
-              <button
-                key={m.id}
-                role="tab"
-                aria-selected={on}
-                onClick={() => setMode(m.id)}
-                className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-md px-3.5 py-1.5 text-sm font-medium transition sm:flex-none ${
-                  on
-                    ? `${accent} text-white shadow`
-                    : 'text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white'
-                }`}>
-                <Icon icon={m.icon} className="size-4" />
-                {m.label}
-              </button>
-            )
-          })}
-        </div>
-        <p className="mt-1.5 px-1 text-sm text-gray-500 dark:text-gray-400">{current.explainer}</p>
-      </div>
-
-      {/* Each mode is its own self-contained pane driving the shared chain store. Remount-per-switch
-          resets transient composer state cleanly. Public + Encrypted are the two Channel paths;
-          Anonymous is the full Whisper (ZK) experience. */}
-      {mode === 'public' && <ChannelPane mode="public" workerFactory={workerFactory} />}
-      {mode === 'encrypted' && <ChannelPane mode="encrypted" workerFactory={workerFactory} />}
-      {mode === 'anonymous' && <AnonymousRoom workerFactory={workerFactory} />}
+    <div className="flex w-full flex-col">
+      {mode === 'public' && <ChannelPane mode="public" activeMode={mode} onMode={setMode} workerFactory={workerFactory} />}
+      {mode === 'encrypted' && <ChannelPane mode="encrypted" activeMode={mode} onMode={setMode} workerFactory={workerFactory} />}
+      {mode === 'anonymous' && <AnonymousRoom activeMode={mode} onMode={setMode} workerFactory={workerFactory} />}
     </div>
   )
 }
@@ -212,9 +216,13 @@ const byBlockDesc = (a: RPCMessage, b: RPCMessage) => Number(BigInt(b.blockNumbe
 
 function ChannelPane({
   mode,
+  activeMode,
+  onMode,
   workerFactory,
 }: {
   mode: 'public' | 'encrypted'
+  activeMode: Mode
+  onMode: (m: Mode) => void
   workerFactory?: () => Worker
 }) {
   const publicMode = mode === 'public'
@@ -385,7 +393,8 @@ function ChannelPane({
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 dark:bg-gray-800 dark:ring-gray-700">
+    <div className="mx-auto flex w-full max-w-4xl flex-col overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 dark:bg-gray-800 dark:ring-gray-700">
+      <ModeBar active={activeMode} onChange={onMode} />
       {/* channel / room bar */}
       <div className="flex items-center gap-3 border-b border-gray-200 px-4 py-2.5 dark:border-gray-700">
         {publicMode ? (
@@ -666,13 +675,16 @@ type FeedRow = {
 }
 
 type AnonProps = {
+  /** The active Chat privacy mode + its setter — drives the in-card ModeBar toggle. */
+  activeMode: Mode
+  onMode: (m: Mode) => void
   /** Injectable PoW worker factory (headless tests supply a fake). Prod omits it. */
   workerFactory?: () => Worker
   /** Injectable ZK worker factory (headless tests supply a fake). Prod omits it. */
   zkWorkerFactory?: () => Worker
 }
 
-function AnonymousRoom({ workerFactory, zkWorkerFactory }: AnonProps) {
+function AnonymousRoom({ activeMode, onMode, workerFactory, zkWorkerFactory }: AnonProps) {
   const transportUrl = useChainStore((s) => selectTransportUrl(s))
   const chainId = useChainStore((s) => selectChain(s)?.id ?? 0)
   const rpcValid = useChainStore((s) => selectRpcValid(s))
@@ -834,7 +846,8 @@ function AnonymousRoom({ workerFactory, zkWorkerFactory }: AnonProps) {
   const disabled = working || !rpcValid || !board || provingUnavailable
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 lg:max-w-5xl dark:bg-gray-800 dark:ring-gray-700">
+    <div className="mx-auto flex w-full max-w-4xl flex-col overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 dark:bg-gray-800 dark:ring-gray-700">
+      <ModeBar active={activeMode} onChange={onMode} />
       {/* header bar — room identity + prover state + narrow-screen view toggle */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-gray-200 px-4 py-2.5 dark:border-gray-700">
         <WhisperMark />
