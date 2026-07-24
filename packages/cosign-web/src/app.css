@@ -665,3 +665,51 @@ dl.meta {
     transform: rotate(360deg);
   }
 }
+
+/* ── the house menu + toggle (no native form controls — they can't be styled) ─────────────────── */
+.menu { position: relative; display: inline-block; }
+.menu-trigger {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  background: var(--ink2); color: var(--parch);
+  border: 1px solid var(--line2); border-radius: 6px;
+  padding: 0.4rem 0.65rem;
+  font: 500 0.88rem var(--body);
+  cursor: pointer;
+}
+.menu-trigger:hover:not(:disabled) { border-color: var(--brass-dim); }
+.menu-caret { color: var(--brass-dim); font-size: 0.8em; }
+.menu-panel {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 30;
+  min-width: 100%;
+  display: flex; flex-direction: column;
+  max-height: min(60vh, 20rem); overflow-y: auto; overscroll-behavior: contain;
+  background: var(--ink2);
+  border: 1px solid var(--brass-dim); border-radius: 6px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.55);
+  padding: 0.25rem;
+}
+.menu-option {
+  text-align: left; white-space: nowrap;
+  background: transparent; color: var(--parch);
+  border: none; border-radius: 4px;
+  padding: 0.4rem 0.65rem;
+  font: 500 0.88rem var(--body);
+  cursor: pointer;
+}
+.menu-option.highlight { background: rgba(233, 226, 208, 0.08); }
+.menu-option.selected { color: var(--brass); font-weight: 700; }
+.toggle {
+  display: inline-flex; align-items: center; gap: 0.45rem;
+  background: transparent; border: none; padding: 0;
+  color: var(--parch); font: 500 0.88rem var(--body);
+  cursor: pointer; text-align: left;
+}
+.toggle:disabled { cursor: default; opacity: 0.6; }
+.toggle-box {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1.05rem; height: 1.05rem; flex: none;
+  border: 1px solid var(--line2); border-radius: 3px;
+  background: var(--ink2); color: var(--brass);
+  font-size: 0.8rem; line-height: 1;
+}
+.toggle.on .toggle-box { border-color: var(--brass-dim); }

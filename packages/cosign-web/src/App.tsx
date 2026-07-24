@@ -1,3 +1,4 @@
+import { Menu } from './components/Menu'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { type Hex, formatUnits, isAddress, isAddressEqual, getAddress } from 'viem'
 import { Icon } from '@iconify/react'
@@ -732,13 +733,12 @@ export function App() {
             </div>
             {showCfg && (
               <div style={{ marginTop: 8 }}>
-                <select value={boardIdx} onChange={(e) => setBoardIdx(Number(e.target.value))}>
-                  {BOARD_ENDPOINTS.map((b, i) => (
-                    <option key={b.rpc} value={i}>
-                      {b.label}
-                    </option>
-                  ))}
-                </select>
+                <Menu
+                  label="board endpoint"
+                  options={BOARD_ENDPOINTS.map((b) => b.label)}
+                  value={boardIdx}
+                  onChange={setBoardIdx}
+                />
                 <div className="small" style={{ marginTop: 6 }}>
                   {factors ? `work ${factors.workMultiplier}/${factors.workDivisor}` : 'probing board…'}
                 </div>

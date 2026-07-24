@@ -1,3 +1,4 @@
+import { Toggle } from './Toggle'
 import { useMemo, useState } from 'react'
 import * as viem from 'viem'
 import { createMsgBoardClient, post } from '@msgboard/games'
@@ -373,10 +374,9 @@ const SetterPanel = ({
             maxLength={5}
             style={{ fontFamily: 'var(--mono)', textTransform: 'lowercase', width: '8rem' }}
           />
-          <label className="muted" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-            <input type="checkbox" checked={openOnChain} onChange={(e) => setOpenOnChain(e.target.checked)} />
+          <Toggle checked={openOnChain} onChange={setOpenOnChain}>
             also open on-chain (lets friends anchor their win)
-          </label>
+          </Toggle>
         </div>
         <p className="muted">
           {wordClean.length === 5 && !wordValid && <span className="bad">not in the Wordle dictionary · </span>}
