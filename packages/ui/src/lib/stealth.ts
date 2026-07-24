@@ -61,6 +61,10 @@ const AEAD_NONCE_BYTES = 24
 /** HKDF `info` label deriving the message AEAD key from the ERC-5564 shared secret. */
 const MSG_KEY_INFO = 'msgboard:stealth:msg:v1'
 
+/** HKDF `info` labels domain-separating the two keys derived from a wallet-signature seed. */
+const SPEND_KEY_INFO = 'msgboard:stealth:spend:v1'
+const VIEW_KEY_INFO = 'msgboard:stealth:view:v1'
+
 const Point = secp256k1.Point
 /** secp256k1 base point G and scalar field Fn (arithmetic mod the curve order n). */
 const G = Point.BASE
@@ -135,6 +139,40 @@ function sharedSecretScalar(sharedSecret: Uint8Array): bigint {
 export function generateStealthMetaAddress(): StealthMetaAddress {
   const spendingPrivKey = secp256k1.utils.randomSecretKey()
   const viewingPrivKey = secp256k1.utils.randomSecretKey()
+  const spendingPubKey = secp256k1.getPublicKey(spendingPrivKey, true)
+  const viewingPubKey = secp256k1.getPublicKey(viewingPrivKey, true)
+  return {
+    spendingPrivKey,
+    spendingPubKey,
+    viewingPrivKey,
+    viewingPubKey,
+    metaAddress: concatBytes(spendingPubKey, viewingPubKey),
+  }
+}
+
+/**
+ * Reduce an HKDF-expanded seed to a valid secp256k1 private scalar in [1, n). We expand 48 bytes
+ * (384 bits) and reduce mod the curve order n — n is within ~2^-128 of 2^256, so the modulo bias is
+ * cryptographically negligible. A zero result (probability ~2^-256) is rejected.
+ */
+function deriveScalar(seed: Uint8Array, info: string): Uint8Array {
+  const out = hkdf(sha256, seed, undefined, info, 48)
+  const x = Fn.create(bytesToNumberBE(out))
+  if (x === 0n) throw new Error('degenerate stealth key derivation (retry signing)')
+  return numberToBytesBE(x, PRIVKEY_BYTES)
+}
+
+/**
+ * Derive a stealth meta-address DETERMINISTICALLY from a seed (a wallet signature over a fixed
+ * message). Same seed → same spending + viewing keypairs, so the identity is recoverable on any
+ * device by re-signing — mirroring wallet-identity.ts. Distinct HKDF `info` labels domain-separate
+ * the spending key (needed to spend/decrypt) from the viewing key (needed only to scan), so neither
+ * can be recovered from the other. The `seed` must be ≥32 bytes of key material.
+ */
+export function deriveStealthMetaAddressFromSeed(seed: Uint8Array): StealthMetaAddress {
+  if (seed.length < 32) throw new Error('seed too short to derive stealth keys')
+  const spendingPrivKey = deriveScalar(seed, SPEND_KEY_INFO)
+  const viewingPrivKey = deriveScalar(seed, VIEW_KEY_INFO)
   const spendingPubKey = secp256k1.getPublicKey(spendingPrivKey, true)
   const viewingPubKey = secp256k1.getPublicKey(viewingPrivKey, true)
   return {

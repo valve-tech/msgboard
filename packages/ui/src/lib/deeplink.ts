@@ -6,7 +6,7 @@
  * `location.search` is free for this state. We read/write three params:
  *
  *   ?tab=chat|mechanics|arcade   — the TryIt section
- *   &mode=public|anonymous|encrypted|direct — the Chat privacy mode
+ *   &mode=public|anonymous|encrypted|direct|stealth — the Chat privacy mode
  *   &demo=encrypted|direct       — the TwoUserDemo "talk to yourself" overlay (omitted when closed)
  *
  * Reads are validated (garbage → undefined, so callers fall back to their own defaults). Writes go
@@ -16,11 +16,11 @@
  */
 
 export type TabId = 'chat' | 'mechanics' | 'arcade'
-export type ChatMode = 'public' | 'anonymous' | 'encrypted' | 'direct'
+export type ChatMode = 'public' | 'anonymous' | 'encrypted' | 'direct' | 'stealth'
 export type DemoKind = 'encrypted' | 'direct'
 
 const TABS: readonly TabId[] = ['chat', 'mechanics', 'arcade']
-const MODES: readonly ChatMode[] = ['public', 'anonymous', 'encrypted', 'direct']
+const MODES: readonly ChatMode[] = ['public', 'anonymous', 'encrypted', 'direct', 'stealth']
 const DEMOS: readonly DemoKind[] = ['encrypted', 'direct']
 
 export interface DeepLink {

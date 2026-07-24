@@ -21,7 +21,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Icon } from '@iconify/react'
 import { base64urlnopad } from '@scure/base'
-import { stringToHex, toHex, type Hex } from 'viem'
+import { stringToHex, toHex, getAddress, hexToBytes, type Address, type Hex } from 'viem'
 import type { RPCMessage } from '@msgboard/sdk'
 import {
   useChainStore,
@@ -87,13 +87,15 @@ import {
 import { formatBlocksRemaining } from '../lib/tree'
 import { BLOCK_RANGE_LIMIT } from '../lib/rpc'
 import { readDeepLink, writeDeepLink, currentShareUrl } from '../lib/deeplink'
+import { checkAnnouncement, decryptMessage as decryptStealthMessage } from '../lib/stealth'
+import * as sm from '../lib/stealth-messenger'
 
 // ── mode selector ────────────────────────────────────────────────────────────────────────
 
-type Mode = 'public' | 'anonymous' | 'encrypted' | 'direct'
+type Mode = 'public' | 'anonymous' | 'encrypted' | 'direct' | 'stealth'
 const MODE_KEY = 'msgboard.chat.mode'
 const isMode = (s: unknown): s is Mode =>
-  s === 'public' || s === 'anonymous' || s === 'encrypted' || s === 'direct'
+  s === 'public' || s === 'anonymous' || s === 'encrypted' || s === 'direct' || s === 'stealth'
 
 const MODES: { id: Mode; label: string; icon: string; explainer: string }[] = [
   {
@@ -120,6 +122,12 @@ const MODES: { id: Mode; label: string; icon: string; explainer: string }[] = [
     icon: 'mdi:email-lock',
     explainer: 'Private messages encrypted to specific people — only they can read them. Senders are unverified.',
   },
+  {
+    id: 'stealth',
+    label: 'Stealth',
+    icon: 'mdi:incognito-circle',
+    explainer: 'On-chain messages to a hidden recipient — the sender is proven, but only the recipient can tell a message is theirs.',
+  },
 ]
 
 /**
@@ -141,7 +149,9 @@ function ModeBar({ active, onChange }: { active: Mode; onChange: (m: Mode) => vo
                 ? 'bg-emerald-700'
                 : m.id === 'direct'
                   ? 'bg-violet-600'
-                  : 'bg-indigo-600'
+                  : m.id === 'stealth'
+                    ? 'bg-teal-600'
+                    : 'bg-indigo-600'
           return (
             <button
               key={m.id}
@@ -215,6 +225,7 @@ export function Chat({ workerFactory }: { workerFactory?: () => Worker }) {
       {mode === 'direct' && (
         <DirectPane activeMode={mode} onMode={setMode} workerFactory={workerFactory} onDemo={() => setDemo('direct')} />
       )}
+      {mode === 'stealth' && <StealthPane activeMode={mode} onMode={setMode} />}
     </div>
   )
 }
@@ -1172,6 +1183,490 @@ function DirectPane({
           PoW off this thread. The board only ever sees ciphertext.
         </p>
       </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// STEALTH — on-chain private messaging to a HIDDEN recipient (StealthMessenger.sol, ERC-5564/6538)
+//
+// The odd one out among the modes: this does NOT ride the ephemeral PoW board. It talks to a real
+// deployed contract on chain 943, so it needs a wallet (to register, to sign each message, to pay
+// gas) and it persists — messages live on-chain, not in a ~120-block window. What it BUYS over the
+// other modes is the pair the contract guarantees: the SENDER is cryptographically proven (an
+// EIP-712 signature the contract recovers → the emitted `sender` topic), while the RECIPIENT is
+// hidden from everyone but themselves (a one-time stealth address only they can recognise, by
+// scanning MessageSent logs with their private viewing key + the 1-byte view tag).
+//
+// Identity is derived DETERMINISTICALLY from a wallet signature (deriveStealthMetaAddressFromSeed),
+// so the same spending+viewing keys come back on any device by re-signing. All crypto is in
+// ../lib/stealth; all chain wiring (inlined ABI, dedicated 943 read client, wallet writes, the
+// log scan) is in ../lib/stealth-messenger. This pane is wiring + honest trust copy.
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+/** A detected, decrypted inbox message — deduped on content hash, with a PROVEN sender. */
+interface StealthInboxItem {
+  id: Hex
+  sender: Address
+  text: string
+  blockNumber: bigint
+  txHash: Hex
+}
+
+/** Short 0x… form for addresses / hashes. */
+const shortHex = (h: string) => `${h.slice(0, 6)}…${h.slice(-4)}`
+
+type RegState = 'idle' | 'signing' | 'pending' | 'done' | 'err'
+type SendState = 'idle' | 'deriving' | 'pending' | 'done' | 'err'
+type LookupState =
+  | { status: 'idle' | 'looking' | 'invalid' | 'unregistered' }
+  | { status: 'found'; meta: Uint8Array }
+
+function StealthPane({ activeMode, onMode }: { activeMode: Mode; onMode: (m: Mode) => void }) {
+  const walletAvailable = useMemo(() => hasInjectedWallet(), [])
+  const client = useMemo(() => sm.stealthPublicClient(), [])
+
+  // Wallet-derived stealth identity — kept in memory only (never persisted): the wallet IS the
+  // backup, re-signing restores the exact same keys. null until the user connects + signs.
+  const [identity, setIdentity] = useState<sm.StealthIdentity | null>(null)
+  const [deriving, setDeriving] = useState(false)
+  const [deriveError, setDeriveError] = useState<string | null>(null)
+
+  // On-chain registration status for this identity's address.
+  const [registeredMeta, setRegisteredMeta] = useState<Uint8Array | null | undefined>(undefined)
+  const [regState, setRegState] = useState<RegState>('idle')
+  const [regError, setRegError] = useState<string | null>(null)
+
+  // Compose: recipient EOA + its looked-up meta-address, and the body.
+  const [recipient, setRecipient] = useState('')
+  const [lookup, setLookup] = useState<LookupState>({ status: 'idle' })
+  const [body, setBody] = useState('')
+  const [sendState, setSendState] = useState<SendState>('idle')
+  const [sendError, setSendError] = useState<string | null>(null)
+  const [sendTx, setSendTx] = useState<Hex | null>(null)
+
+  // Inbox scan.
+  const [inbox, setInbox] = useState<StealthInboxItem[]>([])
+  const [scanning, setScanning] = useState(false)
+  const [scanError, setScanError] = useState<string | null>(null)
+  const [scannedOnce, setScannedOnce] = useState(false)
+
+  const myMetaHex = identity ? toHex(identity.meta.metaAddress) : null
+  const registered =
+    registeredMeta != null && myMetaHex != null && toHex(registeredMeta) === myMetaHex
+  const registeredDifferent = registeredMeta != null && myMetaHex != null && !registered
+
+  // ── derive identity from wallet ──────────────────────────────────────────────────────
+  const deriveIdentity = async () => {
+    setDeriving(true)
+    setDeriveError(null)
+    try {
+      const id = await sm.deriveStealthIdentityFromWallet()
+      setIdentity(id)
+      setRegisteredMeta(undefined)
+      void refreshRegistration(id.address)
+    } catch (err) {
+      setDeriveError(err instanceof Error ? err.message : 'Could not derive from wallet.')
+    } finally {
+      setDeriving(false)
+    }
+  }
+
+  const refreshRegistration = async (address: Address) => {
+    try {
+      setRegisteredMeta(await sm.readRegisteredMeta(client, address))
+    } catch {
+      setRegisteredMeta(null)
+    }
+  }
+
+  // ── register on-chain ────────────────────────────────────────────────────────────────
+  const register = async () => {
+    if (!identity) return
+    setRegState('signing')
+    setRegError(null)
+    try {
+      const hash = await sm.registerOnChain(identity.address, identity.meta.metaAddress)
+      setRegState('pending')
+      await client.waitForTransactionReceipt({ hash })
+      await refreshRegistration(identity.address)
+      setRegState('done')
+      setTimeout(() => setRegState('idle'), 2500)
+    } catch (err) {
+      setRegError(err instanceof Error ? err.message : 'Registration failed.')
+      setRegState('err')
+    }
+  }
+
+  // ── recipient lookup (debounced on the input) ──────────────────────────────────────────
+  useEffect(() => {
+    const addr = recipient.trim()
+    if (!addr) {
+      setLookup({ status: 'idle' })
+      return
+    }
+    if (!sm.isAddress(addr)) {
+      setLookup({ status: 'invalid' })
+      return
+    }
+    let alive = true
+    setLookup({ status: 'looking' })
+    const t = setTimeout(async () => {
+      try {
+        const meta = await sm.readRegisteredMeta(client, getAddress(addr))
+        if (!alive) return
+        setLookup(meta ? { status: 'found', meta } : { status: 'unregistered' })
+      } catch {
+        if (alive) setLookup({ status: 'unregistered' })
+      }
+    }, 350)
+    return () => {
+      alive = false
+      clearTimeout(t)
+    }
+  }, [recipient, client])
+
+  // ── send ───────────────────────────────────────────────────────────────────────────────
+  const send = async () => {
+    const text = body.trim()
+    if (!identity || !text || lookup.status !== 'found') return
+    setSendState('deriving')
+    setSendError(null)
+    setSendTx(null)
+    try {
+      const { txHash } = await sm.sendStealthMessage(identity.address, lookup.meta, text)
+      setSendState('pending')
+      setSendTx(txHash)
+      await client.waitForTransactionReceipt({ hash: txHash })
+      setBody('')
+      setSendState('done')
+      setTimeout(() => setSendState('idle'), 2500)
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : 'Send failed.')
+      setSendState('err')
+    }
+  }
+
+  // ── inbox scan ──────────────────────────────────────────────────────────────────────────
+  const scan = useMemo(
+    () => async (id: sm.StealthIdentity) => {
+      setScanning(true)
+      setScanError(null)
+      try {
+        const announcements = await sm.fetchAnnouncements(client)
+        const scanKeys = { spendingPubKey: id.meta.spendingPubKey, viewingPrivKey: id.meta.viewingPrivKey }
+        const seen = new Set<string>()
+        const found: StealthInboxItem[] = []
+        for (const a of announcements) {
+          const contentId = sm.announcementContentHash(a.ephemeralPubKey, a.ciphertext)
+          if (seen.has(contentId)) continue // client-side dedup (no on-chain dedup exists)
+          const hit = checkAnnouncement(
+            {
+              stealthAddress: hexToBytes(a.stealthAddress),
+              ephemeralPubKey: hexToBytes(a.ephemeralPubKey),
+              viewTag: sm.viewTagByte(a.viewTag),
+            },
+            scanKeys,
+          )
+          if (!hit) continue
+          seen.add(contentId)
+          try {
+            const plaintext = decryptStealthMessage(hit.sharedSecret, hexToBytes(a.ciphertext))
+            found.push({
+              id: contentId,
+              sender: a.sender,
+              text: new TextDecoder().decode(plaintext),
+              blockNumber: a.blockNumber,
+              txHash: a.txHash,
+            })
+          } catch {
+            /* a detected message that won't decrypt — skip (tampered / not really ours) */
+          }
+        }
+        found.sort((x, y) => Number(y.blockNumber - x.blockNumber))
+        setInbox(found)
+      } catch (err) {
+        setScanError(err instanceof Error ? err.message : 'Scan failed.')
+      } finally {
+        setScanning(false)
+        setScannedOnce(true)
+      }
+    },
+    [client],
+  )
+
+  // Auto-scan once on identity, then poll every 20s while the pane is open.
+  useEffect(() => {
+    if (!identity) return
+    void scan(identity)
+    const iv = setInterval(() => void scan(identity), 20_000)
+    return () => clearInterval(iv)
+  }, [identity, scan])
+
+  const canSend = !!identity && lookup.status === 'found' && !!body.trim() && sendState !== 'deriving' && sendState !== 'pending'
+
+  return (
+    <div className="flex w-full flex-col overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 dark:bg-gray-800 dark:ring-gray-700">
+      <ModeBar active={activeMode} onChange={onMode} />
+
+      {/* header */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-gray-200 px-4 py-2.5 dark:border-gray-700">
+        <Icon icon="mdi:incognito-circle" className="size-5 shrink-0 text-teal-600 dark:text-teal-400" />
+        <span className="font-mono text-base font-semibold">Stealth</span>
+        <span className="rounded-full bg-teal-100 px-2 py-0.5 text-xs font-medium text-teal-800 dark:bg-teal-900/50 dark:text-teal-300">
+          on-chain · hidden recipient
+        </span>
+        <span className="ml-auto hidden shrink-0 text-xs text-gray-400 sm:inline">chain 943</span>
+      </div>
+
+      {/* honest trust model */}
+      <div className="border-b border-teal-200 bg-teal-50 px-4 py-2.5 text-[11px] leading-relaxed text-teal-900 dark:border-teal-900/50 dark:bg-teal-950/40 dark:text-teal-200">
+        <p className="font-semibold">
+          <Icon icon="mdi:shield-account" className="inline size-3.5" /> Sender proven, recipient
+          hidden. The contract recovers your signature, so the on-chain <strong>sender is
+          authenticated & public</strong>; the <strong>recipient is hidden</strong> from everyone but
+          themselves.
+        </p>
+        <p className="mt-1 text-teal-800 dark:text-teal-300/90">
+          Metadata (timing / size / your address) is public · no forward secrecy.
+        </p>
+        <details className="group mt-1">
+          <summary className="cursor-pointer list-none font-medium text-teal-700 hover:underline dark:text-teal-300">
+            <Icon icon="mdi:chevron-right" className="inline size-3.5 transition group-open:rotate-90" />
+            Details
+          </summary>
+          <p className="mt-1 text-teal-800 dark:text-teal-300/90">
+            Each message rides a fresh one-time <strong>stealth address</strong> derived (ERC-5564)
+            from the recipient&apos;s published meta-address; only they can link it back to
+            themselves, by scanning logs with their private viewing key. The body is encrypted under
+            the ERC-5564 shared secret. But <strong>the traffic is not hidden</strong>: that a message
+            exists, its size, its timing, and <strong>your (sender) address</strong> are all on-chain.
+            There is <strong>no forward secrecy</strong> — your stealth keys are derived from one
+            wallet signature and never rotate, so compromising it exposes past and future messages.
+            The contract keeps <strong>no on-chain dedup</strong>, so this client dedups received
+            messages on their content hash.
+          </p>
+        </details>
+      </div>
+
+      {/* IDENTITY / REGISTER */}
+      <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+        {!walletAvailable ? (
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800/60 dark:bg-amber-900/20 dark:text-amber-300">
+            No injected wallet found. Stealth messaging needs a wallet to register, sign, and send on
+            chain 943 — install one to use this mode.
+          </div>
+        ) : !identity ? (
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void deriveIdentity()}
+                disabled={deriving}
+                className="inline-flex items-center gap-1.5 rounded-md bg-teal-600 px-3 py-2 text-sm font-medium text-white hover:bg-teal-500 disabled:opacity-50">
+                <Icon icon="mdi:wallet-outline" className="size-4" />
+                {deriving ? 'sign in wallet…' : 'Derive stealth identity'}
+              </button>
+              <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                Sign a fixed message to derive your spending + viewing keys — recoverable on any
+                device by re-signing. The signature never leaves this browser.
+              </span>
+            </div>
+            {deriveError && <p className="text-[11px] text-red-600 dark:text-red-400">{deriveError}</p>}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2 text-xs">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="text-gray-400">you are</span>
+              <code
+                className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] text-gray-700 dark:bg-gray-900 dark:text-gray-200"
+                title={identity.address}>
+                {shortHex(identity.address)}
+              </code>
+              {registered ? (
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300">
+                  <Icon icon="mdi:check-decagram" className="size-3.5" /> registered — others can message you
+                </span>
+              ) : registeredDifferent ? (
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-900/50 dark:text-amber-300">
+                  <Icon icon="mdi:alert" className="size-3.5" /> a different meta-address is registered — re-register to update
+                </span>
+              ) : registeredMeta === undefined ? (
+                <span className="text-[11px] text-gray-400">checking registration…</span>
+              ) : (
+                <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                  <Icon icon="mdi:cloud-off-outline" className="size-3.5" /> not registered — others can&apos;t message you yet
+                </span>
+              )}
+            </div>
+            <div className="flex items-start gap-2">
+              <span className="mt-1 shrink-0 text-gray-400">meta</span>
+              <code className="min-w-0 flex-1 break-all rounded bg-gray-100 px-2 py-1 font-mono text-[10px] text-gray-600 select-all dark:bg-gray-900 dark:text-gray-300" title="your stealth meta-address (spendingPub ‖ viewingPub)">
+                {myMetaHex}
+              </code>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {!registered && (
+                <button
+                  type="button"
+                  onClick={() => void register()}
+                  disabled={regState === 'signing' || regState === 'pending'}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-teal-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-500 disabled:opacity-50">
+                  <Icon icon="mdi:cloud-upload-outline" className="size-3.5" />
+                  {regState === 'signing'
+                    ? 'confirm in wallet…'
+                    : regState === 'pending'
+                      ? 'registering…'
+                      : registeredDifferent
+                        ? 'Re-register on-chain'
+                        : 'Register on-chain'}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => identity && void refreshRegistration(identity.address)}
+                className="text-[11px] text-gray-400 underline decoration-dotted hover:text-gray-600 dark:hover:text-gray-200">
+                refresh status
+              </button>
+              {regState === 'done' && (
+                <span className="text-[11px] text-emerald-600 dark:text-emerald-400">registered ✓</span>
+              )}
+            </div>
+            {regError && <p className="text-[11px] text-red-600 dark:text-red-400">{regError}</p>}
+          </div>
+        )}
+      </div>
+
+      {/* SEND */}
+      {identity && (
+        <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+          <div className="mb-2 flex items-center gap-2 text-xs text-gray-400">
+            <Icon icon="mdi:send-lock-outline" className="size-3.5" /> send a stealth message
+          </div>
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                className="min-w-0 flex-1 rounded-md bg-gray-50 px-2.5 py-1.5 font-mono text-xs text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus:-outline-offset-2 focus:outline-teal-600 dark:bg-gray-900 dark:text-gray-100 dark:outline-gray-600"
+                placeholder="recipient address (0x…)"
+                value={recipient}
+                onChange={(e) => setRecipient(e.target.value)}
+                aria-label="recipient address"
+              />
+              {lookup.status === 'looking' && <span className="text-[11px] text-gray-400">looking up…</span>}
+              {lookup.status === 'found' && (
+                <span className="inline-flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400">
+                  <Icon icon="mdi:check" className="size-3.5" /> registered
+                </span>
+              )}
+              {lookup.status === 'invalid' && recipient.trim() && (
+                <span className="text-[11px] text-red-500">not a valid address</span>
+              )}
+              {lookup.status === 'unregistered' && (
+                <span className="text-[11px] text-amber-600 dark:text-amber-400">
+                  this address hasn&apos;t registered a stealth meta-address — you can&apos;t message it
+                </span>
+              )}
+            </div>
+            <form
+              className="flex items-center gap-2"
+              onSubmit={(e) => {
+                e.preventDefault()
+                void send()
+              }}>
+              <input
+                className="min-w-0 flex-1 rounded-md bg-gray-50 px-3 py-2 text-sm text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus:-outline-offset-2 focus:outline-teal-600 disabled:opacity-60 dark:bg-gray-900 dark:text-gray-100 dark:outline-gray-600"
+                placeholder={lookup.status === 'found' ? 'message (encrypted to the recipient)' : 'enter a registered recipient first'}
+                value={body}
+                disabled={lookup.status !== 'found' || sendState === 'deriving' || sendState === 'pending'}
+                onChange={(e) => setBody(e.target.value)}
+                aria-label="stealth message"
+              />
+              <button
+                type="submit"
+                disabled={!canSend}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-teal-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-teal-500 disabled:opacity-50">
+                {sendState === 'deriving' ? (
+                  <>
+                    <Icon icon="mdi:pen" className="size-4 animate-pulse" /> sign…
+                  </>
+                ) : sendState === 'pending' ? (
+                  <>
+                    <Icon icon="mdi:loading" className="size-4 animate-spin" /> sending…
+                  </>
+                ) : (
+                  <>
+                    <Icon icon="mdi:send-lock" className="size-4" /> send
+                  </>
+                )}
+              </button>
+            </form>
+            {sendState === 'done' && (
+              <p className="text-[11px] text-emerald-600 dark:text-emerald-400">
+                sent ✓ {sendTx && <span className="font-mono">{shortHex(sendTx)}</span>}
+              </p>
+            )}
+            {sendState === 'err' && sendError && (
+              <p className="text-[11px] text-red-600 dark:text-red-400">{sendError}</p>
+            )}
+            <p className="text-[11px] leading-snug text-gray-400">
+              You sign an EIP-712 digest binding this exact message to your key + this chain/contract,
+              then submit it. The recipient stays hidden; your address is proven and public.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* INBOX */}
+      {identity && (
+        <div className="flex flex-col">
+          <div className="flex items-center gap-2 border-b border-gray-200 px-4 py-2 text-xs dark:border-gray-700">
+            <Icon icon="mdi:inbox-arrow-down" className="size-4 text-teal-600 dark:text-teal-400" />
+            <span className="font-semibold text-gray-700 dark:text-gray-200">Inbox</span>
+            <span className="text-gray-400">{inbox.length} for you</span>
+            <button
+              type="button"
+              onClick={() => identity && void scan(identity)}
+              disabled={scanning}
+              className="ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-teal-700 hover:bg-teal-50 disabled:opacity-50 dark:text-teal-300 dark:hover:bg-teal-900/30">
+              <Icon icon={scanning ? 'mdi:loading' : 'mdi:refresh'} className={`size-3.5 ${scanning ? 'animate-spin' : ''}`} />
+              {scanning ? 'scanning…' : 'refresh'}
+            </button>
+          </div>
+          <div className="flex h-72 flex-col gap-1.5 overflow-y-auto px-4 py-3 font-mono text-sm">
+            {scanError ? (
+              <div className="m-auto max-w-xs text-center text-[11px] text-red-500">{scanError}</div>
+            ) : inbox.length === 0 ? (
+              <div className="m-auto max-w-xs text-center text-gray-400">
+                <Icon icon="mdi:inbox-outline" className="mx-auto mb-2 size-7 opacity-60" />
+                <p className="text-sm">{scannedOnce ? 'No messages for you yet.' : 'Scanning the chain…'}</p>
+                <p className="mt-1 text-xs">
+                  Register your meta-address and share your address so others can send you a stealth
+                  message. Only you can tell which on-chain messages are yours.
+                </p>
+              </div>
+            ) : (
+              inbox.map((m) => (
+                <div
+                  key={m.id}
+                  className="flex items-baseline gap-2 rounded px-1 py-0.5 hover:bg-gray-50 dark:hover:bg-gray-700/40">
+                  <span
+                    className="inline-flex shrink-0 items-center gap-1 font-semibold text-teal-700 dark:text-teal-300"
+                    title={`proven sender ${m.sender}`}>
+                    <Icon icon="mdi:check-decagram" className="size-3.5" />
+                    {shortHex(m.sender)}
+                  </span>
+                  <span className="min-w-0 flex-1 break-words text-gray-800 dark:text-gray-100">{m.text}</span>
+                  <span
+                    className="shrink-0 text-[11px] text-gray-400"
+                    title={`block ${m.blockNumber} · tx ${m.txHash}`}>
+                    #{m.blockNumber.toString()}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

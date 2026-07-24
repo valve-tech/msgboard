@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { secp256k1 } from '@noble/curves/secp256k1'
 import {
   generateStealthMetaAddress,
+  deriveStealthMetaAddressFromSeed,
   parseMetaAddress,
   deriveStealthAddress,
   checkAnnouncement,
@@ -86,6 +87,34 @@ describe('stealth (ERC-5564 secp256k1, schemeId 1)', () => {
     const blob = encryptMessage(sharedSecret, 'secret')
     blob[blob.length - 1] ^= 0x01 // flip a bit in the AEAD tag
     expect(() => decryptMessage(sharedSecret, blob)).toThrow()
+  })
+
+  it('deriveStealthMetaAddressFromSeed is deterministic and produces a usable meta-address', () => {
+    const seed = new Uint8Array(64).fill(7)
+    const a = deriveStealthMetaAddressFromSeed(seed)
+    const b = deriveStealthMetaAddressFromSeed(seed)
+    // Same seed → identical keys (portable/recoverable by re-signing).
+    expect(a.metaAddress).toEqual(b.metaAddress)
+    expect(a.spendingPrivKey).toEqual(b.spendingPrivKey)
+    expect(a.viewingPrivKey).toEqual(b.viewingPrivKey)
+    expect(a.metaAddress.length).toBe(66)
+    // Spending & viewing keys are distinct (domain-separated HKDF labels).
+    expect(a.spendingPrivKey).not.toEqual(a.viewingPrivKey)
+    // A different seed yields a different identity.
+    const c = deriveStealthMetaAddressFromSeed(new Uint8Array(64).fill(9))
+    expect(c.metaAddress).not.toEqual(a.metaAddress)
+    // And it works end-to-end as a real recipient meta-address.
+    const { stealthAddress, ephemeralPubKey, viewTag } = deriveStealthAddress(a.metaAddress)
+    const found = checkAnnouncement(
+      { stealthAddress, ephemeralPubKey, viewTag },
+      { spendingPubKey: a.spendingPubKey, viewingPrivKey: a.viewingPrivKey },
+    )
+    expect(found).not.toBeNull()
+    expect(found!.stealthAddress).toEqual(stealthAddress)
+  })
+
+  it('deriveStealthMetaAddressFromSeed rejects a too-short seed', () => {
+    expect(() => deriveStealthMetaAddressFromSeed(new Uint8Array(16))).toThrow()
   })
 
   it('is randomized: two derivations to the same recipient differ but both resolve', () => {
