@@ -50,17 +50,17 @@ describe('keno (draw-without-replacement)', () => {
   })
 
   it('wins on a qualifying hit count and pays stake*(mult-1)', () => {
-    // raw=0, drawn=3 -> {1,39,40}; picks all 3 -> 3 hits -> the top cell for picks=3.
+    // raw=0 draws the fixed 10-of-40 set {1,32..40}; picks [1,39,40] all hit -> 3 hits -> top cell for picks=3.
     const expected = applyEdgeX100(BASE_PAYTABLE_X100[3]![3]!)
-    const win = keno.settleRound(100n, { picks: [1, 39, 40], drawn: 3 }, 0n)
+    const win = keno.settleRound(100n, { picks: [1, 39, 40] }, 0n)
     expect(win.win).toBe(true)
     expect(win.multiplierX100).toBe(expected)
     expect(win.playerDelta).toBe((100n * expected) / 100n - 100n)
   })
 
   it('loses the stake when the hit count does not pay', () => {
-    // raw=0, drawn=3 -> {1,39,40}; picks miss entirely -> 0 hits -> no payout
-    const lose = keno.settleRound(100n, { picks: [2, 3, 4], drawn: 3 }, 0n)
+    // raw=0 draws {1,32..40}; picks [2,3,4] miss entirely -> 0 hits -> no payout
+    const lose = keno.settleRound(100n, { picks: [2, 3, 4] }, 0n)
     expect(lose.win).toBe(false)
     expect(lose.playerDelta).toBe(-100n)
     expect(lose.multiplierX100).toBe(0n)
@@ -68,28 +68,38 @@ describe('keno (draw-without-replacement)', () => {
 
   it('treats an exactly-1.00x cell as a non-win (no positive delta)', () => {
     // 1 pick, miss (0 hits) on a single-pick ticket loses the stake under the placeholder table
-    const r = keno.settleRound(100n, { picks: [5], drawn: 3 }, 0n) // draw {1,39,40} -> 0 hits
+    const r = keno.settleRound(100n, { picks: [5] }, 0n) // draw {1,32..40} -> 0 hits
     expect(r.win).toBe(false)
     expect(r.playerDelta).toBe(-100n)
   })
 
+  it('draw count is FIXED at 10 — a caller cannot force a larger draw (exploit guard)', () => {
+    // Regression: `drawn` was once a caller-supplied param; forcing drawn=40 drew every number so
+    // EVERY pick hit, paying a guaranteed, seed-independent top jackpot (a house-fund drain).
+    // Settlement now always draws DEFAULT_DRAWN and ignores any extraneous `drawn` on the object.
+    const picks = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    const forced = keno.settleRound(100n, { picks, drawn: 40 } as unknown as { picks: number[] }, 0n)
+    const honest = keno.settleRound(100n, { picks }, 0n)
+    expect(forced).toEqual(honest) // the injected drawn=40 is ignored
+    // raw=0 draws {1,32..40}: of picks 1..10 only "1" hits -> 1/10 -> below the pay threshold -> a loss
+    expect(forced.win).toBe(false)
+  })
+
   it('encodeRound is deterministic and hex', () => {
-    const e = keno.encodeRound(100n, { picks: [1, 39, 40], drawn: 3 }, 0n)
+    const e = keno.encodeRound(100n, { picks: [1, 39, 40] }, 0n)
     expect(e).toMatch(/^0x/)
-    expect(keno.encodeRound(100n, { picks: [1, 39, 40], drawn: 3 }, 0n)).toBe(e)
+    expect(keno.encodeRound(100n, { picks: [1, 39, 40] }, 0n)).toBe(e)
   })
 
   it('uses gameId 4 (distinct from dice=1, limbo=2, plinko=3)', () => {
     expect(keno.gameId).toBe(4)
   })
 
-  it('rejects invalid picks and draw counts', () => {
+  it('rejects invalid picks', () => {
     expect(() => keno.settleRound(100n, { picks: [] }, 0n)).toThrow() // too few
     expect(() => keno.settleRound(100n, { picks: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }, 0n)).toThrow() // too many
     expect(() => keno.settleRound(100n, { picks: [0] }, 0n)).toThrow() // out of range
     expect(() => keno.settleRound(100n, { picks: [41] }, 0n)).toThrow() // out of range
     expect(() => keno.settleRound(100n, { picks: [1, 1] }, 0n)).toThrow() // duplicate
-    expect(() => keno.settleRound(100n, { picks: [1], drawn: 0 }, 0n)).toThrow() // draw count
-    expect(() => keno.settleRound(100n, { picks: [1], drawn: 41 }, 0n)).toThrow() // draw count
   })
 })

@@ -75,6 +75,7 @@ contract HouseChannel is SessionStateEIP712, Ownable {
     error BadReveal();
     error BadParams();
     error NoVerifier();
+    error SettleBeforePlay();
     error BadProof();
     error PayoutExceedsPot();
 
@@ -195,9 +196,24 @@ contract HouseChannel is SessionStateEIP712, Ownable {
     }
 
     /// Cooperative settle: anyone submits the final both-signed state. Pays from locked escrow.
+    ///
+    /// SECURITY: the nonce-0 OPEN state is co-signed by BOTH parties at open (settlementMode == 1,
+    /// balances == the two escrows — a full refund of the player's stake). Because the house signs
+    /// every running state as play proceeds, a losing player could otherwise replay that co-signed
+    /// OPEN state here to reclaim their whole stake with certainty (a risk-free free-roll: settle the
+    /// nonce-1 loss as a nonce-0 refund). We reject nonce 0 outright — a settled state must reflect at
+    /// least one played round. A genuine zero-round cancel goes through `disputeFromOpen`, which gives
+    /// the counterparty a challenge window to post a newer state before the refund stands.
+    ///
+    /// NOTE: this closes the *guaranteed* free-roll. The cooperative fast-path still trusts the
+    /// submitter to bring the LATEST co-signed state (a player who was ahead at an earlier nonce could
+    /// submit that peak). Finalizing a suspected-stale state safely requires the dispute clock
+    /// (`dispute` → `respondWithState`); route closes through it, or add a final-close handshake,
+    /// before enabling real funds. Tracked as a pre-real-money protocol decision.
     function settle(SessionState calldata s, bytes calldata sigPlayer, bytes calldata sigHouse) external {
         Table storage t = tables[s.tableId];
         if (t.status != Status.Live) revert BadStatus();
+        if (s.nonce == 0) revert SettleBeforePlay();
         _checkCoSigned(t, s, sigPlayer, sigHouse);
         if (t.hasCheckpoint && s.nonce <= t.checkpointNonce) revert StaleNonce();
         _payout(t, s.tableId, s.balancePlayer, s.balanceHouse);

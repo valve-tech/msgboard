@@ -114,7 +114,7 @@ export const KenoScreen = ({
 
   const roll = () => {
     if (stake === undefined || !picksOk) return
-    // KenoParams shape: { picks: number[]; drawn?: number } — drawn defaults to DEFAULT_DRAWN.
+    // KenoParams shape: { picks: number[] } — the round always draws DEFAULT_DRAWN (10) of 40.
     void session.play(stake, { picks: [...picks].sort((a, b) => a - b) })
   }
 

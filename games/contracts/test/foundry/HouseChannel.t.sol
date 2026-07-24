@@ -127,6 +127,24 @@ contract HouseChannelTest is Test {
         ch.settle(f, sp, sh);
     }
 
+    /// Free-roll guard: the nonce-0 OPEN state is co-signed by both parties at open (a full refund of
+    /// the player's escrow). A losing player must NOT be able to replay it through settle() to reclaim
+    /// their stake — settle() rejects nonce 0. A zero-round refund is only reachable via the
+    /// challenge-windowed disputeFromOpen path.
+    function test_settleRejectsOpenStateFreeRoll() public {
+        _open();
+        SessionState memory openState = _state(0, 200, 200); // nonce 0, full refund, conserves 400
+        (bytes memory sp, bytes memory sh) = _coSign(openState);
+        vm.expectRevert(HouseChannel.SettleBeforePlay.selector);
+        ch.settle(openState, sp, sh);
+        // the table is untouched and a real (nonce >= 1) settle still works
+        SessionState memory played = _state(1, 260, 140); // player won 60 in round 1
+        (bytes memory sp2, bytes memory sh2) = _coSign(played);
+        ch.settle(played, sp2, sh2);
+        assertEq(chips.balanceOf(playerWallet), 800 + 260);
+        assertEq(ch.housePool(), 9_800 + 140);
+    }
+
     function test_openRejectsBadHouseSig() public {
         OpenTerms memory t = _terms();
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(pkPlayerKey, ch.openTermsDigest(t)); // wrong signer
