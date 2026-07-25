@@ -30,6 +30,7 @@ import {
   type BoardClient,
   type Signer,
   type SessionState,
+  type RoundProof,
   type CoinFlipParams,
 } from '@msgboard/games'
 import {
@@ -37,7 +38,7 @@ import {
   landingHouseCategory,
   isRoundTranscript,
 } from '@msgboard/settle'
-import { otherSide, type FlipSide, type FlipFeedRecord } from './coinflip'
+import { type FlipSide } from './coinflip'
 
 /**
  * The deployed 943 HouseChannel — the EIP-712 domain `verifyingContract` both the landing player and
@@ -162,9 +163,13 @@ export async function runBoardFlip(opts: RunFlipOpts): Promise<FlipResult> {
   const category = landingHouseCategory(chainId)
   const params: CoinFlipParams = { pick }
 
-  // onAccept fires AFTER the player co-signs each state (OPEN then ROUND). We capture the ROUND state
-  // (nonce > 0) so the on-screen result is derived from the state both parties signed, not a literal.
+  // onAccept fires AFTER the player co-signs each state (OPEN then ROUND). We capture BOTH the ROUND
+  // state (nonce > 0) and its RoundProof — the proof `runPlayerSide`/`verifyProposedState` already
+  // validated (reveal-checked serverSeed + the clientSeed linchpin) BEFORE the player signed. Every
+  // displayed value is derived from this verified proof, never from the house's re-posted transcript
+  // string, so a lying transcript can't make the shown seed/side disagree with the co-signed outcome.
   let acceptedRound: SessionState | undefined
+  let acceptedProof: RoundProof<CoinFlipParams> | undefined
   const session = makeBoardPlayerSession({
     board,
     chainId,
@@ -172,8 +177,11 @@ export async function runBoardFlip(opts: RunFlipOpts): Promise<FlipResult> {
     category,
     pollMs: opts.pollMs,
     timeoutMs: opts.timeoutMs,
-    onAccept: (s) => {
-      if (s.nonce > 0n) acceptedRound = s
+    onAccept: (s, p) => {
+      if (s.nonce > 0n) {
+        acceptedRound = s
+        acceptedProof = p as RoundProof<CoinFlipParams> | undefined
+      }
     },
   })
 
@@ -229,21 +237,23 @@ export async function runBoardFlip(opts: RunFlipOpts): Promise<FlipResult> {
   }
   opts.onStep?.('transcript')
 
-  if (!acceptedRound) {
+  if (!acceptedRound || !acceptedProof) {
     throw playerErr instanceof Error
       ? playerErr
       : new Error('coinflip: no co-signed ROUND state (house did not complete the round)')
   }
 
-  // ── outcome from the CO-SIGNED ROUND STATE ──────────────────────────────────
+  // ── outcome + verify-panel inputs, ALL from the co-signed ROUND state + its VERIFIED proof ──────────
+  // playerDelta/win from the co-signed balances; seeds from the proof runPlayerSide already reveal- and
+  // linchpin-checked. Nothing here trusts `transcriptJson` (the house-posted string) — it's retained
+  // only as the auditable artifact. So the shown seed/side can never diverge from the co-signed result.
   const playerDelta = acceptedRound.balancePlayer - terms.escrowPlayer
   const win = playerDelta > 0n
-
-  // ── verify-panel inputs from the co-signed transcript ───────────────────────
-  const decoded = readTranscript(transcriptJson)
-  const raw = roundRandom(decoded.serverSeed, decoded.clientSeed, 1n)
+  const serverSeed = acceptedProof.serverSeed
+  const clientSeedUsed = acceptedProof.clientSeed
+  const raw = roundRandom(serverSeed, clientSeedUsed, acceptedRound.nonce)
   const side = coinFlipSide(raw)
-  const commitOk = verifyReveal(terms.rngCommit, decoded.serverSeed)
+  const commitOk = verifyReveal(terms.rngCommit, serverSeed)
 
   return {
     pick,
@@ -253,36 +263,11 @@ export async function runBoardFlip(opts: RunFlipOpts): Promise<FlipResult> {
     stake,
     tableId,
     rngCommit: terms.rngCommit,
-    serverSeed: decoded.serverSeed,
-    clientSeed: decoded.clientSeed,
+    serverSeed,
+    clientSeed: clientSeedUsed,
     raw,
     commitOk,
     transcriptJson,
-  }
-}
-
-// ── transcript decoding (structural read of the signed envelopes; no crypto reimplemented) ──────────
-
-type TranscriptEntry = { kind: string; body: Record<string, unknown> }
-
-/** Pull the OPEN rngCommit + the ROUND seeds/outcome out of a co-signed transcript JSON. */
-function readTranscript(json: string): {
-  rngCommit: viem.Hex
-  serverSeed: viem.Hex
-  clientSeed: viem.Hex
-  win: boolean
-} {
-  const parsed = JSON.parse(json) as { entries?: TranscriptEntry[] }
-  const entries = parsed.entries ?? []
-  const open = entries.find((e) => e.kind === 'OPEN')
-  const round = entries.find((e) => e.kind === 'ROUND')
-  if (!open || !round) throw new Error('coinflip: transcript missing OPEN/ROUND envelope')
-  const outcome = round.body.outcome as { win?: boolean } | undefined
-  return {
-    rngCommit: open.body.rngCommit as viem.Hex,
-    serverSeed: round.body.serverSeed as viem.Hex,
-    clientSeed: round.body.clientSeed as viem.Hex,
-    win: !!outcome?.win,
   }
 }
 
@@ -292,29 +277,28 @@ export function landingCategoryHash(chainId: number): viem.Hex {
 }
 
 /**
- * Decode recent round-transcript board messages into feed records. Best-effort but REAL: each record is
- * recomputed from the public co-signed transcript on the board (parity of the revealed seeds), not from
- * local UI state. Non-transcript / undecodable messages are skipped.
+ * The set of tableIds that have a round-transcript posted in the given board messages, lowercased.
+ *
+ * SECURITY: this is a STRUCTURAL read used ONLY to confirm that a round the player already played and
+ * cryptographically verified this session actually landed on the public board (an "on board ✓" badge).
+ * It deliberately trusts NOTHING about outcomes/seeds — the board category is public and anyone can post
+ * a `round-transcript`, so a naive decode of foreign transcripts would render fabricated "flips" as real
+ * (any account could forge invented seeds/win). We therefore never surface un-self-verified board data;
+ * the feed is built from the player's OWN verified `FlipResult`s, and this only badges which of those are
+ * confirmed present on the board. (A house-address-pinned `verifyFinishedSession` over ALL posters'
+ * transcripts — a verified public feed — is a follow-up that needs the landing house's signing address.)
  */
-export function decodeFeed(
-  messages: ReadonlyArray<{ data: viem.Hex }>,
-  limit = 8,
-): FlipFeedRecord[] {
-  const out: FlipFeedRecord[] = []
+export function postedTableIds(messages: ReadonlyArray<{ data: viem.Hex }>): Set<string> {
+  const ids = new Set<string>()
   for (const m of messages) {
     try {
       const wire = JSON.parse(viem.hexToString(m.data)) as unknown
       if (!isRoundTranscript(wire)) continue
-      const msg = wire as { tableId: viem.Hex; transcriptJson: string }
-      const decoded = readTranscript(msg.transcriptJson)
-      const raw = roundRandom(decoded.serverSeed, decoded.clientSeed, 1n)
-      const side = coinFlipSide(raw)
-      // coinflip pays iff side === pick, so the player's call is recoverable from side + win.
-      const pick = decoded.win ? side : otherSide(side)
-      out.push({ pick, side, win: decoded.win, tableId: msg.tableId })
+      const id = (wire as { tableId?: unknown }).tableId
+      if (typeof id === 'string') ids.add(id.toLowerCase())
     } catch {
-      /* not a decodable round transcript — skip */
+      /* not a round-transcript envelope — skip */
     }
   }
-  return out.slice(-limit).reverse()
+  return ids
 }
