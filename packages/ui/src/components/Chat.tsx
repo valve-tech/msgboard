@@ -1797,15 +1797,18 @@ function TwoUserDemo({
   return (
     <div className="flex w-full flex-col overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 dark:bg-gray-800 dark:ring-gray-700">
       {/* demo header */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-violet-200 bg-violet-50 px-4 py-2.5 dark:border-violet-900/50 dark:bg-violet-950/40">
-        <Icon icon="mdi:account-multiple" className="size-5 shrink-0 text-violet-600 dark:text-violet-400" />
-        <span className="font-semibold text-violet-900 dark:text-violet-100">
-          Demo: talk to yourself — {kind === 'encrypted' ? 'shared-key room' : 'per-recipient DM'}
-        </span>
-        <span className="min-w-0 flex-1 text-[11px] text-violet-800 dark:text-violet-300/90">
-          Two independent identities exchanging <strong>real</strong> end-to-end encrypted messages
-          over this board. Send from either side; watch it decrypt on the other.
-        </span>
+      <div className="flex items-start gap-2 border-b border-violet-200 bg-violet-50 px-4 py-2.5 dark:border-violet-900/50 dark:bg-violet-950/40">
+        <Icon icon="mdi:account-multiple" className="mt-0.5 size-5 shrink-0 text-violet-600 dark:text-violet-400" />
+        {/* title + blurb stacked vertically (not side-by-side) */}
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="font-semibold text-violet-900 dark:text-violet-100">
+            Demo: talk to yourself — {kind === 'encrypted' ? 'shared-key room' : 'per-recipient DM'}
+          </span>
+          <span className="text-[11px] text-violet-800 dark:text-violet-300/90">
+            Two independent identities exchanging <strong>real</strong> end-to-end encrypted messages
+            over this board. Send from either side; watch it decrypt on the other.
+          </span>
+        </div>
         <button
           type="button"
           onClick={() => void copyLink()}
