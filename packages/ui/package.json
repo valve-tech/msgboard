@@ -15,7 +15,9 @@
   },
   "dependencies": {
     "@iconify/react": "^5.0.2",
+    "@msgboard/games": "*",
     "@msgboard/sdk": "^0.0.33",
+    "@msgboard/settle": "*",
     "@noble/ciphers": "^0.6.0",
     "@scure/base": "^1.2.5",
     "circomlibjs": "^0.1.7",
@@ -30,9 +32,11 @@
     "buffer": "^6.0.3"
   },
   "devDependencies": {
+    "@msgboard/games-house-service": "*",
     "@playwright/test": "^1.51.1",
     "@tailwindcss/vite": "^4.1.2",
     "@testing-library/react": "^16.0.0",
+    "@testing-library/dom": "^10.0.0",
     "@testing-library/jest-dom": "^6.4.0",
     "@types/markdown-it": "^14.1.2",
     "@types/react": "^18.3.1",

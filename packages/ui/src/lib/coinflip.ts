@@ -1,93 +1,33 @@
-import { concat, keccak256, stringToHex, hexToString, type Hex } from 'viem'
+import type { Hex } from 'viem'
 
 /**
- * Provably-fair coin flip — the pure math behind the Arcade tab.
+ * Coin-flip vocabulary + tiny display helpers — the LIGHT half of the Arcade, deliberately free of any
+ * `@msgboard/games` / `@msgboard/settle` import so it adds no engine weight to the landing bundle.
  *
- * The outcome is the parity of `keccak256(houseSeed ‖ clientSeed)`:
- *   - houseSeed  = the latest chain block hash (public, the player didn't choose it)
- *   - clientSeed = a random hex the player owns (and can re-roll)
- *
- * Neither party controls both inputs, so neither can bias the result: the block hash
- * isn't known when the player fixes their seed intent, and the seed is the player's.
- * The function is a pure `(blockHash, clientSeed) → side` — same inputs always give the
- * same side, so anyone can recompute a flip and confirm it wasn't fudged.
+ * There is no outcome math here. The flip is a REAL provably-fair commit-reveal round played on
+ * msgboard against a house bot (see `arcade-engine.ts`, lazy-loaded): the house commits its server seed
+ * (hash) before the player reveals its client seed, so neither side can grind the 50/50, and every step
+ * is a signed public board message anyone can re-audit. The outcome is the parity of the co-signed
+ * round entropy — computed by `@msgboard/games`' own verified helpers, NEVER re-derived here.
  */
 
+/** Which face — the whole vocabulary of a coin flip. */
 export type FlipSide = 'heads' | 'tails'
 
-export type FlipOutcome = {
-  /** The combined digest that decides the flip. */
-  digest: Hex
-  /** Even digest → heads, odd digest → tails. */
-  side: FlipSide
-}
+/** The opposite face. A fair coin has exactly two, so a loss on one implies the other landed. */
+export const otherSide = (s: FlipSide): FlipSide => (s === 'heads' ? 'tails' : 'heads')
 
-/**
- * Compute a flip from the two seeds. Deterministic and side-effect free.
- *
- * `keccak256(blockHash ‖ clientSeed)`; the low bit of the digest picks the face
- * (even = heads, odd = tails).
- */
-export function flipOutcome(blockHash: Hex, clientSeed: Hex): FlipOutcome {
-  const digest = keccak256(concat([blockHash, clientSeed]))
-  const side: FlipSide = (BigInt(digest) & 1n) === 0n ? 'heads' : 'tails'
-  return { digest, side }
-}
-
-/** A fresh 32-byte client seed from the platform CSPRNG. */
-export function randomSeed(): Hex {
-  const bytes = new Uint8Array(32)
-  ;(globalThis.crypto ?? crypto).getRandomValues(bytes)
-  return ('0x' + Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')) as Hex
-}
-
-/** A published flip as it lives on the board (opt-in showcase record). */
-export type FlipRecord = {
+/** One round for the "recent flips on the board" feed (from a house-verified transcript). */
+export type FlipFeedRecord = {
   /** What the player called. */
   pick: FlipSide
-  /** What the seeds produced. */
+  /** What the co-signed round entropy produced. */
   side: FlipSide
   /** pick === side. */
   win: boolean
-  /** The player's client seed (so anyone can recompute). */
-  seed: Hex
-  /** The block number whose hash was the house seed. */
-  block: number
-  /**
-   * A unique per-flip nonce. The board treats an identical (category, data) post as idempotent, so
-   * two flips that happen to share the same seed+block+side would collapse into one entry ("played
-   * too quickly, only one of the same result registers per block"). This fresh nonce guarantees every
-   * published flip is a distinct board record. It does NOT feed the outcome — the flip is still purely
-   * keccak256(blockHash ‖ clientSeed) — it only disambiguates the record.
-   */
-  nonce: Hex
+  /** The session/table the round was played on (its public board anchor). */
+  tableId: Hex
 }
 
-/** Encode a flip record into board `data` hex (compact JSON). */
-export function encodeFlip(record: FlipRecord): Hex {
-  return stringToHex(JSON.stringify(record))
-}
-
-/** Decode board `data` hex back into a flip record, or `null` if it isn't one. */
-export function decodeFlip(data: Hex): FlipRecord | null {
-  try {
-    const parsed = JSON.parse(hexToString(data)) as Partial<FlipRecord>
-    if (
-      (parsed.pick === 'heads' || parsed.pick === 'tails') &&
-      (parsed.side === 'heads' || parsed.side === 'tails') &&
-      typeof parsed.win === 'boolean'
-    ) {
-      return {
-        pick: parsed.pick,
-        side: parsed.side,
-        win: parsed.win,
-        seed: (parsed.seed ?? '0x') as Hex,
-        block: typeof parsed.block === 'number' ? parsed.block : 0,
-        nonce: (parsed.nonce ?? '0x') as Hex, // older records predate the nonce; default is harmless
-      }
-    }
-  } catch {
-    /* not a flip record */
-  }
-  return null
-}
+/** Abbreviate a hex value for display: `0x1234…abcdef`. */
+export const shortHex = (h: Hex, lead = 10): string => `${h.slice(0, lead)}…${h.slice(-6)}`

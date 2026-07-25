@@ -31,6 +31,18 @@ export interface RunHouseOpts {
   limits: Limits
   /** The hosted games registry, routed by gameId. Defaults to the four single-outcome games. */
   games?: Game<unknown>[]
+  /**
+   * On-chain settlement mode passed to the house loop. `1` (escrowed — the arcade default) unless
+   * omitted. The zero-stakes landing coin-flip bot passes `0` (optimistic) so nothing ever settles
+   * on-chain: the co-signed transcript is the whole product, no HouseChannel call, no escrow.
+   */
+  settlementMode?: 0 | 1
+  /**
+   * Optional board category override, threaded to BOTH the house deps (feed + reply/co-sign) so the
+   * house serves an isolated feed. Defaults to `houseCategory(chainId)` (the real arcade). The landing
+   * coin-flip bot passes `landingHouseCategory(chainId)`; the player session must pass the SAME value.
+   */
+  category?: { category: string }
   /** Poll cadence + co-sign timeout (ms). Production defaults (1000 / 120000) if omitted. */
   pollMs?: number
   timeoutMs?: number
@@ -56,6 +68,7 @@ export function runBoardHouse(opts: RunHouseOpts): { stop(): void } {
     getHeadBlock: async () => (await publicClient.getBlock({ blockTag: 'latest' })).timestamp,
     pollMs: opts.pollMs,
     timeoutMs: opts.timeoutMs,
+    category: opts.category,
   })
 
   const house = startHouse(
@@ -67,7 +80,7 @@ export function runBoardHouse(opts: RunHouseOpts): { stop(): void } {
       limits: opts.limits,
       domain,
       games: opts.games ?? ([dice, limbo, plinko, keno] as Game<unknown>[]),
-      settlementMode: 1,
+      settlementMode: opts.settlementMode ?? 1,
     },
     deps,
   )
