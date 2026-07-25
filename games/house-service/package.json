@@ -11,7 +11,9 @@
   },
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "start": "tsx src/main.ts",
+    "start:landing": "tsx scripts/run-landing-house.ts"
   },
   "dependencies": {
     "@msgboard/games": "*",
