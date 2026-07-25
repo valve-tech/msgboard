@@ -29,6 +29,7 @@ function riskIdxOf(risk: unknown): bigint {
 }
 
 // bet label -> on-chain bet code, mirroring each game module's internal `betCode`.
+const COINFLIP_PICK: Record<string, bigint> = { heads: 0n, tails: 1n }
 const BACCARAT_BET: Record<string, bigint> = { player: 0n, banker: 1n, tie: 2n }
 const DRAGON_TIGER_BET: Record<string, bigint> = { dragon: 0n, tiger: 1n, tie: 2n }
 const ANDAR_BAHAR_BET: Record<string, bigint> = { andar: 0n, bahar: 1n }
@@ -52,6 +53,8 @@ export function encodeGameParams(gameId: number, params: unknown): Hex {
       return encodeAbiParameters(U256, [BigInt(p.targetX100 as bigint)])
     case 6: // crash — (uint256) => autoCashout (== limbo target curve)
       return encodeAbiParameters(U256, [BigInt(p.autoCashoutX100 as bigint)])
+    case 5: // coinflip — (uint256) => pick {heads:0,tails:1}
+      return encodeAbiParameters(U256, [betCodeOf(COINFLIP_PICK, p.pick)])
     case 9: // monte — (uint256) => pick
       return encodeAbiParameters(U256, [BigInt(p.pick as number)])
     case 11: // baccarat — (uint256) => bet {player:0,banker:1,tie:2}

@@ -26,6 +26,16 @@ export function houseCategory(chainId: number): { category: string } {
   return { category: `games.msgboard.xyz:house:${chainId}` }
 }
 
+/**
+ * A DISTINCT category for the msgboard.xyz landing coin-flip demo, isolating it from the real arcade's
+ * `houseCategory`. Both the landing UI player session and the landing house bot pass THIS same category
+ * so their traffic lands on the same feed and never mixes with real-money arcade tables. Mirrors
+ * `houseCategory` exactly (same `{ category }` shape → same `categoryHash` on both sides).
+ */
+export function landingHouseCategory(chainId: number): { category: string } {
+  return { category: `games.msgboard.xyz:landing:${chainId}` }
+}
+
 // ── message shapes ────────────────────────────────────────────────────────────
 
 /**

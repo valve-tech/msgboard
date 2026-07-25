@@ -54,6 +54,12 @@ export interface BoardPlayerSessionOpts {
    * derived from the state both parties signed — never a fabricated literal.
    */
   onAccept?: (state: SessionState, proof?: RoundProof<unknown>) => void
+  /**
+   * Optional board category override. Defaults to `houseCategory(chainId)` (the real arcade). The
+   * landing coin-flip demo passes `landingHouseCategory(chainId)` so it runs on its own isolated feed.
+   * The house side must pass the SAME category for the two to communicate.
+   */
+  category?: { category: string }
 }
 
 /** What the round driver needs from the caller to post a round-request. */
@@ -85,7 +91,7 @@ export function makeBoardPlayerSession(opts: BoardPlayerSessionOpts): BoardPlaye
   const { board, chainId, tableId } = opts
   const pollMs = opts.pollMs ?? 1000
   const timeoutMs = opts.timeoutMs ?? 120_000
-  const cat = houseCategory(chainId)
+  const cat = opts.category ?? houseCategory(chainId)
 
   // Two transports on the SAME shared category: `rpc` carries open/round request-response, `cosignT`
   // carries the co-sign halves. Each MsgBoardTransport holds a single handler, hence two instances.
