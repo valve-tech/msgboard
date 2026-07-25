@@ -49,13 +49,13 @@ import {
 // ── deployment coordinates ────────────────────────────────────────────────────────────────────
 
 /** StealthMessenger on PulseChain testnet v4 (chain 943). */
-export const STEALTH_MESSENGER_ADDRESS: Address = '0x09917b05709224aef677d314cb9d50c62c3a3171'
+export const STEALTH_MESSENGER_ADDRESS: Address = '0xbcb707de43a7f69e9e8492e668b5193fe509bdbd'
 /** The contract lives on 943 no matter which chain the board UI is pointed at. */
 export const STEALTH_CHAIN_ID = 943
 /** 0x3af — 943 as the hex chainId `wallet_switchEthereumChain` expects. */
 const STEALTH_CHAIN_ID_HEX = numberToHex(STEALTH_CHAIN_ID)
 /** Block the contract was deployed at — the floor for the MessageSent log scan. */
-export const STEALTH_DEPLOY_BLOCK = 24955655n
+export const STEALTH_DEPLOY_BLOCK = 24956435n
 /** ERC-5564 secp256k1 scheme id (matches SCHEME_ID() on-chain and stealth.ts). */
 export const STEALTH_SCHEME_ID = 1n
 
