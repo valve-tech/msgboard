@@ -19,6 +19,7 @@ import { startHouse, makeBoardHouseDeps } from '@msgboard/games-house-service'
 import {
   runBoardFlip,
   postedTableIds,
+  decodeVerifiedFeed,
   landingCategoryHash,
   FUN_STAKE,
   LANDING_HOUSE_CHANNEL,
@@ -263,4 +264,49 @@ describe('player-side fairness check is live', () => {
     }
     await expect(request(roundState, proof)).rejects.toThrow(/bad seed reveal/)
   })
+})
+
+describe('house-address pin (VITE_LANDING_HOUSE_ADDRESS): counterparty identity + verified public feed', () => {
+  const WRONG_HOUSE = ('0x' + 'ab'.repeat(20)) as Hex
+
+  it('accepts the real house address at open and rejects a wrong pinned house', async () => {
+    const board = fakeBoard()
+    const house = startLandingHouse(board)
+    try {
+      // Correct pin → the OpenTerms signature recovers to the real house → the round completes.
+      const ok = await runBoardFlip({
+        board, chainId: CHAIN_ID, pick: 'heads', playerKey: PLAYER_KEY,
+        houseAddress: house.houseAddress, pollMs: 2, timeoutMs: 15_000,
+      })
+      expect(ok.commitOk).toBe(true)
+      // Wrong pin → the real house's OpenTerms sig doesn't match → abort before revealing the seed.
+      await expect(runBoardFlip({
+        board, chainId: CHAIN_ID, pick: 'heads', playerKey: PLAYER_KEY,
+        houseAddress: WRONG_HOUSE, pollMs: 2, timeoutMs: 15_000,
+      })).rejects.toThrow(/not signed by the expected landing house/)
+    } finally {
+      house.stop()
+    }
+  }, 25_000)
+
+  it('decodeVerifiedFeed surfaces house-verified rounds and rejects transcripts not signed by the pinned house', async () => {
+    const board = fakeBoard()
+    const house = startLandingHouse(board)
+    try {
+      const res = await runBoardFlip({
+        board, chainId: CHAIN_ID, pick: 'heads', playerKey: PLAYER_KEY,
+        houseAddress: house.houseAddress, pollMs: 2, timeoutMs: 15_000,
+      })
+      const msgs = (await board.content({}))[landingCategoryHash(CHAIN_ID)] ?? []
+      // Pinned to the REAL house → the round re-verifies off the board and appears.
+      const feed = await decodeVerifiedFeed(msgs, { houseAddress: house.houseAddress, chainId: CHAIN_ID })
+      expect(feed.length).toBe(1)
+      expect(feed[0]).toMatchObject({ side: res.side, win: res.win, tableId: res.tableId })
+      // Pinned to a DIFFERENT address → the same board data verifies to nothing (no forgeable feed).
+      const wrong = await decodeVerifiedFeed(msgs, { houseAddress: WRONG_HOUSE, chainId: CHAIN_ID })
+      expect(wrong.length).toBe(0)
+    } finally {
+      house.stop()
+    }
+  }, 25_000)
 })

@@ -27,6 +27,8 @@ import {
   roundRandom,
   verifyReveal,
   coinFlipSide,
+  verifyFinishedSession,
+  SESSION_STATE_TYPES,
   type BoardClient,
   type Signer,
   type SessionState,
@@ -37,8 +39,9 @@ import {
   makeBoardPlayerSession,
   landingHouseCategory,
   isRoundTranscript,
+  verifyOpenTermsSig,
 } from '@msgboard/settle'
-import { type FlipSide } from './coinflip'
+import { otherSide, type FlipSide, type FlipFeedRecord } from './coinflip'
 
 /**
  * The deployed 943 HouseChannel — the EIP-712 domain `verifyingContract` both the landing player and
@@ -47,6 +50,20 @@ import { type FlipSide } from './coinflip'
  * `DEPLOYMENT_943.houseChannel` in `@msgboard/games-house-service` (liveConfig).
  */
 export const LANDING_HOUSE_CHANNEL = '0xd0fe186fd3ad3d5766d2fd8af35215ab5d3dfc94' as viem.Hex
+
+/**
+ * The landing house bot's SIGNING address, pinned at build time via `VITE_LANDING_HOUSE_ADDRESS`.
+ * When set: the player verifies the house's OpenTerms signature at open (so it's really playing the
+ * deployed house, not a racer who substituted itself on the public category), and the public feed only
+ * trusts transcripts this house co-signed. When UNSET (dev / undeployed): those pinned checks are skipped
+ * — the commit-reveal math still guarantees a fair 50/50 regardless of who the counterparty is; only the
+ * counterparty-identity assurance is off. Lowercased for direct comparison.
+ */
+export const LANDING_HOUSE_ADDRESS: viem.Hex | undefined = (() => {
+  const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env
+  const a = (env?.VITE_LANDING_HOUSE_ADDRESS ?? '').trim()
+  return /^0x[0-9a-fA-F]{40}$/.test(a) ? (a.toLowerCase() as viem.Hex) : undefined
+})()
 
 /** Nominal play-money stake per flip (fun-chips, base units). Nothing settles on-chain. */
 export const FUN_STAKE = 100n
@@ -137,6 +154,8 @@ export type RunFlipOpts = {
   playerKey?: viem.Hex
   /** EIP-712 `verifyingContract`. Defaults to `LANDING_HOUSE_CHANNEL`. */
   houseChannel?: viem.Hex
+  /** Expected house signer to pin the OpenTerms signature against. Defaults to `LANDING_HOUSE_ADDRESS`. */
+  houseAddress?: viem.Hex
   /** Progress callback for the handshake showcase. */
   onStep?: (step: FlipStep) => void
   pollMs?: number
@@ -187,7 +206,8 @@ export async function runBoardFlip(opts: RunFlipOpts): Promise<FlipResult> {
 
   // 1. OPEN handshake: post the clientSeed COMMIT only (never the plaintext) → house-signed OpenTerms.
   opts.onStep?.('commit')
-  const { terms } = await session.requestOpen({
+  const houseAddress = opts.houseAddress ?? LANDING_HOUSE_ADDRESS
+  const { terms, houseSig } = await session.requestOpen({
     tableId,
     player: account.address,
     playerKey: account.address,
@@ -196,6 +216,12 @@ export async function runBoardFlip(opts: RunFlipOpts): Promise<FlipResult> {
     stake,
     clientSeedCommit: commitSeed(clientSeed),
   })
+  // Pin the counterparty: when we know the landing house's address, the OpenTerms MUST be signed by it.
+  // Otherwise a racer on the public category substituted itself as the house. (Fairness holds either way
+  // via commit-reveal; this asserts you're actually playing the deployed house bot.)
+  if (houseAddress && !(await verifyOpenTermsSig(houseAddress, domain, terms, houseSig))) {
+    throw new Error('coinflip: OpenTerms not signed by the expected landing house — aborting (possible counterparty substitution)')
+  }
   opts.onStep?.('grant')
 
   const openBalances = { player: terms.escrowPlayer, house: terms.escrowHouse }
@@ -301,4 +327,80 @@ export function postedTableIds(messages: ReadonlyArray<{ data: viem.Hex }>): Set
     }
   }
   return ids
+}
+
+type SigPair = { player: viem.Hex; house: viem.Hex }
+type OpenBody = {
+  rngCommit: viem.Hex
+  settlementMode?: number
+  balances: { player: string; house: string }
+  sigs?: SigPair
+}
+type RoundBody = {
+  round?: number
+  serverSeed: viem.Hex
+  clientSeed: viem.Hex
+  outcome?: { win?: boolean }
+}
+type TranscriptEnvelope = { kind: string; from?: string; body: Record<string, unknown> }
+
+/**
+ * Decode recent board round-transcripts into feed records — a genuinely PUBLIC, house-verified feed.
+ *
+ * Each transcript is fully re-audited with `verifyFinishedSession` PINNED to the landing house's address:
+ * the co-signatures must recover to {the transcript's player, THIS house}, the reveal chain must hold, and
+ * the recorded outcome must recompute from the revealed seeds. Because an attacker can't forge the house's
+ * signature, any transcript that verifies genuinely came from a real round against the deployed house — so
+ * foreign/fabricated posts on the public category (the pre-fix spoof) are rejected. Async (per-entry
+ * signature recovery). Requires the house address; without it, callers fall back to own-verified rounds.
+ */
+export async function decodeVerifiedFeed(
+  messages: ReadonlyArray<{ data: viem.Hex }>,
+  opts: { houseAddress: viem.Hex; chainId: number; houseChannel?: viem.Hex; limit?: number },
+): Promise<FlipFeedRecord[]> {
+  const domain = makeDomain(opts.chainId, opts.houseChannel ?? LANDING_HOUSE_CHANNEL)
+  const house = opts.houseAddress.toLowerCase()
+  const out: FlipFeedRecord[] = []
+  for (const m of messages) {
+    try {
+      const wire = JSON.parse(viem.hexToString(m.data)) as unknown
+      if (!isRoundTranscript(wire)) continue
+      const { tableId, transcriptJson } = wire as { tableId: viem.Hex; transcriptJson: string }
+      const t = JSON.parse(transcriptJson) as { tableId?: viem.Hex; entries?: TranscriptEnvelope[] }
+      const entries = t.entries ?? []
+      const open = entries.find((e) => e.kind === 'OPEN')
+      const round = entries.find((e) => e.kind === 'ROUND')
+      const ob = open?.body as OpenBody | undefined
+      if (!ob?.sigs?.player || !round?.body || !ob.balances || !t.tableId) continue
+      // Recover the player's address from the OPEN co-signature: reconstruct the OPEN SessionState EXACTLY
+      // as verifyFinishedSession does, then recover who signed the player slot. (verifyFinishedSession
+      // needs both parties; the house is our pinned address, the player is recovered here.) A wrong
+      // reconstruction just yields a bad address → verifyFinishedSession fails → the round is dropped
+      // (fail-closed), never mis-shown.
+      const openState = {
+        tableId: t.tableId, nonce: 0n,
+        balancePlayer: BigInt(ob.balances.player), balanceHouse: BigInt(ob.balances.house),
+        settlementMode: Number(ob.settlementMode ?? 0),
+        gameId: coinflip.gameId, gameStateHash: ZERO32, rngCommit: ob.rngCommit,
+      }
+      const player = await viem.recoverTypedDataAddress({
+        domain, types: SESSION_STATE_TYPES, primaryType: 'SessionState', message: openState, signature: ob.sigs.player,
+      })
+      // Full audit, PINNED to our house: co-sigs recover to {player, THIS house}, reveal chain holds,
+      // outcome recomputes. Un-forgeable house sig ⇒ only genuine rounds vs the deployed house survive.
+      const ok = await verifyFinishedSession(transcriptJson, {
+        parties: { player, house: opts.houseAddress }, commit: ob.rngCommit, game: coinflip, domain,
+      })
+      if (!ok || player.toLowerCase() === house) continue
+      const rb = round.body as RoundBody
+      const raw = roundRandom(rb.serverSeed, rb.clientSeed, BigInt(rb.round ?? 1))
+      const side = coinFlipSide(raw)
+      const win = !!rb.outcome?.win
+      out.push({ pick: win ? side : otherSide(side), side, win, tableId })
+    } catch {
+      /* undecodable / failed verification — skip */
+    }
+  }
+  const limit = opts.limit ?? 8
+  return out.slice(-limit).reverse()
 }
