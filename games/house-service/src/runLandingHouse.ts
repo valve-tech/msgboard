@@ -17,7 +17,7 @@
  * it is never called on-chain in optimistic mode, it just anchors the signing domain both sides share.
  */
 import { type Hex } from 'viem'
-import { coinflip, type Game } from '@msgboard/games'
+import { coinflip, type Game, type Stamper } from '@msgboard/games'
 import { landingHouseCategory } from '@msgboard/settle'
 import { runBoardHouse, type HouseSigner, type RunHouseOpts } from './runHouse'
 import { DEPLOYMENT_943, DEFAULT_LIMITS } from './liveConfig'
@@ -39,6 +39,9 @@ export interface LandingHouseOpts {
   houseChannel?: Hex
   /** Open-review limits. Defaults to DEFAULT_LIMITS (escrow is 0-relevant at zero stakes). */
   limits?: Limits
+  /** Fast PoW stamper for the house's board posts (see RunHouseOpts.stamper). The actor injects a
+   *  WASM one so grant/co-sign/transcript land in ~1-2s instead of the ~150s JS-grind fallback. */
+  stamper?: Stamper
   pollMs?: number
   timeoutMs?: number
 }
@@ -59,6 +62,7 @@ export function landingHouseConfig(opts: LandingHouseOpts): RunHouseOpts {
     games: [coinflip] as Game<unknown>[],
     category: landingHouseCategory(chainId),
     settlementMode: 0,
+    stamper: opts.stamper,
     pollMs: opts.pollMs,
     timeoutMs: opts.timeoutMs,
   }

@@ -10,7 +10,7 @@
  * Used by `main.ts` (the long-running deployable process) and by the `live-round` proof script.
  */
 import { createPublicClient, http, type Hex } from 'viem'
-import { createBoardClient, makeDomain, dice, limbo, plinko, keno, type Game, type StateSigner } from '@msgboard/games'
+import { createBoardClient, makeDomain, dice, limbo, plinko, keno, type Game, type StateSigner, type Stamper } from '@msgboard/games'
 import { startHouse } from './houseLoop'
 import { makeBoardHouseDeps } from './boardDeps'
 import type { Limits } from './openReview'
@@ -46,6 +46,13 @@ export interface RunHouseOpts {
   /** Poll cadence + co-sign timeout (ms). Production defaults (1000 / 120000) if omitted. */
   pollMs?: number
   timeoutMs?: number
+  /**
+   * PoW stamper for the house's board posts. Omit → the default native→WASM cascade, which FAILS in a
+   * self-contained esbuild bundle (no .node addon, wasm not on disk) and falls back to a ~30-150s JS
+   * grind — far past the player's co-sign timeouts. The landing-house actor injects a fast WASM stamper
+   * (base64-embedded engine, ~1-2s) so grant/co-sign/transcript land within a block or two.
+   */
+  stamper?: Stamper
 }
 
 /**
@@ -55,7 +62,7 @@ export interface RunHouseOpts {
  */
 export function runBoardHouse(opts: RunHouseOpts): { stop(): void } {
   const publicClient = createPublicClient({ transport: http(opts.rpcUrl) })
-  const board = createBoardClient(opts.boardRpc)
+  const board = createBoardClient(opts.boardRpc, opts.stamper)
   const domain = makeDomain(opts.chainId, opts.houseChannel)
 
   const { deps, stop: stopDeps } = makeBoardHouseDeps({

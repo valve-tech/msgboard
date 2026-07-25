@@ -19,11 +19,37 @@
  *   MSGBOARD_RPC  MsgBoard RPC (post/read board messages). Keyed valve endpoint, passed from compose.
  *   HOUSE_INDEX   default 50 — the mnemonic addressIndex the house key is derived at.
  */
+import { initSync, stamp as wasmStamp } from '@msgboard/pow-grinder/wasm'
 import { runLandingHouse, houseSignerFromMnemonic } from '@msgboard/games-house-service'
+import type { Stamper } from '@msgboard/games'
+import { POW_GRINDER_WASM_B64 } from './pow-grinder-wasm-b64'
 
 const env = process.env
 const CHAIN = env.CHAIN ?? '943'
 const HOUSE_INDEX = env.HOUSE_INDEX ?? '50'
+
+// FAST PoW stamper. Without this the house's board client falls to the default native→WASM cascade,
+// which in a self-contained esbuild .mjs (no .node addon, no .wasm on disk) collapses to a ~150s JS
+// grind — so the grant/co-sign/transcript land ~15 blocks late, past the player's 120s co-sign timeout,
+// and every flip voids. Instantiate the portable WASM engine from embedded base64 (same recipe as
+// pow-worker.ts), stamp synchronously (~1-2s) — fine on the bot's own thread (no game loops to starve).
+initSync({ module: Buffer.from(POW_GRINDER_WASM_B64, 'base64') })
+const toBytes = (hex: string): Buffer => Buffer.from(hex.slice(2), 'hex')
+const wasmStamper: Stamper = async ({ category, data, workMultiplier, workDivisor, blockHash }) => {
+  const out = wasmStamp({
+    category: toBytes(category),
+    data: toBytes(data),
+    workMultiplier: Number(workMultiplier),
+    workDivisor: Number(workDivisor),
+    blockHash: toBytes(blockHash),
+    startNonce: 0,
+    maxIters: 50_000_000, // ample for the 943 floor (~190k iters); the wasm grinder finds it in ~1-2s
+  })
+  if (!out) throw new Error('landing-house PoW: maxIters exhausted')
+  const nonce = BigInt('0x' + Buffer.from(out.subarray(0, 8)).toString('hex'))
+  const hash = ('0x' + Buffer.from(out.subarray(8)).toString('hex')) as `0x${string}`
+  return { nonce, hash }
+}
 
 const main = async () => {
   if (!env.MNEMONIC) throw new Error('MNEMONIC required')
@@ -38,6 +64,7 @@ const main = async () => {
     chainId: Number(CHAIN),
     rpcUrl: env.RPC,
     boardRpc: env.MSGBOARD_RPC,
+    stamper: wasmStamper,
   })
 
   // graceful shutdown — halt the board feed + house loops, then exit (mirrors session-bots).
