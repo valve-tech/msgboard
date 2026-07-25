@@ -23,23 +23,40 @@
           - "--exclude=dist"
       register: ui_sync
 
-    # The landing Arcade now lazy-loads @msgboard/games + @msgboard/settle (games/ workspaces), so the
-    # UI docker build (Dockerfile `COPY games games` + `npm i`) needs that engine SOURCE on the box.
-    # Non-destructive (delete:false) so it never clobbers files owned by the games-web/indexer deploys;
-    # excludes build/install outputs. Ships coinflip (gameId 5) + landingHouseCategory the UI imports.
-    - name: Rsync the games engine workspaces the UI build needs (non-destructive)
+    # The landing Arcade lazy-loads @msgboard/games (games/msgboard-games) + @msgboard/settle
+    # (games/msgboard-settle). Their remaining deps (@msgboard/pow-grinder, @msgboard/sdk) already live
+    # in packages/ on the box, and neither games package has an install script — so ship ONLY those two
+    # workspaces (source; no hardhat/zk/contracts weight) and register them in the box's otherwise
+    # packages-only root workspaces so `npm i` in the docker build links them. Ships coinflip (gameId 5)
+    # + landingHouseCategory that the UI imports.
+    - name: Rsync the two games workspaces the UI build needs (source only)
       ansible.posix.synchronize:
-        src: "{{ repo_root }}/games/"
-        dest: "{{ deploy_dir }}/games/"
-        delete: false
+        src: "{{ repo_root }}/games/{{ item }}/"
+        dest: "{{ deploy_dir }}/games/{{ item }}/"
+        delete: true
         use_ssh_args: true
         rsync_opts:
           - "--exclude=node_modules"
           - "--exclude=dist"
-          - "--exclude=artifacts"
-          - "--exclude=cache"
-          - "--exclude=.env"
+      loop: [msgboard-games, msgboard-settle]
       register: games_sync
+
+    - name: Register those two workspaces in the box root package.json (idempotent, python3 — no host node)
+      ansible.builtin.shell: |
+        cd {{ deploy_dir }}
+        python3 - <<'PY'
+        import json
+        p = json.load(open('package.json'))
+        ws = p.get('workspaces', [])
+        add = [w for w in ('games/msgboard-games', 'games/msgboard-settle') if w not in ws]
+        if add:
+            p['workspaces'] = ws + add
+            json.dump(p, open('package.json', 'w'), indent=2)
+            open('package.json', 'a').write('\n')
+            print('ADDED ' + ', '.join(add))
+        PY
+      register: ws_patch
+      changed_when: "'ADDED' in ws_patch.stdout"
 
     - name: Rebuild the ui image
       ansible.builtin.command:
