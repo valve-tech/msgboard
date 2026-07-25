@@ -526,6 +526,86 @@
       .trust-validators { margin: 0.55rem 0 0; }
       .trust-validators a { color: var(--brass); }
 
+      /* ---------- the table sub-nav (never strand a player) ---------- */
+      .gamenav {
+        display: flex; align-items: center; gap: 0.45rem 0.6rem; flex-wrap: wrap;
+        border: 1px solid var(--line); border-radius: 8px;
+        background: linear-gradient(180deg, var(--felt-700), var(--felt-800));
+        padding: 0.5rem 0.6rem; margin: 0.6rem 0 0.2rem;
+      }
+      /* The Floor button is the escape hatch — always gold, always obvious, always one click. */
+      .gamenav-floor {
+        font: 700 0.9rem var(--serif); padding: 0.44rem 0.9rem; letter-spacing: 0.01em;
+      }
+      .gamenav-step {
+        padding: 0.4rem 0.72rem; font: 700 1.05rem var(--serif); line-height: 1; min-width: 2.1rem;
+      }
+      .gamenav-current {
+        display: inline-flex; align-items: baseline; gap: 0.4rem; min-width: 0;
+        padding: 0 0.15rem;
+      }
+      .gamenav-seal { align-self: center; font-size: 1.05rem; line-height: 1; filter: drop-shadow(0 0 5px rgba(201, 162, 39, 0.35)); }
+      .gamenav-glyph { align-self: center; font-size: 1.1rem; line-height: 1; }
+      .gamenav-name { font: 700 1.02rem var(--serif); color: var(--cream); white-space: nowrap; }
+      .gamenav-group {
+        font: 600 0.68rem var(--sans); letter-spacing: 0.11em; text-transform: uppercase;
+        color: var(--brass-soft); white-space: nowrap;
+      }
+      .gamenav-right { display: inline-flex; align-items: center; gap: 0.6rem; margin-left: auto; flex-wrap: wrap; }
+      .gamenav-right .blockline { margin-left: 0; }
+
+      /* ---------- the crypto + proof-of-work showcase (the hero of every table) ---------- */
+      .crypto-showcase {
+        position: relative;
+        border: 1px solid var(--brass-soft); border-left: 3px solid var(--brass);
+        border-radius: 6px;
+        background:
+          radial-gradient(120% 140% at 100% 0%, rgba(201, 162, 39, 0.07), transparent 55%),
+          linear-gradient(180deg, var(--felt-700), var(--felt-800));
+        padding: 1rem 1.15rem 1.05rem; margin: 0.7rem 0 0.5rem;
+        animation: rise 0.45s ease both;
+      }
+      .cs-head { display: flex; align-items: flex-start; gap: 0.75rem; }
+      .cs-seal {
+        font-size: 1.75rem; line-height: 1; flex: none; margin-top: 0.1rem;
+        filter: drop-shadow(0 0 9px rgba(201, 162, 39, 0.4));
+      }
+      .cs-eyebrow {
+        font: 600 0.68rem var(--sans); letter-spacing: 0.16em; text-transform: uppercase;
+        color: var(--brass);
+      }
+      .cs-lead { font: 700 1.18rem var(--serif); color: var(--cream); margin: 0.14rem 0 0; }
+      .cs-body { font-size: 0.9rem; line-height: 1.55; color: var(--cream-dim); margin: 0.7rem 0 0.85rem; max-width: 66ch; }
+      .cs-body strong { color: var(--cream); }
+      .cs-body em { color: var(--brass); font-style: italic; }
+      .cs-pillars {
+        display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; margin-bottom: 0.9rem;
+      }
+      .cs-pillar {
+        border: 1px solid var(--line); border-radius: 5px; background: var(--felt-900);
+        padding: 0.55rem 0.7rem;
+      }
+      .cs-pillar b { display: block; font: 700 0.82rem var(--serif); color: var(--brass); margin-bottom: 0.18rem; }
+      .cs-pillar span { display: block; font-size: 0.78rem; line-height: 1.4; color: var(--cream-dim); }
+      /* The PoW band — deliberately reads like a stamped strip, distinct from the felt above it. */
+      .cs-pow {
+        display: flex; align-items: center; gap: 0.55rem 0.85rem; flex-wrap: wrap;
+        border: 1px solid var(--brass-soft); border-radius: 5px;
+        background:
+          repeating-linear-gradient(135deg, rgba(201, 162, 39, 0.05) 0 8px, transparent 8px 16px),
+          var(--felt-900);
+        padding: 0.6rem 0.85rem;
+      }
+      .cs-pow-glyph { font-size: 1.35rem; line-height: 1; flex: none; }
+      .cs-pow-text { flex: 1 1 16rem; min-width: 12rem; font-size: 0.82rem; line-height: 1.5; color: var(--cream-dim); }
+      .cs-pow-text strong { color: var(--brass); }
+      .cs-pow-live {
+        font: 600 0.74rem var(--mono); color: var(--ok); white-space: nowrap;
+        border: 1px solid rgba(111, 220, 166, 0.35); border-radius: 999px; padding: 0.16rem 0.6rem;
+      }
+      .cs-pow a { color: var(--brass); font: 600 0.8rem var(--sans); white-space: nowrap; }
+      .cs-pow a:hover { color: var(--cream); }
+
       /* ---------- provenance: when it happened + where to check it ---------- */
       .card-meta {
         margin-top: 0.55rem;
@@ -591,6 +671,11 @@
         .pitch .pitch-body { padding: 0 0.85rem 0.8rem; }
         /* The info popover is fixed-ish width on desktop; keep it inside the viewport on phones. */
         .info-pop { max-width: min(88vw, 20rem); }
+        /* Sub-nav: the quick-jump + block wrap to their own row; prev/next/floor stay reachable. */
+        .gamenav-right { width: 100%; margin-left: 0; }
+        /* Stack the three crypto pillars on narrow screens rather than crushing them. */
+        .cs-pillars { grid-template-columns: 1fr; }
+        .cs-lead { font-size: 1.06rem; }
       }
       /* Respect reduced-motion: the rise/fade-in animations are decorative. */
       @media (prefers-reduced-motion: reduce) {
