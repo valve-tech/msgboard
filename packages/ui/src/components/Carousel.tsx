@@ -39,16 +39,8 @@ export function Carousel<T>({ items, card, label = 'cards' }: Props<T>) {
 
   return (
     <div className="relative" role="group" aria-roledescription="carousel" aria-label={label}>
-      <div
-        className={`pointer-events-none absolute inset-y-0 left-0 z-10 w-8 bg-gradient-to-r from-white to-transparent transition-opacity duration-200 dark:from-gray-900 ${
-          canPrev ? 'opacity-100' : 'opacity-0'
-        }`}
-      />
-      <div
-        className={`pointer-events-none absolute inset-y-0 right-0 z-10 w-8 bg-gradient-to-l from-white to-transparent transition-opacity duration-200 dark:from-gray-900 ${
-          canNext ? 'opacity-100' : 'opacity-0'
-        }`}
-      />
+      {/* edge-fade overlays removed — they read as a shadow covering the edge cards; the prev/next
+          arrows already signal there's more to scroll. */}
 
       <div
         ref={trackRef}
