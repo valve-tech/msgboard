@@ -117,10 +117,10 @@ export const deployments: GameDeployment[] = [
     // GraphQL under the already-resolving games host, so the lobby/round views read from one indexed
     // query per poll instead of scanning the chain (was hammering the RPC into 429s). Full GraphQL URL.
     gamesIndexer: 'https://games.msgboard.xyz/games-indexer/graphql',
-    // Chips ERC-20 token (deployed 2026-06-10 gate run).
-    chips: '0xA5276259e544C86438566cB28cc87daCce060910',
-    // patched HouseChannel (gameId-binding + disputeFromOpen + gameId-in-Opened), deployed 943 @ block 24708662
-    houseChannel: '0x74bbc31e77c02593c0a7aad0cadadb5b6bff3948',
+    // Chips ERC-20 token — fresh valve-deployer-owned token (2026-07-24 valve migration off gibs).
+    chips: '0x81f130c7d9ff020f46f3b01918424173f8d5ca64',
+    // HouseChannel — close-authorization settle + walk-away forfeiture; valve_deployer-owned, 943 @ block 24957355
+    houseChannel: '0xd0fe186fd3ad3d5766d2fd8af35215ab5d3dfc94',
     // ZK skill games — full real-dictionary set (Sudoku leaderboard + Wordle over Chips escrow).
     sudokuLog: '0xf700e0c1fd235719738cca1cdef6f41bfaef163c',
     sudokuRules: '0x6f9045512ddd9d5a8db4c90377cb4eb052fd940f',

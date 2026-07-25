@@ -22,8 +22,8 @@ export const DEPLOYMENT_943 = {
   rpcUrl: 'https://one.valve.city/rpc/vk_demo/evm/943',
   txRpcUrl: 'https://one.valve.city/rpc/vk_demo/evm/943',
   boardRpc: 'https://one.valve.city/rpc/vk_demo/evm/943',
-  houseChannel: '0x74bbc31e77c02593c0a7aad0cadadb5b6bff3948' as Hex,
-  chips: '0xA5276259e544C86438566cB28cc87daCce060910' as Hex,
+  houseChannel: '0xd0fe186fd3ad3d5766d2fd8af35215ab5d3dfc94' as Hex,
+  chips: '0x81f130c7d9ff020f46f3b01918424173f8d5ca64' as Hex,
   gamesIndexer: 'https://games.msgboard.xyz/games-indexer/graphql',
   explorer: 'https://scan.v4.testnet.pulsechain.com/#',
 } as const
