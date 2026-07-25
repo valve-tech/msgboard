@@ -44,17 +44,17 @@
         rsync_opts:
           - "--exclude=node_modules"
           - "--exclude=dist"
-      loop: [msgboard-games, msgboard-settle]
+      loop: [msgboard-games, msgboard-settle, house-service]
       register: games_sync
 
-    - name: Register those two workspaces in the box root package.json (idempotent, python3 — no host node)
+    - name: Register those workspaces in the box root package.json (idempotent, python3 — no host node)
       ansible.builtin.shell: |
         cd {{ deploy_dir }}
         python3 - <<'PY'
         import json
         p = json.load(open('package.json'))
         ws = p.get('workspaces', [])
-        add = [w for w in ('games/msgboard-games', 'games/msgboard-settle') if w not in ws]
+        add = [w for w in ('games/msgboard-games', 'games/msgboard-settle', 'games/house-service') if w not in ws]
         if add:
             p['workspaces'] = ws + add
             json.dump(p, open('package.json', 'w'), indent=2)
@@ -63,6 +63,56 @@
         PY
       register: ws_patch
       changed_when: "'ADDED' in ws_patch.stdout"
+
+    # The box's package-lock.json predates these workspaces (it's a packages-only snapshot), so `npm i`
+    # in the image would resolve @msgboard/games et al. from the stale lock → registry 404. Drop it so
+    # `npm i` regenerates from the patched package.json and links all workspaces. Regenerable; the box's
+    # root Dockerfile uses `npm i` (not `npm ci`), so no reproducibility guarantee is being relied on.
+    - name: Drop the stale root package-lock.json so npm i resolves the new workspaces fresh
+      ansible.builtin.file:
+        path: "{{ deploy_dir }}/package-lock.json"
+        state: absent
+
+    # The box's root Dockerfile is a packages-only version (no `COPY games games`), so the image never
+    # got the engine source → npm i 404'd on @msgboard/games. Ship the updated Dockerfile (it now COPYs
+    # games/ + declares the VITE_LANDING_HOUSE_ADDRESS build arg). Shared with the sponsor build, where
+    # `COPY games games` is harmless (the 3 light workspaces, no install scripts).
+    - name: Ship the updated root Dockerfile (COPY games + VITE_LANDING_HOUSE_ADDRESS arg)
+      ansible.builtin.copy:
+        src: "{{ repo_root }}/Dockerfile"
+        dest: "{{ deploy_dir }}/Dockerfile"
+        mode: "0644"
+
+    # Targeted (not a whole-file overwrite, to avoid clobbering box-specific config for other services):
+    # ensure the ui service passes the pinned house address to the build. Reads VITE_LANDING_HOUSE_ADDRESS
+    # from the box .env (set separately). Absent → the arg is empty → the UI's pinned checks fall back.
+    - name: Ensure the ui build passes VITE_LANDING_HOUSE_ADDRESS (idempotent compose arg)
+      ansible.builtin.lineinfile:
+        path: "{{ deploy_dir }}/docker-compose.prod.yml"
+        line: "        VITE_LANDING_HOUSE_ADDRESS: ${VITE_LANDING_HOUSE_ADDRESS:-}"
+        insertafter: "VITE_RPC_943:"
+        firstmatch: true
+
+    # The root build script `npm run build --workspace=*` shell-globs `*` against /app, which after
+    # `npm i` includes node_modules + package.json + the new games/ dir → `npm run build
+    # --workspace=node_modules …` → npm errors on the non-workspace entries. Replace it with npm's
+    # proper all-workspaces flag (no shell glob, skips workspaces without a build script). Idempotent;
+    # strictly more correct for the shared ui+sponsor builds. python3 (no host node).
+    - name: Make the root build script glob-proof (npm run build --workspaces --if-present)
+      ansible.builtin.shell: |
+        cd {{ deploy_dir }}
+        python3 - <<'PY'
+        import json
+        p = json.load(open('package.json'))
+        want = 'npm run build --workspaces --if-present'
+        if p.get('scripts', {}).get('build') != want:
+            p.setdefault('scripts', {})['build'] = want
+            json.dump(p, open('package.json', 'w'), indent=2)
+            open('package.json', 'a').write('\n')
+            print('PATCHED')
+        PY
+      register: build_script_patch
+      changed_when: "'PATCHED' in build_script_patch.stdout"
 
     - name: Rebuild the ui image
       ansible.builtin.command:
