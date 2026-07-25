@@ -23,6 +23,24 @@
           - "--exclude=dist"
       register: ui_sync
 
+    # The landing Arcade now lazy-loads @msgboard/games + @msgboard/settle (games/ workspaces), so the
+    # UI docker build (Dockerfile `COPY games games` + `npm i`) needs that engine SOURCE on the box.
+    # Non-destructive (delete:false) so it never clobbers files owned by the games-web/indexer deploys;
+    # excludes build/install outputs. Ships coinflip (gameId 5) + landingHouseCategory the UI imports.
+    - name: Rsync the games engine workspaces the UI build needs (non-destructive)
+      ansible.posix.synchronize:
+        src: "{{ repo_root }}/games/"
+        dest: "{{ deploy_dir }}/games/"
+        delete: false
+        use_ssh_args: true
+        rsync_opts:
+          - "--exclude=node_modules"
+          - "--exclude=dist"
+          - "--exclude=artifacts"
+          - "--exclude=cache"
+          - "--exclude=.env"
+      register: games_sync
+
     - name: Rebuild the ui image
       ansible.builtin.command:
         cmd: docker compose -f docker-compose.prod.yml build ui

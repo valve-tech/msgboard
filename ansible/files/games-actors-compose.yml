@@ -85,6 +85,24 @@ services:
       # BOARD_RPC resolves from VALVE_RPC_KEY (.env). Posts are best-effort + serialized (drop-if-busy).
       BOARD_FEED: "1"
     command: node session-bots.mjs
+  # The landing coin-flip HOUSE: the live counterparty the msgboard.xyz landing Arcade plays against.
+  # Zero-stakes optimistic (settlementMode 0) provably-fair 2× coin flip over the board-mediated
+  # commit-reveal protocol — nothing ever settles on-chain. The house key SIGNS only (mnemonic
+  # addressIndex 50, clear of validators 1-3 / gate players 4-8 / session-bots 30 / cosign-bot 40-42),
+  # so it needs NO funds. Serves the isolated landing feed on games.msgboard.xyz:landing:943. The
+  # derived house address is logged in the startup banner (pin it as the landing house in the UI).
+  landing-house:
+    image: node:24-alpine
+    restart: unless-stopped
+    working_dir: /app
+    volumes: [ "./:/app" ]
+    env_file: .env
+    environment:
+      CHAIN: "943"
+      RPC: "https://one.valve.city/rpc/${VALVE_RPC_KEY}/evm/943"
+      MSGBOARD_RPC: "https://one.valve.city/rpc/${VALVE_RPC_KEY}/evm/943"
+      HOUSE_INDEX: "50"
+    command: node landing-house.mjs
   cast-watcher-369:
     image: node:24-alpine
     restart: unless-stopped

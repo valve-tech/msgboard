@@ -7,7 +7,7 @@ import {
   selectRpcValid,
 } from '../stores/chain'
 import { makeWorkerBoard } from '../seams/worker-board'
-import { shortHex, type FlipSide } from '../lib/coinflip'
+import { shortHex, type FlipSide, type FlipFeedRecord } from '../lib/coinflip'
 import type { FlipResult, FlipStep } from '../lib/arcade-engine'
 
 /**
@@ -68,6 +68,9 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
   // The feed shows the player's OWN verified rounds (each already co-sign-verified in runBoardFlip) — we
   // never render un-self-verified foreign board posts, since the landing category is public and forgeable.
   const [history, setHistory] = useState<FlipResult[]>([])
+  // When the landing house address is pinned (VITE_LANDING_HOUSE_ADDRESS), we can show a genuinely PUBLIC
+  // feed: every round on the board re-verified via verifyFinishedSession against that house (async).
+  const [publicFeed, setPublicFeed] = useState<FlipFeedRecord[]>([])
 
   // The PoW board seam — grinds off-thread and posts. Rebuilt only on transport/chain/difficulty change.
   const board = useMemo(() => {
@@ -113,6 +116,10 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
     }
   }
 
+  // Whether a landing house address is pinned at build time (enables the verified public feed + the
+  // house-signature check on every flip). Undefined in dev / before deploy → we fall back safely.
+  const houseAddr = eng?.LANDING_HOUSE_ADDRESS
+
   // The tableIds that have a round-transcript on the public board — used ONLY to badge which of the
   // player's own verified rounds are confirmed on-board (never to trust foreign outcomes/seeds).
   const postedIds = useMemo<Set<string>>(() => {
@@ -121,9 +128,35 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
     return eng.postedTableIds(msgs)
   }, [content, eng, chainId])
 
+  // With a pinned house address, decode a house-VERIFIED public feed from the board (async — each
+  // transcript's co-signatures + reveal chain + outcome are re-audited against the pinned house).
+  useEffect(() => {
+    if (!eng || !chainId || !houseAddr) {
+      setPublicFeed([])
+      return
+    }
+    let alive = true
+    const msgs = content?.[eng.landingCategoryHash(chainId)] ?? []
+    void eng
+      .decodeVerifiedFeed(msgs, { houseAddress: houseAddr, chainId })
+      .then((f) => { if (alive) setPublicFeed(f) })
+      .catch(() => { if (alive) setPublicFeed([]) })
+    return () => { alive = false }
+  }, [content, eng, chainId, houseAddr])
+
   const total = tally.wins + tally.losses
   const coinFace: FlipSide = result?.side ?? pick
   const parity = result ? (result.raw & 1n).toString() : null
+
+  // The feed: a house-VERIFIED public feed when the house address is pinned (all players' rounds,
+  // re-audited from the board), else the player's OWN verified rounds badged by on-board presence.
+  const feedRows: Array<{ pick: FlipSide; side: FlipSide; win: boolean; tableId: string; badge: 'verified' | 'onboard' | 'pending' }> =
+    houseAddr
+      ? publicFeed.map((r) => ({ pick: r.pick, side: r.side, win: r.win, tableId: r.tableId, badge: 'verified' }))
+      : history.map((r) => ({
+          pick: r.pick, side: r.side, win: r.win, tableId: r.tableId,
+          badge: postedIds.has(r.tableId.toLowerCase()) ? 'onboard' : 'pending',
+        }))
 
   return (
     <div className="flex w-full flex-col gap-4">
@@ -330,10 +363,14 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
           Recent flips on the board
           <span className="font-mono text-[11px] font-normal text-gray-400">landing:{chainId || '?'}</span>
         </h3>
-        {history.length ? (
+        {feedRows.length ? (
           <ul className="flex flex-col divide-y divide-gray-200 text-xs dark:divide-gray-700">
-            {history.map((r) => {
-              const onBoard = postedIds.has(r.tableId.toLowerCase())
+            {feedRows.map((r) => {
+              const good = r.badge !== 'pending'
+              const title =
+                r.badge === 'verified' ? 'house-verified from the public board'
+                : r.badge === 'onboard' ? 'confirmed on the public board'
+                : 'awaiting the next board poll'
               return (
                 <li key={r.tableId} className="flex items-center justify-between py-1.5">
                   <span className="inline-flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
@@ -343,10 +380,10 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
                   </span>
                   <span className="flex items-center gap-2">
                     <span
-                      title={onBoard ? 'confirmed on the public board' : 'awaiting the next board poll'}
-                      className={`inline-flex items-center gap-0.5 font-mono ${onBoard ? 'text-emerald-500' : 'text-gray-400'}`}>
-                      <Icon icon={onBoard ? 'mdi:check-decagram-outline' : 'mdi:progress-upload'} className="size-3.5" />
-                      {shortHex(r.tableId, 8)}
+                      title={title}
+                      className={`inline-flex items-center gap-0.5 font-mono ${good ? 'text-emerald-500' : 'text-gray-400'}`}>
+                      <Icon icon={good ? 'mdi:check-decagram-outline' : 'mdi:progress-upload'} className="size-3.5" />
+                      {shortHex(r.tableId as `0x${string}`, 8)}
                     </span>
                     <span className={`rounded-full px-2 py-0.5 font-medium ${r.win ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'}`}>
                       {r.win ? 'won' : 'lost'}
@@ -359,7 +396,10 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
         ) : (
           <p className="text-xs text-gray-400">
             No rounds yet. Every flip posts its full commit-reveal handshake (PoW-stamped, off-thread) to
-            this chain’s landing category; your verified rounds appear here, each re-confirmed against the board.
+            this chain’s landing category
+            {houseAddr
+              ? ' — every round here is re-verified against the house’s signature straight off the board.'
+              : '; your verified rounds appear here, each re-confirmed against the board.'}
           </p>
         )}
       </div>
