@@ -99,8 +99,8 @@ export function createMsgBoardClient(rpcUrl: string): MsgBoardClient {
 
 /** Build a live `BoardClient` from an RPC URL. The returned client posts real PoW-stamped notices
  *  (JS grind) and reads the live board — used by `MsgBoardTransport` (e.g. the read-only live feed). */
-export function createBoardClient(rpcUrl: string): BoardClient {
-  return msgBoardClientAdapter(createMsgBoardClient(rpcUrl))
+export function createBoardClient(rpcUrl: string, stamp?: Stamper): BoardClient {
+  return msgBoardClientAdapter(createMsgBoardClient(rpcUrl), stamp ? { stamp } : undefined)
 }
 
 // ── unified post API (SDK-friendly verbs: `stamp` + `post`) ─────────────────────────────────────

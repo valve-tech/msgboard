@@ -103,6 +103,22 @@ services:
       MSGBOARD_RPC: "https://one.valve.city/rpc/${VALVE_RPC_KEY}/evm/943"
       HOUSE_INDEX: "50"
     command: node landing-house.mjs
+  # Same landing coin-flip house on 369 (the msgboard.xyz landing page defaults to PulseChain mainnet):
+  # same mnemonic index 50 → the SAME signing address (index derivation is chain-independent), so the
+  # UI's single pinned VITE_LANDING_HOUSE_ADDRESS matches on either chain. Signs only, no funds, zero
+  # stakes/optimistic — never calls a contract, so the 943 HouseChannel domain anchor is fine here too.
+  landing-house-369:
+    image: node:24-alpine
+    restart: unless-stopped
+    working_dir: /app
+    volumes: [ "./:/app" ]
+    env_file: .env
+    environment:
+      CHAIN: "369"
+      RPC: "https://one.valve.city/rpc/${VALVE_RPC_KEY}/evm/369"
+      MSGBOARD_RPC: "https://one.valve.city/rpc/${VALVE_RPC_KEY}/evm/369"
+      HOUSE_INDEX: "50"
+    command: node landing-house.mjs
   cast-watcher-369:
     image: node:24-alpine
     restart: unless-stopped
