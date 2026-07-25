@@ -211,9 +211,18 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
         {/* ── the game ─────────────────────────────────────────────── */}
         <div className="flex flex-col items-center gap-4 rounded-xl border border-gray-300 bg-gray-50 p-5 dark:border-gray-600 dark:bg-gray-900">
           <div className="flex w-full items-center justify-between text-xs font-medium">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-emerald-600 ring-1 ring-emerald-500/30 dark:text-emerald-400">
+            <span
+              title={
+                'Provably fair: outcome = keccak256(block hash ‖ your client seed), parity decides heads/tails.\n' +
+                '• House seed = a fresh chain BLOCK HASH — fixed by consensus, so the house can’t cherry-pick a favorable one.\n' +
+                '• Client seed = yours — so the house can’t predict or grind the result.\n' +
+                'Neither side can bias the 50/50, and anyone can recompute it from those two public inputs (see the Verify panel). ' +
+                'Incentive: because the block hash is set by consensus and your seed is secret to you, rigging it would cost more than any edge it could buy.'
+              }
+              className="inline-flex cursor-help items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-emerald-600 underline decoration-dotted decoration-emerald-500/40 underline-offset-2 ring-1 ring-emerald-500/30 dark:text-emerald-400">
               <Icon icon="mdi:shield-check-outline" className="size-3.5" />
               provably fair
+              <Icon icon="mdi:help-circle-outline" className="size-3 opacity-60" />
             </span>
             <span className="text-gray-500 dark:text-gray-400">
               {head ? `head #${head.number.toString()}` : 'reading head…'}
