@@ -29,6 +29,12 @@
     # workspaces (source; no hardhat/zk/contracts weight) and register them in the box's otherwise
     # packages-only root workspaces so `npm i` in the docker build links them. Ships coinflip (gameId 5)
     # + landingHouseCategory that the UI imports.
+    - name: Ensure the games/ parent dir exists (the box is otherwise a packages-only snapshot)
+      ansible.builtin.file:
+        path: "{{ deploy_dir }}/games"
+        state: directory
+        mode: "0755"
+
     - name: Rsync the two games workspaces the UI build needs (source only)
       ansible.posix.synchronize:
         src: "{{ repo_root }}/games/{{ item }}/"
