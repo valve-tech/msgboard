@@ -53,6 +53,14 @@ export type FlipRecord = {
   seed: Hex
   /** The block number whose hash was the house seed. */
   block: number
+  /**
+   * A unique per-flip nonce. The board treats an identical (category, data) post as idempotent, so
+   * two flips that happen to share the same seed+block+side would collapse into one entry ("played
+   * too quickly, only one of the same result registers per block"). This fresh nonce guarantees every
+   * published flip is a distinct board record. It does NOT feed the outcome — the flip is still purely
+   * keccak256(blockHash ‖ clientSeed) — it only disambiguates the record.
+   */
+  nonce: Hex
 }
 
 /** Encode a flip record into board `data` hex (compact JSON). */
@@ -75,6 +83,7 @@ export function decodeFlip(data: Hex): FlipRecord | null {
         win: parsed.win,
         seed: (parsed.seed ?? '0x') as Hex,
         block: typeof parsed.block === 'number' ? parsed.block : 0,
+        nonce: (parsed.nonce ?? '0x') as Hex, // older records predate the nonce; default is harmless
       }
     }
   } catch {
