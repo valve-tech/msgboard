@@ -26,3 +26,7 @@ export {
 export { faucetMint, type FaucetWalletClient } from './faucet'
 
 export { makeBoardHouseDeps, type BoardHouseDepsOpts } from './boardDeps'
+
+export { runBoardHouse, type RunHouseOpts, type HouseSigner } from './runHouse'
+
+export { runLandingHouse, landingHouseConfig, type LandingHouseOpts } from './runLandingHouse'
