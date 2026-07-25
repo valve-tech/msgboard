@@ -8,6 +8,7 @@ import { FlipBookScreen } from './components/FlipBookScreen'
 import { FlipBookXScreen } from './components/FlipBookXScreen'
 import { RaffleScreen } from './components/RaffleScreen'
 import { DiceScreen } from './components/DiceScreen'
+import { DiceX2Screen } from './components/DiceX2Screen'
 import { LimboScreen } from './components/LimboScreen'
 import { CrashScreen } from './components/CrashScreen'
 import { PlinkoScreen } from './components/PlinkoScreen'
@@ -58,6 +59,7 @@ const GAMES = [
   { id: 'flipx', label: '✍️ Signed Flips' },
   { id: 'raffle', label: '🎟 The Numbers' },
   { id: 'dice', label: '🎲 Dice' },
+  { id: 'dicex2', label: '🎲 Dice X2' },
   { id: 'limbo', label: '🚀 Limbo' },
   { id: 'crash', label: '📈 Crash' },
   { id: 'plinko', label: '⚪ Plinko' },
@@ -303,6 +305,14 @@ export const App = () => {
       )}
       {tab === 'dice' && (
         <DiceScreen
+          deployment={deployment}
+          walletClient={wallet.walletClient}
+          trustAcknowledged={trustAcknowledged}
+          myAddress={wallet.address}
+        />
+      )}
+      {tab === 'dicex2' && (
+        <DiceX2Screen
           deployment={deployment}
           walletClient={wallet.walletClient}
           trustAcknowledged={trustAcknowledged}
