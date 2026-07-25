@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Icon } from '@iconify/react'
-import { createPublicClient, http, type Hex, type PublicClient } from 'viem'
 import {
   useChainStore,
   selectChain,
@@ -8,47 +7,38 @@ import {
   selectRpcValid,
 } from '../stores/chain'
 import { makeWorkerBoard } from '../seams/worker-board'
-import { channelToCategory } from '../lib/channel'
-import {
-  flipOutcome,
-  randomSeed,
-  encodeFlip,
-  decodeFlip,
-  type FlipSide,
-  type FlipOutcome,
-} from '../lib/coinflip'
+import { shortHex, type FlipSide, type FlipFeedRecord } from '../lib/coinflip'
+import type { FlipResult, FlipStep } from '../lib/arcade-engine'
 
 /**
- * Arcade — a provably-fair coin flip played over the board, the whole thesis of the venue in one
- * tab. The player calls heads or tails; the outcome is the parity of
- * `keccak256(blockHash ‖ clientSeed)` where the block hash is the live chain head (the house can't
- * pick it) and the client seed is the player's (re-rollable). It resolves instantly, keeps a
- * session tally, shows the exact recompute so nothing can be fudged, and can optionally publish
- * each flip to a public board category — demonstrating real board posting (PoW off-thread) and
- * reading (the shared content poll) — before pointing at the full 28+-game arcade.
+ * Arcade — a genuinely provably-fair coin flip, played as a REAL board-mediated commit-reveal round
+ * against a house bot, at ZERO stakes (play-money). The player calls heads or tails; the house commits
+ * its server seed (publishing only its hash) BEFORE the player reveals its client seed, so neither side
+ * can grind the 50/50. Every step is a public, PoW-stamped, EIP-712-co-signed board message — the whole
+ * handshake IS the showcase — and anyone can recompute the outcome from the signed transcript.
  *
- * No wallet, no stakes, no new deps. Width note: the root is `w-full` and MUST stay that way — the
- * TryIt shell owns the single max-width; the Arcade must not re-center or cap its own width.
+ * The heavy engine (`@msgboard/games` + `@msgboard/settle`) is LAZY-LOADED (dynamic import) so it only
+ * enters the bundle when this tab opens. No wallet, no on-chain, no funds — an ephemeral key co-signs.
+ *
+ * Width note: the root is `w-full` and MUST stay that way — the TryIt shell owns the single max-width;
+ * the Arcade must not re-center or cap its own width.
  */
 
-const COINFLIP_CHANNEL = 'coinflip-arcade'
-const COINFLIP_CATEGORY = channelToCategory(COINFLIP_CHANNEL)
-const FEATURED_GAMES = ['Crash', 'Plinko', 'Mines']
+/** The runtime type of the lazily-imported engine module (type-only — erased, no bundle cost). */
+type ArcadeEngine = typeof import('../lib/arcade-engine')
 
-type Head = { hash: Hex; number: bigint }
-type Resolved = {
-  outcome: FlipOutcome
-  pick: FlipSide
-  win: boolean
-  block: bigint
-  houseHash: Hex
-  seed: Hex
-}
-type PostState = 'idle' | 'posting' | 'posted' | 'error'
-
-const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
-const short = (h: Hex, n = 10) => `${h.slice(0, n)}…${h.slice(-6)}`
 const faceIcon = (s: FlipSide) => (s === 'heads' ? 'mdi:alpha-h-circle' : 'mdi:alpha-t-circle')
+
+/** The four public handshake milestones, in order, with their showcase copy. */
+const STEPS: ReadonlyArray<{ id: FlipStep; icon: string; title: string; detail: string }> = [
+  { id: 'commit', icon: 'mdi:lock-outline', title: 'You commit', detail: 'post the sealed hash of your client seed to the board' },
+  { id: 'grant', icon: 'mdi:handshake-outline', title: 'House commits blind', detail: 'signs OpenTerms carrying only the hash of its server seed' },
+  { id: 'reveal', icon: 'mdi:key-outline', title: 'You reveal', detail: 'send your client seed; both sides co-sign the round' },
+  { id: 'transcript', icon: 'mdi:file-certificate-outline', title: 'Settled on the board', detail: 'the doubly-signed transcript lands, publicly re-auditable' },
+]
+
+const FEATURED_GAMES = ['Crash', 'Plinko', 'Mines']
+const STARTING_BALANCE = 1000n
 
 export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
   const transportUrl = useChainStore((s) => selectTransportUrl(s))
@@ -58,55 +48,25 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
   const globalWorkMultiplier = useChainStore((s) => s.globalWorkMultiplier)
   const globalWorkDivisor = useChainStore((s) => s.globalWorkDivisor)
 
-  const [pick, setPick] = useState<FlipSide>('heads')
-  const [clientSeed, setClientSeed] = useState<Hex>(() => randomSeed())
-  const [head, setHead] = useState<Head | null>(null)
-  const [flipping, setFlipping] = useState(false)
-  const [result, setResult] = useState<Resolved | null>(null)
-  const [tally, setTally] = useState({ wins: 0, losses: 0 })
-  const [publish, setPublish] = useState(false)
-  const [posting, setPosting] = useState<PostState>('idle')
-
-  // read-only viem client for the house seed (latest block hash), proxy-aware — same pattern as
-  // useAccount. Rebuilt only when the transport or chain changes.
-  const client = useMemo<PublicClient | null>(() => {
-    if (!transportUrl) return null
-    const chain = selectChain(useChainStore.getState())
-    return createPublicClient({ chain, transport: http(transportUrl) }) as PublicClient
-  }, [transportUrl, chainId])
-
-  const readHead = async (): Promise<Head | null> => {
-    if (!client) return null
-    const block = await client.getBlock({ blockTag: 'latest' })
-    return block.hash ? { hash: block.hash, number: block.number ?? 0n } : null
-  }
-
-  // keep a fresh house seed: fetch on mount/transport change, then poll every 12s.
+  // The engine is lazy-loaded on mount (tab open) so the landing bundle stays lean.
+  const [eng, setEng] = useState<ArcadeEngine | null>(null)
   useEffect(() => {
-    if (!client) {
-      setHead(null)
-      return
-    }
-    let cancelled = false
-    const tick = async () => {
-      try {
-        const h = await readHead()
-        if (!cancelled && h) setHead(h)
-      } catch {
-        /* transient rpc failure — keep the last known head */
-      }
-    }
-    void tick()
-    const id = setInterval(() => void tick(), 12_000)
-    return () => {
-      cancelled = true
-      clearInterval(id)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client])
+    let alive = true
+    void import('../lib/arcade-engine')
+      .then((m) => { if (alive) setEng(m) })
+      .catch(() => { if (alive) setEng(null) })
+    return () => { alive = false }
+  }, [])
 
-  // the PoW board seam — grinds off-thread and posts. Reused across flips; only rebuilt on
-  // transport/chain/difficulty change (never in the hot flip path).
+  const [pick, setPick] = useState<FlipSide>('heads')
+  const [flipping, setFlipping] = useState(false)
+  const [reached, setReached] = useState<FlipStep[]>([])
+  const [result, setResult] = useState<FlipResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [balance, setBalance] = useState<bigint>(STARTING_BALANCE)
+  const [tally, setTally] = useState({ wins: 0, losses: 0 })
+
+  // The PoW board seam — grinds off-thread and posts. Rebuilt only on transport/chain/difficulty change.
   const board = useMemo(() => {
     if (!transportUrl) return null
     return makeWorkerBoard({
@@ -119,95 +79,54 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transportUrl, chainId, globalWorkMultiplier, globalWorkDivisor, workerFactory])
 
-  // Serialize board posts through a queue (each post grinds PoW, ~1-2s). A previous drop-if-busy guard
-  // silently LOST rapid flips — now every published flip is queued and posted in turn, each with a
-  // fresh nonce so the board (which is idempotent on identical content) records it distinctly.
-  const postQueueRef = useRef<Promise<void>>(Promise.resolve())
-  const postFlip = (res: Resolved): void => {
-    if (!board) return
-    postQueueRef.current = postQueueRef.current.then(async () => {
-      setPosting('posting')
-      try {
-        const data = encodeFlip({
-          pick: res.pick,
-          side: res.outcome.side,
-          win: res.win,
-          seed: res.seed,
-          block: Number(res.block),
-          nonce: randomSeed(), // unique per post — prevents the same-result-per-block dedup collapse
-        })
-        await board.addMessage({ category: COINFLIP_CATEGORY, data })
-        setPosting('posted')
-        await delay(800)
-        await useChainStore.getState().loadContent()
-      } catch {
-        setPosting('error')
-      }
-    })
-  }
-
   const flip = async () => {
-    if (flipping || !rpcValid) return
+    if (flipping || !rpcValid || !board || !eng) return
     setFlipping(true)
     setResult(null)
-    setPosting('idle')
-
-    // pull a fresh head at flip time so the house seed can't have been known when the seed was set
-    let seedHead = head
+    setError(null)
+    setReached([])
     try {
-      const h = await readHead()
-      if (h) {
-        seedHead = h
-        setHead(h)
-      }
+      // A fresh session: OPEN (nonce 0) + ROUND (nonce 1) → a co-signed transcript. The engine drives
+      // the real handshake over the board; the outcome is read from the co-signed ROUND state, never
+      // fabricated. Publishing is MANDATORY — the handshake IS the on-board round.
+      const res = await eng.runBoardFlip({
+        board: board as unknown as Parameters<ArcadeEngine['runBoardFlip']>[0]['board'],
+        chainId,
+        pick,
+        onStep: (s) => setReached((r) => (r.includes(s) ? r : [...r, s])),
+      })
+      setResult(res)
+      setBalance((b) => b + res.playerDelta)
+      setTally((t) => ({ wins: t.wins + (res.win ? 1 : 0), losses: t.losses + (res.win ? 0 : 1) }))
+      // Best-effort: pull the just-posted round back off the board for the public feed.
+      void useChainStore.getState().loadContent()
     } catch {
-      /* fall back to the last known head */
-    }
-    if (!seedHead) {
+      // Liveness: a withheld/absent house reveal stalls the round. No stakes were at risk, and the
+      // partial handshake is publicly visible on the board — void it and let the player retry cleanly.
+      setError('The house bot didn’t respond — this round is void (no stakes were at risk). Try again.')
+    } finally {
       setFlipping(false)
-      return
     }
-
-    const seed = clientSeed
-    const outcome = flipOutcome(seedHead.hash, seed)
-    const win = outcome.side === pick
-    const res: Resolved = {
-      outcome,
-      pick,
-      win,
-      block: seedHead.number,
-      houseHash: seedHead.hash,
-      seed,
-    }
-
-    await delay(1100) // let the coin spin
-    setResult(res)
-    setTally((t) => ({ wins: t.wins + (win ? 1 : 0), losses: t.losses + (win ? 0 : 1) }))
-    setFlipping(false)
-    if (publish) void postFlip(res)
-    // rotate the seed so the next flip is independent even inside the same block
-    setClientSeed(randomSeed())
   }
 
-  // recent public flips, decoded from the shared content poll (real board reads, not local state)
-  const feed = useMemo(() => {
-    const msgs = content?.[COINFLIP_CATEGORY] ?? []
-    return msgs
-      .map((m) => decodeFlip(m.data))
-      .filter((r): r is NonNullable<typeof r> => r !== null)
-      .slice(-8)
-      .reverse()
-  }, [content])
+  // Recent public flips, decoded from the shared content poll — REAL board reads recomputed from the
+  // co-signed transcripts on the landing category, not local state. Empty until the engine loads.
+  const feed = useMemo<FlipFeedRecord[]>(() => {
+    if (!eng || !chainId) return []
+    const msgs = content?.[eng.landingCategoryHash(chainId)] ?? []
+    return eng.decodeFeed(msgs)
+  }, [content, eng, chainId])
 
   const total = tally.wins + tally.losses
-  const coinFace: FlipSide = result?.outcome.side ?? pick
+  const coinFace: FlipSide = result?.side ?? pick
+  const parity = result ? (result.raw & 1n).toString() : null
 
   return (
     <div className="flex w-full flex-col gap-4">
-      {/* coin spin keyframes — scoped to this component */}
+      {/* coin spin keyframes — scoped to this component; loops while the handshake runs */}
       <style>{`
-        @keyframes arcade-coin-spin { from { transform: rotateY(0deg) } to { transform: rotateY(1980deg) } }
-        .arcade-coin-flipping { animation: arcade-coin-spin 1.1s cubic-bezier(.2,.75,.25,1) both }
+        @keyframes arcade-coin-spin { from { transform: rotateY(0deg) } to { transform: rotateY(360deg) } }
+        .arcade-coin-flipping { animation: arcade-coin-spin 0.9s linear infinite }
       `}</style>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -216,19 +135,20 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
           <div className="flex w-full items-center justify-between text-xs font-medium">
             <span
               title={
-                'Provably fair: outcome = keccak256(block hash ‖ your client seed), parity decides heads/tails.\n' +
-                '• House seed = a fresh chain BLOCK HASH — fixed by consensus, so the house can’t cherry-pick a favorable one.\n' +
-                '• Client seed = yours — so the house can’t predict or grind the result.\n' +
-                'Neither side can bias the 50/50, and anyone can recompute it from those two public inputs (see the Verify panel). ' +
-                'Incentive: because the block hash is set by consensus and your seed is secret to you, rigging it would cost more than any edge it could buy.'
+                'Provably fair by COMMIT-REVEAL, played on msgboard against a house bot.\n' +
+                '• The house commits its server seed first — it publishes only keccak256(serverSeed) in the signed OpenTerms.\n' +
+                '• Only THEN do you reveal your client seed. Since neither side knows the other’s secret when it commits, neither can grind the 50/50.\n' +
+                '• The house then reveals its server seed; your client re-derives the outcome and co-signs ONLY if keccak256(serverSeed) matches the commit AND the round used the exact client seed you committed.\n' +
+                'Every step is a public, signed board message — recompute it yourself from the transcript (see the Verify panel).'
               }
               className="inline-flex cursor-help items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-emerald-600 underline decoration-dotted decoration-emerald-500/40 underline-offset-2 ring-1 ring-emerald-500/30 dark:text-emerald-400">
               <Icon icon="mdi:shield-check-outline" className="size-3.5" />
               provably fair
               <Icon icon="mdi:help-circle-outline" className="size-3 opacity-60" />
             </span>
-            <span className="text-gray-500 dark:text-gray-400">
-              {head ? `head #${head.number.toString()}` : 'reading head…'}
+            <span className="inline-flex items-center gap-1.5 text-gray-500 dark:text-gray-400">
+              <Icon icon="mdi:poker-chip" className="size-3.5 text-amber-500" />
+              {balance.toString()} fun-chips
             </span>
           </div>
 
@@ -251,10 +171,12 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
           {/* result line */}
           <div className="flex h-6 items-center text-sm font-semibold">
             {flipping ? (
-              <span className="text-gray-500 dark:text-gray-400">flipping…</span>
+              <span className="text-gray-500 dark:text-gray-400">running the handshake…</span>
+            ) : error ? (
+              <span className="text-amber-600 dark:text-amber-400">round void</span>
             ) : result ? (
               <span className={result.win ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}>
-                {result.outcome.side === 'heads' ? 'Heads' : 'Tails'} — you {result.win ? 'won' : 'lost'}
+                {result.side === 'heads' ? 'Heads' : 'Tails'} — you {result.win ? 'won' : 'lost'} {result.stake.toString()}
               </span>
             ) : (
               <span className="text-gray-500 dark:text-gray-400">call it and flip</span>
@@ -284,11 +206,12 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
             </div>
             <button
               onClick={() => void flip()}
-              disabled={flipping || !rpcValid}
+              disabled={flipping || !rpcValid || !board || !eng}
               className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50">
               <Icon icon={flipping ? 'mdi:loading' : 'mdi:cash-multiple'} className={`size-4 ${flipping ? 'animate-spin' : ''}`} />
-              {flipping ? 'Flipping…' : 'Flip the coin'}
+              {flipping ? 'Playing on the board…' : !eng ? 'Loading the engine…' : error ? 'Try again' : 'Flip the coin'}
             </button>
+            {error && <p className="text-center text-[11px] text-amber-600 dark:text-amber-400">{error}</p>}
           </div>
 
           {/* tally */}
@@ -310,92 +233,110 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
           </div>
         </div>
 
-        {/* ── provably-fair panel + inputs ─────────────────────────── */}
+        {/* ── the handshake showcase (the point of the venue) ──────── */}
         <div className="flex flex-col gap-3 rounded-xl border border-gray-300 bg-white p-5 dark:border-gray-600 dark:bg-gray-950">
           <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-800 dark:text-gray-100">
-            <Icon icon="mdi:calculator-variant-outline" className="size-4 text-indigo-500" />
-            Verify it yourself
+            <Icon icon="mdi:swap-horizontal-bold" className="size-4 text-indigo-500" />
+            The commit-reveal handshake
           </h3>
           <p className="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
-            Neither side can bias this. The <span className="font-medium text-gray-700 dark:text-gray-300">house seed</span> is a
-            public block hash you didn't choose; the <span className="font-medium text-gray-700 dark:text-gray-300">client seed</span> is
-            yours. The face is the parity of <code className="rounded bg-gray-100 px-1 font-mono text-[11px] dark:bg-gray-800">keccak256(blockHash ‖ clientSeed)</code> —
-            even is Heads, odd is Tails. Recompute it and check.
+            This isn’t a solo demo — it’s a real round played over msgboard against a house bot. The house
+            commits its server seed <span className="font-medium text-gray-700 dark:text-gray-300">first</span> (it
+            publishes only the hash), so it can’t react to your seed; you reveal
+            <span className="font-medium text-gray-700 dark:text-gray-300"> only after</span> that commit is signed,
+            so you can’t grind against a known server seed. Neither side can bias the 50/50.
           </p>
-
-          {/* client seed — editable / re-rollable */}
-          <label className="flex flex-col gap-1">
-            <span className="text-[11px] font-medium uppercase tracking-wide text-gray-400">your client seed (next flip)</span>
-            <div className="flex items-center gap-2">
-              <input
-                value={clientSeed}
-                onChange={(e) => setClientSeed((e.target.value || '0x') as Hex)}
-                spellCheck={false}
-                className="min-w-0 flex-1 rounded-md border border-gray-300 bg-gray-50 px-2 py-1.5 font-mono text-[11px] text-gray-700 outline-none focus:border-indigo-400 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200"
-              />
-              <button
-                onClick={() => setClientSeed(randomSeed())}
-                disabled={flipping}
-                title="re-roll your seed"
-                className="grid size-8 shrink-0 place-items-center rounded-md text-gray-500 ring-1 ring-gray-300 transition hover:text-indigo-500 hover:ring-indigo-400 disabled:opacity-50 dark:ring-gray-600">
-                <Icon icon="mdi:dice-multiple-outline" className="size-4" />
-              </button>
-            </div>
-          </label>
-
-          {/* the recompute for the last flip */}
-          {result ? (
-            <div className="flex flex-col gap-2 rounded-lg bg-gray-50 p-3 text-[11px] dark:bg-gray-900">
-              <Row label={`house seed (block #${result.block.toString()})`} value={short(result.houseHash)} />
-              <Row label="client seed" value={short(result.seed)} />
-              <Row label="keccak digest" value={short(result.outcome.digest)} />
-              <div className="flex items-center justify-between border-t border-gray-200 pt-2 dark:border-gray-700">
-                <span className="text-gray-500 dark:text-gray-400">parity → face</span>
-                <span className="font-mono font-semibold text-gray-800 dark:text-gray-100">
-                  {(BigInt(result.outcome.digest) & 1n).toString()} → {result.outcome.side}
-                </span>
-              </div>
-            </div>
-          ) : (
-            <div className="rounded-lg bg-gray-50 p-3 text-[11px] text-gray-400 dark:bg-gray-900">
-              Flip once to see the exact inputs and the recompute.
-            </div>
-          )}
+          <ol className="flex flex-col gap-2">
+            {STEPS.map((step, i) => {
+              const done = reached.includes(step.id) || (!!result && !error)
+              const active = flipping && reached.length === i
+              return (
+                <li key={step.id} className="flex items-start gap-3">
+                  <span
+                    className={`mt-0.5 grid size-6 shrink-0 place-items-center rounded-full ring-1 transition ${
+                      done
+                        ? 'bg-emerald-500/10 text-emerald-600 ring-emerald-500/40 dark:text-emerald-400'
+                        : active
+                          ? 'bg-indigo-500/10 text-indigo-600 ring-indigo-500/40 dark:text-indigo-400'
+                          : 'text-gray-400 ring-gray-300 dark:ring-gray-600'
+                    }`}>
+                    <Icon icon={done ? 'mdi:check' : active ? 'mdi:loading' : step.icon} className={`size-3.5 ${active ? 'animate-spin' : ''}`} />
+                  </span>
+                  <div className="flex flex-col">
+                    <span className={`text-xs font-medium ${done || active ? 'text-gray-800 dark:text-gray-100' : 'text-gray-500 dark:text-gray-400'}`}>
+                      {step.title}
+                    </span>
+                    <span className="text-[11px] text-gray-400">{step.detail}</span>
+                  </div>
+                </li>
+              )
+            })}
+          </ol>
         </div>
       </div>
 
-      {/* ── board showcase: publish toggle + live feed ─────────────── */}
+      {/* ── verify panel: recompute the flip from the co-signed transcript ─────── */}
+      <div className="flex flex-col gap-3 rounded-xl border border-gray-300 bg-white p-5 dark:border-gray-600 dark:bg-gray-950">
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-800 dark:text-gray-100">
+          <Icon icon="mdi:calculator-variant-outline" className="size-4 text-indigo-500" />
+          Verify it yourself
+        </h3>
+        <p className="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+          Every value below is read from the doubly-co-signed transcript on the board. The house’s
+          <span className="font-medium text-gray-700 dark:text-gray-300"> server seed</span> was fixed by its
+          commit <code className="rounded bg-gray-100 px-1 font-mono text-[11px] dark:bg-gray-800">rngCommit = keccak256(serverSeed)</code>
+          {' '}before your <span className="font-medium text-gray-700 dark:text-gray-300">client seed</span> was revealed. The face is the
+          parity of <code className="rounded bg-gray-100 px-1 font-mono text-[11px] dark:bg-gray-800">raw = keccak256(serverSeed ‖ clientSeed ‖ nonce)</code> —
+          even is Heads, odd is Tails. Check the reveal against the commit and recompute.
+        </p>
+
+        {result ? (
+          <div className="flex flex-col gap-2 rounded-lg bg-gray-50 p-3 text-[11px] dark:bg-gray-900">
+            <Row label="rngCommit (house, at open)" value={shortHex(result.rngCommit)} />
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-gray-500 dark:text-gray-400">serverSeed (revealed)</span>
+              <span className="flex items-center gap-1.5">
+                <span className="font-mono text-gray-700 dark:text-gray-200">{shortHex(result.serverSeed)}</span>
+                <span className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 font-medium ${result.commitOk ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'}`}>
+                  <Icon icon={result.commitOk ? 'mdi:check-circle-outline' : 'mdi:alert-circle-outline'} className="size-3" />
+                  keccak {result.commitOk ? '= commit' : '≠ commit'}
+                </span>
+              </span>
+            </div>
+            <Row label="clientSeed (yours)" value={shortHex(result.clientSeed)} />
+            <Row label="raw" value={shortHex(`0x${result.raw.toString(16)}` as `0x${string}`)} />
+            <div className="flex items-center justify-between border-t border-gray-200 pt-2 dark:border-gray-700">
+              <span className="text-gray-500 dark:text-gray-400">parity → face</span>
+              <span className="font-mono font-semibold text-gray-800 dark:text-gray-100">
+                {parity} → {result.side}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-lg bg-gray-50 p-3 text-[11px] text-gray-400 dark:bg-gray-900">
+            Flip once to see the co-signed seeds and the recompute.
+          </div>
+        )}
+      </div>
+
+      {/* ── board showcase: live feed of recent rounds ─────────────── */}
       <div className="flex flex-col gap-3 rounded-xl border border-gray-300 bg-gray-50 p-5 dark:border-gray-600 dark:bg-gray-900">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-800 dark:text-gray-100">
-            <Icon icon="mdi:access-point" className="size-4 text-indigo-500" />
-            Recent flips on the board
-            <span className="font-mono text-[11px] font-normal text-gray-400">#{COINFLIP_CHANNEL}</span>
-          </h3>
-          <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
-            <input
-              type="checkbox"
-              checked={publish}
-              onChange={(e) => setPublish(e.target.checked)}
-              className="size-4 accent-indigo-600"
-            />
-            Publish my flips (PoW-stamped, off-thread)
-            {posting === 'posting' && <span className="text-indigo-500">· posting…</span>}
-            {posting === 'posted' && <span className="text-emerald-500">· posted ✓</span>}
-            {posting === 'error' && <span className="text-rose-500">· post failed</span>}
-          </label>
-        </div>
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-800 dark:text-gray-100">
+          <Icon icon="mdi:access-point" className="size-4 text-indigo-500" />
+          Recent flips on the board
+          <span className="font-mono text-[11px] font-normal text-gray-400">landing:{chainId || '?'}</span>
+        </h3>
         {feed.length ? (
           <ul className="flex flex-col divide-y divide-gray-200 text-xs dark:divide-gray-700">
-            {feed.map((r, i) => (
-              <li key={i} className="flex items-center justify-between py-1.5">
+            {feed.map((r) => (
+              <li key={r.tableId} className="flex items-center justify-between py-1.5">
                 <span className="inline-flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
                   <Icon icon={faceIcon(r.side)} className={`size-4 ${r.win ? 'text-emerald-500' : 'text-rose-500'}`} />
                   called <span className="font-medium capitalize">{r.pick}</span> · landed{' '}
                   <span className="font-medium capitalize">{r.side}</span>
                 </span>
                 <span className="flex items-center gap-2">
-                  <span className="font-mono text-gray-400">blk {r.block || '?'}</span>
+                  <span className="font-mono text-gray-400">{shortHex(r.tableId, 8)}</span>
                   <span className={`rounded-full px-2 py-0.5 font-medium ${r.win ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'}`}>
                     {r.win ? 'won' : 'lost'}
                   </span>
@@ -405,8 +346,8 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
           </ul>
         ) : (
           <p className="text-xs text-gray-400">
-            No public flips yet. Tick <span className="font-medium">Publish my flips</span> and flip — it posts a PoW-stamped
-            record to the <span className="font-mono">{COINFLIP_CHANNEL}</span> category, then reads it back from the shared board poll.
+            No public rounds yet. Every flip posts its full commit-reveal handshake (PoW-stamped, off-thread)
+            to this chain’s landing category, then reads the co-signed transcripts back from the shared board poll.
           </p>
         )}
       </div>
@@ -422,7 +363,7 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
         <div className="relative flex flex-col items-center gap-3 text-center sm:flex-row sm:justify-between sm:text-left">
           <div>
             <p className="text-sm font-semibold">
-              This inline flip is a for-fun taste. The full{' '}
+              This flip is the real protocol at zero stakes. The full{' '}
               <span className="bg-gradient-to-br from-amber-200 via-amber-400 to-orange-500 bg-clip-text text-transparent">
                 MsgBoard Arcade
               </span>{' '}
@@ -435,7 +376,7 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
                   <span className="font-medium text-amber-200">{g}</span>
                 </span>
               ))}
-              {' '}and more — every draw ships a receipt your browser re-checks against the chain.
+              {' '}and more — every round ships a signed transcript your browser re-checks against the chain.
             </p>
           </div>
           <a
