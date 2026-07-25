@@ -13,12 +13,14 @@
     "ink-pools": "tsx scripts/ink-pools.ts",
     "cast-watcher": "tsx scripts/cast-watcher.ts",
     "player-bots": "tsx scripts/player-bots.ts",
-    "session-bots": "tsx scripts/session-bots.ts"
+    "session-bots": "tsx scripts/session-bots.ts",
+    "landing-house": "tsx scripts/landing-house.ts"
   },
   "dependencies": {
     "@msgboard/coinflip": "*",
     "@msgboard/cosign": "*",
     "@msgboard/games-core": "*",
+    "@msgboard/games-house-service": "*",
     "@msgboard/hilo-war": "*",
     "@msgboard/games": "*",
     "@msgboard/pow-grinder": "*",

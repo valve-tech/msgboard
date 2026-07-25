@@ -62,6 +62,7 @@ services:
         VITE_RPC_1: ${VITE_RPC_1:-}
         VITE_RPC_369: ${VITE_RPC_369:-}
         VITE_RPC_943: ${VITE_RPC_943:-}
+        VITE_LANDING_HOUSE_ADDRESS: ${VITE_LANDING_HOUSE_ADDRESS:-}
     restart: unless-stopped
     networks:
       - msgboard

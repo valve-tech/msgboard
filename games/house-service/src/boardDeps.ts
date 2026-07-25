@@ -39,6 +39,13 @@ export interface BoardHouseDepsOpts {
   pollMs?: number
   /** How long a co-sign `request()` waits for the player's half (ms). Default 120000. */
   timeoutMs?: number
+  /**
+   * Optional board category override, threaded to BOTH the poll (feed) and the reply/co-sign paths.
+   * Defaults to `houseCategory(chainId)` (the real arcade). The landing coin-flip house bot passes
+   * `landingHouseCategory(chainId)` so it serves only the isolated landing feed. The player session
+   * must pass the SAME category.
+   */
+  category?: { category: string }
 }
 
 const END = Symbol('board-house-deps-end')
@@ -48,7 +55,7 @@ export function makeBoardHouseDeps(opts: BoardHouseDepsOpts): { deps: HouseDeps;
   const { board, chainId, getHeadBlock } = opts
   const pollMs = opts.pollMs ?? 1000
   const timeoutMs = opts.timeoutMs ?? 120_000
-  const cat = houseCategory(chainId)
+  const cat = opts.category ?? houseCategory(chainId)
 
   // The feed transport: receives every message in the category; we keep only open/round-requests.
   const feed = new MsgBoardTransport(board, cat)
