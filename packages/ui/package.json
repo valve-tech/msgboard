@@ -14,7 +14,7 @@
     "lint": "prettier --check ."
   },
   "dependencies": {
-    "@iconify/react": "^5.0.2",
+    "@iconify/react": "^6.0.2",
     "@msgboard/games": "*",
     "@msgboard/sdk": "^0.0.33",
     "@msgboard/settle": "*",
