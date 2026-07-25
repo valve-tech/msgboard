@@ -119,28 +119,31 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transportUrl, chainId, globalWorkMultiplier, globalWorkDivisor, workerFactory])
 
-  const postingRef = useRef(false)
-  const postFlip = async (res: Resolved) => {
-    if (!board || postingRef.current) return
-    postingRef.current = true
-    setPosting('posting')
-    try {
-      const data = encodeFlip({
-        pick: res.pick,
-        side: res.outcome.side,
-        win: res.win,
-        seed: res.seed,
-        block: Number(res.block),
-      })
-      await board.addMessage({ category: COINFLIP_CATEGORY, data })
-      setPosting('posted')
-      await delay(800)
-      await useChainStore.getState().loadContent()
-    } catch {
-      setPosting('error')
-    } finally {
-      postingRef.current = false
-    }
+  // Serialize board posts through a queue (each post grinds PoW, ~1-2s). A previous drop-if-busy guard
+  // silently LOST rapid flips — now every published flip is queued and posted in turn, each with a
+  // fresh nonce so the board (which is idempotent on identical content) records it distinctly.
+  const postQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const postFlip = (res: Resolved): void => {
+    if (!board) return
+    postQueueRef.current = postQueueRef.current.then(async () => {
+      setPosting('posting')
+      try {
+        const data = encodeFlip({
+          pick: res.pick,
+          side: res.outcome.side,
+          win: res.win,
+          seed: res.seed,
+          block: Number(res.block),
+          nonce: randomSeed(), // unique per post — prevents the same-result-per-block dedup collapse
+        })
+        await board.addMessage({ category: COINFLIP_CATEGORY, data })
+        setPosting('posted')
+        await delay(800)
+        await useChainStore.getState().loadContent()
+      } catch {
+        setPosting('error')
+      }
+    })
   }
 
   const flip = async () => {

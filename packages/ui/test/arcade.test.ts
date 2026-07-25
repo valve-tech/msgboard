@@ -49,7 +49,7 @@ describe('randomSeed', () => {
 
 describe('encodeFlip / decodeFlip', () => {
   it('round-trips a flip record', () => {
-    const record = { pick: 'heads', side: 'tails', win: false, seed: SEED, block: 12345 } as const
+    const record = { pick: 'heads', side: 'tails', win: false, seed: SEED, block: 12345, nonce: SEED } as const
     const decoded = decodeFlip(encodeFlip(record))
     expect(decoded).toEqual(record)
   })
