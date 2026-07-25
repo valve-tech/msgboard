@@ -3,12 +3,11 @@ import * as viem from 'viem'
 import { deployments } from './config'
 import { useWallet } from './hooks/useWallet'
 import { useChainData } from './hooks/useChainData'
-import { TrustBanner, isTrustAcknowledgedFor, TRUST_ICON, type TrustModel } from './components/TrustBanner'
+import { TrustBanner, isTrustAcknowledgedFor, type TrustModel } from './components/TrustBanner'
 import { FlipBookScreen } from './components/FlipBookScreen'
 import { FlipBookXScreen } from './components/FlipBookXScreen'
 import { RaffleScreen } from './components/RaffleScreen'
 import { DiceScreen } from './components/DiceScreen'
-import { DiceX2Screen } from './components/DiceX2Screen'
 import { LimboScreen } from './components/LimboScreen'
 import { CrashScreen } from './components/CrashScreen'
 import { PlinkoScreen } from './components/PlinkoScreen'
@@ -42,6 +41,8 @@ import { LiveFeed } from './components/LiveFeed'
 import { StandingsScreen } from './components/StandingsScreen'
 import { Lobby } from './components/Lobby'
 import { Menu } from './components/Menu'
+import { GameNav } from './components/GameNav'
+import { CryptoShowcase } from './components/CryptoShowcase'
 
 const short = (a?: viem.Hex) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '')
 
@@ -57,7 +58,6 @@ const GAMES = [
   { id: 'flipx', label: '✍️ Signed Flips' },
   { id: 'raffle', label: '🎟 The Numbers' },
   { id: 'dice', label: '🎲 Dice' },
-  { id: 'dicex2', label: '🎲 Dice X2' },
   { id: 'limbo', label: '🚀 Limbo' },
   { id: 'crash', label: '📈 Crash' },
   { id: 'plinko', label: '⚪ Plinko' },
@@ -194,6 +194,7 @@ export const App = () => {
           )}
         </div>
       </div>
+      {tab === 'lobby' && (
       <details
         className="pitch"
         open={pitchOpen}
@@ -246,20 +247,20 @@ export const App = () => {
           </p>
         </div>
       </details>
+      )}
       {wallet.error && <div className="banner bad">{wallet.error}</div>}
       {data.error && <div className="banner bad">chain read failed: {data.error}</div>}
-      <div className="tabs">
-        <Menu
-          label="game"
-          options={GAMES.map((g) => {
-            const m = trustModelFor(g.id)
-            return { label: g.label, badge: m ? TRUST_ICON[m].icon : undefined, badgeTitle: m ? TRUST_ICON[m].title : undefined }
-          })}
-          value={Math.max(0, GAMES.findIndex((g) => g.id === tab))}
-          onChange={(i) => setTab(GAMES[i]!.id)}
+      {tab !== 'lobby' && (
+        <GameNav
+          games={GAMES}
+          tab={tab}
+          trustModel={trustModel}
+          trustFor={(id) => trustModelFor(id as Tab)}
+          blockNumber={data.blockNumber}
+          onPick={(id) => setTab(id as Tab)}
         />
-        <span className="blockline">block {data.blockNumber.toString()}</span>
-      </div>
+      )}
+      {trustModel && <CryptoShowcase deployment={deployment} model={trustModel} />}
       {trustModel && (
         <TrustBanner
           deployment={deployment}
@@ -302,14 +303,6 @@ export const App = () => {
       )}
       {tab === 'dice' && (
         <DiceScreen
-          deployment={deployment}
-          walletClient={wallet.walletClient}
-          trustAcknowledged={trustAcknowledged}
-          myAddress={wallet.address}
-        />
-      )}
-      {tab === 'dicex2' && (
-        <DiceX2Screen
           deployment={deployment}
           walletClient={wallet.walletClient}
           trustAcknowledged={trustAcknowledged}
