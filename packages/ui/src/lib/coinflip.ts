@@ -14,20 +14,5 @@ import type { Hex } from 'viem'
 /** Which face — the whole vocabulary of a coin flip. */
 export type FlipSide = 'heads' | 'tails'
 
-/** The opposite face. A fair coin has exactly two, so a loss on one implies the other landed. */
-export const otherSide = (s: FlipSide): FlipSide => (s === 'heads' ? 'tails' : 'heads')
-
-/** One decoded round for the public "recent flips on the board" feed. */
-export type FlipFeedRecord = {
-  /** What the player called. */
-  pick: FlipSide
-  /** What the co-signed round entropy produced. */
-  side: FlipSide
-  /** pick === side. */
-  win: boolean
-  /** The session/table the round was played on (its public board anchor). */
-  tableId: Hex
-}
-
 /** Abbreviate a hex value for display: `0x1234…abcdef`. */
 export const shortHex = (h: Hex, lead = 10): string => `${h.slice(0, lead)}…${h.slice(-6)}`

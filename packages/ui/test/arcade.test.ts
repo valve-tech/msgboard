@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { keccak256, type Hex } from 'viem'
+import { keccak256, hexToString, stringToHex, type Hex } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import {
   coinflip,
@@ -18,7 +18,7 @@ import { landingHouseCategory } from '@msgboard/settle'
 import { startHouse, makeBoardHouseDeps } from '@msgboard/games-house-service'
 import {
   runBoardFlip,
-  decodeFeed,
+  postedTableIds,
   landingCategoryHash,
   FUN_STAKE,
   LANDING_HOUSE_CHANNEL,
@@ -126,10 +126,48 @@ describe('runBoardFlip — real board-mediated commit-reveal round vs the house 
       // ── the handshake showcase saw every milestone, in order ──
       expect(onStep.mock.calls.map((c) => c[0])).toEqual(['commit', 'grant', 'reveal', 'transcript'])
 
-      // ── the feed reads the round-transcript BACK off the board and recomputes it ──
-      const feed = decodeFeed(feedMsgs)
-      expect(feed.length).toBe(1)
-      expect(feed[0]).toMatchObject({ win: result.win, side: result.side, tableId: result.tableId })
+      // ── the round-transcript really landed on the public board (confirmed by tableId presence) ──
+      const posted = postedTableIds(feedMsgs)
+      expect(posted.has(result.tableId.toLowerCase())).toBe(true)
+    } finally {
+      house.stop()
+    }
+  }, 25_000)
+
+  it('derives the shown seed/side from the VERIFIED proof, not the house-posted transcript string', async () => {
+    // A board that lets the house co-sign honestly (so the proof the player verifies is correct) but
+    // TAMPERS the serverSeed inside the round-transcript JSON the house posts back. If the UI derived its
+    // display from that transcript string (the old bug), result.serverSeed would be the garbage value and
+    // would NOT hash to rngCommit. With the fix, the seed comes from the co-signed proof and still checks.
+    const GARBAGE = ('0x' + 'ee'.repeat(32)) as Hex
+    const inner = fakeBoard()
+    const tampering: BoardClient = {
+      content: inner.content,
+      addMessage: async (msg: { category: Hex; data: Hex }) => {
+        try {
+          const wire = JSON.parse(hexToString(msg.data)) as { kind?: string; transcriptJson?: string }
+          if (wire.kind === 'round-transcript' && typeof wire.transcriptJson === 'string') {
+            const t = JSON.parse(wire.transcriptJson) as { entries: Array<{ kind: string; body: Record<string, unknown> }> }
+            for (const e of t.entries) if (e.kind === 'ROUND') e.body.serverSeed = GARBAGE
+            wire.transcriptJson = JSON.stringify(t)
+            return inner.addMessage({ category: msg.category, data: stringToHex(JSON.stringify(wire)) })
+          }
+        } catch { /* not a transcript envelope — pass through untouched */ }
+        return inner.addMessage(msg)
+      },
+    }
+    const house = startLandingHouse(tampering)
+    try {
+      const result = await runBoardFlip({
+        board: tampering, chainId: CHAIN_ID, pick: 'heads', playerKey: PLAYER_KEY, pollMs: 2, timeoutMs: 15_000,
+      })
+      // The shown serverSeed came from the verified proof: it still reveal-checks against rngCommit…
+      expect(result.serverSeed).not.toBe(GARBAGE)
+      expect(result.commitOk).toBe(true)
+      expect(commitSeed(result.serverSeed)).toBe(result.rngCommit)
+      // …and the shown side/win remain internally consistent with that verified seed.
+      expect(result.side).toBe(coinFlipSide(result.raw))
+      expect(result.win).toBe(result.side === result.pick)
     } finally {
       house.stop()
     }

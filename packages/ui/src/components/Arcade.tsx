@@ -7,7 +7,7 @@ import {
   selectRpcValid,
 } from '../stores/chain'
 import { makeWorkerBoard } from '../seams/worker-board'
-import { shortHex, type FlipSide, type FlipFeedRecord } from '../lib/coinflip'
+import { shortHex, type FlipSide } from '../lib/coinflip'
 import type { FlipResult, FlipStep } from '../lib/arcade-engine'
 
 /**
@@ -65,6 +65,9 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
   const [error, setError] = useState<string | null>(null)
   const [balance, setBalance] = useState<bigint>(STARTING_BALANCE)
   const [tally, setTally] = useState({ wins: 0, losses: 0 })
+  // The feed shows the player's OWN verified rounds (each already co-sign-verified in runBoardFlip) — we
+  // never render un-self-verified foreign board posts, since the landing category is public and forgeable.
+  const [history, setHistory] = useState<FlipResult[]>([])
 
   // The PoW board seam — grinds off-thread and posts. Rebuilt only on transport/chain/difficulty change.
   const board = useMemo(() => {
@@ -98,7 +101,8 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
       setResult(res)
       setBalance((b) => b + res.playerDelta)
       setTally((t) => ({ wins: t.wins + (res.win ? 1 : 0), losses: t.losses + (res.win ? 0 : 1) }))
-      // Best-effort: pull the just-posted round back off the board for the public feed.
+      setHistory((h) => [res, ...h].slice(0, 8))
+      // Best-effort: pull the just-posted round back off the board to confirm it landed (on-board badge).
       void useChainStore.getState().loadContent()
     } catch {
       // Liveness: a withheld/absent house reveal stalls the round. No stakes were at risk, and the
@@ -109,12 +113,12 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
     }
   }
 
-  // Recent public flips, decoded from the shared content poll — REAL board reads recomputed from the
-  // co-signed transcripts on the landing category, not local state. Empty until the engine loads.
-  const feed = useMemo<FlipFeedRecord[]>(() => {
-    if (!eng || !chainId) return []
+  // The tableIds that have a round-transcript on the public board — used ONLY to badge which of the
+  // player's own verified rounds are confirmed on-board (never to trust foreign outcomes/seeds).
+  const postedIds = useMemo<Set<string>>(() => {
+    if (!eng || !chainId) return new Set()
     const msgs = content?.[eng.landingCategoryHash(chainId)] ?? []
-    return eng.decodeFeed(msgs)
+    return eng.postedTableIds(msgs)
   }, [content, eng, chainId])
 
   const total = tally.wins + tally.losses
@@ -326,28 +330,36 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
           Recent flips on the board
           <span className="font-mono text-[11px] font-normal text-gray-400">landing:{chainId || '?'}</span>
         </h3>
-        {feed.length ? (
+        {history.length ? (
           <ul className="flex flex-col divide-y divide-gray-200 text-xs dark:divide-gray-700">
-            {feed.map((r) => (
-              <li key={r.tableId} className="flex items-center justify-between py-1.5">
-                <span className="inline-flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
-                  <Icon icon={faceIcon(r.side)} className={`size-4 ${r.win ? 'text-emerald-500' : 'text-rose-500'}`} />
-                  called <span className="font-medium capitalize">{r.pick}</span> · landed{' '}
-                  <span className="font-medium capitalize">{r.side}</span>
-                </span>
-                <span className="flex items-center gap-2">
-                  <span className="font-mono text-gray-400">{shortHex(r.tableId, 8)}</span>
-                  <span className={`rounded-full px-2 py-0.5 font-medium ${r.win ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'}`}>
-                    {r.win ? 'won' : 'lost'}
+            {history.map((r) => {
+              const onBoard = postedIds.has(r.tableId.toLowerCase())
+              return (
+                <li key={r.tableId} className="flex items-center justify-between py-1.5">
+                  <span className="inline-flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
+                    <Icon icon={faceIcon(r.side)} className={`size-4 ${r.win ? 'text-emerald-500' : 'text-rose-500'}`} />
+                    called <span className="font-medium capitalize">{r.pick}</span> · landed{' '}
+                    <span className="font-medium capitalize">{r.side}</span>
                   </span>
-                </span>
-              </li>
-            ))}
+                  <span className="flex items-center gap-2">
+                    <span
+                      title={onBoard ? 'confirmed on the public board' : 'awaiting the next board poll'}
+                      className={`inline-flex items-center gap-0.5 font-mono ${onBoard ? 'text-emerald-500' : 'text-gray-400'}`}>
+                      <Icon icon={onBoard ? 'mdi:check-decagram-outline' : 'mdi:progress-upload'} className="size-3.5" />
+                      {shortHex(r.tableId, 8)}
+                    </span>
+                    <span className={`rounded-full px-2 py-0.5 font-medium ${r.win ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'}`}>
+                      {r.win ? 'won' : 'lost'}
+                    </span>
+                  </span>
+                </li>
+              )
+            })}
           </ul>
         ) : (
           <p className="text-xs text-gray-400">
-            No public rounds yet. Every flip posts its full commit-reveal handshake (PoW-stamped, off-thread)
-            to this chain’s landing category, then reads the co-signed transcripts back from the shared board poll.
+            No rounds yet. Every flip posts its full commit-reveal handshake (PoW-stamped, off-thread) to
+            this chain’s landing category; your verified rounds appear here, each re-confirmed against the board.
           </p>
         )}
       </div>
