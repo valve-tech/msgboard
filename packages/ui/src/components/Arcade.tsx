@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '@iconify/react'
 import {
   useChainStore,
@@ -71,6 +71,12 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
   // When the landing house address is pinned (VITE_LANDING_HOUSE_ADDRESS), we can show a genuinely PUBLIC
   // feed: every round on the board re-verified via verifyFinishedSession against that house (async).
   const [publicFeed, setPublicFeed] = useState<FlipFeedRecord[]>([])
+  // Timing: how long the on-board handshake took, total + per step. A live counter ticks while flipping,
+  // stepAt records when each milestone landed, and elapsedMs freezes the total on settle.
+  const flipStartRef = useRef(0)
+  const [stepAt, setStepAt] = useState<Partial<Record<FlipStep, number>>>({})
+  const [elapsedMs, setElapsedMs] = useState<number | null>(null)
+  const [liveMs, setLiveMs] = useState(0)
 
   // The PoW board seam — grinds off-thread and posts. Rebuilt only on transport/chain/difficulty change.
   const board = useMemo(() => {
@@ -85,12 +91,24 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transportUrl, chainId, globalWorkMultiplier, globalWorkDivisor, workerFactory])
 
+  // Tick a live elapsed counter (100ms) while the handshake runs, so the wait is visible, not opaque.
+  useEffect(() => {
+    if (!flipping) return
+    setLiveMs(performance.now() - flipStartRef.current)
+    const id = setInterval(() => setLiveMs(performance.now() - flipStartRef.current), 100)
+    return () => clearInterval(id)
+  }, [flipping])
+
   const flip = async () => {
     if (flipping || !rpcValid || !board || !eng) return
     setFlipping(true)
     setResult(null)
     setError(null)
     setReached([])
+    flipStartRef.current = performance.now()
+    setStepAt({})
+    setElapsedMs(null)
+    setLiveMs(0)
     try {
       // A fresh session: OPEN (nonce 0) + ROUND (nonce 1) → a co-signed transcript. The engine drives
       // the real handshake over the board; the outcome is read from the co-signed ROUND state, never
@@ -99,8 +117,12 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
         board: board as unknown as Parameters<ArcadeEngine['runBoardFlip']>[0]['board'],
         chainId,
         pick,
-        onStep: (s) => setReached((r) => (r.includes(s) ? r : [...r, s])),
+        onStep: (s) => {
+          setReached((r) => (r.includes(s) ? r : [...r, s]))
+          setStepAt((m) => (m[s] != null ? m : { ...m, [s]: performance.now() }))
+        },
       })
+      setElapsedMs(performance.now() - flipStartRef.current)
       setResult(res)
       setBalance((b) => b + res.playerDelta)
       setTally((t) => ({ wins: t.wins + (res.win ? 1 : 0), losses: t.losses + (res.win ? 0 : 1) }))
@@ -147,6 +169,12 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
   const total = tally.wins + tally.losses
   const coinFace: FlipSide = result?.side ?? pick
   const parity = result ? (result.raw & 1n).toString() : null
+
+  // Timing display helpers: total (frozen on settle, live while flipping) + per-step elapsed.
+  const fmtSecs = (ms: number) => `${(ms / 1000).toFixed(1)}s`
+  const totalSecs = elapsedMs != null ? fmtSecs(elapsedMs) : flipping ? fmtSecs(liveMs) : null
+  const stepSecs = (id: FlipStep): string | null =>
+    stepAt[id] != null ? fmtSecs(stepAt[id]! - flipStartRef.current) : null
 
   // The feed: a house-VERIFIED public feed when the house address is pinned (all players' rounds,
   // re-audited from the board), else the player's OWN verified rounds badged by on-board presence.
@@ -206,14 +234,27 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
           </div>
 
           {/* result line */}
-          <div className="flex h-6 items-center text-sm font-semibold">
+          <div className="flex h-6 items-center gap-2 text-sm font-semibold">
             {flipping ? (
-              <span className="text-gray-500 dark:text-gray-400">running the handshake…</span>
+              <span className="inline-flex items-center gap-1.5 text-gray-500 dark:text-gray-400">
+                running the handshake…
+                <span className="font-mono tabular-nums text-indigo-500 dark:text-indigo-400">{totalSecs}</span>
+              </span>
             ) : error ? (
               <span className="text-amber-600 dark:text-amber-400">round void</span>
             ) : result ? (
-              <span className={result.win ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}>
-                {result.side === 'heads' ? 'Heads' : 'Tails'} — you {result.win ? 'won' : 'lost'} {result.stake.toString()}
+              <span className="inline-flex items-center gap-1.5">
+                <span className={result.win ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}>
+                  {result.side === 'heads' ? 'Heads' : 'Tails'} — you {result.win ? 'won' : 'lost'} {result.stake.toString()}
+                </span>
+                {totalSecs && (
+                  <span
+                    title="wall-clock for the full on-board commit-reveal round (multiple PoW-stamped posts)"
+                    className="inline-flex items-center gap-1 rounded-full bg-gray-500/10 px-2 py-0.5 font-mono text-[11px] font-normal tabular-nums text-gray-500 dark:text-gray-400">
+                    <Icon icon="mdi:timer-outline" className="size-3" />
+                    {totalSecs}
+                  </span>
+                )}
               </span>
             ) : (
               <span className="text-gray-500 dark:text-gray-400">call it and flip</span>
@@ -287,6 +328,7 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
             {STEPS.map((step, i) => {
               const done = reached.includes(step.id) || (!!result && !error)
               const active = flipping && reached.length === i
+              const at = stepSecs(step.id)
               return (
                 <li key={step.id} className="flex items-start gap-3">
                   <span
@@ -299,9 +341,16 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
                     }`}>
                     <Icon icon={done ? 'mdi:check' : active ? 'mdi:loading' : step.icon} className={`size-3.5 ${active ? 'animate-spin' : ''}`} />
                   </span>
-                  <div className="flex flex-col">
-                    <span className={`text-xs font-medium ${done || active ? 'text-gray-800 dark:text-gray-100' : 'text-gray-500 dark:text-gray-400'}`}>
-                      {step.title}
+                  <div className="flex flex-1 flex-col">
+                    <span className="flex items-center justify-between gap-2">
+                      <span className={`text-xs font-medium ${done || active ? 'text-gray-800 dark:text-gray-100' : 'text-gray-500 dark:text-gray-400'}`}>
+                        {step.title}
+                      </span>
+                      {at && (
+                        <span className="font-mono text-[11px] tabular-nums text-gray-400" title="elapsed since flip start when this step landed">
+                          {at}
+                        </span>
+                      )}
                     </span>
                     <span className="text-[11px] text-gray-400">{step.detail}</span>
                   </div>
