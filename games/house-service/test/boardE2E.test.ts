@@ -18,11 +18,11 @@ import { describe, it, expect } from 'vitest'
 import { privateKeyToAccount } from 'viem/accounts'
 import type { Hex } from 'viem'
 import {
-  commitSeed, buildSeedChain, makeDomain, dice, limbo,
-  runPlayerSide, verifyFinishedSession, verifyCloseSig,
-  type BoardClient, type VerifyContext, type DiceParams, type LimboParams,
+  commitSeed, buildSeedChain, makeDomain, dice, limbo, coinflip,
+  runPlayerSide, verifyFinishedSession, verifyCloseSig, MsgBoardTransport,
+  type BoardClient, type VerifyContext, type DiceParams, type LimboParams, type CoinFlipParams,
 } from '@msgboard/games'
-import { makeBoardPlayerSession, EscrowedSettlement } from '@msgboard/settle'
+import { makeBoardPlayerSession, EscrowedSettlement, houseCategory, landingHouseCategory } from '@msgboard/settle'
 import { startHouse, makeBoardHouseDeps } from '../src/index'
 
 /** Shared in-memory BoardClient: one append-only log per category. Both sides see each other's
@@ -227,6 +227,86 @@ describe('board E2E — real startHouse ↔ real board player session', () => {
     expect(await verifyCloseSig(playerAccount.address, domain, close, settleTx.args[1] as `0x${string}`)).toBe(true)
     expect(await verifyCloseSig(houseAccount.address, domain, close, settleTx.args[2] as `0x${string}`)).toBe(true)
     expect(accepted.map((s) => s.nonce)).toEqual([0n, 1n])
+
+    stopServing()
+    houseCtl.stop()
+    stopDeps()
+  }, 25_000)
+
+  it('runs a coinflip round on a CUSTOM landing category and never touches the default house category', async () => {
+    // Both sides pass landingHouseCategory(chainId) instead of the default houseCategory(chainId). The
+    // round must complete (proving BOTH send AND poll use the override), and no message may ever land on
+    // the default arcade category (proving the demo is isolated).
+    const board = fakeBoard()
+    const chainId = 943
+    const channel = ('0x' + '00'.repeat(20)) as Hex
+    const domain = makeDomain(chainId, channel)
+    const tip = ('0x' + '99'.repeat(32)) as Hex
+    const clientSeed = ('0x' + 'ee'.repeat(32)) as Hex
+    const tableId = ('0x' + 'ef'.repeat(32)) as Hex
+    const stake = 100n
+    const params: CoinFlipParams = { pick: 'heads' }
+    const landingCat = landingHouseCategory(chainId)
+
+    // category hashes for isolation assertions (same derivation the transports use internally).
+    const landingHash = new MsgBoardTransport(board, landingCat).category
+    const defaultHash = new MsgBoardTransport(board, houseCategory(chainId)).category
+    expect(landingHash).not.toBe(defaultHash)
+
+    const { deps, stop: stopDeps } = makeBoardHouseDeps({
+      board, chainId, getHeadBlock: async () => 1000n, pollMs: 2, timeoutMs: 15_000,
+      category: landingCat,
+    })
+    const houseCtl = startHouse(
+      {
+        boardRpc: 'mem://board', chainId, houseChannel: channel, houseKey,
+        limits: { maxEscrowHouse: 10n ** 24n, clockBlocks: 120n, expiryBlocks: 300n },
+        domain, games: [coinflip], settlementMode: 0, seedTip: tip,
+      },
+      deps,
+    )
+
+    const accepted: Array<{ nonce: bigint }> = []
+    const session = makeBoardPlayerSession({
+      board, chainId, tableId, pollMs: 2, timeoutMs: 15_000,
+      category: landingCat,
+      onAccept: (s) => accepted.push(s as { nonce: bigint }),
+    })
+
+    const { terms, houseSig } = await session.requestOpen({
+      tableId, player: playerAccount.address, playerKey: playerAccount.address,
+      gameId: coinflip.gameId, params, stake, clientSeedCommit: commitSeed(clientSeed),
+    })
+    expect(terms.gameId).toBe(coinflip.gameId)
+    expect(terms.escrowHouse).toBe(100n) // stake*(200-100)/100 = stake
+    expect(houseSig).toMatch(/^0x[0-9a-f]{130}$/i)
+
+    const openBalances = { player: terms.escrowPlayer, house: terms.escrowHouse }
+    runPlayerSide(
+      {
+        domain, tableId, game: coinflip, player: playerSigner, houseRemote: true as const,
+        clientSeed, seedTip: ('0x' + '00'.repeat(32)) as Hex, chainLength: 1 as const,
+        openBalances, settlementMode: 0,
+      },
+      session.playerT,
+    ).catch(() => { /* a refusal would surface as a houseDriver timeout below */ })
+    const stopServing = session.startServing()
+
+    const transcriptJson = await session.houseDriver<CoinFlipParams>({
+      stake, params, clientSeed, playerAddress: playerAccount.address,
+    })
+
+    const ctx: VerifyContext<CoinFlipParams> = {
+      parties: { player: playerAccount.address, house: houseAccount.address },
+      commit: terms.rngCommit, game: coinflip, domain,
+    }
+    expect(await verifyFinishedSession(transcriptJson, ctx)).toBe(true)
+    expect(accepted.map((s) => s.nonce)).toEqual([0n, 1n])
+
+    // Isolation: all traffic is on the landing category; the default arcade category is untouched.
+    const store = await board.content({})
+    expect((store[landingHash] ?? []).length).toBeGreaterThan(0)
+    expect(store[defaultHash]).toBeUndefined()
 
     stopServing()
     houseCtl.stop()
