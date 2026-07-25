@@ -35,12 +35,13 @@ import {
   type RoundProof,
   type CoinFlipParams,
 } from '@msgboard/games'
-import {
-  makeBoardPlayerSession,
-  landingHouseCategory,
-  isRoundTranscript,
-  verifyOpenTermsSig,
-} from '@msgboard/settle'
+// Import from @msgboard/settle SUBPATHS, not the barrel: the barrel re-exports optimistic/escrowed/
+// settlement, which statically import @msgboard/games-contracts artifacts (on-chain settlement the
+// zero-stakes landing flip never uses). Pulling those into the bundle would force games-contracts
+// (hardhat-heavy) into the build. These three files only touch boardProtocol/openTerms/@msgboard/games.
+import { landingHouseCategory, isRoundTranscript } from '@msgboard/settle/boardProtocol'
+import { makeBoardPlayerSession } from '@msgboard/settle/boardSession'
+import { verifyOpenTermsSig } from '@msgboard/settle/openTerms'
 import { otherSide, type FlipSide, type FlipFeedRecord } from './coinflip'
 
 /**
