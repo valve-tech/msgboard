@@ -15,9 +15,17 @@
 
 const BPS = 10_000n
 
-/** Just the slice of a viem client this module needs — keeps the helpers trivially testable. */
-export interface GasPriceSource {
-  getGasPrice(): Promise<bigint>
+/**
+ * Just the slice of a viem client this module needs — the latest block's base fee.
+ *
+ * CRITICAL: we do NOT use `eth_gasPrice` / `eth_maxPriorityFeePerGas` on PulseChain. Those endpoints
+ * return an absurd ~100,000 gwei suggestion (measured on 943), while the real `baseFeePerGas` is ~7
+ * wei and blocks are empty — so trusting the suggestion overpays gas by ~5–6 orders of magnitude (a
+ * simple deploy "cost" 172 PLS at the suggested price vs ~0.0004 PLS at base fee + a tip). We MATCH
+ * THE BASE FEE and add a tiny fixed tip that reliably mines.
+ */
+export interface FeeSource {
+  getBlock(args?: { blockTag?: 'latest' | 'pending' }): Promise<{ baseFeePerGas: bigint | null }>
 }
 
 export interface LegacyFee {
@@ -25,30 +33,32 @@ export interface LegacyFee {
   gasPrice: bigint
 }
 
+const DEFAULT_TIP_WEI = 500_000_000n // 0.5 gwei — above the ~0.1 gwei that mines on 943, negligible in PLS
+
 /**
- * Resolve a buffered legacy gas price from an already-fetched live price. Pure — no I/O.
- * `bufferBps` defaults to 2x (20000) so the tx clears any short-term price move; PulseChain gas is
- * so cheap in PLS terms that an over-buffer costs a rounding error. A `floorWei` guards the
- * degenerate case where a node briefly reports 0.
+ * Pure: legacy gasPrice = base fee + a small priority tip. No I/O. The tip (default 0.5 gwei) is what
+ * gets the tx included on an otherwise-empty chain; the base fee tracks the live floor so the price is
+ * always >= base. `tipWei` overrides the tip; a `floorWei` guards a node briefly reporting no base fee.
  */
-export function bufferedLegacyFee(
-  livePrice: bigint,
-  opts: { bufferBps?: bigint; floorWei?: bigint } = {},
+export function baseFeeLegacyFee(
+  baseFee: bigint,
+  opts: { tipWei?: bigint; floorWei?: bigint; bufferBps?: bigint } = {}, // bufferBps accepted for back-compat, ignored
 ): LegacyFee {
-  const bufferBps = opts.bufferBps ?? 20_000n // 2x
-  const floorWei = opts.floorWei ?? 1_000_000_000n // 1 gwei floor
-  if (livePrice < 0n) throw new Error('gas: live price must be non-negative')
-  if (bufferBps < BPS) throw new Error('gas: bufferBps must be >= 10000 (no negative buffer)')
-  const buffered = (livePrice * bufferBps) / BPS
-  return { gasPrice: buffered > floorWei ? buffered : floorWei }
+  const tip = opts.tipWei ?? DEFAULT_TIP_WEI
+  const floorWei = opts.floorWei ?? DEFAULT_TIP_WEI
+  if (baseFee < 0n) throw new Error('gas: base fee must be non-negative')
+  if (tip < 0n) throw new Error('gas: tip must be non-negative')
+  const price = baseFee + tip
+  return { gasPrice: price > floorWei ? price : floorWei }
 }
 
-/** Fetch the live price and resolve a buffered legacy fee. The single entry point a script uses. */
+/** Fetch the live base fee and resolve a base-fee-matched legacy fee. The entry point a script uses. */
 export async function resolveLegacyFee(
-  source: GasPriceSource,
-  opts: { bufferBps?: bigint; floorWei?: bigint } = {},
+  source: FeeSource,
+  opts: { tipWei?: bigint; floorWei?: bigint; bufferBps?: bigint } = {}, // bufferBps accepted for back-compat, ignored
 ): Promise<LegacyFee> {
-  return bufferedLegacyFee(await source.getGasPrice(), opts)
+  const block = await source.getBlock({ blockTag: 'latest' })
+  return baseFeeLegacyFee(block.baseFeePerGas ?? 0n, opts)
 }
 
 /**

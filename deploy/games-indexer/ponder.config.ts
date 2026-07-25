@@ -39,10 +39,10 @@ const FLIP_BOOK_X_START_369 = 27_091_482
 // chain (2026-07-20, hours before the resolvers deployed) — nothing to miss before that.
 const EAS = '0x9e84Aa4BD0C1931A34B14C1EC918A53C33e2B0F8'
 
-// patched HouseChannel (gameId-binding + disputeFromOpen + gameId-in-Opened), deployed 943.
-const HOUSE_CHANNEL = '0x74bbc31e77c02593c0a7aad0cadadb5b6bff3948'
-// exact contract-creation block (binary-searched via eth_getCode).
-const HOUSE_CHANNEL_START_BLOCK = 24_708_662
+// HouseChannel — close-authorization settle + walk-away forfeiture; valve_deployer-owned (2026-07-24
+// valve migration off gibs). NEW address → index from its own creation block.
+const HOUSE_CHANNEL = '0xd0fe186fd3ad3d5766d2fd8af35215ab5d3dfc94'
+const HOUSE_CHANNEL_START_BLOCK = 24_957_355
 
 export default createConfig({
   ordering: 'omnichain',
