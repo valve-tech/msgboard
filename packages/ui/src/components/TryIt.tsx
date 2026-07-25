@@ -28,7 +28,11 @@ export function TryIt({ workerFactory }: { workerFactory?: () => Worker }) {
   // A shared link (?tab=…) restores the section; it takes precedence over the default. Changing tab
   // reflects into the URL via replaceState (no new history entry).
   const [active, setActive] = useState<SectionId>(() => readDeepLink().tab ?? 'chat')
-  useEffect(() => writeDeepLink({ tab: active }), [active])
+  // `mode` + `demo` are CHAT-only sub-params: on any non-chat tab they're meaningless, so drop them
+  // from the URL (this also cleans up a hand-crafted/shared `?mode=…&tab=arcade` on first load).
+  useEffect(() => {
+    writeDeepLink(active === 'chat' ? { tab: active } : { tab: active, mode: null, demo: null })
+  }, [active])
   const current = SECTIONS.find((s) => s.id === active)!
 
   // "Copy link" — hands out the current deep-link URL so this exact view can be shared.
