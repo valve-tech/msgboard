@@ -468,8 +468,9 @@ function ChannelPane({
   return (
     <div className="flex w-full flex-col overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 dark:bg-gray-800 dark:ring-gray-700">
       <ModeBar active={activeMode} onChange={onMode} />
-      {/* channel / room bar */}
-      <div className="flex items-center gap-3 border-b border-gray-200 px-4 py-2.5 dark:border-gray-700">
+      {/* channel / room bar — in non-public mode the rooms strip follows and provides the divider, so
+          this bar groups with it (no border between) rather than stacking as a second slab. */}
+      <div className={`flex items-center gap-3 px-4 py-2.5 dark:border-gray-700 ${publicMode ? 'border-b border-gray-200' : ''}`}>
         {publicMode ? (
           <>
             <span className="font-mono text-lg text-indigo-600 dark:text-indigo-400">#</span>
@@ -516,9 +517,6 @@ function ChannelPane({
             <Icon icon="mdi:lock-outline" className="size-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
             <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
               Private rooms
-            </span>
-            <span className="hidden shrink-0 text-xs text-gray-400 sm:inline">
-              pick, create, or join a room below
             </span>
           </>
         )}
@@ -964,8 +962,9 @@ function DirectPane({
     <div className="flex w-full flex-col overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 dark:bg-gray-800 dark:ring-gray-700">
       <ModeBar active={activeMode} onChange={onMode} />
 
-      {/* your contact card (your DM address) */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-gray-200 px-4 py-2.5 dark:border-gray-700">
+      {/* Addressing cluster: your card + recipients read as ONE block separated by whitespace (no
+          divider between them) — the divider lands only after the cluster, before the trust band. */}
+      <div className="flex flex-wrap items-center gap-2 px-4 pt-2.5 pb-1.5">
         <Icon icon="mdi:email-lock" className="size-5 shrink-0 text-violet-600 dark:text-violet-400" />
         <span className="shrink-0 text-xs text-gray-400">your card</span>
         <code
@@ -982,8 +981,8 @@ function DirectPane({
         </button>
       </div>
 
-      {/* display name + contacts strip */}
-      <div className="flex flex-wrap items-center gap-1.5 border-b border-gray-200 px-4 py-2 text-xs dark:border-gray-700">
+      {/* display name + contacts strip (closes the addressing cluster → the divider is here) */}
+      <div className="flex flex-wrap items-center gap-1.5 border-b border-gray-200 px-4 pt-1.5 pb-2.5 text-xs dark:border-gray-700">
         <span className="inline-flex items-center gap-1 text-gray-400">
           <Icon icon="mdi:account-multiple-outline" className="size-3.5" /> to
         </span>
@@ -1052,7 +1051,7 @@ function DirectPane({
           compromising one message&apos;s transient keys doesn&apos;t expose the others.
         </p>
         <p className="mt-1 text-violet-800 dark:text-violet-300/90">
-          Unverified senders · metadata is public · keys don&apos;t rotate.
+          Messages aren&apos;t signed · metadata is public · keys don&apos;t rotate.
         </p>
         <details className="group mt-1">
           <summary className="cursor-pointer list-none font-medium text-violet-700 hover:underline dark:text-violet-300">
@@ -1060,9 +1059,10 @@ function DirectPane({
             Details
           </summary>
           <p className="mt-1 text-violet-800 dark:text-violet-300/90">
-            <strong>The sender is not authenticated</strong> — the name on a message is a self-typed
-            label inside the ciphertext, and anyone who can address this conversation could send under
-            any name. Treat identities as unverified. <strong>No full forward secrecy</strong>: your
+            <strong>Messages aren&apos;t signed</strong> — nothing proves which key sent one. Sealing
+            needs only the recipients&apos; public keys, so anyone who can address this conversation can
+            post under any name, and the name you see is just a self-typed label inside the ciphertext.
+            Treat sender names as claims, not proof. <strong>No full forward secrecy</strong>: your
             long-term DM key is derived from your local identity and never rotates, so if that
             identity secret is compromised, all your DMs — past and future — can be read (losing it
             also loses the messages). <strong>Metadata leaks</strong>: the board is public, so a
@@ -1120,13 +1120,13 @@ function DirectPane({
               )
             }
             const { handle: h, text } = decoded
-            // The handle is a self-asserted label inside the ciphertext — NOT an authenticated
-            // sender (audit MEDIUM 2). Render it muted, not as a confident coloured identity, and
-            // mark it unverified so a reader never mistakes it for a proven name.
+            // The handle is a self-asserted label inside the ciphertext — messages aren't signed, so
+            // nothing proves which key sent it (audit MEDIUM 2). Render it muted, not as a confident
+            // coloured identity, so a reader never mistakes it for a proven name.
             const who = h && h.length ? { name: h } : anonHandle(m.hash as Hex)
             return (
               <div key={m.hash} className="flex items-baseline gap-2 rounded px-1 py-0.5 hover:bg-gray-50 dark:hover:bg-gray-700/40">
-                <span className="shrink-0 font-medium text-gray-500 dark:text-gray-400" title="unverified sender — a self-typed label inside the encrypted body, not a proven identity">
+                <span className="shrink-0 font-medium text-gray-500 dark:text-gray-400" title="unsigned message — the name is a self-typed label inside the encrypted body; nothing proves which key sent it">
                   {who.name}
                   <span className="ml-0.5 text-[9px] font-normal text-gray-400" aria-hidden>~</span>
                 </span>
@@ -1424,7 +1424,7 @@ function StealthPane({ activeMode, onMode }: { activeMode: Mode; onMode: (m: Mod
         <p className="font-semibold">
           <Icon icon="mdi:shield-account" className="inline size-3.5" /> Sender proven, recipient
           hidden. The contract recovers your signature, so the on-chain <strong>sender is
-          authenticated & public</strong>; the <strong>recipient is hidden</strong> from everyone but
+          proven & public</strong>; the <strong>recipient is hidden</strong> from everyone but
           themselves.
         </p>
         <p className="mt-1 text-teal-800 dark:text-teal-300/90">
@@ -1759,6 +1759,9 @@ function TwoUserDemo({
       : openMessage(who.keypair.privateKey, who.keypair.publicKey, category, dataHex)
 
   const [sendingFrom, setSendingFrom] = useState<string | null>(null)
+  // Toggle the whole demo between the decrypted view and the raw sealed bytes on the board (what an
+  // eavesdropper without the key sees) — makes the E2E encryption tangible.
+  const [showCipher, setShowCipher] = useState(false)
 
   // "Copy link" — this demo is the thing people most want to share ("talk to yourself"), and the URL
   // already carries ?demo=… (written by Chat), so the current href lands a visitor right back here.
@@ -1811,6 +1814,14 @@ function TwoUserDemo({
         </div>
         <button
           type="button"
+          onClick={() => setShowCipher((v) => !v)}
+          aria-pressed={showCipher}
+          title={showCipher ? 'Show the decrypted messages' : 'Show the sealed bytes an outsider without the key sees'}
+          className="inline-flex shrink-0 items-center gap-1 rounded-md bg-white px-2.5 py-1 text-xs font-medium text-violet-700 ring-1 ring-violet-300 hover:bg-violet-100 dark:bg-gray-800 dark:text-violet-200 dark:ring-violet-800 dark:hover:bg-gray-700">
+          <Icon icon={showCipher ? 'mdi:lock-open-variant-outline' : 'mdi:lock'} className="size-3.5" /> {showCipher ? 'plaintext' : 'ciphertext'}
+        </button>
+        <button
+          type="button"
           onClick={() => void copyLink()}
           title="Copy a link that reopens this demo"
           className="inline-flex shrink-0 items-center gap-1 rounded-md bg-white px-2.5 py-1 text-xs font-medium text-violet-700 ring-1 ring-violet-300 hover:bg-violet-100 dark:bg-gray-800 dark:text-violet-200 dark:ring-violet-800 dark:hover:bg-gray-700">
@@ -1845,6 +1856,7 @@ function TwoUserDemo({
             onSend={(text) => void post(self, other, text)}
             sending={sendingFrom === self.name}
             disabled={!rpcValid || !board || sendingFrom != null}
+            showCipher={showCipher}
             blocksAgo={blocksAgo}
             className={i === 0 ? 'sm:border-r border-gray-200 dark:border-gray-700' : ''}
           />
@@ -1863,6 +1875,7 @@ function DemoPane({
   onSend,
   sending,
   disabled,
+  showCipher,
   blocksAgo,
   className,
 }: {
@@ -1873,15 +1886,23 @@ function DemoPane({
   onSend: (text: string) => void
   sending: boolean
   disabled: boolean
+  showCipher: boolean
   blocksAgo: (bn: string) => string
   className?: string
 }) {
   const [draft, setDraft] = useState('')
   const feedRef = useRef<HTMLDivElement>(null)
+  // Keep the typed text visible while the send works (encrypt + PoW stamp + post) — the input is
+  // disabled meanwhile — then clear it once THIS pane's send finishes (sending: true → false), so you
+  // see the exact text that's being sealed rather than a field that blanks the instant you hit send.
+  const wasSending = useRef(false)
+  useEffect(() => {
+    if (wasSending.current && !sending) setDraft('')
+    wasSending.current = sending
+  }, [sending])
   const submit = () => {
     if (!draft.trim() || disabled) return
     onSend(draft)
-    setDraft('')
   }
   return (
     <section className={`flex min-w-0 flex-col ${className ?? ''}`} aria-label={`${self.name} pane`}>
@@ -1906,6 +1927,20 @@ function DemoPane({
           </div>
         ) : (
           messages.map((m) => {
+            // Ciphertext view: show the sealed bytes exactly as they sit on the public board — what an
+            // outsider WITHOUT the key sees. No handle, no sender side: an eavesdropper can't tell.
+            if (showCipher) {
+              return (
+                <div
+                  key={m.hash}
+                  className="flex items-baseline gap-2 rounded px-1 py-0.5 text-gray-400"
+                  title="what an outsider without the key sees — the sealed bytes on the board">
+                  <Icon icon="mdi:lock" className="size-3.5 shrink-0" />
+                  <span className="min-w-0 flex-1 truncate font-mono text-[11px]">{(m.data as string).slice(0, 48)}…</span>
+                  <span className="shrink-0 text-[11px]" title={`block ${m.blockNumber}`}>{blocksAgo(m.blockNumber)}</span>
+                </div>
+              )
+            }
             const decoded = openAs(self, m.data as Hex)
             const mine = !isDmUndecryptable(decoded) && decoded.handle === self.name
             if (isDmUndecryptable(decoded)) {

@@ -36,6 +36,17 @@ button:not([disabled]),
   /* @apply bg-transparent; */
 }
 
+/* Reliable gradient text. Tailwind v4's `bg-clip-text` + `text-transparent` weren't producing an
+   effective `-webkit-background-clip:text` in this build, so gradient headings rendered as solid
+   blocks with the (transparent) text invisible. This sets the webkit clip + text-fill directly.
+   Pair with any `bg-gradient-*` / `from-* via-* to-*` utilities to supply the gradient. */
+.gradient-text {
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
 /* Prose styles for the rendered docs markdown (ported from DocsPortal.svelte's
    scoped `:global(.docs-prose …)` block). */
 .docs-prose h1 { font-size: 2rem; font-weight: 700; margin: 1.5rem 0 1rem; scroll-margin-top: 4rem; }

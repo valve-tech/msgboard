@@ -29,13 +29,25 @@ type ArcadeEngine = typeof import('../lib/arcade-engine')
 
 const faceIcon = (s: FlipSide) => (s === 'heads' ? 'mdi:alpha-h-circle' : 'mdi:alpha-t-circle')
 
-/** The four public handshake milestones, in order, with their showcase copy. */
-const STEPS: ReadonlyArray<{ id: FlipStep; icon: string; title: string; detail: string }> = [
+/** A timeline row id: the flip anchor (t=0, the moment you call it), the four engine milestones, and the
+ *  terminal `settleable` guarantee — both anchors are derived, not engine `FlipStep`s. */
+type TimelineId = 'flip' | FlipStep | 'settleable'
+
+/** The timeline, in order: the flip anchor first — so the clock starts the instant you flip — then the
+ *  four public commit-reveal milestones, and finally the settleability guarantee (all data is on the
+ *  board, so the round concludes no matter who walks away). */
+const STEPS: ReadonlyArray<{ id: TimelineId; icon: string; title: string; detail: string }> = [
+  { id: 'flip', icon: 'mdi:gesture-tap', title: 'You flip', detail: 'call heads or tails — the round clock starts the instant you flip' },
   { id: 'commit', icon: 'mdi:lock-outline', title: 'You commit', detail: 'post the sealed hash of your client seed to the board' },
   { id: 'grant', icon: 'mdi:handshake-outline', title: 'House commits blind', detail: 'signs OpenTerms carrying only the hash of its server seed' },
   { id: 'reveal', icon: 'mdi:key-outline', title: 'You reveal', detail: 'send your client seed; both sides co-sign the round' },
   { id: 'transcript', icon: 'mdi:file-certificate-outline', title: 'Settled on the board', detail: 'the doubly-signed transcript lands, publicly re-auditable' },
+  { id: 'settleable', icon: 'mdi:lock-check-outline', title: 'No one can stall it', detail: 'both seeds, the commit and both signatures now live on the board — walk away and the round still concludes; anyone can recompute and settle it' },
 ]
+
+/** The four engine-driven milestones, in order — the timeline rows that fill from `reached` (the flip
+ *  and settleable anchors are derived from round state, not emitted by the engine). */
+const ENGINE_STEPS: readonly FlipStep[] = ['commit', 'grant', 'reveal', 'transcript']
 
 const FEATURED_GAMES = ['Crash', 'Plinko', 'Mines']
 const STARTING_BALANCE = 1000n
@@ -74,7 +86,7 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
   // Timing: how long the on-board handshake took, total + per step. A live counter ticks while flipping,
   // stepAt records when each milestone landed, and elapsedMs freezes the total on settle.
   const flipStartRef = useRef(0)
-  const [stepAt, setStepAt] = useState<Partial<Record<FlipStep, number>>>({})
+  const [stepAt, setStepAt] = useState<Partial<Record<TimelineId, number>>>({})
   const [elapsedMs, setElapsedMs] = useState<number | null>(null)
   const [liveMs, setLiveMs] = useState(0)
 
@@ -106,14 +118,16 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
     setError(null)
     setReached([])
     flipStartRef.current = performance.now()
-    setStepAt({})
+    // Anchor the timeline at the flip itself (t=0) so it extends back to the moment you called it.
+    setStepAt({ flip: flipStartRef.current })
     setElapsedMs(null)
     setLiveMs(0)
+    let decided = false
     try {
       // A fresh session: OPEN (nonce 0) + ROUND (nonce 1) → a co-signed transcript. The engine drives
       // the real handshake over the board; the outcome is read from the co-signed ROUND state, never
       // fabricated. Publishing is MANDATORY — the handshake IS the on-board round.
-      const res = await eng.runBoardFlip({
+      await eng.runBoardFlip({
         board: board as unknown as Parameters<ArcadeEngine['runBoardFlip']>[0]['board'],
         chainId,
         pick,
@@ -121,18 +135,27 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
           setReached((r) => (r.includes(s) ? r : [...r, s]))
           setStepAt((m) => (m[s] != null ? m : { ...m, [s]: performance.now() }))
         },
+        // The outcome is DECIDED here (ROUND co-signed) — reveal it + freeze the wall-clock NOW, before
+        // the transcript posts. This is the "you won" celebration; the board-settle steps finish after.
+        onDecided: (res) => {
+          decided = true
+          setElapsedMs(performance.now() - flipStartRef.current)
+          setResult(res)
+          setBalance((b) => b + res.playerDelta)
+          setTally((t) => ({ wins: t.wins + (res.win ? 1 : 0), losses: t.losses + (res.win ? 0 : 1) }))
+          setHistory((h) => [res, ...h].slice(0, 8))
+        },
       })
-      setElapsedMs(performance.now() - flipStartRef.current)
-      setResult(res)
-      setBalance((b) => b + res.playerDelta)
-      setTally((t) => ({ wins: t.wins + (res.win ? 1 : 0), losses: t.losses + (res.win ? 0 : 1) }))
-      setHistory((h) => [res, ...h].slice(0, 8))
-      // Best-effort: pull the just-posted round back off the board to confirm it landed (on-board badge).
+      // The transcript has landed — the ancillary tail. Stamp the settleability guarantee at its real
+      // (later) time WITHOUT moving the frozen total, then confirm the post landed on the board.
+      setStepAt((m) => ({ ...m, settleable: performance.now() }))
       void useChainStore.getState().loadContent()
     } catch {
-      // Liveness: a withheld/absent house reveal stalls the round. No stakes were at risk, and the
-      // partial handshake is publicly visible on the board — void it and let the player retry cleanly.
-      setError('The house bot didn’t respond — this round is void (no stakes were at risk). Try again.')
+      // A withheld/absent house reveal stalls the round BEFORE it's decided → void it (no stakes were at
+      // risk). But once the ROUND is co-signed (decided), the outcome stands even if the transcript post
+      // hiccups — it's settleable from the co-signed state — so a decided round is never voided here.
+      if (!decided)
+        setError('The house bot didn’t respond — this round is void (no stakes were at risk). Try again.')
     } finally {
       setFlipping(false)
     }
@@ -169,11 +192,14 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
   const total = tally.wins + tally.losses
   const coinFace: FlipSide = result?.side ?? pick
   const parity = result ? (result.raw & 1n).toString() : null
+  // The persisted, walletless co-sign identity (localStorage-backed; STABLE across refreshes, holds no
+  // funds). Surfaced so it's visible that the same "you" plays every round — it isn't regenerated.
+  const playerAddr = useMemo(() => (eng ? eng.loadPlayerAddress() : null), [eng])
 
   // Timing display helpers: total (frozen on settle, live while flipping) + per-step elapsed.
   const fmtSecs = (ms: number) => `${(ms / 1000).toFixed(1)}s`
   const totalSecs = elapsedMs != null ? fmtSecs(elapsedMs) : flipping ? fmtSecs(liveMs) : null
-  const stepSecs = (id: FlipStep): string | null =>
+  const stepSecs = (id: TimelineId): string | null =>
     stepAt[id] != null ? fmtSecs(stepAt[id]! - flipStartRef.current) : null
 
   // The feed: a house-VERIFIED public feed when the house address is pinned (all players' rounds,
@@ -221,7 +247,7 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
           <div className="grid size-32 place-items-center [perspective:800px]">
             <div
               className={`grid size-32 place-items-center rounded-full bg-gradient-to-br shadow-lg ${
-                flipping ? 'arcade-coin-flipping' : ''
+                flipping && !result ? 'arcade-coin-flipping' : ''
               } ${
                 result
                   ? result.win
@@ -233,29 +259,37 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
             </div>
           </div>
 
-          {/* result line */}
+          {/* result line — the outcome is revealed the moment the round is co-signed (decided), so it
+              takes priority over the still-running `flipping` (the board-settle tail finishes after). */}
           <div className="flex h-6 items-center gap-2 text-sm font-semibold">
-            {flipping ? (
-              <span className="inline-flex items-center gap-1.5 text-gray-500 dark:text-gray-400">
-                running the handshake…
-                <span className="font-mono tabular-nums text-indigo-500 dark:text-indigo-400">{totalSecs}</span>
-              </span>
-            ) : error ? (
-              <span className="text-amber-600 dark:text-amber-400">round void</span>
-            ) : result ? (
+            {result ? (
               <span className="inline-flex items-center gap-1.5">
                 <span className={result.win ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}>
                   {result.side === 'heads' ? 'Heads' : 'Tails'} — you {result.win ? 'won' : 'lost'} {result.stake.toString()}
                 </span>
                 {totalSecs && (
                   <span
-                    title="wall-clock for the full on-board commit-reveal round (multiple PoW-stamped posts)"
+                    title="wall-clock to the DECIDED outcome (co-signed round) — the transcript settling on the board follows"
                     className="inline-flex items-center gap-1 rounded-full bg-gray-500/10 px-2 py-0.5 font-mono text-[11px] font-normal tabular-nums text-gray-500 dark:text-gray-400">
                     <Icon icon="mdi:timer-outline" className="size-3" />
                     {totalSecs}
                   </span>
                 )}
+                {flipping && (
+                  <span
+                    title="the round is decided; the doubly-signed transcript is landing on the board"
+                    className="inline-flex items-center gap-1 text-[11px] font-normal text-gray-400">
+                    <Icon icon="mdi:loading" className="size-3 animate-spin" /> settling…
+                  </span>
+                )}
               </span>
+            ) : flipping ? (
+              <span className="inline-flex items-center gap-1.5 text-gray-500 dark:text-gray-400">
+                running the handshake…
+                <span className="font-mono tabular-nums text-indigo-500 dark:text-indigo-400">{totalSecs}</span>
+              </span>
+            ) : error ? (
+              <span className="text-amber-600 dark:text-amber-400">round void</span>
             ) : (
               <span className="text-gray-500 dark:text-gray-400">call it and flip</span>
             )}
@@ -309,6 +343,16 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
               <div className="text-[11px] uppercase tracking-wide text-gray-400">win rate</div>
             </div>
           </div>
+
+          {/* the persistent, walletless identity — same across refreshes, holds no funds */}
+          {playerAddr && (
+            <div
+              className="flex w-full items-center justify-center gap-1.5 text-[11px] text-gray-400"
+              title={`Your walletless co-sign identity ${playerAddr} — kept in this browser, stable across refreshes, holds no funds.`}>
+              <Icon icon="mdi:account-key-outline" className="size-3.5" />
+              playing as <span className="font-mono text-gray-500 dark:text-gray-400">{shortHex(playerAddr, 6)}</span>
+            </div>
+          )}
         </div>
 
         {/* ── the handshake showcase (the point of the venue) ──────── */}
@@ -325,9 +369,20 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
             so you can’t grind against a known server seed. Neither side can bias the 50/50.
           </p>
           <ol className="flex flex-col gap-2">
-            {STEPS.map((step, i) => {
-              const done = reached.includes(step.id) || (!!result && !error)
-              const active = flipping && reached.length === i
+            {STEPS.map((step) => {
+              // Three row kinds: the `flip` anchor (done the instant the round starts), the four engine
+              // steps (fill in order as `reached` grows via onStep), and the terminal `settleable`
+              // guarantee — done only once the transcript actually LANDS (stepAt.settleable), NOT when the
+              // outcome is decided. So after "you won" is revealed, the last two steps still complete.
+              const ei = ENGINE_STEPS.indexOf(step.id as FlipStep)
+              const isSettled = stepAt.settleable != null
+              const done =
+                step.id === 'flip' ? stepAt.flip != null
+                : step.id === 'settleable' ? isSettled
+                : reached.includes(step.id as FlipStep)
+              const active =
+                step.id === 'settleable' ? flipping && !isSettled && reached.length === ENGINE_STEPS.length
+                : ei >= 0 && flipping && reached.length === ei
               const at = stepSecs(step.id)
               return (
                 <li key={step.id} className="flex items-start gap-3">
@@ -465,7 +520,7 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
           <div>
             <p className="text-sm font-semibold">
               This flip is the real protocol at zero stakes. The full{' '}
-              <span className="bg-gradient-to-br from-amber-200 via-amber-400 to-orange-500 bg-clip-text text-transparent">
+              <span className="gradient-text bg-gradient-to-br from-amber-200 via-amber-400 to-orange-500">
                 MsgBoard Arcade
               </span>{' '}
               is 28+ provably-fair games with real on-chain settlement.

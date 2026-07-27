@@ -101,6 +101,15 @@ export function loadOrCreatePlayerKey(store?: KeyStore): viem.Hex {
   return key
 }
 
+/**
+ * The address of the persisted ephemeral player key — a STABLE pseudonymous identity across refreshes
+ * (the key lives in localStorage; see {@link loadOrCreatePlayerKey}). Surfaced in the UI so the
+ * persistence is visible: it is NOT regenerated per refresh, even though it holds no funds.
+ */
+export function loadPlayerAddress(store?: KeyStore): viem.Hex {
+  return privateKeyToAccount(loadOrCreatePlayerKey(store)).address
+}
+
 /** Adapt a viem local account to the session `Signer` shape (binds the account to its signers). */
 function accountSigner(account: ReturnType<typeof privateKeyToAccount>): Signer {
   return {
@@ -159,6 +168,15 @@ export type RunFlipOpts = {
   houseAddress?: viem.Hex
   /** Progress callback for the handshake showcase. */
   onStep?: (step: FlipStep) => void
+  /**
+   * Fires exactly ONCE the moment the ROUND is co-signed — i.e. the outcome is fully DECIDED (the
+   * accepted state + verified proof carry the revealed serverSeed) — which happens BEFORE the house
+   * posts the transcript to the board. The UI reveals the result + freezes its wall-clock here, so the
+   * "you won" celebration lands at the decided moment and the transcript-settle is an ancillary tail.
+   * The passed result carries an empty `transcriptJson` (the retained transcript is only in the final
+   * return value); nothing displayed depends on it.
+   */
+  onDecided?: (result: FlipResult) => void
   pollMs?: number
   timeoutMs?: number
 }
@@ -190,6 +208,10 @@ export async function runBoardFlip(opts: RunFlipOpts): Promise<FlipResult> {
   // string, so a lying transcript can't make the shown seed/side disagree with the co-signed outcome.
   let acceptedRound: SessionState | undefined
   let acceptedProof: RoundProof<CoinFlipParams> | undefined
+  // `fireDecided` is wired up once the OpenTerms are known (below); onAccept invokes it the instant the
+  // ROUND is co-signed so `onDecided` lands before the transcript post. Guarded to fire exactly once.
+  let decidedFired = false
+  let fireDecided: (() => void) | null = null
   const session = makeBoardPlayerSession({
     board,
     chainId,
@@ -201,6 +223,7 @@ export async function runBoardFlip(opts: RunFlipOpts): Promise<FlipResult> {
       if (s.nonce > 0n) {
         acceptedRound = s
         acceptedProof = p as RoundProof<CoinFlipParams> | undefined
+        fireDecided?.()
       }
     },
   })
@@ -224,6 +247,38 @@ export async function runBoardFlip(opts: RunFlipOpts): Promise<FlipResult> {
     throw new Error('coinflip: OpenTerms not signed by the expected landing house — aborting (possible counterparty substitution)')
   }
   opts.onStep?.('grant')
+
+  // Build a FlipResult from the co-signed ROUND state + its verified proof. The outcome is authoritative
+  // the moment the ROUND is accepted (the proof is reveal- and linchpin-checked BEFORE the player signs),
+  // so nothing here trusts the house-posted `transcript` string — it's retained only as the artifact.
+  const buildResult = (round: SessionState, proof: RoundProof<CoinFlipParams>, transcript: string): FlipResult => {
+    const playerDelta = round.balancePlayer - terms.escrowPlayer
+    const serverSeed = proof.serverSeed
+    const clientSeedUsed = proof.clientSeed
+    const raw = roundRandom(serverSeed, clientSeedUsed, round.nonce)
+    return {
+      pick,
+      side: coinFlipSide(raw),
+      win: playerDelta > 0n,
+      playerDelta,
+      stake,
+      tableId,
+      rngCommit: terms.rngCommit,
+      serverSeed,
+      clientSeed: clientSeedUsed,
+      raw,
+      commitOk: verifyReveal(terms.rngCommit, serverSeed),
+      transcriptJson: transcript,
+    }
+  }
+  // Now that the OpenTerms are known, arm the decided-fire. onAccept calls this the instant the ROUND is
+  // co-signed (mid-houseDriver, before the transcript post) → the UI celebrates + freezes its clock there.
+  fireDecided = () => {
+    if (decidedFired || !acceptedRound || !acceptedProof) return
+    decidedFired = true
+    opts.onDecided?.(buildResult(acceptedRound, acceptedProof, ''))
+  }
+  fireDecided() // no-op unless the ROUND was already accepted synchronously
 
   const openBalances = { player: terms.escrowPlayer, house: terms.escrowHouse }
 
@@ -270,32 +325,11 @@ export async function runBoardFlip(opts: RunFlipOpts): Promise<FlipResult> {
       : new Error('coinflip: no co-signed ROUND state (house did not complete the round)')
   }
 
-  // ── outcome + verify-panel inputs, ALL from the co-signed ROUND state + its VERIFIED proof ──────────
-  // playerDelta/win from the co-signed balances; seeds from the proof runPlayerSide already reveal- and
-  // linchpin-checked. Nothing here trusts `transcriptJson` (the house-posted string) — it's retained
-  // only as the auditable artifact. So the shown seed/side can never diverge from the co-signed result.
-  const playerDelta = acceptedRound.balancePlayer - terms.escrowPlayer
-  const win = playerDelta > 0n
-  const serverSeed = acceptedProof.serverSeed
-  const clientSeedUsed = acceptedProof.clientSeed
-  const raw = roundRandom(serverSeed, clientSeedUsed, acceptedRound.nonce)
-  const side = coinFlipSide(raw)
-  const commitOk = verifyReveal(terms.rngCommit, serverSeed)
-
-  return {
-    pick,
-    side,
-    win,
-    playerDelta,
-    stake,
-    tableId,
-    rngCommit: terms.rngCommit,
-    serverSeed,
-    clientSeed: clientSeedUsed,
-    raw,
-    commitOk,
-    transcriptJson,
-  }
+  // The transcript has now landed. The authoritative result was already computed at the decided moment
+  // (onDecided) — here we return it WITH the retained transcript for the caller's auditable book. Ensure
+  // onDecided fired (no-op if it already did during houseDriver).
+  fireDecided()
+  return buildResult(acceptedRound, acceptedProof, transcriptJson)
 }
 
 /** The board category hash for the landing coin-flip feed on `chainId` (what the content poll keys by). */
