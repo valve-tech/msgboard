@@ -53,9 +53,12 @@ export function SideToc({ sections }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sections])
 
+  // The rail is fixed in the left gutter (x:16–192). Centered content maxes at max-w-7xl (1280px), so
+  // the gutter only clears it once side margins exceed ~192px — i.e. viewport ≳1680px. Below that we
+  // hide the rail entirely (min-[1680px]:block) rather than let it overlap the first content column.
   return (
     <nav
-      className="fixed left-4 top-1/2 z-40 hidden max-h-[80vh] w-44 -translate-y-1/2 overflow-y-auto xl:block"
+      className="fixed left-4 top-1/2 z-40 hidden max-h-[80vh] w-44 -translate-y-1/2 overflow-y-auto min-[1680px]:block"
       aria-label="On this page">
       <ul className="flex flex-col gap-0.5 border-l border-gray-200 pl-3 text-sm dark:border-gray-700">
         {sections.map((section) => (

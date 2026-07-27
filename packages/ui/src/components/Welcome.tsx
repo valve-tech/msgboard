@@ -56,14 +56,14 @@ export function Welcome() {
         </div>
 
         <h1 className="flex flex-col items-center font-bold leading-[1.05] tracking-tight">
+          {/* `.gradient-text` (app.css) supplies the reliable webkit clip + transparent fill — the
+              Tailwind `bg-clip-text`/`text-transparent` utilities weren't clipping here, so the word
+              rendered as a solid block. */}
           <span className="grid place-items-center">
             <span
               key={index}
-              style={{
-                gridArea: '1 / 1',
-                filter: 'drop-shadow(0 2px 20px rgba(245,158,11,0.35))',
-              }}
-              className="whitespace-nowrap bg-gradient-to-br from-amber-200 via-amber-400 to-orange-500 bg-clip-text text-3xl text-transparent sm:text-5xl md:text-6xl lg:text-7xl">
+              style={{ gridArea: '1 / 1' }}
+              className="gradient-text whitespace-nowrap bg-gradient-to-br from-amber-200 via-amber-400 to-orange-500 text-3xl sm:text-5xl md:text-6xl lg:text-7xl">
               {words[index]}
             </span>
           </span>
