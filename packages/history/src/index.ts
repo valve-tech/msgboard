@@ -16,3 +16,8 @@ export type { TeamFile, TeamFileInput, TeamEntry } from './cosign/team-file.js'
 export type { CosignDeps, CosignResult } from './cosign/handler.js'
 export type { CosignOption } from './server.js'
 export type { CosignRecordView } from './cosign/fetch.js'
+
+export type { PetitionDeps, PetitionResult } from './petition/handler.js'
+export type { PetitionOption } from './server.js'
+export type { PetitionRoute } from './petition/router.js'
+export type { PetitionView } from './petition/fetch.js'
