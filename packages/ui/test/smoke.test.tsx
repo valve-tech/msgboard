@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 
 // App now renders the Interactive MVP flow, which touches the network on mount — stub it.
 vi.mock('@msgboard/sdk', async (importOriginal) => {
@@ -25,7 +25,9 @@ describe('scaffold', () => {
   it('renders the app shell with the interactive board flow', async () => {
     const { App } = await import('../src/App')
     render(<App />)
-    // the Interactive flow's chain selector is the entry point of the MVP screen
-    expect(await screen.findByLabelText(/chain/i)).toBeTruthy()
+    // The interactive board (with the chain selector) lives on the Mechanics tab; open it, then
+    // assert the chain picker (a house Menu button, aria-label "chain") renders.
+    fireEvent.click(await screen.findByRole('tab', { name: /mechanics/i }))
+    expect(await screen.findByRole('button', { name: 'chain' })).toBeTruthy()
   })
 })

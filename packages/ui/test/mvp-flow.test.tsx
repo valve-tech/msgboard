@@ -74,6 +74,8 @@ beforeEach(() => {
   lastWorker = null
   sdkContent = {}
   localStorage.clear()
+  // jsdom doesn't implement scrollIntoView; the house Menu calls it when opened.
+  Element.prototype.scrollIntoView = vi.fn()
 })
 
 describe('MVP vertical slice (Interactive flow)', () => {
@@ -83,10 +85,10 @@ describe('MVP vertical slice (Interactive flow)', () => {
 
     render(<Interactive workerFactory={() => new FakeWorker() as unknown as Worker} />)
 
-    const select = (await screen.findByLabelText(/chain/i)) as HTMLSelectElement
-    act(() => {
-      fireEvent.change(select, { target: { value: 'pulsechainV4' } })
-    })
+    // The chain picker is the house Menu (no native <select> — those are banned): open the trigger
+    // (aria-label "chain"), then click the "PulseChain V4" option → the store's chainOption updates.
+    fireEvent.click(await screen.findByRole('button', { name: 'chain' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'PulseChain V4' }))
     expect(useChainStore.getState().chainOption).toBe('pulsechainV4')
   })
 
