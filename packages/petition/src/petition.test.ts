@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { type Hex, recoverAddress } from 'viem'
+import { type Hex } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import type { Content, RPCMessage } from '@msgboard/sdk'
 import type { BoardClient } from '@msgboard/cosign'
@@ -56,11 +56,7 @@ describe('signPetition / verifySignature', () => {
     const record = await signPetition(board, p, verifyingContract, sign, now)
 
     expect(record.signer.toLowerCase()).toBe(creatorAccount.address.toLowerCase())
-    expect(verifySignature(p, record, verifyingContract)).toBe(true)
-
-    // verifySignature's synchronous signer recovery must agree with viem's async recoverAddress
-    const recoveredAsync = await recoverAddress({ hash: record.digest, signature: record.signature })
-    expect(recoveredAsync.toLowerCase()).toBe(record.signer.toLowerCase())
+    expect(await verifySignature(p, record, verifyingContract)).toBe(true)
 
     const signatures = await readPetitionSignatures(board, p.id, 1, now)
     expect(signatures).toHaveLength(1)
@@ -74,10 +70,10 @@ describe('signPetition / verifySignature', () => {
     const record = await signPetition(board, p, verifyingContract, sign, now)
 
     const tampered: Petition = { ...p, statement: 'Bulldoze the park' }
-    expect(verifySignature(tampered, record, verifyingContract)).toBe(false)
+    expect(await verifySignature(tampered, record, verifyingContract)).toBe(false)
   })
 
-  it('rejects a forged record claiming a signer it did not sign for', async () => {
+  it('rejects a forged record claiming a signer it did not sign for (tampered signer)', async () => {
     const board = fakeBoard()
     const p = makePetition()
     const sign = (d: Hex) => creatorAccount.sign({ hash: d })
@@ -85,7 +81,19 @@ describe('signPetition / verifySignature', () => {
 
     const otherAccount = privateKeyToAccount(('0x' + '55'.repeat(32)) as Hex)
     const forged = { ...record, signer: otherAccount.address }
-    expect(verifySignature(p, forged, verifyingContract)).toBe(false)
+    expect(await verifySignature(p, forged, verifyingContract)).toBe(false)
+  })
+
+  it('rejects a record whose signature was swapped for someone else\'s (tampered signature)', async () => {
+    const board = fakeBoard()
+    const p = makePetition()
+    const sign = (d: Hex) => creatorAccount.sign({ hash: d })
+    const record = await signPetition(board, p, verifyingContract, sign, now)
+
+    const otherAccount = privateKeyToAccount(('0x' + '55'.repeat(32)) as Hex)
+    const otherSignature = await otherAccount.sign({ hash: record.digest })
+    const tampered = { ...record, signature: otherSignature }
+    expect(await verifySignature(p, tampered, verifyingContract)).toBe(false)
   })
 })
 
