@@ -47,17 +47,30 @@ const PETITION_START_943 = process.env.PETITION_START_943
 const PETITION_ADDR_369 = process.env.PETITION_ADDR_369
 const PETITION_START_369 = process.env.PETITION_START_369
 
+// Parses a required startBlock env var for a chain whose address IS set. Fails loud rather than
+// defaulting to 0 — a missing/invalid startBlock would otherwise make Ponder backfill that chain from
+// genesis, which is a serious operational footgun on PulseChain (not a quiet degrade).
+function requireStartBlock(addrVarName: string, startVarName: string, value: string | undefined): number {
+  const n = value ? Number(value) : Number.NaN
+  if (!Number.isInteger(n) || n <= 0) {
+    throw new Error(
+      `${addrVarName} is set but ${startVarName} is missing/invalid — refusing to backfill from genesis`,
+    )
+  }
+  return n
+}
+
 const petitionNetwork: Record<string, { address: `0x${string}`; startBlock: number }> = {}
 if (PETITION_ADDR_943) {
   petitionNetwork.pulsechainV4 = {
     address: PETITION_ADDR_943 as `0x${string}`,
-    startBlock: PETITION_START_943 ? Number(PETITION_START_943) : 0,
+    startBlock: requireStartBlock('PETITION_ADDR_943', 'PETITION_START_943', PETITION_START_943),
   }
 }
 if (PETITION_ADDR_369) {
   petitionNetwork.pulsechain = {
     address: PETITION_ADDR_369 as `0x${string}`,
-    startBlock: PETITION_START_369 ? Number(PETITION_START_369) : 0,
+    startBlock: requireStartBlock('PETITION_ADDR_369', 'PETITION_START_369', PETITION_START_369),
   }
 }
 
