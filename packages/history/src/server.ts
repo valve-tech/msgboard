@@ -3,11 +3,15 @@ import type { Archive, ArchiveQuery } from './archive.js'
 import { type CosignDeps, handleCosignRequest } from './cosign/handler.js'
 import { matchCosignRoute } from './cosign/router.js'
 import { loadTeamFile, type TeamFile, type TeamFileInput } from './cosign/team-file.js'
+import { type PetitionDeps, handlePetitionRequest } from './petition/handler.js'
+import { matchPetitionRoute } from './petition/router.js'
 
 export type CosignOption = Omit<CosignDeps, 'teamFile'> & {
   /** The registry team-file: a loaded TeamFile, a raw object, or a JSON path. */
   teamFile: TeamFile | TeamFileInput | string
 }
+
+export type PetitionOption = PetitionDeps
 
 export type ArchiveServerOptions = {
   /** The archive to serve. */
@@ -31,6 +35,13 @@ export type ArchiveServerOptions = {
    * Absent → the server is unchanged (only `/health` + `/messages`).
    */
   cosign?: CosignOption
+  /**
+   * Opt-in petition endpoint group. When present, the same server answers
+   * `/petition/index`, `/petition/:id/signatures`, `/petition/:id/tally`
+   * (decoded petition view) alongside `/messages` and `/cosign`.
+   * Absent → the server is unchanged.
+   */
+  petition?: PetitionOption
 }
 
 export type ArchiveServer = {
@@ -112,6 +123,13 @@ export const archiveServer = (options: ArchiveServerOptions): ArchiveServer => {
       }
     : undefined
 
+  const petitionDeps: PetitionDeps | undefined = options.petition
+    ? {
+        ...options.petition,
+        archive: options.petition.archive ?? options.archive, // default the fallback to this server's archive
+      }
+    : undefined
+
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', `http://${host}:${port}`)
 
@@ -143,6 +161,22 @@ export const archiveServer = (options: ArchiveServerOptions): ArchiveServer => {
           return respond(res, 500, {
             ok: false,
             error: error instanceof Error ? error.message : 'cosign query failed',
+          })
+        }
+      }
+    }
+
+    if (petitionDeps && req.method === 'GET') {
+      const route = matchPetitionRoute(url.pathname)
+      if (route) {
+        if (!authorized(req)) return respond(res, 401, { ok: false, error: 'unauthorized' })
+        try {
+          const result = await handlePetitionRequest(route, url.searchParams, petitionDeps)
+          return respond(res, result.status, result.body)
+        } catch (error) {
+          return respond(res, 500, {
+            ok: false,
+            error: error instanceof Error ? error.message : 'petition query failed',
           })
         }
       }
