@@ -152,6 +152,33 @@ describe('handlePetitionRequest', () => {
     expect(body.signers.sort()).toEqual([addr(1), addr(2), addr(3)].sort())
   })
 
+  it('tally: signers default-cap at 200 (not the full set) and page via offset/limit', async () => {
+    const id = `0x${'06'.repeat(32)}` as Hex
+    const scope = signScope(id)
+    const todayCat = categoryKey(PETITION_NS, scope, isoDay(NOW))
+    const signers = Array.from({ length: 250 }, (_, i) => addr(i + 1))
+    const board = fakeBoard({ [todayCat]: signers.map((a) => encodeRecord(rec(a))) })
+    const route = matchPetitionRoute(`/petition/${id}/tally`)!
+
+    // No ?limit — must NOT dump all 250 signers.
+    const noLimit = await handlePetitionRequest(route, new URLSearchParams('days=7'), deps(board))
+    expect(noLimit.status).toBe(200)
+    const bodyNoLimit = noLimit.body as { count: number; signers: Hex[] }
+    expect(bodyNoLimit.count).toBe(250) // count is always the FULL deduped signer count
+    expect(bodyNoLimit.signers).toHaveLength(200) // signers is capped to the default page size
+
+    // Page through the rest via offset/limit.
+    const page2 = await handlePetitionRequest(
+      route,
+      new URLSearchParams('days=7&offset=200&limit=100'),
+      deps(board),
+    )
+    const bodyPage2 = page2.body as { count: number; signers: Hex[] }
+    expect(bodyPage2.count).toBe(250)
+    expect(bodyPage2.signers).toHaveLength(50) // the remaining 50 signers
+    expect(new Set([...bodyNoLimit.signers, ...bodyPage2.signers]).size).toBe(250) // union = all
+  })
+
   it('signatures: supports offset/limit pagination', async () => {
     const id = `0x${'04'.repeat(32)}` as Hex
     const scope = signScope(id)

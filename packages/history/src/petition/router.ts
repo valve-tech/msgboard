@@ -19,7 +19,9 @@ export const matchPetitionRoute = (pathname: string): PetitionRoute | null => {
   if (parts.length === 2 && parts[1] === 'index') return { kind: 'index' }
 
   const id = parts[1]
-  if (!id) return null
+  // "index" is the reserved index-bucket segment, not a valid petition id — a literal
+  // `/petition/index/signatures` or `/petition/index/tally` must not resolve to an id route.
+  if (!id || id === 'index') return null
 
   // /petition/:id/signatures
   if (parts.length === 3 && parts[2] === 'signatures') return { kind: 'signatures', id }
