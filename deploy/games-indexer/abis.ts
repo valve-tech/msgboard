@@ -47,3 +47,60 @@ export const flipBookXAbi = [{"inputs":[{"internalType":"address","name":"token_
 // EAS (@provex/eas instance) — only the Attested event; attestation payloads are decoded from the
 // resolver-checked schema fields at query time by the frontend, so the log alone is enough here.
 export const easAbi = [{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"recipient","type":"address"},{"indexed":true,"internalType":"address","name":"attester","type":"address"},{"indexed":false,"internalType":"bytes32","name":"uid","type":"bytes32"},{"indexed":true,"internalType":"bytes32","name":"schemaUID","type":"bytes32"}],"name":"Attested","type":"event"}] as const
+
+// PetitionSignatures (@msgboard/petition, Task B) — verbatim copy of packages/petition/src/contract.ts's
+// PETITION_SIGNATURES_ABI, trimmed to what this indexer touches (just the Signed event; submit/
+// submitBatch/signed/count are included too so the ABI stays a drop-in match with the source package).
+// Registered conditionally in ponder.config.ts — see PETITION_ADDR_{943,369} there.
+export const petitionSignaturesAbi = [
+  {
+    type: 'function',
+    name: 'submit',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'petitionId', type: 'bytes32' },
+      { name: 'statement', type: 'string' },
+      { name: 'signer', type: 'address' },
+      { name: 'signature', type: 'bytes' },
+    ],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'submitBatch',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'petitionId', type: 'bytes32' },
+      { name: 'statement', type: 'string' },
+      { name: 'signers', type: 'address[]' },
+      { name: 'signatures', type: 'bytes[]' },
+    ],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'signed',
+    stateMutability: 'view',
+    inputs: [
+      { name: '', type: 'bytes32' },
+      { name: '', type: 'address' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+  {
+    type: 'function',
+    name: 'count',
+    stateMutability: 'view',
+    inputs: [{ name: '', type: 'bytes32' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'event',
+    name: 'Signed',
+    inputs: [
+      { name: 'petitionId', type: 'bytes32', indexed: true },
+      { name: 'signer', type: 'address', indexed: true },
+    ],
+    anonymous: false,
+  },
+] as const

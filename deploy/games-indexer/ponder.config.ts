@@ -2,7 +2,15 @@ import { createConfig } from 'ponder'
 // `as const` abis (abis.ts) so Ponder derives the event-name types and the registry is populated —
 // a generic `as Abi` cast erases the events and `ponder.on('CoinFlip:Entered')` fails at runtime.
 import { SOLVE_SCHEMAS } from './schemas'
-import { coinFlipAbi, easAbi, flipBookAbi, flipBookXAbi, houseChannelAbi, raffleAbi } from './abis'
+import {
+  coinFlipAbi,
+  easAbi,
+  flipBookAbi,
+  flipBookXAbi,
+  houseChannelAbi,
+  petitionSignaturesAbi,
+  raffleAbi,
+} from './abis'
 
 // Vendored, self-contained snapshot (mirrors deploy/random-indexer, which runs ponder 0.16): the
 // game ABIs are bundled in ./abis so the image builds with no workspace deps. Source of
@@ -43,6 +51,45 @@ const EAS = '0x9e84Aa4BD0C1931A34B14C1EC918A53C33e2B0F8'
 // valve migration off gibs). NEW address → index from its own creation block.
 const HOUSE_CHANNEL = '0xd0fe186fd3ad3d5766d2fd8af35215ab5d3dfc94'
 const HOUSE_CHANNEL_START_BLOCK = 24_957_355
+
+// PetitionSignatures (Task H) — unlike the contracts above, this one is NOT deployed yet
+// (`@msgboard/petition`'s `deployments` map is still `{}`), so there's no address to pin at build time.
+// Addresses + start blocks come from env instead (set on the box .env, or the compose environment —
+// see docker-compose.prod.yml / ansible/deploy-games-indexer.yml), filled in post-deploy. Only build a
+// per-chain entry when its address env var is actually set, so this config still builds with no env at
+// all — the indexer simply doesn't index petitions until then, rather than pointing at a bogus address.
+// Mirrors games/indexer/ponder.config.ts (Task D) exactly, adapted to this file's `chain`/`chains` API.
+const PETITION_ADDR_943 = process.env.PETITION_ADDR_943
+const PETITION_START_943 = process.env.PETITION_START_943
+const PETITION_ADDR_369 = process.env.PETITION_ADDR_369
+const PETITION_START_369 = process.env.PETITION_START_369
+
+// Parses a required startBlock env var for a chain whose address IS set. Fails loud rather than
+// defaulting to 0 — a missing/invalid startBlock would otherwise make Ponder backfill that chain from
+// genesis, a serious operational footgun on PulseChain (not a quiet degrade).
+function requireStartBlock(addrVarName: string, startVarName: string, value: string | undefined): number {
+  const n = value ? Number(value) : Number.NaN
+  if (!Number.isInteger(n) || n <= 0) {
+    throw new Error(
+      `${addrVarName} is set but ${startVarName} is missing/invalid — refusing to backfill from genesis`,
+    )
+  }
+  return n
+}
+
+const petitionChain: Record<string, { address: `0x${string}`; startBlock: number }> = {}
+if (PETITION_ADDR_943) {
+  petitionChain.pulsechainV4 = {
+    address: PETITION_ADDR_943 as `0x${string}`,
+    startBlock: requireStartBlock('PETITION_ADDR_943', 'PETITION_START_943', PETITION_START_943),
+  }
+}
+if (PETITION_ADDR_369) {
+  petitionChain.pulsechain = {
+    address: PETITION_ADDR_369 as `0x${string}`,
+    startBlock: requireStartBlock('PETITION_ADDR_369', 'PETITION_START_369', PETITION_START_369),
+  }
+}
 
 export default createConfig({
   ordering: 'omnichain',
@@ -102,5 +149,15 @@ export default createConfig({
         args: { schemaUID: Object.keys(SOLVE_SCHEMAS) as `0x${string}`[] },
       },
     },
+    // Registered only when at least one PETITION_ADDR_{943,369} env var is set (see petitionChain
+    // above) — pre-deploy, this contract simply isn't part of the config.
+    ...(Object.keys(petitionChain).length > 0
+      ? {
+          PetitionSignatures: {
+            abi: petitionSignaturesAbi,
+            chain: petitionChain,
+          },
+        }
+      : {}),
   },
 })

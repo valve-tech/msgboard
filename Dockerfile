@@ -15,6 +15,19 @@ COPY games games
 # public feed only trusts this house's transcripts. Unset → those pinned checks are skipped (fair either way).
 ARG VITE_LANDING_HOUSE_ADDRESS
 ENV VITE_LANDING_HOUSE_ADDRESS=$VITE_LANDING_HOUSE_ADDRESS
+# packages/petition-web build-time config (Task H). These are all PUBLIC values (a deployed contract
+# address, and the base URLs of the petition read-side / settlement-indexer HTTP APIs) — safe to inline
+# into the bundle, unlike the board RPC key above. Unset until the PetitionSignatures contract is
+# deployed (games/contracts/scripts/deploy-petition.ts); the app degrades cleanly to "not deployed here"
+# (see packages/petition-web/src/lib/config.ts) with these empty.
+ARG VITE_PETITION_ADDR_943
+ARG VITE_PETITION_ADDR_369
+ARG VITE_PETITION_READ_BASE
+ARG VITE_PETITION_INDEXER_URL
+ENV VITE_PETITION_ADDR_943=$VITE_PETITION_ADDR_943
+ENV VITE_PETITION_ADDR_369=$VITE_PETITION_ADDR_369
+ENV VITE_PETITION_READ_BASE=$VITE_PETITION_READ_BASE
+ENV VITE_PETITION_INDEXER_URL=$VITE_PETITION_INDEXER_URL
 RUN npm i
 RUN npm run build
 
