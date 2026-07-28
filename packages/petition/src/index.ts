@@ -24,3 +24,11 @@ export {
   type Deployment,
   deployments,
 } from './contract.js'
+export {
+  createPetition,
+  signPetition,
+  readPetitions,
+  readPetitionSignatures,
+  tally,
+  verifySignature,
+} from './petition.js'
