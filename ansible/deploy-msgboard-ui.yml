@@ -83,15 +83,26 @@
         dest: "{{ deploy_dir }}/Dockerfile"
         mode: "0644"
 
-    # Targeted (not a whole-file overwrite, to avoid clobbering box-specific config for other services):
-    # ensure the ui service passes the pinned house address to the build. Reads VITE_LANDING_HOUSE_ADDRESS
-    # from the box .env (set separately). Absent → the arg is empty → the UI's pinned checks fall back.
-    - name: Ensure the ui build passes VITE_LANDING_HOUSE_ADDRESS (idempotent compose arg)
-      ansible.builtin.lineinfile:
-        path: "{{ deploy_dir }}/docker-compose.prod.yml"
-        line: "        VITE_LANDING_HOUSE_ADDRESS: ${VITE_LANDING_HOUSE_ADDRESS:-}"
-        insertafter: "VITE_RPC_943:"
-        firstmatch: true
+    # Normalize the ui build args (targeted, not a whole-file overwrite — other services' box config must
+    # survive): (1) STRIP any VITE_RPC_1/369/943 build args — a keyed RPC url must NEVER be a build-time
+    # value (vite inlines it into the PUBLIC bundle → the key leaks). The Dockerfile no longer declares
+    # those ARGs and the browser uses /api/rpc-proxy?chain=<id> with the key injected server-side (see the
+    # runtime RPC_* env task below). (2) ensure the pinned house address build arg is present.
+    - name: Normalize ui build args (strip keyed VITE_RPC_*, keep VITE_LANDING_HOUSE_ADDRESS)
+      ansible.builtin.shell: |
+        cd {{ deploy_dir }}
+        python3 - <<'PY'
+        import re
+        path = 'docker-compose.prod.yml'
+        s = open(path).read()
+        out = re.sub(r'^ +VITE_RPC_(?:1|369|943): .*\n', '', s, flags=re.M)  # drop the leak-prone build args
+        if 'VITE_LANDING_HOUSE_ADDRESS: ' not in out:
+            out = out.replace('      args:\n', '      args:\n        VITE_LANDING_HOUSE_ADDRESS: ${VITE_LANDING_HOUSE_ADDRESS:-}\n', 1)
+        if out != s:
+            open(path, 'w').write(out); print('PATCHED')
+        PY
+      register: ui_args_patch
+      changed_when: "'PATCHED' in ui_args_patch.stdout"
 
     # Give the ui CONTAINER the keyed valve endpoints at RUNTIME. The client bundle never carries a key:
     # the browser posts to /api/rpc-proxy?chain=<id> and the vite-preview server (this container) reads
