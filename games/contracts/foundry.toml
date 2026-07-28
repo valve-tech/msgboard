@@ -20,6 +20,8 @@ evm_version = 'shanghai'
 remappings = [
   'forge-std/=../../lib/forge-std/src/',
   'solady/=../../node_modules/solady/',
+  # PetitionSignatures.sol (reached via PetitionSignatures.t.sol) uses OpenZeppelin's EIP712/ECDSA.
+  '@openzeppelin/=../../node_modules/@openzeppelin/',
 ]
 # ShuffleVerifier52.t.sol pulls in the vendored uzkge PlonkVerifier, which hits solc
 # stack-too-deep under this profile's viaIR:true. It compiles + runs under the dedicated
