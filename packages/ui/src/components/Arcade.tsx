@@ -202,6 +202,19 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
     setGranting(true)
     setChipsPending(false)
     try {
+      // Read the CURRENT on-chain balance BEFORE posting the request and use it as the baseline —
+      // on the very first grant `onchainChips` is still null, so a snapshot of component state would
+      // short-circuit the poll on its first read (before the mint tx even lands) and show the stale
+      // pre-grant balance forever. Reading fresh from the chain avoids that null-only-works-once trap.
+      const client = selectClient(useChainStore.getState())
+      let before = 0n
+      try {
+        before = await readChipsBalance(client, chipFaucet.chips, wallet.address)
+      } catch {
+        before = 0n
+      }
+      setOnchainChips(before)
+
       // Post to the SAME 32-byte category the faucet SERVICE watches — `stringToHex(name, {size:32})`,
       // a zero-padded name, NOT a keccak categoryHash — with `data` = the recipient address AS-IS
       // (already hex; do NOT stringToHex() it) so the faucet's `isAddress(m.data)` match works.
@@ -211,13 +224,11 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
         category: stringToHex(chipFaucet.category, { size: 32 }),
         data: wallet.address.toLowerCase() as Hex,
       })
-      // Poll the real on-chain balance until it rises above what we last saw (or time out).
-      const client = selectClient(useChainStore.getState())
-      const before = onchainChips
+      // Poll the real on-chain balance until it RISES above the pre-post baseline (or time out).
       let found = false
       for (let i = 0; i < 30; i++) {
         const bal = await readChipsBalance(client, chipFaucet.chips, wallet.address)
-        if (before == null || bal > before) {
+        if (bal > before) {
           setOnchainChips(bal)
           found = true
           break
