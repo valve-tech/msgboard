@@ -14,7 +14,8 @@
     "cast-watcher": "tsx scripts/cast-watcher.ts",
     "player-bots": "tsx scripts/player-bots.ts",
     "session-bots": "tsx scripts/session-bots.ts",
-    "landing-house": "tsx scripts/landing-house.ts"
+    "landing-house": "tsx scripts/landing-house.ts",
+    "petition-bot": "tsx scripts/petition-bot.ts"
   },
   "dependencies": {
     "@msgboard/coinflip": "*",
@@ -23,6 +24,7 @@
     "@msgboard/games-house-service": "*",
     "@msgboard/hilo-war": "*",
     "@msgboard/games": "*",
+    "@msgboard/petition": "*",
     "@msgboard/pow-grinder": "*",
     "@msgboard/raffle": "*",
     "@gibs/random": "^0.0.19",
