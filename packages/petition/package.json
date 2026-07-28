@@ -40,6 +40,7 @@
   "dependencies": {
     "@msgboard/cosign": "^0.0.33",
     "@msgboard/sdk": "^0.0.34",
+    "@noble/curves": "^1.9.1",
     "viem": "^2.25.0"
   },
   "devDependencies": {
