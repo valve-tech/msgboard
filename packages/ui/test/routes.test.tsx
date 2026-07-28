@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 
 // The full app shell touches the network on mount (Interactive's worker board + the
 // GamesLiveProof chain reads). Stub the SDK + viem so route rendering is offline.
@@ -46,8 +46,9 @@ const renderAt = async (hash: string) => {
 describe('hash-router route coverage (parity with the Svelte App.svelte)', () => {
   it('#/ → Home (landing) renders the hero + interactive board', async () => {
     await renderAt('#/')
-    // the interactive board's chain selector is on the home page (unique)
-    expect(await screen.findByLabelText(/chain/i)).toBeTruthy()
+    // the interactive board (with the chain selector) lives on the Mechanics tab of the Try-it section
+    fireEvent.click(await screen.findByRole('tab', { name: /mechanics/i }))
+    expect(await screen.findByRole('button', { name: 'chain' })).toBeTruthy()
     // hero word(s) from Welcome — "MsgBoard" appears across several sections
     expect((await screen.findAllByText('MsgBoard')).length).toBeGreaterThan(0)
     // the "Try it now" hero CTA is unique to the home landing
