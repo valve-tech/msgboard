@@ -50,6 +50,15 @@ const products: Product[] = [
     cta: 'Enter the venue',
     external: true,
   },
+  {
+    title: 'Petitions',
+    description:
+      'Co-signed public statements: sign a statement with your wallet, PoW-stamped to the board, tallied verifiably — every signature is client-recomputed against its EIP-712 digest rather than trusted — with permissionless on-chain finality once a signer batch is settled.',
+    icon: 'mdi:file-sign-outline',
+    href: 'https://petition.msgboard.xyz',
+    cta: 'Open Petitions',
+    external: true,
+  },
 ]
 
 /** A grid of things built on the board: three live apps (Cosign, the archive, Games) + one ZK pattern. */

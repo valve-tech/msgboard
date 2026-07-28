@@ -5,7 +5,7 @@
  * The app is a HASH router (the route lives in `location.hash`), so the query string in
  * `location.search` is free for this state. We read/write three params:
  *
- *   ?tab=chat|mechanics|arcade   — the TryIt section
+ *   ?tab=chat|mechanics|arcade|petitions   — the TryIt section
  *   &mode=public|anonymous|encrypted|direct|stealth — the Chat privacy mode
  *   &demo=encrypted|direct       — the TwoUserDemo "talk to yourself" overlay (omitted when closed)
  *
@@ -15,11 +15,11 @@
  * own key; the others survive, so the three independent components compose one URL without clobbering.
  */
 
-export type TabId = 'chat' | 'mechanics' | 'arcade'
+export type TabId = 'chat' | 'mechanics' | 'arcade' | 'petitions'
 export type ChatMode = 'public' | 'anonymous' | 'encrypted' | 'direct' | 'stealth'
 export type DemoKind = 'encrypted' | 'direct'
 
-const TABS: readonly TabId[] = ['chat', 'mechanics', 'arcade']
+const TABS: readonly TabId[] = ['chat', 'mechanics', 'arcade', 'petitions']
 const MODES: readonly ChatMode[] = ['public', 'anonymous', 'encrypted', 'direct', 'stealth']
 const DEMOS: readonly DemoKind[] = ['encrypted', 'direct']
 

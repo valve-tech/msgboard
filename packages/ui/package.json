@@ -16,6 +16,7 @@
   "dependencies": {
     "@iconify/react": "^5.0.2",
     "@msgboard/games": "*",
+    "@msgboard/petition": "*",
     "@msgboard/sdk": "^0.0.33",
     "@msgboard/settle": "*",
     "@noble/ciphers": "^0.6.0",
