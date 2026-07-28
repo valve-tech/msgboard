@@ -7,6 +7,7 @@
     "packages/sdk",
     "packages/cosign",
     "packages/petition",
+    "packages/petition-web",
     "packages/history",
     "packages/hardhat",
     "packages/relayer",
