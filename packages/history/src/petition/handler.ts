@@ -137,9 +137,11 @@ export const handlePetitionRequest = async (
       }
     }
 
-    // route.kind === 'tally' — the headline endpoint
+    // route.kind === 'tally' — the headline endpoint. `count` is always the FULL deduped
+    // signer count; only the returned `signers` array is paginated (same default cap as
+    // /signatures — an unpaginated request must never dump the entire signer set).
     const { count, signers } = tally(records)
-    const signersOut = paginate(signers, params, signers.length || 1)
+    const signersOut = paginate(signers, params, DEFAULT_SIGNATURES_LIMIT)
     return { status: 200, body: { id, count, signers: signersOut } }
   } catch (error) {
     return {

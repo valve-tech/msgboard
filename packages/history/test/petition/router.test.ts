@@ -26,4 +26,11 @@ describe('matchPetitionRoute', () => {
     expect(matchPetitionRoute('/petition/0xdead/owners')).toBeNull() // no owners concept
     expect(matchPetitionRoute('/petition//signatures')).toBeNull() // empty id
   })
+
+  it('reserves the literal id "index" — it must not resolve as an :id route', () => {
+    expect(matchPetitionRoute('/petition/index/signatures')).toBeNull()
+    expect(matchPetitionRoute('/petition/index/tally')).toBeNull()
+    // and the index route itself is unaffected
+    expect(matchPetitionRoute('/petition/index')).toEqual({ kind: 'index' })
+  })
 })
