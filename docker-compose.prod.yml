@@ -59,10 +59,13 @@ services:
       context: .
       dockerfile: ./Dockerfile
       args:
-        VITE_RPC_1: ${VITE_RPC_1:-}
-        VITE_RPC_369: ${VITE_RPC_369:-}
-        VITE_RPC_943: ${VITE_RPC_943:-}
+        # No VITE_RPC_* build args on purpose — a keyed RPC url must never be inlined into the public
+        # bundle. The browser uses /api/rpc-proxy?chain=<id> and the server injects RPC_<id> at runtime.
         VITE_LANDING_HOUSE_ADDRESS: ${VITE_LANDING_HOUSE_ADDRESS:-}
+    environment:  # ui-runtime-rpc (key-safe proxy): the preview server substitutes these; NOT build args
+      RPC_1: ${RPC_1:-}
+      RPC_369: ${RPC_369:-}
+      RPC_943: ${RPC_943:-}
     restart: unless-stopped
     networks:
       - msgboard

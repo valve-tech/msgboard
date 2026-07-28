@@ -6,12 +6,11 @@ COPY packages packages
 # games workspaces must be present for `npm i` to resolve the workspace symlinks and for vite to bundle
 # the engine. These packages export TS source (main = src/index.ts), so no prebuild step is needed.
 COPY games games
-ARG VITE_RPC_1
-ENV VITE_RPC_1=$VITE_RPC_1
-ARG VITE_RPC_369
-ENV VITE_RPC_369=$VITE_RPC_369
-ARG VITE_RPC_943
-ENV VITE_RPC_943=$VITE_RPC_943
+# NOTE: there are deliberately NO VITE_RPC_* build args. The board RPC url must NEVER be a build-time
+# value — vite inlines referenced build-time env into the PUBLIC bundle, so a keyed valve endpoint would
+# ship the RPC key to every visitor. The browser instead posts to /api/rpc-proxy?chain=<id> and the
+# vite-preview server substitutes the keyed endpoint from its RUNTIME env (RPC_<id>). See rpc.ts /
+# vite.config.ts. Keeping the key out of the build is the whole point.
 # The landing house bot's signing address, pinned so the player verifies its OpenTerms signature and the
 # public feed only trusts this house's transcripts. Unset → those pinned checks are skipped (fair either way).
 ARG VITE_LANDING_HOUSE_ADDRESS
