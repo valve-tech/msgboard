@@ -9,14 +9,14 @@
  *       wheel, dicex2, cascade
  *   - stateful mines (its own reveal/cash-out driver): mines
  *   - ladder push-your-luck on the shared ladder engine (runLadderTable):
- *       towers, chicken, firewalk, heist, hilo (the card ladder, HILO_GAME_ID 18), greedDice, cipher
+ *       towers, chicken, firewalk, heist, hilo-ladder (the card ladder, HILO_GAME_ID 18), greedDice, cipher
  *   - decision one-shots — pick a random legal decision, settle, broadcast (runDecisionTable):
  *       blackjack, threeCardPoker, videoPoker, paiGow
  *   - direct-settle single-draws that can't ride HouseSession (also runDecisionTable):
  *       roulette (params carry nested bigint bet stakes the transcript can't JSON-serialize),
  *       wordle (a SkillGame — settles from a verified result, has no encodeRound)
  *   - sudoku: a TIMED LEADERBOARD, not a wager — the bot posts a solve entry (runSudokuTable)
- *   - hilo-war: the two-peer ZK-masked-deck duel (runHiLoTable; keyed 'hilo-war', was 'hilo')
+ *   - hilo-war: the two-peer ZK-masked-deck duel (runHiLoTable; keyed 'hilo-war')
  *
  * Each game runs its own table loop. A table is a `HouseSession` constructed exactly the way the
  * web hook (examples/games/web/src/hooks/useSession.ts) builds one:
@@ -59,7 +59,8 @@
  *   RPC          accepted for parity with the other bots; unused today (in-process seeds).
  *   GAMES        comma list to restrict which games run (default: the FULL roster above). E.g.
  *                GAMES=dice,towers,blackjack,hilo-war. Names match the ALL_GAMES keys; unknown names
- *                are dropped. The two-peer duel is keyed 'hilo-war'; 'hilo' is the ladder card game.
+ *                are dropped. The two-peer duel is keyed 'hilo-war'; 'hilo-ladder' is the ladder card
+ *                game (kept distinct so the live-feed renderer never confuses the two on `game` name).
  *   HILO_ANTE / HILO_ESCROW  hilo-war ante / per-peer escrow (ether, default 0.01 / 1).
  *   HILO_FLIPS   flips before a hilo table cooperatively settles + reopens (default 32).
  *   CHAIN_LENGTH default 256 — rounds the committed seed chain affords before a table reopens.
@@ -196,7 +197,8 @@ const HILO_FLIPS = env.HILO_FLIPS ? Number(env.HILO_FLIPS) : 32
 
 // The FULL roster. Categories: single-draw (HouseSession), stateful mines, ladder games (shared engine),
 // decision one-shots, the two-peer hilo-war ZK duel, and the sudoku leaderboard. The war game is keyed
-// 'hilo-war' (its old key was 'hilo') so the ladder card game hilo.ts can take the 'hilo' key.
+// 'hilo-war' and the ladder card game hilo.ts is keyed 'hilo-ladder' — kept distinct (they used to
+// collide on the bare 'hilo' name, which broke the live-feed renderer's per-game dispatch).
 const ALL_GAMES = [
   // single-draw Game<TParams> via runDrawTable
   'dice', 'limbo', 'plinko', 'keno',
@@ -204,7 +206,7 @@ const ALL_GAMES = [
   // stateful mines (own driver)
   'mines',
   // ladder games via runLadderTable
-  'towers', 'chicken', 'firewalk', 'heist', 'hilo', 'greedDice', 'cipher',
+  'towers', 'chicken', 'firewalk', 'heist', 'hilo-ladder', 'greedDice', 'cipher',
   // decision one-shots via runDecisionTable (roulette + wordle settle directly here too)
   'blackjack', 'threeCardPoker', 'videoPoker', 'paiGow', 'roulette', 'wordle',
   // timed leaderboard (solver driver)
@@ -520,14 +522,15 @@ const runMinesTable = async () => {
 }
 
 // ---------------------------------------------------------------------------------------------
-// LADDER games (towers / chicken / firewalk / heist / hilo / greedDice / cipher): the mines pattern
-// generalized onto the shared ladder engine (ladder.ts). One generic driver, parameterized by a small
-// per-game adapter: {start, resolver, choice, maxSteps}. A layout is committed up front (DERIVED from
-// the sealed round seed), the bot random-walks revealing steps with a randomized think delay, stops
-// early at a random height, cashes out, and settles the terminal delta via ladderPlayerDelta. Broadcast
-// is open+summary only, exactly like mines. Each per-game `choice()` draws a legal move: a single-path
-// game (chicken/firewalk/greedDice) always picks 0; towers/heist/cipher/hilo pick within their choice
-// space — a random guess, so the bot busts about as often as an uninformed player would (that is fine).
+// LADDER games (towers / chicken / firewalk / heist / hilo-ladder / greedDice / cipher): the mines
+// pattern generalized onto the shared ladder engine (ladder.ts). One generic driver, parameterized by a
+// small per-game adapter: {start, resolver, choice, maxSteps}. A layout is committed up front (DERIVED
+// from the sealed round seed), the bot random-walks revealing steps with a randomized think delay,
+// stops early at a random height, cashes out, and settles the terminal delta via ladderPlayerDelta.
+// Broadcast is open+summary only, exactly like mines. Each per-game `choice()` draws a legal move: a
+// single-path game (chicken/firewalk/greedDice) always picks 0; towers/heist/cipher/hilo-ladder pick
+// within their choice space — a random guess, so the bot busts about as often as an uninformed player
+// would (that is fine).
 // ---------------------------------------------------------------------------------------------
 interface LadderAdapter {
   label: GameName
@@ -607,7 +610,7 @@ const LADDER_TABLES: Partial<Record<GameName, LadderAdapter>> = {
   chicken: { label: 'chicken', start: (s) => startChicken(CHICKEN_CFG, s), resolver: (s) => chickenResolveStep(s, CHICKEN_CFG), choice: () => 0 },
   firewalk: { label: 'firewalk', start: (s) => startFirewalk(FIREWALK_CFG, s), resolver: (s) => firewalkResolveStep(s), choice: () => 0 },
   heist: { label: 'heist', start: (s) => startHeist(HEIST_CFG, s), resolver: (s) => heistResolveStep(s, HEIST_CFG), choice: () => randInt(HEIST_CFG.vaults) },
-  hilo: { label: 'hilo', start: (s) => startHiLo(HILO_CFG, s), resolver: (s) => hiloResolveStep(s, HILO_CFG), choice: () => randInt(2) },
+  'hilo-ladder': { label: 'hilo-ladder', start: (s) => startHiLo(HILO_CFG, s), resolver: (s) => hiloResolveStep(s, HILO_CFG), choice: () => randInt(2) },
   greedDice: { label: 'greedDice', start: (s) => startGreedDice(GREED_DICE_CFG, s), resolver: (s) => greedDiceResolveStep(s, GREED_DICE_CFG), choice: () => 0 },
   cipher: { label: 'cipher', start: (s) => startCipher(CIPHER_CFG, s), resolver: (s) => cipherResolveStep(s, CIPHER_CFG), choice: () => randInt(cipherSymbols(CIPHER_CFG.difficulty)) },
 }
