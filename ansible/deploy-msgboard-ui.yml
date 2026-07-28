@@ -93,6 +93,31 @@
         insertafter: "VITE_RPC_943:"
         firstmatch: true
 
+    # Give the ui CONTAINER the keyed valve endpoints at RUNTIME. The client bundle never carries a key:
+    # the browser posts to /api/rpc-proxy?chain=<id> and the vite-preview server (this container) reads
+    # RPC_<id> from its runtime env and substitutes it there (see packages/ui/vite.config.ts). These are
+    # runtime env vars, NOT build args, so they are never inlined into the public JS. Idempotent (marker).
+    - name: Give the ui container the keyed RPC endpoints at runtime (proxy substitutes them server-side)
+      ansible.builtin.shell: |
+        cd {{ deploy_dir }}
+        python3 - <<'PY'
+        path = 'docker-compose.prod.yml'
+        s = open(path).read()
+        marker = '# ui-runtime-rpc (key-safe proxy)'
+        if marker not in s:
+            anchor = '        VITE_LANDING_HOUSE_ADDRESS: ${VITE_LANDING_HOUSE_ADDRESS:-}\n'
+            block = ('    environment:  ' + marker + '\n'
+                     '      RPC_1: ${RPC_1:-}\n'
+                     '      RPC_369: ${RPC_369:-}\n'
+                     '      RPC_943: ${RPC_943:-}\n')
+            assert anchor in s, 'ui build-args anchor not found in compose'
+            s = s.replace(anchor, anchor + block, 1)
+            open(path, 'w').write(s)
+            print('PATCHED')
+        PY
+      register: ui_env_patch
+      changed_when: "'PATCHED' in ui_env_patch.stdout"
+
     # The root build script `npm run build --workspace=*` shell-globs `*` against /app, which after
     # `npm i` includes node_modules + package.json + the new games/ dir → `npm run build
     # --workspace=node_modules …` → npm errors on the non-workspace entries. Replace it with npm's
@@ -127,6 +152,24 @@
         chdir: "{{ deploy_dir }}"
       register: up
       changed_when: "'Started' in up.stderr or 'Recreated' in up.stderr"
+
+    # SECURITY GATE: the built client bundle must NEVER contain the raw RPC key. We read the key segment
+    # from the container's runtime RPC_943 and assert it appears ZERO times in the served dist. The key
+    # value itself is never printed (only the occurrence count). Fails the deploy loudly on any leak.
+    - name: Security gate — assert the served client bundle contains no raw RPC key
+      ansible.builtin.shell: |
+        cd {{ deploy_dir }}
+        KEY=$(docker compose -f docker-compose.prod.yml exec -T ui sh -c 'printf %s "$RPC_943"' | sed -nE 's#.*/rpc/([^/]+)/evm/.*#\1#p')
+        if [ -z "$KEY" ] || [ "$KEY" = "vk_demo" ]; then
+          echo "RPC_943 unset or vk_demo — no private key to leak; gate passes trivially"; exit 0
+        fi
+        HITS=$(docker compose -f docker-compose.prod.yml exec -T ui sh -c "grep -rlF -- '$KEY' dist 2>/dev/null | wc -l" | tr -d '[:space:]')
+        echo "raw-key occurrences in served dist: ${HITS:-unknown}"
+        test "${HITS:-1}" -eq 0
+      args:
+        chdir: "{{ deploy_dir }}"
+      register: security_gate
+      changed_when: false
 
     # Body-aware, from the box itself (bypasses Cloudflare via --resolve): the container may take a
     # few seconds to come back after the recreate.

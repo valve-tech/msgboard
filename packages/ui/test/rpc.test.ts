@@ -39,12 +39,20 @@ describe('needsProxy', () => {
 })
 
 describe('rpcs map', () => {
-  it('resolves pulsechainV4 rpcUrl to the env override or the valve.city default', () => {
+  it('resolves pulsechainV4 rpcUrl to the key-safe server-side proxy path (never a keyed url)', () => {
     const cfg = rpcs.get('pulsechainV4')!
-    expect(cfg.rpcUrl).toBe(
-      import.meta.env.VITE_RPC_943 ?? 'https://one.valve.city/rpc/vk_demo/evm/943',
-    )
+    // The rpcUrl is ALWAYS the same-origin proxy path — the keyed valve endpoint is substituted
+    // server-side in the /api/rpc-proxy handler, so the key never reaches the client bundle.
+    expect(cfg.rpcUrl).toBe('/api/rpc-proxy?chain=943')
+    expect(cfg.rpcUrl).not.toMatch(/one\.valve\.city/)
     expect(cfg.gasSponsor).toBeTruthy()
+  })
+
+  it('never exposes a raw RPC key in any preset rpcUrl', () => {
+    for (const cfg of rpcs.values()) {
+      expect(cfg.rpcUrl.startsWith('/api/rpc-proxy?chain=')).toBe(true)
+      expect(cfg.rpcUrl).not.toMatch(/one\.valve\.city|\/rpc\//)
+    }
   })
 
   it('exposes the three preset chains', () => {
