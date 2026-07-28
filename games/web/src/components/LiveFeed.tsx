@@ -7,6 +7,7 @@ const GAME_ICON: Record<string, string> = {
   plinko: '🪙',
   keno: '🔢',
   mines: '💣',
+  'hilo-ladder': '🔼',
   hilo: '⚔️',
 }
 
@@ -18,18 +19,66 @@ const ago = (at?: number): string => {
   return `${Math.round(s / 3600)}h ago`
 }
 
-/** A one-line human summary of a lifecycle notice. */
-const describe = (n: BoardNotice): string => {
-  const g = n.game ?? 'game'
+/** `x${mult}` from a `multiplierX100` field (string/number/bigint), or '' if it isn't a finite number. */
+const multX = (v: unknown): string => {
+  const n = Number(v)
+  return Number.isFinite(n) ? `x${(n / 100).toFixed(2)}` : ''
+}
+
+/**
+ * A one-line human summary of a lifecycle notice.
+ *
+ * The bots (and player-driven sessions) post several field-disjoint payload shapes under the same
+ * `kind: 'open' | 'summary'` envelope — a single-draw game, mines, a ladder climb, a decision
+ * one-shot, the Hi-Lo War duel, and the Sudoku leaderboard all carry different extra fields (see
+ * `BoardNotice` in useBoardFeed.ts). Dispatch on the CHARACTERISTIC FIELDS of each shape rather than
+ * on `game` alone: game names are just labels chosen by whichever screen/bot posted the notice, and
+ * two different games have collided on the same name before (the Hi-Lo ladder climb vs. the Hi-Lo War
+ * duel both used to post as `'hilo'`). Every branch degrades to a generic, undefined-free line if a
+ * field it expects turns out to be missing.
+ */
+export const describe = (n: BoardNotice): string => {
   if (n.kind === 'open') {
-    if (g === 'mines') return `opened a ${n.tiles}-tile / ${n.mines}-mine board`
-    if (g === 'hilo') return `sat down to a Hi-Lo War table (escrow ${n.escrowEach})`
+    if (typeof n.tiles === 'number' && typeof n.mines === 'number') {
+      return `opened a ${n.tiles}-tile / ${n.mines}-mine board`
+    }
+    if ('escrowEach' in n && 'deck' in n) {
+      return `sat down to a Hi-Lo War table${typeof n.escrowEach !== 'undefined' ? ` (escrow ${n.escrowEach})` : ''}`
+    }
+    if ('puzzle' in n) return `started a Sudoku puzzle${typeof n.puzzle === 'string' ? ` ${n.puzzle}` : ''}`
+    if (typeof n.maxSteps === 'number') return `opened a climb (${n.maxSteps} steps max)`
     return `opened a table`
   }
   if (n.kind === 'summary') {
-    if (g === 'mines') return `${n.busted ? 'hit a mine' : `cashed out ${n.reveals} safe`} (${n.delta} net)`
-    if (g === 'hilo') return `settled after ${n.flips} flips (A ${n.balA} · B ${n.balB})`
-    return `played ${n.rounds} rounds (balance ${n.balance})`
+    // Hi-Lo War duel settlement: flips + both peers' balances.
+    if (typeof n.flips !== 'undefined' && 'balA' in n && 'balB' in n) {
+      return `settled after ${n.flips} flips (A ${n.balA} · B ${n.balB})`
+    }
+    // mines: reveal count + bust flag.
+    if (typeof n.reveals !== 'undefined' && 'busted' in n) {
+      const net = typeof n.delta !== 'undefined' ? ` (${n.delta} net)` : ''
+      return `${n.busted ? 'hit a mine' : `cashed out ${n.reveals} safe`}${net}`
+    }
+    // ladder climb (towers/chicken/firewalk/heist/hilo-ladder/greedDice/cipher): step count + bust flag.
+    if (typeof n.steps !== 'undefined' && 'busted' in n) {
+      const parts = [multX(n.multiplierX100), typeof n.delta !== 'undefined' ? `${n.delta} net` : ''].filter(Boolean)
+      const suffix = parts.length ? ` (${parts.join(', ')})` : ''
+      return `${n.busted ? 'busted' : 'cashed out'} at step ${n.steps}${suffix}`
+    }
+    // decision one-shot (blackjack/threeCardPoker/videoPoker/paiGow/roulette/wordle): a settle detail.
+    if (typeof n.detail === 'string') {
+      const net = typeof n.delta !== 'undefined' ? ` (${n.delta} net)` : ''
+      return `${n.detail}${net}`
+    }
+    // Sudoku leaderboard: elapsed time + rank, not a wager.
+    if (typeof n.elapsed !== 'undefined') {
+      return `solved in ${n.elapsed}s${typeof n.rank !== 'undefined' ? ` (rank ${n.rank})` : ''}`
+    }
+    // single-draw games (dice/limbo/plinko/keno/…): round count + running balance.
+    if (typeof n.rounds !== 'undefined' && typeof n.balance !== 'undefined') {
+      return `played ${n.rounds} rounds (balance ${n.balance})`
+    }
+    return 'settled'
   }
   return n.kind ?? 'activity'
 }

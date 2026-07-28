@@ -17,7 +17,7 @@ export const HiLoScreen = ({ deployment, walletClient, trustAcknowledged, myAddr
   const session = useLadderSession({ walletClient, boardRpc: deployment.boardRpc, chainId: deployment.chainId })
 
   const adapter: LadderAdapter = useMemo(() => ({
-    gameLabel: 'hilo',
+    gameLabel: 'hilo-ladder',
     maxSteps: CONFIG.steps,
     start: (seed) => startHiLo(CONFIG, seed),
     resolveStep: (seed, step, choice, mult) => hiloResolveStep(seed, CONFIG)(step, choice, mult),
