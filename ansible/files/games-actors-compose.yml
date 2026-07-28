@@ -149,6 +149,35 @@ services:
       RPC: "https://one.valve.city/rpc/${VALVE_RPC_KEY}/evm/369"
       MSGBOARD_RPC: "https://one.valve.city/rpc/${VALVE_RPC_KEY}/evm/369"
     command: node cast-watcher.mjs
+  # The petition BOT: seeds + drives the @msgboard/petition capture->settle loop on chain 943 — ensures
+  # each configured statement exists as a petition (idempotent, deterministic per-statement id), has
+  # SIGNER_COUNT mnemonic-indexed keys co-sign it, then submitBatch()s the outstanding (verified but
+  # not-yet-on-chain) signatures on a timer. Indices 60/61-65 are a fresh block, clear of validators 1-3,
+  # gate players 4-8, ops 10-11, player-bots 20-29, flipbook/session-bots 30-31, cosign-bot 40-42,
+  # landing-house 50, chip-faucet 51 — CREATOR_INDEX (60) needs its own 943 gas top-up (no auto-refill
+  # wired here, unlike chip-faucet's FUNDER_INDEX 0 mechanism).
+  # PETITION_VERIFIER is the deployed PetitionSignatures address (games/contracts/scripts/deploy-petition.ts) —
+  # TODO(deploy-time): unset until then. Empty -> the bot runs capture-only (ensures petitions exist on
+  # the board) and logs a loud warning; it never signs/settles against a placeholder domain (signatures
+  # are EIP-712 domain-bound to the verifier — see petition-bot.ts's own guard).
+  # PETITION_STATEMENTS is a TODO(deploy-time) JSON array of statement strings to seed, e.g.
+  # '["Free the whales"]' — empty array is inert (logs a warning, nothing to seed).
+  petition-bot:
+    image: node:24-alpine
+    restart: unless-stopped
+    working_dir: /app
+    volumes: [ "./:/app" ]
+    env_file: .env
+    environment:
+      CHAIN: "943"
+      RPC: "https://one.valve.city/rpc/${VALVE_RPC_KEY}/evm/943"
+      PETITION_VERIFIER: "${PETITION_VERIFIER:-}"
+      PETITION_STATEMENTS: "${PETITION_STATEMENTS:-[]}"
+      CREATOR_INDEX: "60"
+      SIGNER_START_INDEX: "61"
+      SIGNER_COUNT: "5"
+      SETTLE_INTERVAL_MS: "300000"
+    command: node petition-bot.mjs
   player-bots-369:
     image: node:24-alpine
     restart: unless-stopped

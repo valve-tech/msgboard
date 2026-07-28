@@ -227,6 +227,15 @@ services:
       PONDER_RPC_URL_369: ${PONDER_RPC_URL_369:?PONDER_RPC_URL_369 must be set (one.valve.city/rpc/<key>/evm/369)}
       PONDER_SCHEMA: ${GAMES_943_SCHEMA:?GAMES_943_SCHEMA must be set (games_943_<n>)}
       PONDER_TELEMETRY_DISABLED: 'true'
+      # TODO(deploy-time): PetitionSignatures (Task H) — deploy/games-indexer/ponder.config.ts only
+      # registers the contract on a chain whose PETITION_ADDR_<chain> is set here; leave both unset
+      # until games/contracts/scripts/deploy-petition.ts has run on that chain. A set PETITION_ADDR_*
+      # WITHOUT its matching PETITION_START_* fails the indexer loudly at startup (refuses to backfill
+      # from genesis) rather than silently defaulting to block 0.
+      PETITION_ADDR_943: ${PETITION_ADDR_943:-}
+      PETITION_START_943: ${PETITION_START_943:-}
+      PETITION_ADDR_369: ${PETITION_ADDR_369:-}
+      PETITION_START_369: ${PETITION_START_369:-}
 
   # hasura: GraphQL over the message_archive table. Published on LOOPBACK ONLY
   # (127.0.0.1:8081) — Caddy proxies the public GraphQL endpoint at archive.msgboard.xyz,

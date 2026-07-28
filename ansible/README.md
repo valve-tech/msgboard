@@ -10,6 +10,14 @@ hand-maintained on the box, and nwaku is **co-located** on the box's `edge` netw
   smoke** → block/rescue auto-rollback).
 - **`deploy-waku.yml`** → the **nwaku WSS node** (`waku.msgboard.xyz`) co-located on the box, on the
   `edge` network, route in the shared Caddyfile; persistent nodekey; standalone cluster-0 (no RLN).
+- **`deploy-petition.yml`** → the `@msgboard/petition-web` UI (`petition.msgboard.xyz`): same recipe as
+  `deploy-cosign.yml` (rsync source, register workspace, build + start, safe-reload Caddy route).
+  `VITE_PETITION_ADDR_{943,369}` / `VITE_PETITION_READ_BASE` / `VITE_PETITION_INDEXER_URL` are **build
+  args** (see `docker-compose.petition.yml`) — set them in the box `.env` and rerun to rebuild once the
+  `PetitionSignatures` contract is deployed. The petition read-side is served by the EXISTING
+  `cosign-archive.msgboard.xyz` (see `deploy-cosign-archive.yml`); the settlement indexer is the
+  existing `games-indexer-943` (see `deploy-games-indexer.yml`), gated on `PETITION_ADDR_{943,369}`;
+  the fleet bot is `petition-bot` in `deploy-games-actors.yml`, gated on `PETITION_VERIFIER`.
 
 > **Caddy reload caveat (handled):** on this box `caddy reload` does NOT reliably apply a *new* host
 > block (it serves an empty 200). Both plays probe the result and **restart Caddy** if the reload didn't

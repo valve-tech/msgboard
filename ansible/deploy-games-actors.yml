@@ -1,22 +1,25 @@
 ---
 # Deploy the games actor fleet (/opt/games-actors on the box): the cast-watcher + player-bots on
 # 943 AND 369, the FlipBook maker/taker bots on 943, the cosign bot on 943, the session-bots on 943,
-# and the landing coin-flip house on 943 (the live counterparty for the msgboard.xyz landing Arcade).
+# the landing coin-flip house on 943 (the live counterparty for the msgboard.xyz landing Arcade), and
+# the petition bot on 943 (seeds + drives the @msgboard/petition capture->settle loop).
 # Sources live in this repo (games/e2e/scripts in THIS repo); this play bundles them LOCALLY with the
 # same esbuild recipe the games-deploy GH workflow uses, ships the .mjs + the compose file, and
 # restarts only what changed.
 #
 # The box's /opt/games-actors/.env (MNEMONIC, SEEDS0, VALVE_RPC_KEY — the actors' own funded
-# mnemonic, NOT the contracts deployer) is never written by this play, only asserted present.
+# mnemonic, NOT the contracts deployer; also PETITION_VERIFIER/PETITION_STATEMENTS once the
+# PetitionSignatures contract is deployed — see docker-compose override comments) is never written by
+# this play, only asserted present.
 #
 #   ansible-playbook deploy-games-actors.yml [-e games_repo=/path/to/msgboard]
-- name: Deploy the games actor fleet (cast-watcher + player-bots + flipbook-bots + cosign-bot + session-bots + landing-house)
+- name: Deploy the games actor fleet (cast-watcher + player-bots + flipbook-bots + cosign-bot + session-bots + landing-house + petition-bot)
   hosts: msgboard
   gather_facts: false
   vars:
     games_repo: "{{ playbook_dir }}/.."
     actors_dir: /opt/games-actors
-    bundles: [cast-watcher, player-bots, flipbook-bots, cosign-bot, session-bots, landing-house, pow-worker, chip-faucet]
+    bundles: [cast-watcher, player-bots, flipbook-bots, cosign-bot, session-bots, landing-house, pow-worker, chip-faucet, petition-bot]
   tasks:
     - name: The actor sources must exist locally
       ansible.builtin.stat:
@@ -90,10 +93,11 @@
            + (['cosign-bot'] if 'cosign-bot' in changed_bundles else [])
            + (['session-bots'] if ('session-bots' in changed_bundles or 'pow-worker' in changed_bundles) else [])
            + (['landing-house', 'landing-house-369'] if 'landing-house' in changed_bundles else [])
-           + (['chip-faucet'] if 'chip-faucet' in changed_bundles else []) }}
+           + (['chip-faucet'] if 'chip-faucet' in changed_bundles else [])
+           + (['petition-bot'] if 'petition-bot' in changed_bundles else []) }}
       when: restart_targets | length > 0
 
-    - name: Smoke — all ten services are up
+    - name: Smoke — all eleven services are up
       ansible.builtin.shell: >-
         set -o pipefail;
         docker compose ps --format '{{ '{{' }}.Service{{ '}}' }} {{ '{{' }}.State{{ '}}' }}' | sort
@@ -103,7 +107,7 @@
       register: fleet
       changed_when: false
       failed_when: >-
-        fleet.stdout_lines | select('search', ' running') | list | length != 10
+        fleet.stdout_lines | select('search', ' running') | list | length != 11
 
     # No --tail: the banner prints once at startup, and a long-running unchanged service (no
     # restart this run — by design) has it far beyond any tail window. NO pipefail here — grep -q
@@ -127,6 +131,7 @@
         - { svc: landing-house, banner: "landing house on chain 943" }
         - { svc: landing-house-369, banner: "landing house on chain 369" }
         - { svc: chip-faucet, banner: "chip faucet on chain 943" }
+        - { svc: petition-bot, banner: "petition bot on chain 943" }
       changed_when: false
       register: banner
       retries: 2

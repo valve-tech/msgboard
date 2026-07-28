@@ -1,0 +1,169 @@
+---
+# Deploy the petition-web UI onto the msgboard box. Mirrors deploy-cosign.yml exactly: the box's
+# {{ deploy_dir }} is a NON-git snapshot, so we rsync the petition-web source in (rather than git pull),
+# register its workspace, add the service via a compose override, build + start it (VITE_PETITION_* are
+# BUILD ARGS — see docker-compose.petition.yml — so a rebuild is required whenever they change, not just
+# a restart), then add the Caddy route with a SAFE reload (backup → caddy adapt → reload → positive +
+# regression smoke → block/rescue auto-rollback). Idempotent.
+#
+#   SSH_AUTH_SOCK="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock" \
+#     ansible-playbook deploy-petition.yml
+- name: Deploy petition-web UI (msgboard box)
+  hosts: msgboard
+  gather_facts: true
+  vars:
+    deploy_dir: /opt/msgboard
+    repo_root: "{{ playbook_dir }}/.."
+    caddyfile: "{{ deploy_dir }}/deploy/caddy/Caddyfile"
+    compose: "docker compose -f docker-compose.prod.yml -f docker-compose.petition.yml"
+  tasks:
+    # Get the petition-web source onto the box over the SINGLE existing SSH connection (tar → copy →
+    # extract) rather than `synchronize`, whose self-built `rsync -e ssh` ignores our identity args and
+    # trips the 1Password agent's key limit (same reasoning as deploy-cosign.yml).
+    - name: Archive the petition-web source locally (no node_modules/dist)
+      ansible.builtin.command:
+        cmd: tar czf /tmp/petition-web-src.tgz -C {{ repo_root }}/packages --exclude=node_modules --exclude=dist petition-web
+      delegate_to: localhost
+      changed_when: false
+
+    - name: Copy the archive to the box
+      ansible.builtin.copy:
+        src: /tmp/petition-web-src.tgz
+        dest: "{{ deploy_dir }}/petition-web-src.tgz"
+        mode: "0644"
+
+    - name: Extract the petition-web source into packages/
+      ansible.builtin.command:
+        cmd: tar xzf petition-web-src.tgz -C packages
+        chdir: "{{ deploy_dir }}"
+      changed_when: true
+
+    - name: Copy the petition compose override
+      ansible.builtin.copy:
+        src: "{{ repo_root }}/docker-compose.petition.yml"
+        dest: "{{ deploy_dir }}/docker-compose.petition.yml"
+        mode: "0644"
+
+    - name: Register the petition-web workspace in root package.json (idempotent; via a node container)
+      ansible.builtin.command:
+        chdir: "{{ deploy_dir }}"
+        cmd: >
+          docker run --rm -v {{ deploy_dir }}:/w -w /w node:lts node -e
+          'const fs=require("fs"),p="package.json",j=JSON.parse(fs.readFileSync(p));j.workspaces=j.workspaces||[];if(!j.workspaces.includes("packages/petition-web")){j.workspaces.push("packages/petition-web");fs.writeFileSync(p,JSON.stringify(j,null,2)+"\n");console.log("added")}else{console.log("present")}'
+      register: ws
+      changed_when: "'added' in ws.stdout"
+
+    # VITE_PETITION_ADDR_{943,369} / VITE_PETITION_READ_BASE / VITE_PETITION_INDEXER_URL are read from
+    # the box .env by compose's ${VAR:-default} interpolation in docker-compose.petition.yml's build
+    # args — NOT written by this play. Until the PetitionSignatures contract is deployed and its address
+    # is added to the box .env (see the runbook's README), these build empty/default and the app runs
+    # in its "not deployed here" degraded mode. A later re-run of this play after the box .env changes
+    # WILL rebuild with the new values (compose always rebuilds on `build`; see below).
+    - name: Build the petition-web image (full monorepo build — a few minutes)
+      ansible.builtin.command:
+        cmd: "{{ compose }} build petition-web"
+        chdir: "{{ deploy_dir }}"
+      changed_when: true
+
+    - name: Start petition-web
+      ansible.builtin.command:
+        cmd: "{{ compose }} up -d petition-web"
+        chdir: "{{ deploy_dir }}"
+      register: up
+      changed_when: "'Started' in up.stderr or 'Recreated' in up.stderr or 'Created' in up.stderr"
+
+    - name: Configure the petition.msgboard.xyz Caddy route (with rollback)
+      block:
+        - name: Back up the Caddyfile
+          ansible.builtin.copy:
+            src: "{{ caddyfile }}"
+            dest: "{{ caddyfile }}.bak.{{ ansible_date_time.iso8601_basic_short }}"
+            remote_src: true
+          register: caddy_backup
+
+        - name: Add / update the petition.msgboard.xyz block (idempotent)
+          ansible.builtin.blockinfile:
+            path: "{{ caddyfile }}"
+            marker: "# {mark} ANSIBLE petition.msgboard.xyz"
+            block: |
+              petition.msgboard.xyz {
+              	tls /etc/caddy/origin.pem /etc/caddy/origin.key
+              	encode gzip
+              	handle {
+              		reverse_proxy petition-web:4173
+              	}
+              }
+          register: caddy_edit
+
+        - name: Validate (caddy adapt — read-only)
+          ansible.builtin.command: docker exec caddy caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile
+          changed_when: false
+
+        - name: Reload Caddy
+          ansible.builtin.command: docker exec caddy caddy reload --config /etc/caddy/Caddyfile
+          when: caddy_edit.changed
+
+        # `caddy reload` on this box does NOT reliably apply a brand-NEW host block (it returns an empty
+        # 200 — Caddy's no-route default). Check the body, and if it's empty, do a clean restart (all
+        # sites are behind Cloudflare, which retries the ~1-3s blip). Same discipline as deploy-cosign.yml.
+        - name: Probe whether the new host actually serves a body
+          ansible.builtin.command: >-
+            docker run --rm --network host curlimages/curl:latest -sk
+            --resolve petition.msgboard.xyz:443:127.0.0.1 https://petition.msgboard.xyz/ -o /dev/null -w '%{http_code}:%{size_download}'
+          register: probe
+          changed_when: false
+          failed_when: false
+
+        - name: Restart Caddy if the reload didn't apply the new host
+          ansible.builtin.command: docker restart caddy
+          when: probe.stdout is not match('^200:[1-9][0-9]*$')
+
+        - name: Settle after restart
+          ansible.builtin.pause:
+            seconds: 5
+          when: probe.stdout is not match('^200:[1-9][0-9]*$')
+
+        - name: Positive smoke — petition.msgboard.xyz serves 200 + a NON-EMPTY body
+          ansible.builtin.command: >-
+            docker run --rm --network host curlimages/curl:latest -sk
+            --resolve petition.msgboard.xyz:443:127.0.0.1 https://petition.msgboard.xyz/ -o /dev/null -w '%{http_code}:%{size_download}'
+          register: smoke
+          changed_when: false
+          failed_when: smoke.stdout is not match('^200:[1-9][0-9]*$')
+          retries: 8
+          delay: 3
+          until: smoke.stdout is match('^200:[1-9][0-9]*$')
+
+        - name: Regression smoke — msgboard.xyz still serves 200 + a body
+          ansible.builtin.command: >-
+            docker run --rm --network host curlimages/curl:latest -sk
+            --resolve msgboard.xyz:443:127.0.0.1 https://msgboard.xyz/ -o /dev/null -w '%{http_code}:%{size_download}'
+          register: reg
+          changed_when: false
+          failed_when: reg.stdout is not match('^200:[1-9][0-9]*$')
+
+        - name: Regression smoke — cosign.msgboard.xyz still serves 200 + a body (if deployed)
+          ansible.builtin.command: >-
+            docker run --rm --network host curlimages/curl:latest -sk
+            --resolve cosign.msgboard.xyz:443:127.0.0.1 https://cosign.msgboard.xyz/ -o /dev/null -w '%{http_code}:%{size_download}'
+          register: reg_cosign
+          changed_when: false
+          failed_when: false
+
+      rescue:
+        - name: Restore the Caddyfile from backup
+          ansible.builtin.copy:
+            src: "{{ caddy_backup.dest }}"
+            dest: "{{ caddyfile }}"
+            remote_src: true
+          when: caddy_backup.dest is defined
+        - name: Reload Caddy after restore
+          ansible.builtin.command: docker exec caddy caddy reload --config /etc/caddy/Caddyfile
+          when: caddy_backup.dest is defined
+        - name: Fail loudly
+          ansible.builtin.fail:
+            msg: "petition Caddy change failed validation/smoke — Caddyfile restored + reloaded."
+
+    - name: Done
+      ansible.builtin.debug:
+        msg: "petition-web live behind petition.msgboard.xyz (origin smoke 200)."
