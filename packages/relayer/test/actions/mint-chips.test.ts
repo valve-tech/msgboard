@@ -48,4 +48,21 @@ describe('mintChipsAction', () => {
     }))
     expect(result).toEqual({ ok: true, ref: '0xtx' })
   })
+
+  it('passes explicit EIP-1559 fees to writeContract when set (so mints mine on PulseChain)', async () => {
+    const writeContract = vi.fn(async () => '0xtx')
+    const waitForTransactionReceipt = vi.fn(async () => ({ transactionHash: '0xtx' }))
+    const ctx = { chain: { id: 943 }, node: { transport: {} as never },
+      publicClient: { waitForTransactionReceipt } } as unknown as RelayerContext
+    const action = mintChipsAction<string>({
+      account: { address: '0xfrom' } as never, chips,
+      recipient: (item) => item as `0x${string}`, amount: 1000n, cap: 1000n,
+      maxFeePerGas: 2_000_000_000n, maxPriorityFeePerGas: 500_000_000n,
+      walletFactory: () => ({ writeContract }) as never,
+    })
+    await action.execute(recipient, ctx)
+    expect(writeContract).toHaveBeenCalledWith(expect.objectContaining({
+      maxFeePerGas: 2_000_000_000n, maxPriorityFeePerGas: 500_000_000n,
+    }))
+  })
 })

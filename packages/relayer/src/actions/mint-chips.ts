@@ -13,6 +13,13 @@ export type MintChipsActionOptions<T> = {
   amount: bigint
   cap: bigint
   gas?: bigint
+  /**
+   * Explicit EIP-1559 fees. REQUIRED on chains whose auto fee-estimation misprices a tx — notably
+   * PulseChain (943/369), where an unpriced mint lands at ~16 wei of priority and never gets mined.
+   * Set both (e.g. maxPriorityFeePerGas ~0.5 gwei, maxFeePerGas ~2 gwei) so mints actually confirm.
+   */
+  maxFeePerGas?: bigint
+  maxPriorityFeePerGas?: bigint
   walletFactory?: (context: RelayerContext) => WalletClient
 }
 
@@ -31,6 +38,8 @@ export const mintChipsAction = <T>(options: MintChipsActionOptions<T>): RelayerA
         account: options.account, chain: context.chain,
         address: options.chips, abi: MINT_ABI, functionName: 'mint', args: [to, minted],
         ...(options.gas ? { gas: options.gas } : {}),
+        ...(options.maxFeePerGas ? { maxFeePerGas: options.maxFeePerGas } : {}),
+        ...(options.maxPriorityFeePerGas ? { maxPriorityFeePerGas: options.maxPriorityFeePerGas } : {}),
       })
       await context.publicClient.waitForTransactionReceipt({ hash })
       return { ok: true, ref: hash }
