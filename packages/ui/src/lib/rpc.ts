@@ -28,6 +28,14 @@ export type ChainConfig = {
     address: string
     amount: bigint
   }
+  /** info regarding chip faucet sponsorship - when users ask for chips
+   * the following token address, category, and amount will be used to sponsor them
+   */
+  chipFaucet?: {
+    chips: `0x${string}`
+    category: string
+    amount: bigint
+  }
 }
 
 /** default block range limit for message expiry on the msgboard */
@@ -52,6 +60,11 @@ export const rpcs = new Map<ChainOption, ChainConfig>([
       gasSponsor: {
         address: '0x5891148fFBea957c1C183313Dc8F63AbEf0f3958',
         amount: parseEther('10'),
+      },
+      chipFaucet: {
+        chips: '0x81f130c7d9ff020f46f3b01918424173f8d5ca64',
+        category: 'chipsplease:943',
+        amount: 1000n * 10n ** 18n,
       },
     },
   ],
