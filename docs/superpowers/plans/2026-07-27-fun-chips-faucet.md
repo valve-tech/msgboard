@@ -16,8 +16,8 @@
 - **The landing coin-flip is untouched.** The faucet only grants; it never stakes/settles.
 - **No HTTP surface.** Board-watch only.
 - **Chips 943:** `0x81f130c7d9ff020f46f3b01918424173f8d5ca64` (single-owner Solady `Ownable`; `mint(to,amount)` is `onlyOwner`).
-- **Category:** `chipsplease:943` (exact string; UI poster and service must match). `@msgboard/sdk` `categoryHash` / relayer `toCategoryHex` zero-pad a name to bytes32.
-- **Wire trick (from the gas faucet):** the request post's `data` **is** the recipient address (a hex address string). Dedup by `message.hash.toLowerCase()` — one PoW post = one grant.
+- **Category encoding (CRITICAL):** the faucet service watches `msgboardContentSource({ category: 'chipsplease:943' })`, whose `toCategoryHex` does `stringToHex('chipsplease:943', { size: 32 })` (zero-padded name) — **NOT** `categoryHash` (which keccaks; a different value — the documented category gotcha). So the UI MUST post to the SAME 32-byte category: `stringToHex('chipsplease:943', { size: 32 })`. This mirrors `Interactive.tsx:182` (the gas-request flow), not the arcade flip's `categoryHash`.
+- **Wire trick (from the gas faucet):** the request post's `data` **is** the recipient address posted AS-IS (an address is already a hex string, so it is posted raw and lowercased — see `Interactive.tsx:135` `isHex(text) ? text : stringToHex(text)`; for an address `isHex` is true → no re-encoding). The faucet's `isAddress(m.data)` then matches. Do NOT `stringToHex()` the address (that double-encodes it and breaks `isAddress`). Dedup by `message.hash.toLowerCase()` — one PoW post = one grant.
 - **Faucet key:** dedicated mnemonic index **51**. Needs 943 gas (minting is on-chain). valve-deployer transfers Chips ownership to it (one-time, §Task 8).
 - **Grant amount default:** `1000` chips in base units (confirm Chips decimals during Task 1; `Chips` is a plain Solady ERC20 → 18 decimals unless overridden, so `1000n * 10n ** 18n`). Per-tx `cap` guards a misconfig.
 - **Commit style:** unsigned, no `Co-Authored-By` (match the repo's existing commits).
@@ -544,7 +544,7 @@ import { Arcade } from '../src/components/Arcade'
 // Mock the wallet + board so no chain is touched; assert a post to chipsplease:943 category hash.
 // (Follow the existing arcade.test.ts harness for lazy-engine + worker-board mocking.)
 ```
-Write a test that: mocks `connectInjectedWallet` to return a fixed address; renders `<Arcade>` on 943; turns the memory-only toggle OFF; clicks Connect then "Get chips"; asserts the worker board received an `addMessage` whose category equals `categoryHash('chipsplease:943')` and whose `data` decodes to the wallet address. Reuse the board/worker mock approach from `test/arcade.test.ts` and `test/smoke.test.tsx`.
+Write a test that: mocks `connectInjectedWallet` to return a fixed address; renders `<Arcade>` on 943; turns the memory-only toggle OFF; clicks Connect then "Get chips"; asserts the worker board received an `addMessage` whose category equals `stringToHex('chipsplease:943', { size: 32 })` (the zero-padded name the faucet watches — NOT `categoryHash`) and whose `data` equals the lowercased wallet address as-is (so the faucet's `isAddress(m.data)` matches). Reuse the board/worker mock approach from `test/arcade.test.ts` and `test/smoke.test.tsx`.
 
 - [ ] **Step 2: Run to verify it fails**
 
@@ -561,10 +561,12 @@ const getChips = async () => {
   if (!wallet || !board || !chipFaucet) return
   setGranting(true)
   try {
-    // The wire trick: data IS the recipient address (matches the faucet's isAddress(data) condition).
+    // Post to the SAME 32-byte category the faucet watches (stringToHex name, size 32 — NOT categoryHash),
+    // with data = the recipient address AS-IS (address is already hex; posting it raw makes the faucet's
+    // isAddress(m.data) match). Mirrors the gas-request flow in Interactive.tsx (lines 135 + 182).
     await board.addMessage({
-      category: categoryHash(chipFaucet.category) as `0x${string}`,
-      data: stringToHex(wallet.address),
+      category: stringToHex(chipFaucet.category, { size: 32 }),
+      data: wallet.address.toLowerCase() as `0x${string}`,
     })
     // Poll the on-chain balance until it rises (or a timeout).
     const client = useChainStore.getState() // selectClient(...) → publicClient
