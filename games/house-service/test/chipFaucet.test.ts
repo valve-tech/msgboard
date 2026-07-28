@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { isAddress, stringToHex } from 'viem'
 import { chipFaucetConfig } from '../src/runChipFaucet'
 
 const account = { address: '0xfaucet' } as never

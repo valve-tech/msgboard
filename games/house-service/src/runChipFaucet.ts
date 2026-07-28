@@ -1,6 +1,6 @@
 import { http, isAddress, type Account, type Hex } from 'viem'
 import type { RPCMessage } from '@msgboard/sdk'
-import { Relayer, msgboardContentSource, memoryTtlStore, type RelayerContext } from '@msgboard/relayer'
+import { Relayer, msgboardContentSource, memoryTtlStore, resolveChain, type RelayerContext, type RelayerConfig } from '@msgboard/relayer'
 import { mintChipsAction } from '@msgboard/relayer'
 
 export interface ChipFaucetOpts {
@@ -20,14 +20,14 @@ export interface ChipFaucetOpts {
 const DEFAULT_AMOUNT = 1000n * 10n ** 18n
 
 /** PURE relayer config for the chip faucet — the entry AND tests consume the identical object. */
-export function chipFaucetConfig(opts: ChipFaucetOpts) {
+export function chipFaucetConfig(opts: ChipFaucetOpts): RelayerConfig<RPCMessage> {
   const amount = opts.amount ?? DEFAULT_AMOUNT
   return {
-    node: { transport: http(opts.rpcUrl) },
+    node: { transport: http(opts.rpcUrl), chain: resolveChain(opts.chainId ?? 943) },
     mode: opts.mode ?? 'live',
     intervalMs: opts.intervalMs ?? 20_000,
     source: msgboardContentSource({ category: opts.category ?? 'chipsplease:943' }),
-    condition: (m: RPCMessage, _context: RelayerContext) => isAddress(m.data) as boolean,
+    condition: (m: RPCMessage, _context: RelayerContext) => isAddress(m.data),
     key: (m: RPCMessage) => m.hash.toLowerCase(),
     store: memoryTtlStore<RPCMessage>({ ttlMs: opts.ttlMs ?? 3_600_000 }),
     action: mintChipsAction<RPCMessage>({
@@ -36,11 +36,11 @@ export function chipFaucetConfig(opts: ChipFaucetOpts) {
       amount, cap: opts.cap ?? amount,
       walletFactory: opts.walletFactory,
     }),
-  } as const
+  }
 }
 
 export function runChipFaucet(opts: ChipFaucetOpts) {
-  const relayer = new Relayer<RPCMessage>(chipFaucetConfig(opts) as never)
+  const relayer = new Relayer<RPCMessage>(chipFaucetConfig(opts))
   relayer.start()
   return { relayer, stop: () => relayer.stop() }
 }
