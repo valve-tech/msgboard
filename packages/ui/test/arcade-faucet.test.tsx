@@ -19,9 +19,15 @@ vi.mock('../src/lib/wallet', () => ({
 }))
 
 // The on-chain balance poll is exercised separately in chips.test.ts — stub it here so this test
-// stays focused on the post shape and doesn't need a real PublicClient/RPC.
+// stays focused on the post shape and doesn't need a real PublicClient/RPC. The flow now reads the
+// balance BOTH before posting (baseline) and after (poll) — return 0n on the first call (baseline)
+// and 5000n on every call after, so the poll's "balance rose above baseline" check resolves on its
+// very first read instead of looping through the full 30 * 2s timeout.
 vi.mock('../src/lib/chips', () => ({
-  readChipsBalance: vi.fn(async () => 5000n),
+  readChipsBalance: vi.fn((() => {
+    let calls = 0
+    return async () => (calls++ === 0 ? 0n : 5000n)
+  })()),
 }))
 
 type Posted = { type: string; category?: Hex; data?: Hex; [k: string]: unknown }

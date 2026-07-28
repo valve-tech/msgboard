@@ -31,4 +31,21 @@ describe('mintChipsAction', () => {
     }))
     expect(result).toEqual({ ok: true, ref: '0xtx' })
   })
+
+  it('execute mints the plain amount when it is under the cap (not capped)', async () => {
+    const writeContract = vi.fn(async () => '0xtx')
+    const waitForTransactionReceipt = vi.fn(async () => ({ transactionHash: '0xtx' }))
+    const ctx = { chain: { id: 943 }, node: { transport: {} as never },
+      publicClient: { waitForTransactionReceipt } } as unknown as RelayerContext
+    const action = mintChipsAction<string>({
+      account: { address: '0xfrom' } as never, chips,
+      recipient: (item) => item as `0x${string}`, amount: 500n, cap: 1000n,
+      walletFactory: () => ({ writeContract }) as never,
+    })
+    const result = await action.execute(recipient, ctx)
+    expect(writeContract).toHaveBeenCalledWith(expect.objectContaining({
+      address: chips, functionName: 'mint', args: [recipient, 500n], // under cap, uncapped
+    }))
+    expect(result).toEqual({ ok: true, ref: '0xtx' })
+  })
 })
