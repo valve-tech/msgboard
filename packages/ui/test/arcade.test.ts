@@ -135,6 +135,45 @@ describe('runBoardFlip — real board-mediated commit-reveal round vs the house 
     }
   }, 25_000)
 
+  it('fires the commit/reveal milestones when their board posts land — not before (accurate handshake timing)', async () => {
+    // The handshake timeline shows, per step, "elapsed when this step landed". The two PLAYER milestones
+    // are board POSTS: `commit` = the sealed open-request, `reveal` = the seed-revealing round-request.
+    // Each must be timestamped when its post actually reaches the board — not at the instant we intend to
+    // send — else `commit` reads 0.0s (fired before any send) and `reveal` reads the grant time (fired
+    // before houseDriver posts the round-request). We assert the milestones follow their real sends,
+    // recorded off the board.
+    const inner = fakeBoard()
+    const timeline: string[] = []
+    const recording: BoardClient = {
+      content: inner.content,
+      addMessage: async (msg: { category: Hex; data: Hex }) => {
+        let kind = 'other'
+        try { kind = (JSON.parse(hexToString(msg.data)) as { kind?: string }).kind ?? 'other' } catch { /* not a JSON envelope */ }
+        timeline.push(`send:${kind}`)
+        return inner.addMessage(msg)
+      },
+    }
+    const house = startLandingHouse(recording)
+    try {
+      await runBoardFlip({
+        board: recording, chainId: CHAIN_ID, pick: 'heads', playerKey: PLAYER_KEY,
+        onStep: (s) => timeline.push(`step:${s}`), pollMs: 2, timeoutMs: 15_000,
+      })
+      // `commit` lands only after the open-request is actually on the board.
+      const iOpenReq = timeline.indexOf('send:open-request')
+      const iCommit = timeline.indexOf('step:commit')
+      expect(iOpenReq).toBeGreaterThanOrEqual(0)
+      expect(iCommit).toBeGreaterThan(iOpenReq)
+      // `reveal` lands only after the seed-revealing round-request is posted.
+      const iRoundReq = timeline.indexOf('send:round-request')
+      const iReveal = timeline.indexOf('step:reveal')
+      expect(iRoundReq).toBeGreaterThanOrEqual(0)
+      expect(iReveal).toBeGreaterThan(iRoundReq)
+    } finally {
+      house.stop()
+    }
+  }, 25_000)
+
   it('derives the shown seed/side from the VERIFIED proof, not the house-posted transcript string', async () => {
     // A board that lets the house co-sign honestly (so the proof the player verifies is correct) but
     // TAMPERS the serverSeed inside the round-transcript JSON the house posts back. If the UI derived its

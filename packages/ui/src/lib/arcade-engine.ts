@@ -226,10 +226,15 @@ export async function runBoardFlip(opts: RunFlipOpts): Promise<FlipResult> {
         fireDecided?.()
       }
     },
+    // The two PLAYER handshake milestones are board POSTS, so fire them when the post actually LANDS on
+    // the board (onSent), not when we issue the call: `open-request` = the sealed commit ('commit'),
+    // `round-request` = the seed reveal ('reveal'). Firing them earlier made "You commit" read 0.0s and
+    // "You reveal" read the grant time — the per-step timings didn't reflect real board latency.
+    onSent: (kind) => opts.onStep?.(kind === 'open-request' ? 'commit' : 'reveal'),
   })
 
   // 1. OPEN handshake: post the clientSeed COMMIT only (never the plaintext) → house-signed OpenTerms.
-  opts.onStep?.('commit')
+  //    'commit' is fired by onSent above the instant the open-request lands on the board.
   const houseAddress = opts.houseAddress ?? LANDING_HOUSE_ADDRESS
   const { terms, houseSig } = await session.requestOpen({
     tableId,
@@ -305,7 +310,7 @@ export async function runBoardFlip(opts: RunFlipOpts): Promise<FlipResult> {
   })
   const stopServing = session.startServing()
 
-  opts.onStep?.('reveal')
+  // 'reveal' is fired by onSent (above) the instant the seed-revealing round-request lands on the board.
   let transcriptJson: string
   try {
     transcriptJson = await session.houseDriver<CoinFlipParams>({
