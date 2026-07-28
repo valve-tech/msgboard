@@ -12,9 +12,8 @@ import {
   PETITION_DOMAIN_VERSION,
   PETITION_TYPES,
 } from '@msgboard/petition'
-import { PETITION_READ_BASE, PETITION_INDEXER_URL } from './config.js'
+import { PETITION_READ_BASE } from './config.js'
 import { fetchPetitionIndex, fetchAllPetitionSignatures, fetchPetitionTally } from './read-side.js'
-import { fetchSettledSigners } from './settled.js'
 import { outstanding } from './reconcile.js'
 
 /** A 32-byte random salt, hex-encoded (crypto.getRandomValues — the same source `crypto.randomUUID` uses). */
@@ -60,36 +59,6 @@ export interface PetitionDetail {
   verifiedSigners: Hex[]
   /** ON-CHAIN (settled) — from the settlement indexer. Hard finality. */
   settledSigners: Hex[]
-}
-
-/**
- * Loads a single petition's THREE distinct counts: captured (read-side, fast/unverified),
- * verified (client-recomputed via `verifySignature` — the trustless number), and settled
- * (the on-chain indexer). Returns null if the petition id isn't in the captured index.
- */
-export async function getPetition(
-  id: Hex,
-  verifyingContract: Hex | null,
-  chainId: number,
-  readBase: string = PETITION_READ_BASE,
-  indexerBase: string = PETITION_INDEXER_URL,
-): Promise<PetitionDetail | null> {
-  const petitions = await fetchPetitionIndex(readBase)
-  const petition = petitions.find((p) => p.id.toLowerCase() === id.toLowerCase())
-  if (!petition) return null
-
-  const [capturedTally, verified, settledSigners] = await Promise.all([
-    fetchPetitionTally(id, readBase),
-    verifyingContract ? verifyAll(petition, verifyingContract, readBase) : Promise.resolve({ verifiedSigners: [], records: [], invalidCount: 0 }),
-    fetchSettledSigners(chainId, id, indexerBase),
-  ])
-
-  return {
-    petition,
-    capturedCount: capturedTally.count,
-    verifiedSigners: verified.verifiedSigners,
-    settledSigners,
-  }
 }
 
 /**
