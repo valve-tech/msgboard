@@ -2,6 +2,7 @@ import { createConfig } from 'ponder'
 import { http, type Abi } from 'viem'
 // The CoinFlip/Raffle ABIs come from games-core (it resolves the @gibs/random artifacts reliably).
 import { coinFlipAbi, raffleAbi } from '@msgboard/games-core'
+import { PETITION_SIGNATURES_ABI } from '@msgboard/petition'
 // SudokuLog isn't re-exported by games-core, so its ABI comes straight from the compiled artifact —
 // same source games-core uses for CoinFlip/Raffle (`Artifact.abi as viem.Abi`).
 import SudokuLogArtifact from '../contracts/artifacts/contracts/games/SudokuLog.sol/SudokuLog.json'
@@ -34,6 +35,31 @@ const SUDOKU_LOG_943 = '0xf700e0c1fd235719738cca1cdef6f41bfaef163c'
 const SUDOKU_LOG_369 = '0x939cbb0f10b5f9e76861a179fbe666e1cae50ba7'
 const SUDOKU_START_BLOCK_943 = 24_898_763
 const SUDOKU_START_BLOCK_369 = 27_063_003
+
+// PetitionSignatures — unlike the contracts above, this one is NOT deployed yet
+// (`@msgboard/petition`'s `deployments` map is still `{}`), so there's no address to pin at build
+// time. Addresses + start blocks are read from env instead, and filled in post-deploy by whoever runs
+// this indexer. Only build a per-chain network entry when its address env var is actually set, so
+// `ponder codegen`/`tsc` succeed with no env at all — the indexer simply doesn't index petitions until
+// then, rather than pointing at a bogus placeholder address.
+const PETITION_ADDR_943 = process.env.PETITION_ADDR_943
+const PETITION_START_943 = process.env.PETITION_START_943
+const PETITION_ADDR_369 = process.env.PETITION_ADDR_369
+const PETITION_START_369 = process.env.PETITION_START_369
+
+const petitionNetwork: Record<string, { address: `0x${string}`; startBlock: number }> = {}
+if (PETITION_ADDR_943) {
+  petitionNetwork.pulsechainV4 = {
+    address: PETITION_ADDR_943 as `0x${string}`,
+    startBlock: PETITION_START_943 ? Number(PETITION_START_943) : 0,
+  }
+}
+if (PETITION_ADDR_369) {
+  petitionNetwork.pulsechain = {
+    address: PETITION_ADDR_369 as `0x${string}`,
+    startBlock: PETITION_START_369 ? Number(PETITION_START_369) : 0,
+  }
+}
 
 export default createConfig({
   networks: {
@@ -83,5 +109,15 @@ export default createConfig({
         },
       },
     },
+    // Registered only when at least one PETITION_ADDR_{943,369} env var is set (see petitionNetwork
+    // above) — pre-deploy, this contract simply isn't part of the config.
+    ...(Object.keys(petitionNetwork).length > 0
+      ? {
+          PetitionSignatures: {
+            abi: PETITION_SIGNATURES_ABI,
+            network: petitionNetwork,
+          },
+        }
+      : {}),
   },
 })
