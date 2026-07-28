@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <rect width="32" height="32" rx="7" fill="#14151b"/>
+  <rect x="1" y="1" width="30" height="30" rx="6" fill="none" stroke="#c79a3e" stroke-opacity="0.35" stroke-width="1"/>
+  <text x="16" y="17" font-family="Georgia, 'Times New Roman', serif" font-size="20" fill="#c79a3e"
+        text-anchor="middle" dominant-baseline="central">✶</text>
+</svg>
