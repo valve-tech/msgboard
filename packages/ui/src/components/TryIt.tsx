@@ -3,6 +3,7 @@ import { Icon } from '@iconify/react'
 import { Chat } from './Chat'
 import { Interactive } from './Interactive'
 import { Arcade } from './Arcade'
+import { Petitions } from './Petitions'
 import { readDeepLink, writeDeepLink } from '../lib/deeplink'
 
 /**
@@ -16,12 +17,13 @@ import { readDeepLink, writeDeepLink } from '../lib/deeplink'
  * (the board content is polled once for the whole page).
  */
 
-type SectionId = 'chat' | 'mechanics' | 'arcade'
+type SectionId = 'chat' | 'mechanics' | 'arcade' | 'petitions'
 
 const SECTIONS: { id: SectionId; label: string; icon: string; blurb: string }[] = [
   { id: 'chat', label: 'Chat', icon: 'mdi:chat-outline', blurb: 'a live room — pick a privacy mode (public, anonymous, or encrypted) and say something' },
   { id: 'mechanics', label: 'Mechanics', icon: 'mdi:cog-outline', blurb: 'compose a raw message and watch the proof-of-work + wire format' },
   { id: 'arcade', label: 'Arcade', icon: 'mdi:dice-multiple', blurb: 'a provably-fair coin flip over the board — the arcade\'s whole thesis in one tab' },
+  { id: 'petitions', label: 'Petitions', icon: 'mdi:file-sign-outline', blurb: 'sign a featured petition with your wallet — a co-signed statement, PoW-stamped to the board' },
 ]
 
 export function TryIt({ workerFactory }: { workerFactory?: () => Worker }) {
@@ -70,6 +72,7 @@ export function TryIt({ workerFactory }: { workerFactory?: () => Worker }) {
       {active === 'chat' && <Chat workerFactory={workerFactory} />}
       {active === 'mechanics' && <Interactive workerFactory={workerFactory} />}
       {active === 'arcade' && <Arcade workerFactory={workerFactory} />}
+      {active === 'petitions' && <Petitions workerFactory={workerFactory} />}
     </div>
   )
 }
