@@ -33,3 +33,5 @@ export { runLandingHouse, landingHouseConfig, type LandingHouseOpts } from './ru
 
 // Key derivation for operators/entrypoints (e.g. the landing-house actor): the house SIGNS only.
 export { houseSignerFromMnemonic, readMnemonic } from './liveConfig'
+
+export { runChipFaucet, chipFaucetConfig, type ChipFaucetOpts } from './runChipFaucet'
