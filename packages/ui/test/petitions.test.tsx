@@ -67,7 +67,7 @@ describe('Petitions — landing widget', () => {
 
     await screen.findByText(new RegExp(STATEMENT))
     expect(await screen.findByText(/posted, unverified/i)).toBeTruthy()
-    expect(screen.getByText(/1 signed/i)).toBeTruthy()
+    expect(await screen.findByText(/1 signed/i)).toBeTruthy()
   })
 
   it('links out to the full app', async () => {
