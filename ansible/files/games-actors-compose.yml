@@ -119,6 +119,22 @@ services:
       MSGBOARD_RPC: "https://one.valve.city/rpc/${VALVE_RPC_KEY}/evm/369"
       HOUSE_INDEX: "50"
     command: node landing-house.mjs
+  # The fun-chips FAUCET: watches games.msgboard.xyz:chipsplease:943 and owner-mints Chips to the
+  # posted recipient address (one PoW post = one grant, dedup by message hash). The faucet key
+  # (mnemonic index 51) is the Chips owner and needs 943 GAS (minting is on-chain). Posts nothing.
+  chip-faucet:
+    image: node:24-alpine
+    restart: unless-stopped
+    working_dir: /app
+    volumes: [ "./:/app" ]
+    env_file: .env
+    environment:
+      CHAIN: "943"
+      RPC: "https://one.valve.city/rpc/${VALVE_RPC_KEY}/evm/943"
+      CHIPS: "0x81f130c7d9ff020f46f3b01918424173f8d5ca64"
+      FAUCET_INDEX: "51"
+      CHIP_CATEGORY: "chipsplease:943"
+    command: node chip-faucet.mjs
   cast-watcher-369:
     image: node:24-alpine
     restart: unless-stopped

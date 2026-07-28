@@ -16,7 +16,7 @@
   vars:
     games_repo: "{{ playbook_dir }}/.."
     actors_dir: /opt/games-actors
-    bundles: [cast-watcher, player-bots, flipbook-bots, cosign-bot, session-bots, landing-house, pow-worker]
+    bundles: [cast-watcher, player-bots, flipbook-bots, cosign-bot, session-bots, landing-house, pow-worker, chip-faucet]
   tasks:
     - name: The actor sources must exist locally
       ansible.builtin.stat:
@@ -89,10 +89,11 @@
            + (['flipbook-bots'] if 'flipbook-bots' in changed_bundles else [])
            + (['cosign-bot'] if 'cosign-bot' in changed_bundles else [])
            + (['session-bots'] if ('session-bots' in changed_bundles or 'pow-worker' in changed_bundles) else [])
-           + (['landing-house', 'landing-house-369'] if 'landing-house' in changed_bundles else []) }}
+           + (['landing-house', 'landing-house-369'] if 'landing-house' in changed_bundles else [])
+           + (['chip-faucet'] if 'chip-faucet' in changed_bundles else []) }}
       when: restart_targets | length > 0
 
-    - name: Smoke — all nine services are up
+    - name: Smoke — all ten services are up
       ansible.builtin.shell: >-
         set -o pipefail;
         docker compose ps --format '{{ '{{' }}.Service{{ '}}' }} {{ '{{' }}.State{{ '}}' }}' | sort
@@ -102,7 +103,7 @@
       register: fleet
       changed_when: false
       failed_when: >-
-        fleet.stdout_lines | select('search', ' running') | list | length != 9
+        fleet.stdout_lines | select('search', ' running') | list | length != 10
 
     # No --tail: the banner prints once at startup, and a long-running unchanged service (no
     # restart this run — by design) has it far beyond any tail window. NO pipefail here — grep -q
@@ -125,6 +126,7 @@
         - { svc: session-bots, banner: "session bots on chain 943" }
         - { svc: landing-house, banner: "landing house on chain 943" }
         - { svc: landing-house-369, banner: "landing house on chain 369" }
+        - { svc: chip-faucet, banner: "chip faucet on chain 943" }
       changed_when: false
       register: banner
       retries: 2
