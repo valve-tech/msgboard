@@ -1,0 +1,49 @@
+{
+  "name": "@msgboard/petition",
+  "version": "0.0.1",
+  "description": "Shared interface for MsgBoard petitions: descriptor codec, EIP-712 digest, category keys, and contract ABI",
+  "repository": "github:valve-tech/msgboard",
+  "author": "MsgBoard",
+  "license": "MIT",
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "keywords": [
+    "msgboard",
+    "petition",
+    "signatures"
+  ],
+  "scripts": {
+    "prebuild": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "tsc",
+    "watch": "tsc -w",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "prettier --check ."
+  },
+  "files": [
+    "dist/"
+  ],
+  "dependencies": {
+    "@msgboard/cosign": "^0.0.33",
+    "@msgboard/sdk": "^0.0.34",
+    "viem": "^2.25.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.2",
+    "vitest": "^3.1.1"
+  }
+}
