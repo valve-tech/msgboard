@@ -565,6 +565,21 @@ const config: HardhatUserConfig = {
           optimizer: { enabled: true, runs: 200 },
         },
       },
+      // PetitionSignatures deploys to 943/369 like the other games contracts — pin Shanghai (no
+      // MCOPY/TSTORE) so the deployed bytecode runs there. OZ is pinned to 5.0.2 in package.json
+      // precisely so its EIP712/ECDSA sources stay Shanghai-compatible (see the `eas` foundry
+      // profile note in foundry.toml).
+      'contracts/PetitionSignatures.sol': {
+        version: '0.8.25',
+        settings: {
+          viaIR: true,
+          evmVersion: 'shanghai',
+          optimizer: {
+            enabled: true,
+            runs: 1_000,
+          },
+        },
+      },
     },
   },
   paths: {
