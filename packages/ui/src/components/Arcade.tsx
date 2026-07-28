@@ -1,14 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '@iconify/react'
+import { stringToHex, type Hex } from 'viem'
 import {
   useChainStore,
   selectChain,
   selectTransportUrl,
   selectRpcValid,
+  selectSelectedOption,
+  selectChipFaucetActive,
+  selectClient,
 } from '../stores/chain'
 import { makeWorkerBoard } from '../seams/worker-board'
+import { connectInjectedWallet } from '../lib/wallet'
+import { readChipsBalance } from '../lib/chips'
 import { shortHex, type FlipSide, type FlipFeedRecord } from '../lib/coinflip'
 import type { FlipResult, FlipStep } from '../lib/arcade-engine'
+import { ToggleButton } from './ToggleButton'
 
 /**
  * Arcade — a genuinely provably-fair coin flip, played as a REAL board-mediated commit-reveal round
@@ -90,6 +97,22 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
   const [elapsedMs, setElapsedMs] = useState<number | null>(null)
   const [liveMs, setLiveMs] = useState(0)
 
+  // ── "Get chips" (Task 7) ─────────────────────────────────────────────────
+  // Purely additive: the flip above ALWAYS plays the zero-stakes local `balance`/`tally` counter,
+  // in both modes, untouched by any of this. Memory-only (default ON) is today's walletless
+  // behavior exactly. Switched OFF (and only when this chain declares a chipFaucet), a Connect
+  // button appears; once connected, "Get chips" posts a faucet request to the board and polls
+  // the real on-chain Chips balance.
+  const [memoryOnly, setMemoryOnly] = useState(true)
+  const [wallet, setWallet] = useState<{ address: Hex } | null>(null)
+  const [connecting, setConnecting] = useState(false)
+  const [walletError, setWalletError] = useState<string | null>(null)
+  const [granting, setGranting] = useState(false)
+  const [onchainChips, setOnchainChips] = useState<bigint | null>(null)
+  const [chipsPending, setChipsPending] = useState(false)
+  const chipFaucet = useChainStore((s) => selectSelectedOption(s)?.chipFaucet)
+  const chipActive = useChainStore((s) => selectChipFaucetActive(s))
+
   // The PoW board seam — grinds off-thread and posts. Rebuilt only on transport/chain/difficulty change.
   const board = useMemo(() => {
     if (!transportUrl) return null
@@ -158,6 +181,54 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
         setError('The house bot didn’t respond — this round is void (no stakes were at risk). Try again.')
     } finally {
       setFlipping(false)
+    }
+  }
+
+  const connectWallet = async () => {
+    setConnecting(true)
+    setWalletError(null)
+    try {
+      const w = await connectInjectedWallet()
+      setWallet({ address: w.address })
+    } catch (e) {
+      setWalletError(e instanceof Error ? e.message : 'Failed to connect wallet.')
+    } finally {
+      setConnecting(false)
+    }
+  }
+
+  const getChips = async () => {
+    if (!wallet || !board || !chipFaucet) return
+    setGranting(true)
+    setChipsPending(false)
+    try {
+      // Post to the SAME 32-byte category the faucet SERVICE watches — `stringToHex(name, {size:32})`,
+      // a zero-padded name, NOT a keccak categoryHash — with `data` = the recipient address AS-IS
+      // (already hex; do NOT stringToHex() it) so the faucet's `isAddress(m.data)` match works.
+      // Mirrors the gas-request flow in Interactive.tsx (stringToHex(categoryValue,{size:32}) + the
+      // raw hex message text).
+      await board.addMessage({
+        category: stringToHex(chipFaucet.category, { size: 32 }),
+        data: wallet.address.toLowerCase() as Hex,
+      })
+      // Poll the real on-chain balance until it rises above what we last saw (or time out).
+      const client = selectClient(useChainStore.getState())
+      const before = onchainChips
+      let found = false
+      for (let i = 0; i < 30; i++) {
+        const bal = await readChipsBalance(client, chipFaucet.chips, wallet.address)
+        if (before == null || bal > before) {
+          setOnchainChips(bal)
+          found = true
+          break
+        }
+        await new Promise((r) => setTimeout(r, 2000))
+      }
+      if (!found) setChipsPending(true)
+    } catch {
+      setChipsPending(true)
+    } finally {
+      setGranting(false)
     }
   }
 
@@ -241,6 +312,62 @@ export function Arcade({ workerFactory }: { workerFactory?: () => Worker }) {
               <Icon icon="mdi:poker-chip" className="size-3.5 text-amber-500" />
               {balance.toString()} fun-chips
             </span>
+          </div>
+
+          {/* memory-only toggle + (when off, on a chain with a chip faucet) connect-wallet /
+              get-chips / on-chain balance — purely additive, never touches the flip above */}
+          <div className="flex w-full flex-col gap-1">
+            <div className="flex w-full items-center justify-between text-xs font-medium">
+              <span className="inline-flex items-center gap-1.5 text-gray-500 dark:text-gray-400">
+                <ToggleButton
+                  off="on-chain"
+                  on="memory"
+                  checked={memoryOnly}
+                  onClick={() => setMemoryOnly((m) => !m)}
+                  iconClass="size-3"
+                />
+                memory-only chips
+              </span>
+              {!memoryOnly && chipActive && (
+                <span className="flex items-center gap-2">
+                  {!wallet ? (
+                    <button
+                      onClick={() => void connectWallet()}
+                      disabled={connecting}
+                      className="inline-flex items-center gap-1 rounded-full bg-indigo-500/10 px-2.5 py-1 text-indigo-600 ring-1 ring-indigo-500/30 transition disabled:cursor-not-allowed disabled:opacity-50 dark:text-indigo-400">
+                      <Icon
+                        icon={connecting ? 'mdi:loading' : 'mdi:wallet-outline'}
+                        className={`size-3.5 ${connecting ? 'animate-spin' : ''}`}
+                      />
+                      {connecting ? 'Connecting…' : 'Connect'}
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => void getChips()}
+                        disabled={granting}
+                        className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2.5 py-1 text-amber-600 ring-1 ring-amber-500/30 transition disabled:cursor-not-allowed disabled:opacity-50 dark:text-amber-400">
+                        <Icon
+                          icon={granting ? 'mdi:loading' : 'mdi:poker-chip'}
+                          className={`size-3.5 ${granting ? 'animate-spin' : ''}`}
+                        />
+                        {granting ? 'Requesting…' : 'Get chips'}
+                      </button>
+                      <span className="text-gray-500 dark:text-gray-400">
+                        {onchainChips != null
+                          ? `${onchainChips.toString()} on-chain`
+                          : chipsPending
+                            ? 'still pending…'
+                            : shortHex(wallet.address, 4)}
+                      </span>
+                    </>
+                  )}
+                </span>
+              )}
+            </div>
+            {!memoryOnly && walletError && (
+              <p className="text-right text-[11px] text-amber-600 dark:text-amber-400">{walletError}</p>
+            )}
           </div>
 
           {/* the coin */}
