@@ -3,16 +3,24 @@
  * capture→settle loop on chain 943. Mirrors the other fleet actors (chip-faucet, cosign-bot,
  * landing-house): env-driven, mnemonic-indexed keys, a startup banner the deploy greps.
  *
- * Two phases, per the design in `packages/petition`:
- *   1. CAPTURE (once, at start) — ensure each `PETITION_STATEMENTS` entry exists as a petition
- *      (`readPetitions` + `createPetition` if absent, creator = mnemonic CREATOR_INDEX, id derived
- *      from a deterministic per-statement salt so a restart never double-creates); then have
- *      `SIGNER_COUNT` mnemonic-indexed keys (SIGNER_START_INDEX..) `signPetition` each petition they
- *      haven't already signed (dedup via `readPetitionSignatures`).
- *   2. SETTLE (once at start, then every SETTLE_INTERVAL_MS) — per petition, recompute which
- *      captured signatures VERIFY (`verifySignature`) and are not yet recorded on-chain
- *      (`PetitionSignatures.signed`), and `submitBatch` the outstanding set with explicit EIP-1559
- *      fees (`sendAs`/`flooredFees` from actor-common — never the node's ~100k-gwei suggestion).
+ * Two phases, run once at start AND every `SETTLE_INTERVAL_MS` thereafter (both attempt/attemptRead-
+ * guarded — see the "resilience" note below), per the design in `packages/petition`:
+ *   1. CAPTURE — ensure each `PETITION_STATEMENTS` entry exists as a petition (`readPetitions` +
+ *      `createPetition` if absent, creator = mnemonic CREATOR_INDEX, id derived from a deterministic
+ *      per-statement salt so a restart never double-creates); then have `SIGNER_COUNT` mnemonic-
+ *      indexed keys (SIGNER_START_INDEX..) `signPetition` each petition they haven't already signed
+ *      (dedup via `readPetitionSignatures`). Re-running this on every tick (not just at start) means
+ *      a statement added to `PETITION_STATEMENTS` after the process started still gets seeded.
+ *   2. SETTLE — per petition, recompute which captured signatures VERIFY (`verifySignature`) and are
+ *      not yet recorded on-chain (`PetitionSignatures.signed`), and `submitBatch` the outstanding set
+ *      with explicit EIP-1559 fees (`sendAs`/`flooredFees` from actor-common — never the node's
+ *      ~100k-gwei suggestion).
+ *
+ * RESILIENCE: every board/chain read either phase depends on goes through `attempt`
+ * (fire-and-forget actions) or `attemptRead` (reads whose result is needed) — both log one line and
+ * return/continue rather than throw. So a transient board/RPC hiccup, even on the very first tick,
+ * can never propagate out of `tick()` to `main().catch` → `process.exit(1)`; the process stays up
+ * and the next tick retries.
  *
  * PETITION_VERIFIER (the deployed PetitionSignatures address) is env-driven because
  * `@msgboard/petition`'s `deployments` registry is still `{}`. Signing is domain-bound to
@@ -39,10 +47,10 @@
  *   CREATOR_INDEX (0)     mnemonic addressIndex for the petition creator / settle submitter.
  *   SIGNER_START_INDEX(1) first mnemonic addressIndex signers are derived from (SIGNER_COUNT keys,
  *                         contiguous from here).
- *   SETTLE_INTERVAL_MS    settle tick cadence. Default 300000 (5 min).
+ *   SETTLE_INTERVAL_MS    tick cadence (capture + settle, both re-run every tick). Default 300000 (5 min).
  *   PETITION_WINDOW_DAYS  rolling read window for petitions/signatures. Default 30.
  *   DRY_RUN               if set, log intended create/sign/settle actions; post/send nothing.
- *   ONCE                  if set, run one capture + one settle tick then exit (smoke / typecheck).
+ *   ONCE                  if set, run a single tick (capture + settle) then exit (smoke / typecheck).
  */
 import * as viem from 'viem'
 import type { GamesChainId } from '@msgboard/games-core'
@@ -139,9 +147,24 @@ const main = async () => {
     }
   }
 
-  // ── CAPTURE (once at start): ensure petitions exist, then have SIGNER_COUNT keys sign them ──
+  /** Same contract as `attempt`, but for a READ whose result the caller needs: a failure logs one
+   *  line and yields `undefined` instead of throwing, so a transient board/RPC error can never
+   *  escape `capture`/`settle` and kill the process. */
+  const attemptRead = async <T>(label: string, fn: () => Promise<T>): Promise<T | undefined> => {
+    try {
+      return await fn()
+    } catch (e) {
+      console.error(`petition bot: ${label}: ${oneLine(e)}`)
+      return undefined
+    }
+  }
+
+  // ── CAPTURE (at start, then every SETTLE_INTERVAL_MS): ensure petitions exist, then have
+  //    SIGNER_COUNT keys sign them. Every read is `attemptRead`-guarded so a transient board/RPC
+  //    failure logs one line and returns/continues instead of throwing out of `capture`. ──
   const capture = async () => {
-    const existing = await readPetitions(board, WINDOW_DAYS)
+    const existing = await attemptRead('capture: readPetitions', () => readPetitions(board, WINDOW_DAYS))
+    if (existing === undefined) return
     const toCreate = petitionsNeedingCreation(existing, STATEMENTS, creator.account.address, saltFor)
     for (const { statement, id, salt } of toCreate) {
       await attempt(`create petition ${short(id)}`, async () => {
@@ -165,9 +188,14 @@ const main = async () => {
     if (!PETITION_VERIFIER) return // capture-only: no domain to sign against yet
 
     // Re-read so newly-created petitions above are included in the signing pass.
-    const petitions = await readPetitions(board, WINDOW_DAYS)
+    const petitions = await attemptRead('capture: re-read readPetitions', () => readPetitions(board, WINDOW_DAYS))
+    if (petitions === undefined) return
     for (const p of petitions) {
-      const existingSigs = await readPetitionSignatures(board, p.id, WINDOW_DAYS)
+      const existingSigs = await attemptRead(
+        `capture: readPetitionSignatures ${short(p.id)}`,
+        () => readPetitionSignatures(board, p.id, WINDOW_DAYS),
+      )
+      if (existingSigs === undefined) continue // transient read failure — try this petition next tick
       const already = new Set(existingSigs.map((r) => r.signer.toLowerCase()))
       for (const signer of signers) {
         if (already.has(signer.account.address.toLowerCase())) continue
@@ -183,17 +211,22 @@ const main = async () => {
     }
   }
 
-  // ── SETTLE (once at start + every SETTLE_INTERVAL_MS): submitBatch the outstanding signers ──
+  // ── SETTLE (at start + every SETTLE_INTERVAL_MS): submitBatch the outstanding signers ──
   const settle = async () => {
     if (!PETITION_VERIFIER) return // nothing to read/settle against
     const verifier = PETITION_VERIFIER as viem.Hex
-    const petitions = await readPetitions(board, WINDOW_DAYS)
+    const petitions = await attemptRead('settle: readPetitions', () => readPetitions(board, WINDOW_DAYS))
+    if (petitions === undefined) return
     for (const p of petitions) {
       await attempt(`settle petition ${short(p.id)}`, async () => {
         const records = await readPetitionSignatures(board, p.id, WINDOW_DAYS)
         const { count: capturedTotal } = tally(records)
 
-        // Keep only the LATEST record per signer whose signature verifies against the real domain.
+        // Keep one verified record per signer whose signature verifies against the real domain. Any
+        // digest-matching signature is equally valid to submit, so which one wins doesn't matter —
+        // note the loop below does NOT keep the newest: `keysForWindow` yields today's category
+        // first then older days descending, and each later (older-day) match here OVERWRITES the
+        // map entry, so the record actually retained per signer is the OLDEST match, not the latest.
         const verifiedBySigner = new Map<string, SignatureRecord>()
         for (const r of records) {
           if (await verifySignature(p, r, verifier)) verifiedBySigner.set(r.signer.toLowerCase(), r)
@@ -240,16 +273,26 @@ const main = async () => {
     }
   }
 
-  await capture()
-  await settle()
+  // One tick = capture (ensure petitions + signatures) then settle (submitBatch outstanding). Both
+  // phases are internally attempt/attemptRead-guarded, so `tick` itself never throws — a transient
+  // board/RPC failure logs one line and the NEXT tick (interval or restart) retries; it can never
+  // kill this long-running process. Run every SETTLE_INTERVAL_MS (not just once at startup) so the
+  // bot both self-heals from a failed startup tick and keeps seeding/signing newly-added statements
+  // over time, not only at process start.
+  const tick = async () => {
+    await attempt('capture tick', capture)
+    await attempt('settle tick', settle)
+  }
+
+  await tick() // guarded initial kick — no unguarded await here that can exit the process
 
   if (env.ONCE === 'true') return
 
-  const settleTimer = setInterval(() => { void settle().catch((e) => console.error(`petition bot: settle tick failed: ${oneLine(e)}`)) }, SETTLE_INTERVAL_MS)
+  const tickTimer = setInterval(() => { void tick() }, SETTLE_INTERVAL_MS)
 
   const shutdown = (sig: string) => {
     console.log(`\n${sig} — stopping petition bot…`)
-    clearInterval(settleTimer)
+    clearInterval(tickTimer)
     process.exit(0)
   }
   process.on('SIGINT', () => shutdown('SIGINT'))
