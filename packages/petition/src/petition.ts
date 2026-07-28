@@ -1,6 +1,4 @@
 import { type Hex, recoverAddress } from 'viem'
-import { publicKeyToAddress } from 'viem/accounts'
-import { secp256k1 } from '@noble/curves/secp256k1'
 import {
   type BoardClient,
   type SignatureRecord,
@@ -14,32 +12,6 @@ import {
 import { type Petition, decodePetition, encodePetition } from './descriptor.js'
 import { petitionDigest } from './digest.js'
 import { PETITION_NS, INDEX_SCOPE, signScope } from './categories.js'
-
-/**
- * Synchronous ECDSA signer recovery, mirroring viem's `recoverAddress` bit-for-bit (same
- * secp256k1 recovery + `publicKeyToAddress` derivation) without viem's dynamic `import()`,
- * which forces that path to be async. `verifySignature` needs a genuinely synchronous
- * `boolean` return, so signer recovery is inlined here via `@noble/curves` — the same
- * library viem itself uses under the hood for this exact operation.
- */
-function recoverSignerSync(hash: Hex, signature: Hex): Hex {
-  const yParityOrV = Number(`0x${signature.slice(130)}`)
-  const recoveryBit =
-    yParityOrV === 0 || yParityOrV === 1
-      ? yParityOrV
-      : yParityOrV === 27
-        ? 0
-        : yParityOrV === 28
-          ? 1
-          : (() => {
-              throw new Error('recoverSignerSync: invalid yParityOrV value')
-            })()
-  const sig = secp256k1.Signature.fromCompact(signature.slice(2, 130)).addRecoveryBit(
-    recoveryBit as 0 | 1,
-  )
-  const publicKey = `0x${sig.recoverPublicKey(hash.slice(2)).toHex(false)}` as Hex
-  return publicKeyToAddress(publicKey)
-}
 
 /** Posts `p`'s descriptor to the petition index under the current UTC day's bucket. */
 export async function createPetition(
@@ -128,15 +100,15 @@ export function tally(records: SignatureRecord[]): { count: number; signers: Hex
  * and that the signature recovers to `record.signer` (case-insensitive). Never throws — returns
  * false on any mismatch or recovery failure.
  */
-export function verifySignature(
+export async function verifySignature(
   p: Petition,
   record: SignatureRecord,
   verifyingContract: Hex,
-): boolean {
+): Promise<boolean> {
   try {
     const digest = petitionDigest(p, verifyingContract)
     if (record.digest.toLowerCase() !== digest.toLowerCase()) return false
-    const recovered = recoverSignerSync(digest, record.signature)
+    const recovered = await recoverAddress({ hash: digest, signature: record.signature })
     return recovered.toLowerCase() === record.signer.toLowerCase()
   } catch {
     return false
