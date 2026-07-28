@@ -35,3 +35,4 @@ export { runLandingHouse, landingHouseConfig, type LandingHouseOpts } from './ru
 export { houseSignerFromMnemonic, readMnemonic } from './liveConfig'
 
 export { runChipFaucet, chipFaucetConfig, type ChipFaucetOpts } from './runChipFaucet'
+export { computeTopUp, refuelGas, type RefuelGasOpts, type RefuelPublicClient, type RefuelWalletClient } from './gasRefill'
