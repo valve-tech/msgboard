@@ -42,7 +42,6 @@ import { LiveFeed } from './components/LiveFeed'
 import { StandingsScreen } from './components/StandingsScreen'
 import { Lobby } from './components/Lobby'
 import { Menu } from './components/Menu'
-import { CryptoShowcase } from './components/CryptoShowcase'
 import { AppShell } from './components/shell/AppShell'
 import { HowItWorksProvider, HowItWorksModal } from './components/HowItWorks'
 
@@ -201,7 +200,12 @@ export const App = () => {
 
   return (
     <HowItWorksProvider value={() => setHowOpen(true)}>
-      <HowItWorksModal open={howOpen} onClose={() => setHowOpen(false)} />
+      <HowItWorksModal
+        open={howOpen}
+        onClose={() => setHowOpen(false)}
+        deployment={deployment}
+        model={trustModel}
+      />
       <AppShell
         deployment={deployment}
         games={[...GAMES]}
@@ -209,16 +213,15 @@ export const App = () => {
         onPick={(id) => setTab(id as Tab)}
         topRight={topRight}
       >
-        {/* Per-table chrome: the error banners + the preserved trust gate (CryptoShowcase +
-            TrustBanner). Spans the stage grid full width above the stage/tray pair, so the migrated
-            tables' "tap Got it on the fairness note above" copy still reads true. */}
+        {/* Per-table chrome: the error banners + the slim TrustBanner gate. The full CryptoShowcase
+            explainer is demoted into the "How it works" modal (model-aware) so the stage leads. Spans
+            the stage grid full width above the stage/tray pair. */}
         <div
           className="shell-chrome"
           style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}
         >
           {wallet.error && <div className="banner bad">{wallet.error}</div>}
           {data.error && <div className="banner bad">chain read failed: {data.error}</div>}
-          {trustModel && <CryptoShowcase deployment={deployment} model={trustModel} />}
           {trustModel && (
             <TrustBanner
               deployment={deployment}
