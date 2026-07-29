@@ -1,4 +1,7 @@
 import { createContext, useContext, useEffect } from 'react'
+import type { GameDeployment } from '../config'
+import type { TrustModel } from './TrustBanner'
+import { CryptoShowcase } from './CryptoShowcase'
 
 /**
  * The fairness explainer, demoted from the old lobby `.pitch` block into an on-demand overlay.
@@ -22,7 +25,17 @@ export const HowItWorksLink = () => {
   )
 }
 
-export const HowItWorksModal = ({ open, onClose }: { open: boolean; onClose: () => void }) => {
+export const HowItWorksModal = ({
+  open,
+  onClose,
+  deployment,
+  model,
+}: {
+  open: boolean
+  onClose: () => void
+  deployment?: GameDeployment
+  model?: TrustModel | null
+}) => {
   // Esc closes the overlay — standard modal affordance.
   useEffect(() => {
     if (!open) return
@@ -65,6 +78,10 @@ export const HowItWorksModal = ({ open, onClose }: { open: boolean; onClose: () 
               Close
             </button>
           </div>
+          {model && deployment ? (
+            <CryptoShowcase deployment={deployment} model={model} />
+          ) : (
+          <>
           <p className="hero-pitch">
             Every table, one promise: <strong>the draw is sealed before you play</strong>, and your own
             browser re-runs the count on every result. The numbers draws its seed from validator
@@ -104,6 +121,8 @@ export const HowItWorksModal = ({ open, onClose }: { open: boolean; onClose: () 
             <em>The record</em>). And if a chain's vault ever runs dry, the tables simply pause; nothing breaks, and
             play resumes the moment it's refilled.
           </p>
+          </>
+          )}
         </div>
       </div>
     </div>
