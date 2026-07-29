@@ -250,9 +250,25 @@
   font-weight: 700;
   color: #fff;
 }
+.amount-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #fff;
+  font: inherit;
+  font-size: 19px;
+  font-weight: 700;
+}
+.amount-input::placeholder {
+  color: var(--muted);
+}
 .amount .m {
   color: var(--gold);
   font-size: 14px;
+  white-space: nowrap;
+  padding-left: 8px;
 }
 .quick {
   display: grid;
@@ -273,6 +289,42 @@
 .quick button:hover {
   border-color: #e8b93f55;
   color: var(--gold);
+}
+/* in-hand action buttons (Blackjack Hit/Stand/Double/Split, etc.) */
+.acts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+  margin-top: 11px;
+}
+.acts button {
+  padding: 12px 0;
+  border-radius: 10px;
+  font-weight: 800;
+  font-size: 12.5px;
+  border: none;
+  cursor: pointer;
+  color: #fff;
+  box-shadow: 0 5px 0 #0006, 0 8px 16px -6px #000;
+}
+.b-hit {
+  background: linear-gradient(180deg, #e0685c, #b8413a);
+}
+.b-stand {
+  background: linear-gradient(180deg, #4a7fd0, #2f57a0);
+}
+.b-double {
+  background: linear-gradient(180deg, #d0a53f, #a87d24);
+}
+.b-split {
+  background: linear-gradient(180deg, #3aa76a, #237a49);
+}
+/* small muted caption under the tray controls (connect-wallet / ack hints) */
+.tray-hint {
+  margin: 9px 0 0;
+  font-size: 11.5px;
+  color: var(--muted);
+  text-align: center;
 }
 .primary {
   width: 100%;
