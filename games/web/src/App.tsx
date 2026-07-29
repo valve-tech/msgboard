@@ -42,12 +42,11 @@ import { LiveFeed } from './components/LiveFeed'
 import { StandingsScreen } from './components/StandingsScreen'
 import { Lobby } from './components/Lobby'
 import { Menu } from './components/Menu'
-import { GameNav } from './components/GameNav'
 import { CryptoShowcase } from './components/CryptoShowcase'
+import { AppShell } from './components/shell/AppShell'
+import { HowItWorksProvider, HowItWorksModal } from './components/HowItWorks'
 
 const short = (a?: viem.Hex) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '')
-
-const PITCH_KEY = 'msgboard-games:pitch-collapsed'
 
 const chainIcon = (chainId: number): string | undefined =>
   chainId === 31337 ? undefined : `https://gib.show/image/${chainId}?w=32&h=32&format=webp`
@@ -112,6 +111,11 @@ const trustModelFor = (tab: Tab): TrustModel | null =>
           ? 'zk'
           : 'cosigned'
 
+// The five recomposed tables (Blackjack, Crash, Dice, Roulette, Mines) return a two-column
+// [stage-col, tray-col] pair that drops straight into the .stagewrap grid. Every other screen still
+// returns its legacy single-column form; grid auto-flow drops it into the stage (first) column, with
+// the tray column left empty, until its archetype migration lands in a later phase.
+
 // Deep-link state: the active game (and chain) live in the URL query so a refresh, share, or bookmark
 // lands back on the same table instead of resetting to Coin Flip.
 const readParams = () => new URLSearchParams(window.location.search)
@@ -150,8 +154,9 @@ export const App = () => {
       deployment && trustModel ? isTrustAcknowledgedFor(deployment.chainId, trustModel) : true,
     )
   }, [deployment, trustModel])
-  // Collapsed by default — show the tables, not a wall of text. We remember if a player opened it.
-  const [pitchOpen, setPitchOpen] = useState(() => localStorage.getItem(PITCH_KEY) === 'false')
+  // The fairness explainer is demoted to an on-demand overlay — opened from the shell top bar or any
+  // table's "How it works" title-bar action. Closed by default; the tables lead, not a wall of text.
+  const [howOpen, setHowOpen] = useState(false)
 
   if (!deployment) {
     return (
@@ -166,110 +171,62 @@ export const App = () => {
     )
   }
 
+  // The old .marquee's chain switch + wallet controls, lifted into the shell's top bar, plus the new
+  // "How it works" opener (the demoted fairness explainer). Combined into the single topRight node.
+  const topRight = (
+    <>
+      <button type="button" className="secondary" onClick={() => setHowOpen(true)}>
+        ⓘ How it works
+      </button>
+      <Menu
+        label="chain"
+        options={deployments.map((d) => ({ label: d.label, icon: chainIcon(d.chainId) }))}
+        value={deploymentIndex}
+        onChange={setDeploymentIndex}
+      />
+      {wallet.address ? (
+        <>
+          <span className="tag mono">{short(wallet.address)}</span>
+          <button className="secondary" onClick={wallet.disconnect}>
+            Disconnect
+          </button>
+        </>
+      ) : (
+        <button onClick={() => void wallet.connect()} disabled={wallet.connecting}>
+          {wallet.connecting ? 'Connecting…' : 'Connect wallet'}
+        </button>
+      )}
+    </>
+  )
+
   return (
-    <div className="app">
-      <div className="marquee">
-        <div>
-          <h1>
-            MsgBoard <span className="gold">Games</span>
-          </h1>
-          <div className="strapline">the back room where the books stay open</div>
-        </div>
-        <div className="row">
-          <Menu
-            label="chain"
-            options={deployments.map((d) => ({ label: d.label, icon: chainIcon(d.chainId) }))}
-            value={deploymentIndex}
-            onChange={setDeploymentIndex}
-          />
-          {wallet.address ? (
-            <>
-              <span className="tag mono">{short(wallet.address)}</span>
-              <button className="secondary" onClick={wallet.disconnect}>
-                Disconnect
-              </button>
-            </>
-          ) : (
-            <button onClick={() => void wallet.connect()} disabled={wallet.connecting}>
-              {wallet.connecting ? 'Connecting…' : 'Connect wallet'}
-            </button>
+    <HowItWorksProvider value={() => setHowOpen(true)}>
+      <HowItWorksModal open={howOpen} onClose={() => setHowOpen(false)} />
+      <AppShell
+        deployment={deployment}
+        games={[...GAMES]}
+        active={tab}
+        onPick={(id) => setTab(id as Tab)}
+        topRight={topRight}
+      >
+        {/* Per-table chrome: the error banners + the preserved trust gate (CryptoShowcase +
+            TrustBanner). Spans the stage grid full width above the stage/tray pair, so the migrated
+            tables' "tap Got it on the fairness note above" copy still reads true. */}
+        <div
+          className="shell-chrome"
+          style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}
+        >
+          {wallet.error && <div className="banner bad">{wallet.error}</div>}
+          {data.error && <div className="banner bad">chain read failed: {data.error}</div>}
+          {trustModel && <CryptoShowcase deployment={deployment} model={trustModel} />}
+          {trustModel && (
+            <TrustBanner
+              deployment={deployment}
+              model={trustModel}
+              onAcknowledged={() => setTrustAcknowledged(true)}
+            />
           )}
         </div>
-      </div>
-      {tab === 'lobby' && (
-      <details
-        className="pitch"
-        open={pitchOpen}
-        onToggle={(e) => {
-          const isOpen = (e.target as HTMLDetailsElement).open
-          setPitchOpen(isOpen)
-          localStorage.setItem(PITCH_KEY, isOpen ? 'false' : 'true')
-        }}
-      >
-        <summary>How the back room stays honest — and cheap</summary>
-        <div className="pitch-body">
-          <p className="hero-pitch">
-            Every table, one promise: <strong>the draw is sealed before you play</strong>, and your own
-            browser re-runs the count on every result. The numbers draws its seed from validator
-            secrets locked on{' '}
-            <a href="https://msgboard.xyz" target="_blank" rel="noreferrer">
-              chain
-            </a>
-            ; the coin flip needs no seed at all — a peer's sealed choice against your open call, escrowed on chain;
-            the dice, limbo, crash, plinko, wheel, monte, keno, mines, baccarat, dragon tiger, towers, chicken,
-            firewalk, heist, hi-lo, greed dice and the rest lock their seed before the first hand and settle
-            off chain, co-signed, with the trail posted to MsgBoard. A trust-me casino asks you to believe the odds;
-            this room hands you the books.
-          </p>
-          <div className="howit">
-            <div className="howit-step">
-              <span className="howit-num">1</span>
-              <strong>Sealed before you play.</strong> On the chain games, validators ink hashed secrets ahead of the
-              draw and your entry pins that exact set. At the tables, the seed is committed before the first hand. Either
-              way, nothing can change once you've bet.
-            </div>
-            <div className="howit-step">
-              <span className="howit-num">2</span>
-              <strong>The reveal is the draw.</strong> Chain games: the seed is the hash of the validators' revealed
-              secrets — one honest validator beats any cartel. Tables: each hand reveals the next sealed seed, co-signed
-              by you and the house off chain over MsgBoard — no gas per play.
-            </div>
-            <div className="howit-step">
-              <span className="howit-num">3</span>
-              <strong>You keep the books.</strong> Your browser recomputes every outcome — re-verifying the chain draw,
-              or replaying the co-signed table transcript — and stamps the slip <em>on the level</em> or calls it
-              crooked. Don't trust the room; audit it.
-            </div>
-          </div>
-          <p className="howit-footer">
-            <strong>Supercharged by MsgBoard:</strong> coordination rides proof-of-work stamps instead of gas, so fees
-            never bleed the odds — every settlement leaves a notice on the board (follow the trail from{' '}
-            <em>The record</em>). And if a chain's vault ever runs dry, the tables simply pause; nothing breaks, and
-            play resumes the moment it's refilled.
-          </p>
-        </div>
-      </details>
-      )}
-      {wallet.error && <div className="banner bad">{wallet.error}</div>}
-      {data.error && <div className="banner bad">chain read failed: {data.error}</div>}
-      {tab !== 'lobby' && (
-        <GameNav
-          games={GAMES}
-          tab={tab}
-          trustModel={trustModel}
-          trustFor={(id) => trustModelFor(id as Tab)}
-          blockNumber={data.blockNumber}
-          onPick={(id) => setTab(id as Tab)}
-        />
-      )}
-      {trustModel && <CryptoShowcase deployment={deployment} model={trustModel} />}
-      {trustModel && (
-        <TrustBanner
-          deployment={deployment}
-          model={trustModel}
-          onAcknowledged={() => setTrustAcknowledged(true)}
-        />
-      )}
       {tab === 'lobby' && (
         <Lobby
           deployment={deployment}
@@ -553,6 +510,7 @@ export const App = () => {
       )}
       {tab === 'standings' && <StandingsScreen deployment={deployment} myAddress={wallet.address} />}
       {tab === 'live' && <LiveFeed deployment={deployment} />}
+      </AppShell>
       <div className="colophon">
         <span>
           a{' '}
@@ -571,6 +529,6 @@ export const App = () => {
           </a>
         </span>
       </div>
-    </div>
+    </HowItWorksProvider>
   )
 }
