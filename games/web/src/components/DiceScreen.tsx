@@ -8,6 +8,7 @@ import { parseStake } from './StakeInput'
 import { TurnTiming } from './TurnTiming'
 import { InfoDot } from './Meta'
 import { GameStage } from './shell/GameStage'
+import { HowItWorksLink } from './HowItWorks'
 import { BetTray } from './shell/BetTray'
 import { MetaPanel } from './shell/MetaPanel'
 import { ProbabilityStrip } from './stages/ProbabilityStrip'
@@ -282,7 +283,7 @@ export const DiceScreen = ({
 
   return (
     <>
-      <GameStage title="DICE" subtitle="roll under your target to win · sealed before you play" action="ⓘ How it works">
+      <GameStage title="DICE" subtitle="roll under your target to win · sealed before you play" action={<HowItWorksLink />}>
         <ProbabilityStrip header={`ROLL UNDER ${targetDisplay}`} markerPct={markerPct} stats={stats} />
       </GameStage>
 

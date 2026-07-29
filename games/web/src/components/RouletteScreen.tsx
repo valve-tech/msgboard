@@ -9,6 +9,7 @@ import { parseStake } from './StakeInput'
 import { InfoDot } from './Meta'
 import { Menu } from './Menu'
 import { GameStage } from './shell/GameStage'
+import { HowItWorksLink } from './HowItWorks'
 import { BetTray } from './shell/BetTray'
 import { MetaPanel } from './shell/MetaPanel'
 import { WheelBoard, type RouletteCellBet } from './stages/WheelBoard'
@@ -137,7 +138,7 @@ export const RouletteScreen = ({ walletClient, trustAcknowledged, myAddress }: {
 
   return (
     <>
-      <GameStage title="ROULETTE" subtitle="european single zero · sealed before you play" action="ⓘ How it works">
+      <GameStage title="ROULETTE" subtitle="european single zero · sealed before you play" action={<HowItWorksLink />}>
         <WheelBoard recent={recentForBoard} onCell={onCell} />
       </GameStage>
 

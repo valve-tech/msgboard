@@ -190,6 +190,18 @@
   border-radius: 20px;
   white-space: nowrap;
 }
+/* the "How it works" opener rendered inside the .pf pill — plain, so the pill carries the chrome */
+.gtitle .pf .pf-open {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
 
 /* right tray */
 .tray-col {
