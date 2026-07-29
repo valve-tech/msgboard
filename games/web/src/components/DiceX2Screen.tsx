@@ -114,7 +114,7 @@ export const DiceX2Screen = ({
               type="number"
               min={MIN_TARGET_PCT}
               max={MAX_TARGET_PCT}
-              step={0.5}
+              step="any"
               value={targetPct}
               onChange={(e) => setTargetPct(e.target.value)}
               style={{ width: '5.5rem' }}
