@@ -89,4 +89,7 @@ export interface Deployment {
 }
 
 /** Known deployments, keyed by chainId. Populated after the contract is deployed. */
-export const deployments: Record<number, Deployment> = {}
+export const deployments: Record<number, Deployment> = {
+  // PulseChain V4 testnet (bots/demo). Deployed via valve_deployer 2026-07-28.
+  943: { chainId: 943, address: '0x4e1c2e17fd4b9200654081a6f47a9b34ce498024', deployBlock: 24990403 },
+}
