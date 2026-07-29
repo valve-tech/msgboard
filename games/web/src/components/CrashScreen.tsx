@@ -5,7 +5,6 @@ import type { GameDeployment } from '../config'
 import { useSession, type RoundRecord } from '../hooks/useSession'
 import { parseStake } from './StakeInput'
 import { TurnTiming } from './TurnTiming'
-import { InfoDot } from './Meta'
 import { GameStage } from './shell/GameStage'
 import { HowItWorksLink } from './HowItWorks'
 import { BetTray } from './shell/BetTray'
@@ -133,24 +132,16 @@ export const CrashScreen = ({
           onAmount={setAmount}
           action={
             session.ready ? (
-              <button onClick={run} disabled={!canRun}>
+              <button className="primary" onClick={run} disabled={!canRun}>
                 {session.status === 'playing' ? 'Launching…' : 'Launch'}
               </button>
             ) : (
-              <button onClick={() => void session.start()} disabled={!canOpen}>
+              <button className="primary" onClick={() => void session.start()} disabled={!canOpen}>
                 {session.status === 'opening' ? 'Opening…' : 'Open table'}
               </button>
             )
           }
         >
-          <p className="muted">
-            Crash
-            <InfoDot>
-              <strong>Set an auto-cashout, then watch the rocket climb.</strong> If the multiplier reaches
-              your target before it crashes, you win that multiple. The crash point is sealed before you
-              play — your browser re-checks it. Instant off-chain settle, no gas.
-            </InfoDot>
-          </p>
           <div className="field">
             <label htmlFor="crash-cashout">Auto cashout ×</label>
             <div className="box">
@@ -169,9 +160,9 @@ export const CrashScreen = ({
             </div>
             <div className="slider" />
           </div>
-          {!walletClient && <span className="muted">connect a wallet to play</span>}
+          {!walletClient && <p className="tray-hint">connect a wallet to play</p>}
           {walletClient && !trustAcknowledged && (
-            <span className="muted">tap "Got it" on the fairness note above first</span>
+            <p className="tray-hint">tap "Got it" on the fairness note above first</p>
           )}
           <p className="muted">
             {amount !== '' && stake === undefined && <span className="bad">enter a positive amount · </span>}

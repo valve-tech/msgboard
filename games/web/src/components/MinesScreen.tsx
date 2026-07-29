@@ -10,7 +10,6 @@ import type { GameDeployment } from '../config'
 import { useMinesSession, type MinesGameRecord } from '../hooks/useMinesSession'
 import { parseStake } from './StakeInput'
 import { TurnTiming } from './TurnTiming'
-import { InfoDot } from './Meta'
 import { GameStage } from './shell/GameStage'
 import { HowItWorksLink } from './HowItWorks'
 import { BetTray } from './shell/BetTray'
@@ -174,14 +173,6 @@ export const MinesScreen = ({
             )
           }
         >
-          <p className="muted">
-            Mines
-            <InfoDot>
-              <strong>Clear safe tiles to grow your multiplier.</strong> Cash out any time — hit a mine
-              and you bust. More mines means faster growth and bigger risk. The board is sealed before
-              your first pick (it can't move under you), and you can re-check the whole game after.
-            </InfoDot>
-          </p>
           <label className="threshold-label">
             tiles
             <Menu
@@ -210,9 +201,9 @@ export const MinesScreen = ({
               <span style={{ color: 'var(--muted)', fontSize: 12 }}>of {tileCount}</span>
             </div>
           </div>
-          {!walletClient && <span className="muted">connect a wallet to play</span>}
+          {!walletClient && <p className="tray-hint">connect a wallet to play</p>}
           {walletClient && !trustAcknowledged && (
-            <span className="muted">tap "Got it" on the fairness note above first</span>
+            <p className="tray-hint">tap "Got it" on the fairness note above first</p>
           )}
           <p className="muted">
             {amount !== '' && stake === undefined && <span className="bad">enter a positive amount · </span>}

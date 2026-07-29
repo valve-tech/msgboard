@@ -6,7 +6,6 @@ import type { GameDeployment } from '../config'
 import { useSession, makeInMemoryHouseDriver, PLACEHOLDER_VERIFIER, type RoundRecord, DEMO_HOUSE_ADDRESS } from '../hooks/useSession'
 import { parseStake } from './StakeInput'
 import { TurnTiming } from './TurnTiming'
-import { InfoDot } from './Meta'
 import { GameStage } from './shell/GameStage'
 import { HowItWorksLink } from './HowItWorks'
 import { BetTray } from './shell/BetTray'
@@ -293,24 +292,16 @@ export const DiceScreen = ({
           onAmount={setAmount}
           action={
             session.ready ? (
-              <button onClick={() => void roll()} disabled={!canRoll}>
+              <button className="primary" onClick={() => void roll()} disabled={!canRoll}>
                 {session.status === 'playing' ? 'Rolling…' : 'Roll'}
               </button>
             ) : (
-              <button onClick={() => void openAndStart()} disabled={!canOpen}>
+              <button className="primary" onClick={() => void openAndStart()} disabled={!canOpen}>
                 {session.status === 'opening' ? 'Opening…' : 'Open table'}
               </button>
             )
           }
         >
-          <p className="muted">
-            Dice
-            <InfoDot>
-              <strong>Roll under your win chance to win.</strong> The lower the chance, the bigger the
-              payout. Each roll is settled instantly off-chain — no gas — and the seed was sealed before
-              you opened the table, so you can re-check it.
-            </InfoDot>
-          </p>
           <div className="field">
             <label htmlFor="dice-target">Win chance %</label>
             <div className="box">
@@ -328,9 +319,9 @@ export const DiceScreen = ({
               <span style={{ color: 'var(--muted)', fontSize: 12 }}>%</span>
             </div>
           </div>
-          {!walletClient && <span className="muted">connect a wallet to play</span>}
+          {!walletClient && <p className="tray-hint">connect a wallet to play</p>}
           {walletClient && !trustAcknowledged && (
-            <span className="muted">tap "Got it" on the fairness note above first</span>
+            <p className="tray-hint">tap "Got it" on the fairness note above first</p>
           )}
           <p className="muted">
             {amount !== '' && stake === undefined && <span className="bad">enter a positive amount · </span>}
