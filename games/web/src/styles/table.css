@@ -1,0 +1,986 @@
+/*
+ * table.css — the "sitting at a table" game shell + stage stylesheet.
+ *
+ * Ported from the approved brainstorm mockups (verbatim class rules, deduplicated):
+ *   - table-feel-v2.html  → shell (.app/.rail*/.ticker*/.stagewrap/.gtitle*/.bet*/.meta*/...) + felt (blackjack)
+ *   - game-configs.html   → .primary/.primary.amber + canvas (crash) + strip (dice) + grid (mines)
+ *   - roulette-v2.html    → wheel + board (roulette)
+ *
+ * Two deliberate deviations from a literal copy-paste, both to avoid real collisions across the
+ * three source files when their classes share a stylesheet:
+ *   1. `.stage` uses game-configs.html's `display:grid;place-items:center` (not roulette-v2.html's
+ *      one-off `display:flex` override) so every game stage is laid out the same way; Roulette gets
+ *      its own `.roulstage` absolute-inset wrapper (from game-configs.html) to match the
+ *      .crashstage/.dicestage/.minesstage convention instead.
+ *   2. `.grid` means two different things in the source files (Crash's canvas line pattern vs.
+ *      Roulette's board layout) — both scoped to their stage wrapper (`.crashstage .grid`,
+ *      `.boardwrap .grid`) so the same class name can't clobber the other game's rules.
+ */
+
+:root {
+  --gold: #e8b93f;
+  --gold-dim: #b98f2c;
+  --ink: #e9e4d2;
+  --muted: #8a927f;
+  --felt-hi: #2a8459;
+  --felt-a: #1c6644;
+  --felt-b: #0a3121;
+  --felt-edge: #05160e;
+  --wood-hi: #7a4e2c;
+  --wood-a: #5a3820;
+  --wood-b: #241207;
+  --bg: #0a0d0b;
+  --panel: #121a15;
+  --panel2: #0d1310;
+  --red: #d05a4e;
+  --green: #33c07a;
+  --blue: #4a7fd0;
+  --purple: #8a6bd0;
+}
+
+/* ============================== shell ============================== */
+
+.app {
+  display: grid;
+  grid-template-columns: 60px 1fr;
+  height: 100vh;
+}
+
+/* left rail */
+.rail {
+  background: linear-gradient(180deg, #0d1310, #0a0d0b);
+  border-right: 1px solid #ffffff0d;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 0;
+  gap: 4px;
+  overflow: hidden;
+}
+.rail .mark {
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  background: radial-gradient(120% 120% at 30% 20%, #2a5f43, #0c2418);
+  border: 1px solid var(--gold-dim);
+  display: grid;
+  place-items: center;
+  color: var(--gold);
+  font-weight: 800;
+  font-size: 17px;
+  margin-bottom: 8px;
+  box-shadow: 0 4px 14px #0008, inset 0 1px 0 #ffffff22;
+}
+.rail .ico {
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 17px;
+  cursor: pointer;
+  position: relative;
+}
+.rail .ico:hover {
+  background: #ffffff0a;
+  color: var(--ink);
+}
+.rail .ico.on {
+  color: var(--gold);
+  background: #e8b93f14;
+}
+.rail .ico.on::before {
+  content: '';
+  position: absolute;
+  left: -11px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--gold);
+}
+.rail .sep {
+  height: 1px;
+  width: 28px;
+  background: #ffffff10;
+  margin: 5px 0;
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* win ticker */
+.ticker {
+  height: 34px;
+  flex: 0 0 auto;
+  border-bottom: 1px solid #ffffff0d;
+  display: flex;
+  align-items: center;
+  gap: 30px;
+  padding: 0 18px;
+  overflow: hidden;
+  white-space: nowrap;
+  background: #0b0f0d;
+  font-size: 12px;
+  color: var(--muted);
+}
+.ticker b {
+  color: var(--ink);
+  font-weight: 600;
+}
+.ticker .amt {
+  color: var(--gold);
+  font-weight: 700;
+}
+.ticker .who {
+  color: #7fd0a0;
+}
+.ticker .dot {
+  color: #ffffff28;
+}
+
+/* game area layout */
+.stagewrap {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(280px, 25vw, 350px);
+  gap: 16px;
+  padding: 14px 18px;
+  min-height: 0;
+}
+.stage-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.gtitle {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.gtitle h1 {
+  margin: 0;
+  font-size: clamp(20px, 2.4vw, 30px);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  font-family: 'Arial Narrow', 'Inter', sans-serif;
+  background: linear-gradient(180deg, #fff, #cfc8ad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.gtitle .sub {
+  color: var(--muted);
+  font-size: 12px;
+}
+.gtitle .pf {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--gold-dim);
+  cursor: pointer;
+  border: 1px solid #e8b93f30;
+  padding: 5px 11px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+
+/* right tray */
+.tray-col {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+.bet {
+  background: linear-gradient(180deg, var(--panel), var(--panel2));
+  border: 1px solid #ffffff10;
+  border-radius: 15px;
+  padding: 14px;
+  box-shadow: 0 20px 40px -20px #000;
+}
+.bet .top {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10.5px;
+  color: var(--muted);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  margin-bottom: 7px;
+}
+.amount {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #0a0f0c;
+  border: 1px solid #ffffff12;
+  border-radius: 10px;
+  padding: 11px 13px;
+  font-size: 19px;
+  font-weight: 700;
+  color: #fff;
+}
+.amount .m {
+  color: var(--gold);
+  font-size: 14px;
+}
+.quick {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-top: 7px;
+}
+.quick button {
+  background: #0e150f;
+  border: 1px solid #ffffff12;
+  color: var(--ink);
+  padding: 8px 0;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+}
+.quick button:hover {
+  border-color: #e8b93f55;
+  color: var(--gold);
+}
+.primary {
+  width: 100%;
+  margin-top: 11px;
+  padding: 15px 0;
+  border-radius: 11px;
+  font-weight: 900;
+  font-size: 15px;
+  border: none;
+  cursor: pointer;
+  letter-spacing: 0.05em;
+  color: #03170d;
+  background: linear-gradient(180deg, #33c07a, #1c8a51);
+  box-shadow: 0 7px 0 #0006, 0 10px 20px -6px #000;
+}
+.primary.amber {
+  background: linear-gradient(180deg, #e8b93f, #a87d24);
+  color: #241800;
+}
+.pf-link {
+  text-align: right;
+  font-size: 11px;
+  color: var(--gold-dim);
+  margin-top: 9px;
+  cursor: pointer;
+}
+
+.meta {
+  background: linear-gradient(180deg, var(--panel), var(--panel2));
+  border: 1px solid #ffffff10;
+  border-radius: 15px;
+  padding: 5px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.tabs {
+  display: flex;
+  gap: 2px;
+  padding: 5px;
+}
+.tabs div {
+  flex: 1;
+  text-align: center;
+  padding: 8px 0;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--muted);
+  border-radius: 8px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+.tabs div.on {
+  background: #e8b93f14;
+  color: var(--gold);
+}
+.pl {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 11.5px;
+  text-align: center;
+  line-height: 1.6;
+  padding: 8px;
+}
+.pl b {
+  display: block;
+  color: var(--ink);
+  font-size: 20px;
+  margin-bottom: 2px;
+}
+
+/* ============================== stage =============================== */
+
+.stage {
+  flex: 1;
+  border-radius: 18px;
+  position: relative;
+  overflow: hidden;
+  min-height: 0;
+  background: radial-gradient(120% 80% at 50% 0%, #16281e 0%, #080f0b 72%);
+  border: 1px solid #ffffff0d;
+  box-shadow: 0 30px 70px -22px #000, inset 0 1px 0 #ffffff10;
+  display: grid;
+  place-items: center;
+}
+.stage::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(75% 80% at 50% 30%, transparent 48%, #000000cc 100%);
+}
+.stage::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -6%;
+  width: 60%;
+  height: 55%;
+  transform: translateX(-50%);
+  pointer-events: none;
+  background: radial-gradient(50% 60% at 50% 0%, #ffe9a81f, transparent 70%);
+}
+
+/* ============================== felt (blackjack) ============================== */
+
+.scene {
+  position: absolute;
+  inset: 0;
+  perspective: 820px;
+  perspective-origin: 50% 26%;
+}
+.plane {
+  position: absolute;
+  left: 50%;
+  top: 52%;
+  width: min(112%, 940px);
+  aspect-ratio: 1.42 / 1;
+  transform: translate(-50%, -50%) rotateX(58deg);
+  transform-style: preserve-3d;
+}
+.rail-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 90deg at 50% 50%,
+    var(--wood-b),
+    var(--wood-a) 12%,
+    var(--wood-hi) 25%,
+    var(--wood-a) 40%,
+    var(--wood-b) 52%,
+    var(--wood-a) 66%,
+    var(--wood-hi) 78%,
+    var(--wood-a) 90%,
+    var(--wood-b)
+  );
+  padding: clamp(20px, 3.4vw, 40px);
+  box-shadow: 0 60px 80px -20px #000d, inset 0 4px 10px #ffffff26, inset 0 -14px 30px #000b;
+}
+.felt {
+  position: absolute;
+  inset: clamp(20px, 3.4vw, 40px);
+  border-radius: 50%;
+  overflow: hidden;
+  background: radial-gradient(
+    60% 62% at 50% 30%,
+    var(--felt-hi) 0%,
+    var(--felt-a) 42%,
+    var(--felt-b) 82%,
+    var(--felt-edge) 100%
+  );
+  box-shadow: inset 0 18px 55px #000000aa, inset 0 -8px 22px #00000077;
+}
+.felt::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(46% 30% at 50% 12%, #ffffff1c, transparent 70%);
+}
+.arc {
+  position: absolute;
+  top: 26%;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #efe6c8bb;
+  font-size: clamp(9px, 1.1vw, 13px);
+  letter-spacing: 0.32em;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.medal {
+  position: absolute;
+  top: 41%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: clamp(46px, 7vw, 84px);
+  font-weight: 900;
+  color: #0d3323;
+  text-shadow: 0 1px 0 #ffffff1f, 0 -2px 3px #00000090;
+  -webkit-text-stroke: 2px #b98f2c55;
+  letter-spacing: -3px;
+}
+.drack {
+  position: absolute;
+  top: 11%;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 5px;
+  background: #20140a;
+  padding: 6px 11px;
+  border-radius: 8px;
+  box-shadow: inset 0 2px 5px #000a, 0 3px 6px #0008;
+}
+.chip {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  box-shadow: 0 1px 2px #0009, inset 0 1px 0 #ffffff44;
+}
+.spots {
+  position: absolute;
+  bottom: 20%;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  gap: min(9vw, 74px);
+}
+.spot {
+  width: clamp(46px, 6vw, 72px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  border: 2px solid #e8b93f80;
+  display: grid;
+  place-items: center;
+  color: #e8b93f88;
+  font-size: 10px;
+  font-weight: 700;
+  box-shadow: inset 0 0 20px #00000055, 0 0 20px #e8b93f1f;
+}
+.spot.main {
+  border-color: var(--gold);
+  color: var(--gold);
+  box-shadow: inset 0 0 24px #00000066, 0 0 34px #e8b93f3a;
+}
+.fcard {
+  position: absolute;
+  width: clamp(34px, 4.4vw, 52px);
+  aspect-ratio: 0.72;
+  border-radius: 5px;
+  background: linear-gradient(160deg, #fdfcf5, #e6e2d2);
+  box-shadow: 0 6px 14px -3px #000b;
+  color: #123;
+  font-weight: 800;
+  font-size: clamp(10px, 1.3vw, 15px);
+  padding: 4px 5px;
+  transform: rotate(var(--r, 0deg));
+}
+.fcard.red {
+  color: #c0392b;
+}
+.fcard.back {
+  background: linear-gradient(160deg, #3a2f5e, #241a44);
+}
+.hand {
+  position: absolute;
+  bottom: 4%;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 10px;
+  z-index: 5;
+  filter: drop-shadow(0 22px 22px #000a);
+}
+.hcard {
+  width: clamp(58px, 7vw, 86px);
+  aspect-ratio: 0.7;
+  border-radius: 9px;
+  background: linear-gradient(158deg, #fefdf6, #e4e0cf);
+  color: #12203a;
+  font-weight: 800;
+  font-size: clamp(15px, 2vw, 26px);
+  padding: 8px 10px;
+  box-shadow: inset 0 1px 0 #fff, 0 2px 4px #0006;
+}
+.hcard.red {
+  color: #c0392b;
+}
+.hcard:first-child {
+  transform: rotate(-7deg) translateY(6px);
+}
+.hcard:last-child {
+  transform: rotate(6deg);
+}
+
+/* ============================== canvas (crash) ============================== */
+
+.crashstage {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, #0b1a14 0%, #070f0b 100%);
+  overflow: hidden;
+}
+.crashstage .grid {
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(#ffffff08 1px, transparent 1px),
+    linear-gradient(90deg, #ffffff08 1px, transparent 1px);
+  background-size: 60px 46px;
+}
+.curve {
+  position: absolute;
+  inset: 0;
+}
+.mult {
+  position: absolute;
+  top: 40%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: clamp(44px, 8vw, 96px);
+  font-weight: 900;
+  color: var(--green);
+  text-shadow: 0 0 40px #33c07a66;
+  font-family: 'Arial Narrow', 'Inter', sans-serif;
+  letter-spacing: 1px;
+}
+.hist {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.hchip {
+  padding: 4px 9px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 800;
+  background: #0e150f;
+  border: 1px solid #ffffff12;
+}
+.hchip.lo {
+  color: #d05a4e;
+}
+.hchip.mid {
+  color: #e8b93f;
+}
+.hchip.hi {
+  color: #33c07a;
+}
+
+/* ============================== strip (dice) ============================== */
+
+.dicestage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 22px;
+  padding: 0 6%;
+}
+.rollhdr {
+  font-size: clamp(20px, 3vw, 34px);
+  font-weight: 800;
+  color: #cfc8ad;
+  letter-spacing: 0.02em;
+}
+.rollhdr b {
+  color: var(--gold);
+}
+.strip {
+  width: 100%;
+  max-width: 720px;
+}
+.bar {
+  height: 16px;
+  border-radius: 10px;
+  background: linear-gradient(90deg, var(--green) 0 50%, #3a1512 50% 100%);
+  position: relative;
+  box-shadow: inset 0 2px 6px #0008;
+}
+.bar .lose {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 50%;
+  border-radius: 0 10px 10px 0;
+  background: linear-gradient(90deg, #7a2b25, #d05a4e);
+}
+.marker {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 22px;
+  height: 34px;
+  border-radius: 7px;
+  background: #fff;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 14px var(--gold), 0 3px 6px #000a;
+  border: 2px solid var(--gold);
+}
+.scale {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.stats3 {
+  display: flex;
+  gap: 14px;
+  width: 100%;
+  max-width: 720px;
+}
+.stat {
+  flex: 1;
+  background: #0d1310;
+  border: 1px solid #ffffff10;
+  border-radius: 12px;
+  padding: 14px;
+  text-align: center;
+}
+.stat small {
+  display: block;
+  color: var(--muted);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.stat b {
+  font-size: clamp(18px, 2.4vw, 26px);
+  color: #fff;
+}
+.stat.g b {
+  color: var(--gold);
+}
+
+/* ============================== wheel (roulette) ============================== */
+
+/* absolute-inset wrapper so `.stage`'s shared `display:grid;place-items:center` doesn't need a
+   per-game override — matches the .crashstage/.dicestage/.minesstage convention (from game-configs.html) */
+.roulstage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  gap: 12px;
+}
+
+.wheelrow {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+.wheelwrap {
+  perspective: 600px;
+  flex: 0 0 auto;
+}
+.wheel {
+  width: clamp(120px, 14vw, 170px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  position: relative;
+  transform: rotateX(24deg);
+  transform-style: preserve-3d;
+  box-shadow: 0 26px 40px -14px #000d, 0 0 0 5px #241207, 0 0 0 8px #e8b93f66, inset 0 0 26px #000a;
+}
+.wheel .pockets {
+  position: absolute;
+  inset: 9px;
+  border-radius: 50%;
+}
+.wheel .hub {
+  position: absolute;
+  inset: 34%;
+  border-radius: 50%;
+  background: radial-gradient(#2a5f43, #0c2418);
+  border: 2px solid #e8b93f88;
+  display: grid;
+  place-items: center;
+  box-shadow: inset 0 0 12px #000a;
+}
+.wheel .hub::after {
+  content: '◈';
+  color: var(--gold);
+  font-size: 15px;
+}
+.wheel .ball {
+  position: absolute;
+  top: 6%;
+  left: 50%;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #fff;
+  transform: translateX(-50%);
+  box-shadow: 0 0 8px #fff, 0 2px 3px #000a;
+}
+.recent {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.rlabel {
+  font-size: 10.5px;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.nums {
+  display: flex;
+  gap: 5px;
+}
+.num {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 800;
+  color: #fff;
+}
+.num.r {
+  background: var(--red);
+}
+.num.b {
+  background: #1a1a1a;
+  border: 1px solid #ffffff22;
+}
+.num.g {
+  background: var(--green);
+}
+.hotcold {
+  font-size: 11px;
+  color: var(--muted);
+}
+.hotcold b {
+  color: var(--ink);
+}
+
+.boardwrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  justify-content: center;
+}
+.felt-note {
+  align-self: center;
+  font-size: 10px;
+  color: #6f7a68;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+.boardwrap .grid {
+  display: grid;
+  grid-template-columns: 38px repeat(12, 1fr) 44px;
+  grid-auto-rows: minmax(24px, 3.2vh);
+  gap: 3px;
+}
+.cell {
+  border-radius: 4px;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: clamp(10px, 1.15vw, 13px);
+  color: #fff;
+  cursor: pointer;
+  border: 1px solid #ffffff12;
+  box-shadow: inset 0 1px 0 #ffffff10;
+}
+.cell.r {
+  background: #8f2f27;
+}
+.cell.b {
+  background: #1b1f1c;
+}
+.cell.g {
+  background: var(--green);
+  grid-row: 1 / span 3;
+  grid-column: 1;
+  font-size: 16px;
+}
+.cell:hover {
+  outline: 1.5px solid var(--gold);
+  z-index: 2;
+}
+.col21 {
+  grid-column: 14;
+  font-size: 11px;
+  color: var(--ink);
+  background: #0f150f;
+}
+.dozens {
+  display: grid;
+  grid-template-columns: 38px repeat(3, 1fr) 44px;
+  gap: 3px;
+}
+.dozens div {
+  grid-column: span 1;
+  background: #0f150f;
+  border: 1px solid #ffffff12;
+  border-radius: 4px;
+  text-align: center;
+  padding: 7px 0;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.dozens .sp {
+  grid-column: 2 / 3;
+}
+.dozens .lead {
+  grid-column: 1;
+  background: transparent;
+  border: none;
+}
+.outside {
+  display: grid;
+  grid-template-columns: 38px repeat(6, 1fr) 44px;
+  gap: 3px;
+}
+.outside div {
+  background: #0f150f;
+  border: 1px solid #ffffff12;
+  border-radius: 4px;
+  text-align: center;
+  padding: 7px 0;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.outside .lead {
+  background: transparent;
+  border: none;
+}
+.outside .red {
+  color: #e0685c;
+}
+.chips {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+.cval {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 12px;
+  color: #fff;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 #ffffff44, 0 2px 4px #0008;
+  border: 2px dashed #ffffff44;
+}
+.cval.on {
+  outline: 2px solid var(--gold);
+  border-style: solid;
+}
+
+/* ============================== grid (mines) ============================== */
+
+.minesstage {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+.mgrid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: clamp(6px, 1vw, 12px);
+  width: min(78%, 460px);
+}
+.tile {
+  aspect-ratio: 1;
+  border-radius: 12px;
+  background: linear-gradient(160deg, #1b241d, #0e140f);
+  border: 1px solid #ffffff10;
+  display: grid;
+  place-items: center;
+  font-size: clamp(18px, 3vw, 30px);
+  box-shadow: inset 0 1px 0 #ffffff10, 0 4px 8px -3px #000;
+  cursor: pointer;
+}
+.tile.gem {
+  background: radial-gradient(circle at 40% 30%, #2a8459, #0c3a26);
+  border-color: #e8b93f55;
+  box-shadow: 0 0 18px #33c07a44;
+}
+.tile.bomb {
+  background: radial-gradient(circle at 40% 30%, #d05a4e, #5a1a15);
+}
+.tile.hidden:hover {
+  border-color: #e8b93f55;
+}
+.mnext {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #0e150f;
+  border: 1px solid #ffffff12;
+  border-radius: 20px;
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--gold);
+}
+
+/* ============================== responsive ============================== */
+
+@media (max-width: 940px) {
+  .stagewrap {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(280px, 1fr) auto;
+  }
+  .tray-col {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .bet {
+    flex: 1 1 300px;
+  }
+  .meta {
+    flex: 1 1 240px;
+  }
+}
+@media (max-width: 560px) {
+  .app {
+    grid-template-columns: 0 1fr;
+  }
+  .rail {
+    display: none;
+  }
+}
