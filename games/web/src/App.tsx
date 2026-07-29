@@ -212,24 +212,42 @@ export const App = () => {
         active={tab}
         onPick={(id) => setTab(id as Tab)}
         topRight={topRight}
+        chrome={
+          /* Slim per-table chrome pinned above the scrolling stage: error banners + the TrustBanner
+             gate. The full CryptoShowcase explainer is demoted into the "How it works" modal. */
+          <>
+            {wallet.error && <div className="banner bad">{wallet.error}</div>}
+            {data.error && <div className="banner bad">chain read failed: {data.error}</div>}
+            {trustModel && (
+              <TrustBanner
+                deployment={deployment}
+                model={trustModel}
+                onAcknowledged={() => setTrustAcknowledged(true)}
+              />
+            )}
+          </>
+        }
+        footer={
+          <div className="colophon">
+            <span>
+              a{' '}
+              <a href="https://msgboard.xyz" target="_blank" rel="noreferrer">
+                MsgBoard
+              </a>{' '}
+              venue · run by valve
+            </span>
+            <span>
+              <a href="https://github.com/gibsfinance/random" target="_blank" rel="noreferrer">
+                contracts
+              </a>
+              {' · '}
+              <a href="https://github.com/valve-tech/msgboard" target="_blank" rel="noreferrer">
+                msgboard
+              </a>
+            </span>
+          </div>
+        }
       >
-        {/* Per-table chrome: the error banners + the slim TrustBanner gate. The full CryptoShowcase
-            explainer is demoted into the "How it works" modal (model-aware) so the stage leads. Spans
-            the stage grid full width above the stage/tray pair. */}
-        <div
-          className="shell-chrome"
-          style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}
-        >
-          {wallet.error && <div className="banner bad">{wallet.error}</div>}
-          {data.error && <div className="banner bad">chain read failed: {data.error}</div>}
-          {trustModel && (
-            <TrustBanner
-              deployment={deployment}
-              model={trustModel}
-              onAcknowledged={() => setTrustAcknowledged(true)}
-            />
-          )}
-        </div>
       {tab === 'lobby' && (
         <Lobby
           deployment={deployment}
@@ -514,24 +532,6 @@ export const App = () => {
       {tab === 'standings' && <StandingsScreen deployment={deployment} myAddress={wallet.address} />}
       {tab === 'live' && <LiveFeed deployment={deployment} />}
       </AppShell>
-      <div className="colophon">
-        <span>
-          a{' '}
-          <a href="https://msgboard.xyz" target="_blank" rel="noreferrer">
-            MsgBoard
-          </a>{' '}
-          venue · run by valve
-        </span>
-        <span>
-          <a href="https://github.com/gibsfinance/random" target="_blank" rel="noreferrer">
-            contracts
-          </a>
-          {' · '}
-          <a href="https://github.com/valve-tech/msgboard" target="_blank" rel="noreferrer">
-            msgboard
-          </a>
-        </span>
-      </div>
     </HowItWorksProvider>
   )
 }
