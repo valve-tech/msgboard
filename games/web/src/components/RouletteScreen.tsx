@@ -6,7 +6,6 @@ import {
 } from '@msgboard/games'
 import type { GameDeployment } from '../config'
 import { parseStake } from './StakeInput'
-import { InfoDot } from './Meta'
 import { Menu } from './Menu'
 import { GameStage } from './shell/GameStage'
 import { HowItWorksLink } from './HowItWorks'
@@ -143,12 +142,7 @@ export const RouletteScreen = ({ walletClient, trustAcknowledged, myAddress }: {
       </GameStage>
 
       <div className="tray-col">
-        <BetTray amount={amount} onAmount={setAmount} action={<button onClick={spinWheel} disabled={!canSpin}>Spin</button>}>
-          <p className="muted">Roulette<InfoDot>
-            <strong>European single-zero wheel.</strong> Place a bet, spin, and the winning pocket is
-            raw % 37 from the sealed seed. Straight up pays 35:1; dozens and columns 2:1; red/black, odd/even
-            and high/low 1:1. The only edge is the green zero. Your browser re-derives the pocket from the
-            disclosed seed to prove the spin.</InfoDot></p>
+        <BetTray amount={amount} onAmount={setAmount} action={<button className="primary amber" onClick={spinWheel} disabled={!canSpin}>Spin</button>}>
           <label className="threshold-label">
             bet
             <Menu
@@ -183,8 +177,8 @@ export const RouletteScreen = ({ walletClient, trustAcknowledged, myAddress }: {
               />
             </label>
           )}
-          {!walletClient && <span className="muted">connect a wallet to play</span>}
-          {walletClient && !trustAcknowledged && <span className="muted">tap "Got it" on the fairness note above first</span>}
+          {!walletClient && <p className="tray-hint">connect a wallet to play</p>}
+          {walletClient && !trustAcknowledged && <p className="tray-hint">tap "Got it" on the fairness note above first</p>}
           <p className="muted">
             {amount !== '' && stake === undefined && <span className="bad">enter a positive amount · </span>}
             {betDef.kind === 'straight' && !straightValid && <span className="bad">number must be 0–36 · </span>}
