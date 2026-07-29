@@ -5,9 +5,13 @@ import {
   commitSeed, roundRandom, type RouletteParams,
 } from '@msgboard/games'
 import type { GameDeployment } from '../config'
-import { StakeInput, parseStake } from './StakeInput'
+import { parseStake } from './StakeInput'
 import { InfoDot } from './Meta'
 import { Menu } from './Menu'
+import { GameStage } from './shell/GameStage'
+import { BetTray } from './shell/BetTray'
+import { MetaPanel } from './shell/MetaPanel'
+import { WheelBoard, type RouletteCellBet } from './stages/WheelBoard'
 
 const fmtMult = (x100: bigint): string => `${(Number(x100) / 100).toFixed(2)}x`
 const randomSeed = (): viem.Hex => viem.bytesToHex(crypto.getRandomValues(new Uint8Array(32)))
@@ -96,16 +100,54 @@ export const RouletteScreen = ({ walletClient, trustAcknowledged, myAddress }: {
   const wins = history.filter((s) => s.win).length
   const net = history.reduce((sum, s) => sum + s.playerDelta, 0n)
 
+  const recentForBoard = history.slice(-6).map((s) => ({
+    n: s.pocket, color: (s.pocket === 0 ? 'g' : isRed(s.pocket) ? 'r' : 'b') as 'r' | 'b' | 'g',
+  }))
+
+  const findBetIndex = (t: RouletteBetType): number => BET_TYPES.findIndex((b) => b.type === t)
+
+  // WheelBoard is stateless — it only emits a bet identifier. This maps each identifier onto the
+  // exact same setBetIndex/setSelection/setStraightRaw state the Menu/group buttons already drive,
+  // so clicking the board is just an alternate way to reach a bet this screen already knows how to
+  // settle (no new bet types, no new settlement path).
+  const onCell = (bet: RouletteCellBet) => {
+    if (bet.startsWith('straight:')) {
+      setBetIndex(findBetIndex(RouletteBetType.STRAIGHT))
+      setStraightRaw(bet.slice('straight:'.length))
+      return
+    }
+    if (bet.startsWith('dozen:')) {
+      setBetIndex(findBetIndex(RouletteBetType.DOZEN))
+      setSelection(Number(bet.slice('dozen:'.length)))
+      return
+    }
+    if (bet.startsWith('column:')) {
+      setBetIndex(findBetIndex(RouletteBetType.COLUMN))
+      setSelection(Number(bet.slice('column:'.length)))
+      return
+    }
+    const simple: Partial<Record<string, RouletteBetType>> = {
+      red: RouletteBetType.RED, black: RouletteBetType.BLACK,
+      odd: RouletteBetType.ODD, even: RouletteBetType.EVEN,
+      low: RouletteBetType.LOW, high: RouletteBetType.HIGH,
+    }
+    const t = simple[bet]
+    if (t !== undefined) setBetIndex(findBetIndex(t))
+  }
+
   return (
-    <div>
-      <div className="card">
-        <h3>Roulette<InfoDot>
-          <strong>European single-zero wheel.</strong> Place a bet, spin, and the winning pocket is
-          raw % 37 from the sealed seed. Straight up pays 35:1; dozens and columns 2:1; red/black, odd/even
-          and high/low 1:1. The only edge is the green zero. Your browser re-derives the pocket from the
-          disclosed seed to prove the spin.</InfoDot></h3>
-        <div className="row">
-          <StakeInput value={amount} onChange={setAmount} />
+    <>
+      <GameStage title="ROULETTE" subtitle="european single zero · sealed before you play" action="ⓘ How it works">
+        <WheelBoard recent={recentForBoard} onCell={onCell} />
+      </GameStage>
+
+      <div className="tray-col">
+        <BetTray amount={amount} onAmount={setAmount} action={<button onClick={spinWheel} disabled={!canSpin}>Spin</button>}>
+          <p className="muted">Roulette<InfoDot>
+            <strong>European single-zero wheel.</strong> Place a bet, spin, and the winning pocket is
+            raw % 37 from the sealed seed. Straight up pays 35:1; dozens and columns 2:1; red/black, odd/even
+            and high/low 1:1. The only edge is the green zero. Your browser re-derives the pocket from the
+            disclosed seed to prove the spin.</InfoDot></p>
           <label className="threshold-label">
             bet
             <Menu
@@ -140,18 +182,15 @@ export const RouletteScreen = ({ walletClient, trustAcknowledged, myAddress }: {
               />
             </label>
           )}
-          <button onClick={spinWheel} disabled={!canSpin}>Spin</button>
           {!walletClient && <span className="muted">connect a wallet to play</span>}
           {walletClient && !trustAcknowledged && <span className="muted">tap "Got it" on the fairness note above first</span>}
-        </div>
-        <p className="muted">
-          {amount !== '' && stake === undefined && <span className="bad">enter a positive amount · </span>}
-          {betDef.kind === 'straight' && !straightValid && <span className="bad">number must be 0–36 · </span>}
-          <span className="ok">{betLabel} pays {fmtMult(payoutX100)}</span>
-        </p>
+          <p className="muted">
+            {amount !== '' && stake === undefined && <span className="bad">enter a positive amount · </span>}
+            {betDef.kind === 'straight' && !straightValid && <span className="bad">number must be 0–36 · </span>}
+            <span className="ok">{betLabel} pays {fmtMult(payoutX100)}</span>
+          </p>
 
-        {spin && (
-          <div style={{ marginTop: '0.75rem' }}>
+          {spin && (
             <p className="muted">
               landed on{' '}
               <span className="tag mono" style={{ fontSize: '1.1rem', color: pocketColor(spin.pocket).css }}>
@@ -164,8 +203,19 @@ export const RouletteScreen = ({ walletClient, trustAcknowledged, myAddress }: {
               </span>
               <span className="muted"> · commit {spin.commit.slice(0, 10)}… · {spin.verified ? 'verify ✓' : 'verify ✗'}</span>
             </p>
-          </div>
-        )}
+          )}
+        </BetTray>
+
+        <MetaPanel tabs={['Recent', 'Stats']}>
+          {history.length > 0 ? (
+            <span>
+              <b>{wins}/{history.length}</b>
+              won · {viem.formatEther(net)} net
+            </span>
+          ) : (
+            <span className="muted">no spins yet</span>
+          )}
+        </MetaPanel>
       </div>
 
       {myAddress && history.length > 0 && (
@@ -190,6 +240,6 @@ export const RouletteScreen = ({ walletClient, trustAcknowledged, myAddress }: {
           </details>
         </>
       )}
-    </div>
+    </>
   )
 }
