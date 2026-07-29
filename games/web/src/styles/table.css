@@ -20,7 +20,7 @@
 :root {
   --gold: #e8b93f;
   --gold-dim: #b98f2c;
-  --ink: #e9e4d2;
+  --shell-ink: #e9e4d2;
   --muted: #8a927f;
   --felt-hi: #2a8459;
   --felt-a: #1c6644;
@@ -55,7 +55,13 @@
   align-items: center;
   padding: 12px 0;
   gap: 4px;
-  overflow: hidden;
+  /* The rail holds ~37 game icons (≫ 100vh); it must scroll its list internally while staying a
+     fixed 60px column. Scrollbar hidden cosmetically — it still scrolls (wheel/trackpad/touch). */
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.rail::-webkit-scrollbar {
+  display: none;
 }
 .rail .mark {
   width: 38px;
@@ -84,7 +90,7 @@
 }
 .rail .ico:hover {
   background: #ffffff0a;
-  color: var(--ink);
+  color: var(--shell-ink);
 }
 .rail .ico.on {
   color: var(--gold);
@@ -130,7 +136,7 @@
   color: var(--muted);
 }
 .ticker b {
-  color: var(--ink);
+  color: var(--shell-ink);
   font-weight: 600;
 }
 .ticker .amt {
@@ -151,7 +157,13 @@
   grid-template-columns: minmax(0, 1fr) clamp(280px, 25vw, 350px);
   gap: 16px;
   padding: 14px 18px;
+  /* min-height:0 lets this flex child shrink below its content; overflow-y:auto then makes the
+     game area below the pinned WinTicker the scroll region (`.main` keeps overflow:hidden so the
+     ticker stays fixed). Everything taller than the viewport — below-fold play buttons, the docked
+     tray, and the trailing history sections migrated screens append as extra grid rows — becomes
+     reachable by scrolling here. */
   min-height: 0;
+  overflow-y: auto;
 }
 .stage-col {
   display: flex;
@@ -251,7 +263,7 @@
 .quick button {
   background: #0e150f;
   border: 1px solid #ffffff12;
-  color: var(--ink);
+  color: var(--shell-ink);
   padding: 8px 0;
   border-radius: 8px;
   font-weight: 600;
@@ -373,7 +385,7 @@
 }
 .pl b {
   display: block;
-  color: var(--ink);
+  color: var(--shell-ink);
   font-size: 20px;
   margin-bottom: 2px;
 }
@@ -385,7 +397,11 @@
   border-radius: 18px;
   position: relative;
   overflow: hidden;
-  min-height: 0;
+  /* flex:1 keeps the stage dominant, filling free space on a tall viewport. The min-height floor
+     keeps it a usable size (rather than collapsing to its absolutely-positioned content) on shorter
+     viewports — where it instead pushes the tray/history past the fold so `.stagewrap` scrolls to
+     them, rather than squashing the stage to nothing. */
+  min-height: min(58vh, 440px);
   background: radial-gradient(120% 80% at 50% 0%, #16281e 0%, #080f0b 72%);
   border: 1px solid #ffffff0d;
   box-shadow: 0 30px 70px -22px #000, inset 0 1px 0 #ffffff10;
@@ -836,7 +852,7 @@
   color: var(--muted);
 }
 .hotcold b {
-  color: var(--ink);
+  color: var(--shell-ink);
 }
 
 .boardwrap {
@@ -891,7 +907,7 @@
 .col21 {
   grid-column: 14;
   font-size: 11px;
-  color: var(--ink);
+  color: var(--shell-ink);
   background: #0f150f;
 }
 .dozens {

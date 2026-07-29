@@ -8,7 +8,7 @@ import {
 } from '@msgboard/games'
 import type { GameDeployment } from '../config'
 import { useMinesSession, type MinesGameRecord } from '../hooks/useMinesSession'
-import { StakeInput, parseStake } from './StakeInput'
+import { parseStake } from './StakeInput'
 import { TurnTiming } from './TurnTiming'
 import { InfoDot } from './Meta'
 import { GameStage } from './shell/GameStage'
