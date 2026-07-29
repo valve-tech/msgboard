@@ -119,6 +119,22 @@
   min-width: 0;
   overflow: hidden;
 }
+/* slim per-table chrome (error banners + trust strip), pinned above the scrolling stage */
+.shell-chrome {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 8px 18px 0;
+}
+/* colophon pinned as a thin footer inside the viewport-locked frame (not a page-scroll sibling) */
+.main > .colophon {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 8px 18px;
+  border-top: 1px solid #ffffff10;
+  font-size: 11px;
+}
 
 /* win ticker */
 .ticker {

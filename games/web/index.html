@@ -31,7 +31,7 @@
         --mono: 'Spline Sans Mono', ui-monospace, monospace;
       }
       * { box-sizing: border-box; }
-      html { color-scheme: dark; }
+      html { color-scheme: dark; height: 100%; }
       body {
         margin: 0;
         color: var(--cream);
@@ -43,17 +43,18 @@
           repeating-linear-gradient(0deg, transparent 0 2px, rgba(0, 0, 0, 0.12) 2px 4px),
           var(--felt-800);
         background-attachment: fixed;
-        min-height: 100vh;
+        height: 100vh;
+        height: 100dvh;
+        overflow: hidden;
       }
       /* Full-bleed host for the shell: the table-feel .app (a height:100vh, 60px|1fr grid from
          table.css) owns the whole layout now, so #root is just a full-width/height container — no
          max-width, no centering, no padding. It stays a flex column only so the colophon (a sibling
          after the 100vh .app) still flows below the fold instead of overlapping. */
       #root {
-        min-height: 100vh;
-        min-height: 100dvh;
-        display: flex;
-        flex-direction: column;
+        height: 100vh;
+        height: 100dvh;
+        overflow: hidden;
       }
       /* NOTE: .app is intentionally NOT styled here — table.css's `.app { display:grid;
          grid-template-columns:60px 1fr; height:100vh }` is the single source of truth for the shell
