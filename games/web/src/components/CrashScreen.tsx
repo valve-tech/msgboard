@@ -3,9 +3,13 @@ import * as viem from 'viem'
 import { crash, type CrashParams } from '@msgboard/games'
 import type { GameDeployment } from '../config'
 import { useSession, type RoundRecord } from '../hooks/useSession'
-import { StakeInput, parseStake } from './StakeInput'
+import { parseStake } from './StakeInput'
 import { TurnTiming } from './TurnTiming'
 import { InfoDot } from './Meta'
+import { GameStage } from './shell/GameStage'
+import { BetTray } from './shell/BetTray'
+import { MetaPanel } from './shell/MetaPanel'
+import { CanvasStage } from './stages/CanvasStage'
 
 const HUNDREDTHS = 100n
 
@@ -94,72 +98,118 @@ export const CrashScreen = ({
   const wins = session.history.filter((r) => r.win).length
   const taken = session.history.reduce((sum, r) => sum + r.playerDelta, 0n)
 
+  // Stage's big multiplier readout: the last settled round's payout, falling back to the pending
+  // auto-cashout target as a preview before the first round — there's no per-tick live curve here,
+  // this is an instant off-chain settle (see the file docstring), so there's nothing to animate.
+  const lastRound = session.history[session.history.length - 1]
+  const bigMultiplier =
+    session.status === 'playing'
+      ? '…'
+      : lastRound
+        ? fmtMult(lastRound.multiplierX100)
+        : autoCashoutX100 !== undefined
+          ? fmtMult(autoCashoutX100)
+          : '—'
+  const historyChips = session.history.slice(-6).map((r) => (
+    <span key={r.round} className={`hchip ${r.win ? 'hi' : 'lo'}`}>
+      {fmtMult(r.multiplierX100)}
+    </span>
+  ))
+
   return (
-    <div>
-      <div className="card">
-        <h3>
-          Crash
-          <InfoDot>
-            <strong>Set an auto-cashout, then watch the rocket climb.</strong> If the multiplier reaches
-            your target before it crashes, you win that multiple. The crash point is sealed before you
-            play — your browser re-checks it. Instant off-chain settle, no gas.
-          </InfoDot>
-        </h3>
-        <div className="row">
-          <StakeInput value={amount} onChange={setAmount} />
-          <label className="threshold-label">
-            auto-cashout ×
-            <input
-              type="number"
-              min={MIN_CASHOUT_MULT}
-              max={MAX_CASHOUT_MULT}
-              step="any"
-              value={cashoutMult}
-              onChange={(e) => setCashoutMult(e.target.value)}
-              style={{ width: '5.5rem' }}
-              aria-label="auto-cashout multiplier"
-            />
-          </label>
-          {session.ready ? (
-            <button onClick={run} disabled={!canRun}>
-              {session.status === 'playing' ? 'Launching…' : 'Launch'}
-            </button>
-          ) : (
-            <button onClick={() => void session.start()} disabled={!canOpen}>
-              {session.status === 'opening' ? 'Opening…' : 'Open table'}
-            </button>
-          )}
+    <>
+      <GameStage
+        title="CRASH"
+        subtitle="cash out before it busts · sealed before you play"
+        action="ⓘ How it works"
+      >
+        <CanvasStage multiplier={bigMultiplier} history={historyChips.length > 0 ? historyChips : undefined} />
+      </GameStage>
+
+      <div className="tray-col">
+        <BetTray
+          amount={amount}
+          onAmount={setAmount}
+          action={
+            session.ready ? (
+              <button onClick={run} disabled={!canRun}>
+                {session.status === 'playing' ? 'Launching…' : 'Launch'}
+              </button>
+            ) : (
+              <button onClick={() => void session.start()} disabled={!canOpen}>
+                {session.status === 'opening' ? 'Opening…' : 'Open table'}
+              </button>
+            )
+          }
+        >
+          <p className="muted">
+            Crash
+            <InfoDot>
+              <strong>Set an auto-cashout, then watch the rocket climb.</strong> If the multiplier reaches
+              your target before it crashes, you win that multiple. The crash point is sealed before you
+              play — your browser re-checks it. Instant off-chain settle, no gas.
+            </InfoDot>
+          </p>
+          <div className="field">
+            <label htmlFor="crash-cashout">Auto cashout ×</label>
+            <div className="box">
+              <input
+                id="crash-cashout"
+                type="number"
+                min={MIN_CASHOUT_MULT}
+                max={MAX_CASHOUT_MULT}
+                step="any"
+                value={cashoutMult}
+                onChange={(e) => setCashoutMult(e.target.value)}
+                aria-label="auto-cashout multiplier"
+                style={{ width: '100%', border: 'none', background: 'transparent', color: 'inherit', font: 'inherit' }}
+              />
+              <span style={{ color: 'var(--muted)', fontSize: 12 }}>×</span>
+            </div>
+            <div className="slider" />
+          </div>
           {!walletClient && <span className="muted">connect a wallet to play</span>}
           {walletClient && !trustAcknowledged && (
             <span className="muted">tap "Got it" on the fairness note above first</span>
           )}
-        </div>
-        <p className="muted">
-          {amount !== '' && stake === undefined && <span className="bad">enter a positive amount · </span>}
-          {cashoutMult !== '' && !cashoutOk && (
-            <span className="bad">
-              auto-cashout {MIN_CASHOUT_MULT.toFixed(2)}x–{MAX_CASHOUT_MULT.toFixed(2)}x ·{' '}
-            </span>
-          )}
-          {autoCashoutX100 !== undefined && <span className="ok">pays {fmtMult(autoCashoutX100)}</span>}
-          {winChancePct !== undefined && (
-            <span className="muted"> · {winChancePct.toFixed(2)}% reach chance</span>
-          )}
-          {potentialWin !== undefined && potentialWin > 0n && (
-            <span className="muted"> · +{viem.formatEther(potentialWin)} on a win</span>
-          )}
-        </p>
-        {session.commit && (
-          <p className="card-meta muted">
-            server-seed commit <span className="mono">{session.commit.slice(0, 10)}…</span>
-            {session.balances && (
-              <>
-                {' · '}your balance {viem.formatEther(session.balances.player)} · {session.roundsLeft} rounds left
-              </>
+          <p className="muted">
+            {amount !== '' && stake === undefined && <span className="bad">enter a positive amount · </span>}
+            {cashoutMult !== '' && !cashoutOk && (
+              <span className="bad">
+                auto-cashout {MIN_CASHOUT_MULT.toFixed(2)}x–{MAX_CASHOUT_MULT.toFixed(2)}x ·{' '}
+              </span>
+            )}
+            {autoCashoutX100 !== undefined && <span className="ok">pays {fmtMult(autoCashoutX100)}</span>}
+            {winChancePct !== undefined && (
+              <span className="muted"> · {winChancePct.toFixed(2)}% reach chance</span>
+            )}
+            {potentialWin !== undefined && potentialWin > 0n && (
+              <span className="muted"> · +{viem.formatEther(potentialWin)} on a win</span>
             )}
           </p>
-        )}
-        {session.error && <p className="bad">{session.error}</p>}
+          {session.commit && (
+            <p className="card-meta muted">
+              server-seed commit <span className="mono">{session.commit.slice(0, 10)}…</span>
+              {session.balances && (
+                <>
+                  {' · '}your balance {viem.formatEther(session.balances.player)} · {session.roundsLeft} rounds left
+                </>
+              )}
+            </p>
+          )}
+          {session.error && <p className="bad">{session.error}</p>}
+        </BetTray>
+
+        <MetaPanel tabs={['Recent', 'Stats']}>
+          {session.history.length > 0 ? (
+            <span>
+              <b>{wins}/{session.history.length}</b>
+              cashed · {viem.formatEther(taken)} net
+            </span>
+          ) : (
+            <span className="muted">no rounds yet</span>
+          )}
+        </MetaPanel>
       </div>
 
       <h2>This table</h2>
@@ -187,6 +237,6 @@ export const CrashScreen = ({
           </details>
         </>
       )}
-    </div>
+    </>
   )
 }
