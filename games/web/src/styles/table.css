@@ -127,6 +127,10 @@
   gap: 0.4rem;
   padding: 8px 18px 0;
 }
+/* no trust strip / no error on this tab (lobby/standings/live) → don't render an empty bar */
+.shell-chrome:empty {
+  display: none;
+}
 /* colophon pinned as a thin footer inside the viewport-locked frame (not a page-scroll sibling) */
 .main > .colophon {
   flex: 0 0 auto;
