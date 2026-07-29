@@ -6,7 +6,6 @@ import {
 } from '@msgboard/games'
 import type { GameDeployment } from '../config'
 import { parseStake } from './StakeInput'
-import { InfoDot } from './Meta'
 import { randomDeckSeed, Card, CardBack } from './decisionShared'
 import { GameStage } from './shell/GameStage'
 import { HowItWorksLink } from './HowItWorks'
@@ -89,20 +88,16 @@ export const BlackjackScreen = ({ deployment: _d, walletClient, trustAcknowledge
       </GameStage>
 
       <div className="tray-col">
-        <BetTray amount={amount} onAmount={setAmount} action={<button onClick={deal} disabled={!canDeal}>{dealLabel}</button>}>
-          <p className="muted">Blackjack<InfoDot>
-            <strong>Beat the dealer to 21 without busting.</strong> Hit for another card, Stand to hold, or
-            Double for one final card at twice the bet. The dealer's hole card stays sealed until you act,
-            then the dealer draws to 17. Blackjack pays 3:2. Your browser re-checks the hand after.</InfoDot></p>
-          {!walletClient && <span className="muted">connect a wallet to play</span>}
-          {walletClient && !trustAcknowledged && <span className="muted">tap "Got it" on the fairness note above first</span>}
+        <BetTray amount={amount} onAmount={setAmount} action={<button className="primary" onClick={deal} disabled={!canDeal}>{dealLabel}</button>}>
           {phase === 'player' && game && (
-            <div className="row" style={{ marginTop: '0.6rem' }}>
-              <button onClick={() => act('hit')}>Hit</button>
-              <button onClick={() => act('stand')}>Stand</button>
-              {game.actions.length === 0 && <button className="secondary" onClick={() => act('double')}>Double</button>}
+            <div className="acts">
+              <button className="b-hit" onClick={() => act('hit')}>Hit</button>
+              <button className="b-stand" onClick={() => act('stand')}>Stand</button>
+              {game.actions.length === 0 && <button className="b-double" onClick={() => act('double')}>Double</button>}
             </div>
           )}
+          {!walletClient && <p className="tray-hint">connect a wallet to play</p>}
+          {walletClient && !trustAcknowledged && <p className="tray-hint">tap "Got it" on the fairness note above first</p>}
           {phase === 'done' && r && game && (
             <p className={r.playerDelta >= 0n ? 'ok' : 'bad'}>
               {r.playerDelta > 0n ? 'win' : r.playerDelta < 0n ? 'lose' : 'push'} · {r.playerDelta >= 0n ? '+' : ''}{viem.formatEther(r.playerDelta)}
