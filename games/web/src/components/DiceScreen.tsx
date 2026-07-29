@@ -4,9 +4,13 @@ import { dice, diceMultiplierX100, buildSeedChain, commitSeed, makeDomain, type 
 import { EscrowedSettlement, signOpenTerms, paramsHashOf, type OpenTerms } from '@msgboard/settle'
 import type { GameDeployment } from '../config'
 import { useSession, makeInMemoryHouseDriver, PLACEHOLDER_VERIFIER, type RoundRecord, DEMO_HOUSE_ADDRESS } from '../hooks/useSession'
-import { StakeInput, parseStake } from './StakeInput'
+import { parseStake } from './StakeInput'
 import { TurnTiming } from './TurnTiming'
 import { InfoDot } from './Meta'
+import { GameStage } from './shell/GameStage'
+import { BetTray } from './shell/BetTray'
+import { MetaPanel } from './shell/MetaPanel'
+import { ProbabilityStrip } from './stages/ProbabilityStrip'
 
 const HUNDREDTHS = 100n
 
@@ -266,86 +270,119 @@ export const DiceScreen = ({
   const wins = session.history.filter((r) => r.win).length
   const taken = session.history.reduce((sum, r) => sum + r.playerDelta, 0n)
 
+  // Stage slots: header shows the roll-under target, marker/win-zone track it 1:1 (roll-under
+  // means win chance == target%), stats mirror the same computed values as the old inline copy.
+  const targetDisplay = Number.isFinite(pct) ? pct.toFixed(2) : '50.00'
+  const markerPct = targetOk ? pct : 50
+  const stats = [
+    { label: 'Win chance', value: targetOk ? `${pct.toFixed(2)}%` : '—' },
+    { label: 'Multiplier', value: multiplierX100 !== undefined ? fmtMult(multiplierX100) : '—', gold: true },
+    { label: 'Pays on win', value: potentialWin !== undefined ? `+${viem.formatEther(potentialWin)}` : '—' },
+  ]
+
   return (
-    <div>
-      <div className="card">
-        <h3>
-          Roll under
-          <InfoDot>
-            <strong>Roll under your win chance to win.</strong> The lower the chance, the bigger the
-            payout. Each roll is settled instantly off-chain — no gas — and the seed was sealed before
-            you opened the table, so you can re-check it.
-          </InfoDot>
-        </h3>
-        <div className="row">
-          <StakeInput value={amount} onChange={setAmount} />
-          <label className="threshold-label">
-            win chance %
-            <input
-              type="number"
-              min={MIN_TARGET_PCT}
-              max={MAX_TARGET_PCT}
-              step="any"
-              value={targetPct}
-              onChange={(e) => setTargetPct(e.target.value)}
-              style={{ width: '5.5rem' }}
-              aria-label="win chance percent"
-            />
-          </label>
-          {session.ready ? (
-            <button onClick={() => void roll()} disabled={!canRoll}>
-              {session.status === 'playing' ? 'Rolling…' : 'Roll'}
-            </button>
-          ) : (
-            <button onClick={() => void openAndStart()} disabled={!canOpen}>
-              {session.status === 'opening' ? 'Opening…' : 'Open table'}
-            </button>
-          )}
+    <>
+      <GameStage title="DICE" subtitle="roll under your target to win · sealed before you play" action="ⓘ How it works">
+        <ProbabilityStrip header={`ROLL UNDER ${targetDisplay}`} markerPct={markerPct} stats={stats} />
+      </GameStage>
+
+      <div className="tray-col">
+        <BetTray
+          amount={amount}
+          onAmount={setAmount}
+          action={
+            session.ready ? (
+              <button onClick={() => void roll()} disabled={!canRoll}>
+                {session.status === 'playing' ? 'Rolling…' : 'Roll'}
+              </button>
+            ) : (
+              <button onClick={() => void openAndStart()} disabled={!canOpen}>
+                {session.status === 'opening' ? 'Opening…' : 'Open table'}
+              </button>
+            )
+          }
+        >
+          <p className="muted">
+            Dice
+            <InfoDot>
+              <strong>Roll under your win chance to win.</strong> The lower the chance, the bigger the
+              payout. Each roll is settled instantly off-chain — no gas — and the seed was sealed before
+              you opened the table, so you can re-check it.
+            </InfoDot>
+          </p>
+          <div className="field">
+            <label htmlFor="dice-target">Win chance %</label>
+            <div className="box">
+              <input
+                id="dice-target"
+                type="number"
+                min={MIN_TARGET_PCT}
+                max={MAX_TARGET_PCT}
+                step="any"
+                value={targetPct}
+                onChange={(e) => setTargetPct(e.target.value)}
+                aria-label="win chance percent"
+                style={{ width: '100%', border: 'none', background: 'transparent', color: 'inherit', font: 'inherit' }}
+              />
+              <span style={{ color: 'var(--muted)', fontSize: 12 }}>%</span>
+            </div>
+          </div>
           {!walletClient && <span className="muted">connect a wallet to play</span>}
           {walletClient && !trustAcknowledged && (
             <span className="muted">tap "Got it" on the fairness note above first</span>
           )}
-        </div>
-        <p className="muted">
-          {amount !== '' && stake === undefined && <span className="bad">enter a positive amount · </span>}
-          {targetPct !== '' && !targetOk && (
-            <span className="bad">
-              win chance {MIN_TARGET_PCT}–{MAX_TARGET_PCT}% ·{' '}
-            </span>
-          )}
-          {multiplierX100 !== undefined && <span className="ok">pays {fmtMult(multiplierX100)}</span>}
-          {potentialWin !== undefined && potentialWin > 0n && (
-            <span className="muted"> · +{viem.formatEther(potentialWin)} on a win</span>
-          )}
-        </p>
-        {session.commit && (
-          <p className="card-meta muted">
-            server-seed commit <span className="mono">{session.commit.slice(0, 10)}…</span>
-            {session.balances && (
-              <>
-                {' · '}your balance {viem.formatEther(session.balances.player)} · {session.roundsLeft} rolls left
-              </>
+          <p className="muted">
+            {amount !== '' && stake === undefined && <span className="bad">enter a positive amount · </span>}
+            {targetPct !== '' && !targetOk && (
+              <span className="bad">
+                win chance {MIN_TARGET_PCT}–{MAX_TARGET_PCT}% ·{' '}
+              </span>
+            )}
+            {multiplierX100 !== undefined && <span className="ok">pays {fmtMult(multiplierX100)}</span>}
+            {potentialWin !== undefined && potentialWin > 0n && (
+              <span className="muted"> · +{viem.formatEther(potentialWin)} on a win</span>
             )}
           </p>
-        )}
-        {session.error && <p className="bad">{session.error}</p>}
+          {session.commit && (
+            <p className="card-meta muted">
+              server-seed commit <span className="mono">{session.commit.slice(0, 10)}…</span>
+              {session.balances && (
+                <>
+                  {' · '}your balance {viem.formatEther(session.balances.player)} · {session.roundsLeft} rolls left
+                </>
+              )}
+            </p>
+          )}
+          {session.error && <p className="bad">{session.error}</p>}
 
-        {/* Settle button — shown after a round completes (co-signed off-chain) */}
-        {tableStatus === 'settle-pending' && deployment.houseChannel && (
-          <div className="row" style={{ marginTop: '0.5rem' }}>
-            <button onClick={() => void settle()}>
-              Settle on-chain
-            </button>
-            <span className="muted">posts the co-signed final state to the HouseChannel contract</span>
-          </div>
-        )}
-        {tableStatus === 'settling' && (
-          <p className="muted">Settling…</p>
-        )}
-        {tableStatus === 'landed' && (
-          <p className="ok">Settled on-chain.</p>
-        )}
-        {settleError && <p className="bad">{settleError}</p>}
+          {/* Settle button — shown after a round completes (co-signed off-chain) */}
+          {tableStatus === 'settle-pending' && deployment.houseChannel && (
+            <div className="row" style={{ marginTop: '0.5rem' }}>
+              <button onClick={() => void settle()}>
+                Settle on-chain
+              </button>
+              <span className="muted">posts the co-signed final state to the HouseChannel contract</span>
+            </div>
+          )}
+          {tableStatus === 'settling' && (
+            <p className="muted">Settling…</p>
+          )}
+          {tableStatus === 'landed' && (
+            <p className="ok">Settled on-chain.</p>
+          )}
+          {settleError && <p className="bad">{settleError}</p>}
+        </BetTray>
+
+        <MetaPanel tabs={['Recent', 'Stats']}>
+          {session.history.length > 0 ? (
+            <span>
+              <b>{wins}/{session.history.length}</b>
+              won · {viem.formatEther(taken)} net
+            </span>
+          ) : (
+            <span className="muted">no rolls yet</span>
+          )}
+        </MetaPanel>
       </div>
 
       <h2>This table</h2>
@@ -373,7 +410,7 @@ export const DiceScreen = ({
           </details>
         </>
       )}
-    </div>
+    </>
   )
 }
 
