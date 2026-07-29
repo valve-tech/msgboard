@@ -5,9 +5,13 @@ import {
   type BlackjackAction, type BlackjackResult,
 } from '@msgboard/games'
 import type { GameDeployment } from '../config'
-import { StakeInput, parseStake } from './StakeInput'
+import { parseStake } from './StakeInput'
 import { InfoDot } from './Meta'
 import { randomDeckSeed, Card, CardBack } from './decisionShared'
+import { GameStage } from './shell/GameStage'
+import { BetTray } from './shell/BetTray'
+import { MetaPanel } from './shell/MetaPanel'
+import { FeltTable } from './stages/FeltTable'
 
 type Phase = 'idle' | 'player' | 'done'
 interface Game { seed: bigint; commit: viem.Hex; actions: BlackjackAction[]; result?: BlackjackResult; verified?: boolean }
@@ -57,50 +61,66 @@ export const BlackjackScreen = ({ deployment: _d, walletClient, trustAcknowledge
 
   const view = game && phase === 'player' ? blackjackPlayerView(game.seed, game.actions) : undefined
   const r = game?.result
+
+  // dealer/player slots for FeltTable — same card/total expressions as before, just relocated.
+  const dealerNode = game && (
+    <div className="row">
+      {phase === 'player' && view ? <><Card index={view.dealerUp} /><CardBack /></>
+        : r?.dealerCards.map((c, i) => <Card key={i} index={c} />)}
+      {r && <span className="muted">({r.dealerTotal})</span>}
+    </div>
+  )
+  const playerNode = game && (
+    <div className="row">
+      {(phase === 'player' && view ? view.playerCards : r!.playerCards).map((c, i) => <Card key={i} index={c} />)}
+      <span className="muted">({phase === 'player' && view ? view.playerTotal : handTotal(r!.playerCards).total})</span>
+    </div>
+  )
+  const spotsNode = <div className="spot main">{amount}</div>
+
+  const dealLabel = phase === 'player' ? 'In hand…' : phase === 'done' ? 'Deal again' : 'Deal'
+  const netHistory = history.reduce((s, g) => s + (g.result?.playerDelta ?? 0n), 0n)
+
   return (
-    <div>
-      <div className="card">
-        <h3>Blackjack<InfoDot>
-          <strong>Beat the dealer to 21 without busting.</strong> Hit for another card, Stand to hold, or
-          Double for one final card at twice the bet. The dealer's hole card stays sealed until you act,
-          then the dealer draws to 17. Blackjack pays 3:2. Your browser re-checks the hand after.</InfoDot></h3>
-        <div className="row">
-          <StakeInput value={amount} onChange={setAmount} />
-          <button onClick={deal} disabled={!canDeal}>{phase === 'player' ? 'In hand…' : 'Deal'}</button>
+    <>
+      <GameStage title="BLACKJACK" subtitle="sealed before you play" action="⇆ Change table">
+        <FeltTable dealer={dealerNode} player={playerNode} spots={spotsNode} />
+      </GameStage>
+
+      <div className="tray-col">
+        <BetTray amount={amount} onAmount={setAmount} action={<button onClick={deal} disabled={!canDeal}>{dealLabel}</button>}>
+          <p className="muted">Blackjack<InfoDot>
+            <strong>Beat the dealer to 21 without busting.</strong> Hit for another card, Stand to hold, or
+            Double for one final card at twice the bet. The dealer's hole card stays sealed until you act,
+            then the dealer draws to 17. Blackjack pays 3:2. Your browser re-checks the hand after.</InfoDot></p>
           {!walletClient && <span className="muted">connect a wallet to play</span>}
           {walletClient && !trustAcknowledged && <span className="muted">tap "Got it" on the fairness note above first</span>}
-        </div>
+          {phase === 'player' && game && (
+            <div className="row" style={{ marginTop: '0.6rem' }}>
+              <button onClick={() => act('hit')}>Hit</button>
+              <button onClick={() => act('stand')}>Stand</button>
+              {game.actions.length === 0 && <button className="secondary" onClick={() => act('double')}>Double</button>}
+            </div>
+          )}
+          {phase === 'done' && r && game && (
+            <p className={r.playerDelta >= 0n ? 'ok' : 'bad'}>
+              {r.playerDelta > 0n ? 'win' : r.playerDelta < 0n ? 'lose' : 'push'} · {r.playerDelta >= 0n ? '+' : ''}{viem.formatEther(r.playerDelta)}
+              {r.doubled ? ' (doubled)' : ''}{' '}
+              <span className="muted">· commit {game.commit.slice(0, 10)}… · {game.verified ? 'verify ✓' : 'verify ✗'}</span>
+            </p>
+          )}
+        </BetTray>
 
-        {game && (
-          <div style={{ marginTop: '0.75rem' }}>
-            <p className="muted">dealer</p>
-            <div className="row">
-              {phase === 'player' && view ? <><Card index={view.dealerUp} /><CardBack /></>
-                : r?.dealerCards.map((c, i) => <Card key={i} index={c} />)}
-              {r && <span className="muted">({r.dealerTotal})</span>}
-            </div>
-            <p className="muted" style={{ marginTop: '0.5rem' }}>you</p>
-            <div className="row">
-              {(phase === 'player' && view ? view.playerCards : r!.playerCards).map((c, i) => <Card key={i} index={c} />)}
-              <span className="muted">({phase === 'player' && view ? view.playerTotal : handTotal(r!.playerCards).total})</span>
-            </div>
-            {phase === 'player' && (
-              <div className="row" style={{ marginTop: '0.6rem' }}>
-                <button onClick={() => act('hit')}>Hit</button>
-                <button onClick={() => act('stand')}>Stand</button>
-                {game.actions.length === 0 && <button className="secondary" onClick={() => act('double')}>Double</button>}
-              </div>
-            )}
-            {phase === 'done' && r && (
-              <p style={{ marginTop: '0.6rem' }} className={r.playerDelta >= 0n ? 'ok' : 'bad'}>
-                {r.playerDelta > 0n ? 'win' : r.playerDelta < 0n ? 'lose' : 'push'} · {r.playerDelta >= 0n ? '+' : ''}{viem.formatEther(r.playerDelta)}
-                {r.doubled ? ' (doubled)' : ''}{' '}
-                <span className="muted">· commit {game.commit.slice(0, 10)}… · {game.verified ? 'verify ✓' : 'verify ✗'}</span>
-              </p>
-            )}
-          </div>
-        )}
-        {phase === 'done' && <div className="row" style={{ marginTop: '0.5rem' }}><button onClick={deal} disabled={!canDeal}>Deal again</button></div>}
+        <MetaPanel tabs={['Recent', 'Stats']}>
+          {myAddress && history.length > 0 ? (
+            <span>
+              <b>{netHistory >= 0n ? '+' : ''}{viem.formatEther(netHistory)}</b>
+              net · {history.length} hand{history.length === 1 ? '' : 's'}
+            </span>
+          ) : (
+            <span className="muted">no hands yet</span>
+          )}
+        </MetaPanel>
       </div>
 
       {myAddress && history.length > 0 && (
@@ -108,7 +128,7 @@ export const BlackjackScreen = ({ deployment: _d, walletClient, trustAcknowledge
           <h2>Your book</h2>
           <details className="history" open>
             <summary>{history.length} hand{history.length === 1 ? '' : 's'}
-              <span className="muted"> · {viem.formatEther(history.reduce((s, g) => s + (g.result?.playerDelta ?? 0n), 0n))} net</span>
+              <span className="muted"> · {viem.formatEther(netHistory)} net</span>
             </summary>
             {[...history].reverse().map((g, i) => (
               <div className="card" key={i}>
@@ -122,6 +142,6 @@ export const BlackjackScreen = ({ deployment: _d, walletClient, trustAcknowledge
           </details>
         </>
       )}
-    </div>
+    </>
   )
 }
