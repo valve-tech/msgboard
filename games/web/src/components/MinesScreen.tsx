@@ -11,6 +11,10 @@ import { useMinesSession, type MinesGameRecord } from '../hooks/useMinesSession'
 import { StakeInput, parseStake } from './StakeInput'
 import { TurnTiming } from './TurnTiming'
 import { InfoDot } from './Meta'
+import { GameStage } from './shell/GameStage'
+import { BetTray } from './shell/BetTray'
+import { MetaPanel } from './shell/MetaPanel'
+import { RevealGrid, type RevealTile } from './stages/RevealGrid'
 
 const HUNDREDTHS = 100n
 
@@ -69,6 +73,11 @@ const GameReceipt = ({ record }: { record: MinesGameRecord }) => {
  * drive `useSession`/`HouseSession.playRound`), this one drives `useMinesSession`: a board is
  * committed up-front, the player clicks tiles to reveal them one at a time, and either cashes out
  * the running multiplier or busts on a mine. Component signature matches DiceScreen's exactly.
+ *
+ * View reshaped onto the shared table shell (GameStage/BetTray/MetaPanel), same as the other four
+ * migrated games. The board itself renders via `RevealGrid` — the flat `.minesstage/.mgrid/.tile`
+ * stage ported from game-configs.html's `#mines` panel — fed straight from `session.cells` (no new
+ * tile model; `MinesCell.revealed`/`.mine` map 1:1 onto `RevealTile.state`).
  */
 export const MinesScreen = ({
   deployment,
@@ -82,14 +91,14 @@ export const MinesScreen = ({
   myAddress?: viem.Hex
 }) => {
   const [amount, setAmount] = useState('0.1')
-  const [tiles, setTiles] = useState<number>(DEFAULT_TILES)
+  const [tileCount, setTileCount] = useState<number>(DEFAULT_TILES)
   const [mines, setMines] = useState<number>(3)
 
   const session = useMinesSession({ walletClient, boardRpc: deployment.boardRpc, chainId: deployment.chainId })
 
   const stake = parseStake(amount)
-  const minesOk = Number.isInteger(mines) && mines >= 1 && mines <= tiles - 1
-  const config: MinesConfig | undefined = minesOk ? { tiles, mines } : undefined
+  const minesOk = Number.isInteger(mines) && mines >= 1 && mines <= tileCount - 1
+  const config: MinesConfig | undefined = minesOk ? { tiles: tileCount, mines } : undefined
 
   // live "next reveal" multiplier preview for the configured board (before any reveal).
   const nextMultiplierX100 = useMemo(() => {
@@ -112,118 +121,134 @@ export const MinesScreen = ({
     session.newGame(config, stake)
   }
 
-  // clamp mines into range whenever tiles changes.
-  const onTiles = (t: number) => {
-    setTiles(t)
+  // clamp mines into range whenever the tile count changes.
+  const onTileCount = (t: number) => {
+    setTileCount(t)
     if (mines > t - 1) setMines(Math.max(1, t - 1))
   }
 
   const cashed = session.history.filter((g) => g.status === 'cashed').length
   const net = session.history.reduce((sum, g) => sum + g.playerDelta, 0n)
-  const cols = gridCols(session.config?.tiles ?? tiles)
+  const cols = gridCols(session.config?.tiles ?? tileCount)
+
+  // MinesCell (revealed + mine) maps 1:1 onto RevealTile's hidden/gem/bomb — no new tile model.
+  const gridTiles: RevealTile[] = session.cells.map((cell) => ({
+    state: !cell.revealed ? 'hidden' : cell.mine ? 'bomb' : 'gem',
+  }))
+
+  const banner = playing && session.cells.length > 0 ? (
+    <>
+      next tile {nextMultiplierX100 !== undefined ? fmtMult(nextMultiplierX100) : '—'} · cash out {fmtMult(session.multiplierX100)}
+    </>
+  ) : undefined
+
+  const onTile = (i: number) => {
+    if (!playing) return
+    session.revealTile(i)
+  }
 
   return (
-    <div>
-      <div className="card">
-        <h3>
-          Mines
-          <InfoDot>
-            <strong>Clear safe tiles to grow your multiplier.</strong> Cash out any time — hit a mine
-            and you bust. More mines means faster growth and bigger risk. The board is sealed before
-            your first pick (it can't move under you), and you can re-check the whole game after.
-          </InfoDot>
-        </h3>
-        <div className="row">
-          <StakeInput value={amount} onChange={setAmount} />
+    <>
+      <GameStage title="MINES" subtitle="flip gems, dodge the mines · sealed before you play" action="ⓘ How it works">
+        {gridTiles.length > 0 ? (
+          <RevealGrid cols={cols} tiles={gridTiles} banner={banner} onTile={onTile} />
+        ) : (
+          <p className="muted">Set your stake, board size, and mines, then start a game.</p>
+        )}
+      </GameStage>
+
+      <div className="tray-col">
+        <BetTray
+          amount={amount}
+          onAmount={setAmount}
+          action={
+            playing ? (
+              <button className="primary amber" onClick={() => session.cashOut()} disabled={!session.canCashOut}>
+                Cash out {cashOutValue !== undefined ? `(${viem.formatEther(cashOutValue)})` : ''}
+              </button>
+            ) : (
+              <button className="primary" onClick={startGame} disabled={!canStart}>
+                New game
+              </button>
+            )
+          }
+        >
+          <p className="muted">
+            Mines
+            <InfoDot>
+              <strong>Clear safe tiles to grow your multiplier.</strong> Cash out any time — hit a mine
+              and you bust. More mines means faster growth and bigger risk. The board is sealed before
+              your first pick (it can't move under you), and you can re-check the whole game after.
+            </InfoDot>
+          </p>
           <label className="threshold-label">
             tiles
             <Menu
               label="tiles"
               options={TILE_OPTIONS.map(String)}
-              value={Math.max(0, (TILE_OPTIONS as readonly number[]).indexOf(tiles))}
-              onChange={(i) => onTiles(TILE_OPTIONS[i] as (typeof TILE_OPTIONS)[number])}
+              value={Math.max(0, (TILE_OPTIONS as readonly number[]).indexOf(tileCount))}
+              onChange={(i) => onTileCount(TILE_OPTIONS[i] as (typeof TILE_OPTIONS)[number])}
               disabled={playing}
             />
           </label>
-          <label className="threshold-label">
-            mines
-            <input
-              type="number"
-              min={1}
-              max={tiles - 1}
-              step={1}
-              value={mines}
-              onChange={(e) => setMines(Number(e.target.value))}
-              disabled={playing}
-              style={{ width: '4.5rem' }}
-              aria-label="mines"
-            />
-          </label>
-          <button onClick={startGame} disabled={!canStart}>
-            {playing ? 'Game in progress…' : 'New game'}
-          </button>
-          {playing && (
-            <button onClick={() => session.cashOut()} disabled={!session.canCashOut}>
-              Cash out {cashOutValue !== undefined ? `(${viem.formatEther(cashOutValue)})` : ''}
-            </button>
-          )}
+          <div className="field">
+            <label htmlFor="mines-count">Mines</label>
+            <div className="box">
+              <input
+                id="mines-count"
+                type="number"
+                min={1}
+                max={tileCount - 1}
+                step={1}
+                value={mines}
+                onChange={(e) => setMines(Number(e.target.value))}
+                disabled={playing}
+                aria-label="mines"
+                style={{ width: '100%', border: 'none', background: 'transparent', color: 'inherit', font: 'inherit' }}
+              />
+              <span style={{ color: 'var(--muted)', fontSize: 12 }}>of {tileCount}</span>
+            </div>
+          </div>
           {!walletClient && <span className="muted">connect a wallet to play</span>}
           {walletClient && !trustAcknowledged && (
             <span className="muted">tap "Got it" on the fairness note above first</span>
           )}
-        </div>
-        <p className="muted">
-          {amount !== '' && stake === undefined && <span className="bad">enter a positive amount · </span>}
-          {!minesOk && <span className="bad">mines must be between 1 and {tiles - 1} · </span>}
-          {playing && (
-            <span className="ok">
-              now {fmtMult(session.multiplierX100)}
-              {nextMultiplierX100 !== undefined && (
-                <span className="muted"> (next {fmtMult(nextMultiplierX100)})</span>
-              )}
-            </span>
-          )}
-        </p>
-        {session.commit && (
-          <p className="card-meta muted">
-            board commit <span className="mono">{session.commit.slice(0, 10)}…</span>
-            {' · '}
-            {session.safeRevealed} revealed · {fmtMult(session.multiplierX100)}
-            {cashOutValue !== undefined && <> · cash-out value {viem.formatEther(cashOutValue)}</>}
+          <p className="muted">
+            {amount !== '' && stake === undefined && <span className="bad">enter a positive amount · </span>}
+            {!minesOk && <span className="bad">mines must be between 1 and {tileCount - 1} · </span>}
+            {playing && (
+              <span className="ok">
+                now {fmtMult(session.multiplierX100)}
+                {nextMultiplierX100 !== undefined && (
+                  <span className="muted"> (next {fmtMult(nextMultiplierX100)})</span>
+                )}
+              </span>
+            )}
           </p>
-        )}
-        {session.error && <p className="bad">{session.error}</p>}
+          {session.commit && (
+            <p className="card-meta muted">
+              board commit <span className="mono">{session.commit.slice(0, 10)}…</span>
+              {' · '}
+              {session.safeRevealed} revealed · {fmtMult(session.multiplierX100)}
+              {cashOutValue !== undefined && <> · cash-out value {viem.formatEther(cashOutValue)}</>}
+            </p>
+          )}
+          {session.error && <p className="bad">{session.error}</p>}
+        </BetTray>
 
-        {/* the clickable tile grid */}
-        {session.cells.length > 0 && (
-          <div
-            className="mines-grid"
-            style={{
-              display: 'grid',
-              gridTemplateColumns: `repeat(${cols}, 2.4rem)`,
-              gap: '0.4rem',
-              marginTop: '0.75rem',
-            }}
-          >
-            {session.cells.map((cell) => {
-              const label = cell.revealed ? (cell.mine ? '💣' : '✓') : ''
-              const cls = cell.revealed ? (cell.mine ? 'tag bad' : 'tag ok') : 'tag'
-              return (
-                <button
-                  key={cell.tile}
-                  type="button"
-                  className={cls}
-                  onClick={() => session.revealTile(cell.tile)}
-                  disabled={!playing || cell.revealed}
-                  style={{ width: '2.4rem', height: '2.4rem', padding: 0, fontSize: '1rem' }}
-                  aria-label={`tile ${cell.tile}${cell.revealed ? (cell.mine ? ' mine' : ' safe') : ''}`}
-                >
-                  {label}
-                </button>
-              )
-            })}
-          </div>
-        )}
+        <MetaPanel tabs={['Recent', 'Chart', 'Stats']}>
+          {session.history.length > 0 ? (
+            <span>
+              <b>{cashed}</b>/{session.history.length} cashed · {viem.formatEther(net)} net
+            </span>
+          ) : session.status !== 'idle' || session.cells.length > 0 ? (
+            <span>
+              <b>{session.safeRevealed}</b> gems safe · {tileCount - session.safeRevealed} tiles left
+            </span>
+          ) : (
+            <span className="muted">no games yet</span>
+          )}
+        </MetaPanel>
       </div>
 
       {/* the just-finished game's receipt */}
@@ -259,6 +284,6 @@ export const MinesScreen = ({
           </details>
         </>
       )}
-    </div>
+    </>
   )
 }
