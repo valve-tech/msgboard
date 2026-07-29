@@ -45,19 +45,19 @@
         background-attachment: fixed;
         min-height: 100vh;
       }
-      /* Fill the viewport so the felt + footer always reach the bottom, even when a game's
-         content is short — a flex column with the colophon pushed down (margin-top:auto below). */
+      /* Full-bleed host for the shell: the table-feel .app (a height:100vh, 60px|1fr grid from
+         table.css) owns the whole layout now, so #root is just a full-width/height container — no
+         max-width, no centering, no padding. It stays a flex column only so the colophon (a sibling
+         after the 100vh .app) still flows below the fold instead of overlapping. */
       #root {
-        max-width: 920px;
-        margin: 0 auto;
-        padding: 1.25rem 1.25rem 4rem;
         min-height: 100vh;
         min-height: 100dvh;
         display: flex;
         flex-direction: column;
       }
-      /* App wrapper fills #root so the footer (margin-top:auto) can pin to the viewport bottom. */
-      .app { flex: 1 0 auto; display: flex; flex-direction: column; }
+      /* NOTE: .app is intentionally NOT styled here — table.css's `.app { display:grid;
+         grid-template-columns:60px 1fr; height:100vh }` is the single source of truth for the shell
+         layout. (The old inline `.app { flex … }` rule was removed; it conflicted with that grid.) */
 
       /* ---------- type ---------- */
       h1 {
@@ -661,7 +661,8 @@
 
       /* ---------- responsive: phones / narrow ---------- */
       @media (max-width: 600px) {
-        #root { padding: 0.85rem 0.85rem 2.25rem; }
+        /* keep the shell full-bleed on phones too — table.css handles the narrow rail collapse */
+        #root { padding: 0; }
         h1 { font-size: 1.6rem; }
         h2 { font-size: 1.1rem; margin-top: 1.6rem; }
         .strapline { letter-spacing: 0.14em; font-size: 0.72rem; }
