@@ -113,7 +113,7 @@ export const CrashScreen = ({
               type="number"
               min={MIN_CASHOUT_MULT}
               max={MAX_CASHOUT_MULT}
-              step={0.01}
+              step="any"
               value={cashoutMult}
               onChange={(e) => setCashoutMult(e.target.value)}
               style={{ width: '5.5rem' }}

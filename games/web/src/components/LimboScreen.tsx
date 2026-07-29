@@ -115,7 +115,7 @@ export const LimboScreen = ({
               type="number"
               min={MIN_TARGET_MULT}
               max={MAX_TARGET_MULT}
-              step={0.01}
+              step="any"
               value={targetMult}
               onChange={(e) => setTargetMult(e.target.value)}
               style={{ width: '5.5rem' }}
