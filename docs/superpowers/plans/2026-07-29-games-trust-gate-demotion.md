@@ -137,6 +137,49 @@ git commit -m "feat(games-web): demote CryptoShowcase out of the game flow into 
 
 ---
 
+### Task 3: Lock the app to the viewport — no outer scrollbar, isolated pane scroll
+
+**User directive (2026-07-29):** "the app needs to be full screen. no scrollbar. or rather, isolated scrollbar." The shell is already `.app { height:100vh }` with `.rail`/`.stagewrap` as `overflow-y:auto` isolated scroll regions and `.main { overflow:hidden }` (ticker pinned). The remaining leak is the **colophon**, rendered as a sibling *after* `.app` inside `#root`, which pushes `#root` past `100vh` and produces an outer page scrollbar.
+
+**Files:**
+- Modify: `games/web/index.html` (the `html`/`body`/`#root` rules)
+- Modify: `games/web/src/components/shell/AppShell.tsx` (host the colophon inside the frame)
+- Modify: `games/web/src/App.tsx` (move the colophon into the shell / pass it as a slot)
+
+**Interfaces:**
+- If a slot is cleanest: `AppShell` gains an optional `footer?: ReactNode` prop rendered as the last child of `.main` (a slim always-visible bar below the scrolling `.stagewrap`). Otherwise the colophon markup moves directly into `.main`.
+
+- [ ] **Step 1: Lock the outer frame (index.html)**
+
+Ensure the page itself never scrolls:
+```css
+html, body { height: 100%; margin: 0; overflow: hidden; }
+#root { height: 100vh; height: 100dvh; overflow: hidden; }
+```
+(`#root` currently is `min-height` + flex-column to let the colophon flow below — replace that with a fixed-height, overflow-hidden frame now that the colophon moves inside `.main`.)
+
+- [ ] **Step 2: Move the colophon inside the frame**
+
+Relocate the colophon (the "a MsgBoard venue · run by valve" + contracts/msgboard links block) from being a sibling of `<AppShell>` to the **last child of `.main`**, below the scrolling `.stagewrap`, as a slim always-visible footer that stays within the `100vh` frame. Use an `AppShell` `footer?` slot (preferred) or inline it in `.main`. `.main` stays `overflow:hidden`; layout is ticker (fixed) → `.stagewrap` (`flex:1`, scrolls) → colophon (fixed, slim). Add a minimal `.colophon` style tweak if needed so it reads as a thin footer bar.
+
+- [ ] **Step 3: Typecheck + build**
+
+Run: `cd games/web && npm run typecheck && npm run build`
+Expected: both PASS.
+
+- [ ] **Step 4: Visual smoke (controller-run)**
+
+Acceptance: at desktop and at 780px, the app fills the viewport with **no outer/page scrollbar**; scrollbars appear only inside the rail (when the 37-game list overflows) and inside the stage content (when a screen's content overflows); the colophon is visible at the bottom of the frame without scrolling the page; the WinTicker stays pinned at the top.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add games/web/index.html games/web/src/components/shell/AppShell.tsx games/web/src/App.tsx
+git commit -m "feat(games-web): lock the shell to the viewport — no outer scrollbar, isolated pane scroll"
+```
+
+---
+
 ## Self-Review
 
 **Spec coverage:**
