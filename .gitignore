@@ -41,3 +41,8 @@ docs/superpowers/plans/2026-06-01-msgboard-faucet-deploy.md
 
 # scratch screenshots (playwright smokes, etc.)
 tmp/
+
+# local UI-review screenshots / playwright scratch
+baseline-*.png
+*-review.png
+.playwright-mcp/
