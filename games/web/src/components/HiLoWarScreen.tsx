@@ -5,12 +5,15 @@ import type { Bet } from '@msgboard/hilo-war'
 import type { GameDeployment } from '../config'
 import { useWarSession, type FlipRecord } from '../hooks/useWarSession'
 import { TurnTiming } from './TurnTiming'
-import { InfoDot } from './Meta'
+import { Card, CardBack } from './decisionShared'
+import { GameStage } from './shell/GameStage'
+import { HowItWorksLink } from './HowItWorks'
+import { ControlTray } from './shell/ControlTray'
+import { MetaPanel } from './shell/MetaPanel'
+import { FeltTable } from './stages/FeltTable'
 
-/** hidden-card glyph for a folded / unrevealed opponent card. */
+/** hidden-card glyph for a folded / unrevealed opponent card (compact history log only). */
 const CARD_BACK = '🂠'
-
-/** Render a card index as a glyph (e.g. `K♠`), or the hidden back when null. */
 const renderCard = (i: number | null): string => (i === null ? CARD_BACK : cardName(i))
 
 const winnerLabel = (r: FlipRecord): { text: string; cls: string } => {
@@ -40,23 +43,42 @@ const FlipReceipt = ({ record }: { record: FlipRecord }) => {
         your balance {viem.formatEther(record.balanceA)} · house {viem.formatEther(record.balanceB)}
         {record.pot > 0n && <> · war carry {viem.formatEther(record.pot)}</>} · co-signed by both peers
       </p>
-      {record.timing && (
-        <p className="card-meta muted">
-          <TurnTiming timing={record.timing} />
-        </p>
-      )}
+      {record.timing && <p className="card-meta muted"><TurnTiming timing={record.timing} /></p>}
     </div>
   )
 }
 
+/** A seat on the felt — a card (or face-down back) over a name caption that lights on a win. */
+const Seat = ({ card, label, won, big }: { card: number | null | undefined; label: string; won?: boolean; big?: boolean }) => (
+  <div className="row" style={{ flexDirection: 'column', alignItems: 'center', gap: big ? 8 : 6 }}>
+    {typeof card === 'number' ? <Card index={card} big={big} /> : <CardBack big={big} />}
+    <span className={won ? 'ok' : 'muted'} style={{ letterSpacing: '0.16em', fontSize: big ? 13 : 11, fontWeight: won ? 700 : 400 }}>
+      {label}
+    </span>
+  </div>
+)
+
+/** A labelled pair of toggle chips (Hold/Raise, Call/Fold) for the control tray. */
+const Toggle = <T extends string>({ label, value, options, onChange, disabled }: {
+  label: string; value: T; options: readonly T[]; onChange: (v: T) => void; disabled?: boolean
+}) => (
+  <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+    <span className="muted" style={{ fontSize: 12, minWidth: 92 }}>{label}</span>
+    {options.map((o) => (
+      <button key={o} type="button" disabled={disabled} onClick={() => onChange(o)}
+        className={o === value ? 'tag ok' : 'tag'} aria-pressed={o === value}
+        style={{ cursor: disabled ? 'default' : 'pointer', textTransform: 'capitalize' }}>
+        {o.toLowerCase()}
+      </button>
+    ))}
+  </div>
+)
+
 /**
- * Hi-Lo War — the two-peer ZK-masked-deck session game. There is NO entropy beacon: the randomness
- * is the masked-deck double shuffle co-signed at genesis. The human is Player A; an in-browser
- * random-strategy bot is Player B (mirroring how the other session screens run an in-browser house).
- *
- * Signature matches DiceScreen exactly. `walletClient`/`myAddress` gate opening a table and identify
- * the player; the in-browser session itself uses ephemeral keys for both peers (see useWarSession's
- * ASSUMPTIONS — co-signing every per-flip envelope through the injected wallet would be unplayable).
+ * Hi-Lo War — the two-peer ZK-masked-deck duel. Higher card wins the pot; ties carry a war pot to the
+ * next flip. Your card stands up big in the foreground; the house card sits at the far end, face-down
+ * until the showdown (or stays hidden on a fold). Hold to ante or Raise to push, and pre-set whether
+ * you Call or Fold if the house raises. One shuffle sealed at genesis; no per-flip gas.
  */
 export const HiLoWarScreen = ({
   deployment,
@@ -82,99 +104,67 @@ export const HiLoWarScreen = ({
   const flip = () => void session.playFlip({ bet, onRaise })
 
   const wins = session.history.filter((r) => r.winner === 'A').length
-  const taken = session.history.reduce((sum, r) => sum + r.deltaA, 0n)
+  const net = session.history.reduce((sum, r) => sum + r.deltaA, 0n)
+  const last = session.history.length > 0 ? session.history[session.history.length - 1] : undefined
+  const pot = session.state?.pot ?? 0n
 
-  const Chip = <T extends string>({
-    value,
-    current,
-    set,
-    children,
-  }: {
-    value: T
-    current: T
-    set: (v: T) => void
-    children: React.ReactNode
-  }) => (
-    <button
-      onClick={() => set(value)}
-      disabled={busy}
-      className={value === current ? 'tag ok' : 'tag'}
-      style={{ cursor: busy ? 'default' : 'pointer' }}
-      aria-pressed={value === current}
-    >
-      {children}
+  const houseNode = <Seat card={last?.opponentCard} label="House" won={last?.winner === 'B'} />
+  const youNode = <Seat card={last?.myCard} label="You" won={last?.winner === 'A'} big />
+
+  const primary = session.ready ? (
+    <button className="primary" onClick={flip} disabled={!canFlip}>{session.status === 'playing' ? 'Flipping…' : 'Flip'}</button>
+  ) : (
+    <button className="primary" onClick={() => void session.start()} disabled={!canOpen}>
+      {session.status === 'opening' ? 'Shuffling…' : settled ? 'Open new table' : 'Open table'}
     </button>
   )
 
   return (
-    <div>
-      <div className="card">
-        <h3>
-          Hi-Lo War
-          <InfoDot>
-            <strong>Higher card wins the pot.</strong> Each flip you and the house get one card
-            face-down. Hold to ante, or Raise to push — the other side Calls (showdown) or Folds (its
-            card stays hidden). Ties carry a war pot to the next flip. One shuffle, sealed at the
-            start; no per-flip gas.
-          </InfoDot>
-        </h3>
-        <div className="row" style={{ gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
-          <span className="muted">bet</span>
-          <Chip value="HOLD" current={bet} set={setBet}>
-            Hold
-          </Chip>
-          <Chip value="RAISE" current={bet} set={setBet}>
-            Raise
-          </Chip>
-          <span className="muted">if the house raises</span>
-          <Chip value="CALL" current={onRaise} set={setOnRaise}>
-            Call
-          </Chip>
-          <Chip value="FOLD" current={onRaise} set={setOnRaise}>
-            Fold
-          </Chip>
-          {session.ready ? (
-            <>
-              <button onClick={flip} disabled={!canFlip}>
-                {session.status === 'playing' ? 'Flipping…' : 'Flip'}
-              </button>
-              <button onClick={() => void session.settle()} disabled={!canFlip} className="tag">
-                {session.status === 'settling' ? 'Settling…' : 'Cash out / settle'}
-              </button>
-            </>
-          ) : (
-            <button onClick={() => void session.start()} disabled={!canOpen}>
-              {session.status === 'opening' ? 'Shuffling…' : settled ? 'Open new table' : 'Open table'}
+    <>
+      <GameStage title="HI-LO WAR" subtitle="higher card takes the pot" action={<HowItWorksLink />}>
+        <FeltTable
+          dealer={houseNode}
+          player={youNode}
+          centerMark={null}
+          spots={pot > 0n ? <div className="spot main" style={{ fontVariantNumeric: 'tabular-nums' }}>war<span style={{ display: 'block', fontSize: 11 }}>◈{viem.formatEther(pot)}</span></div> : undefined}
+        />
+      </GameStage>
+
+      <div className="tray-col">
+        <ControlTray
+          title="Your move"
+          hint={session.deckCommitment ? <span className="mono">deck {session.deckCommitment.slice(0, 8)}…</span> : undefined}
+          action={primary}
+        >
+          <Toggle label="your bet" value={bet} options={['HOLD', 'RAISE'] as const} onChange={setBet} disabled={busy} />
+          <Toggle label="if house raises" value={onRaise} options={['CALL', 'FOLD'] as const} onChange={setOnRaise} disabled={busy} />
+          {session.ready && (
+            <button className="secondary" onClick={() => void session.settle()} disabled={!canFlip} style={{ width: '100%' }}>
+              {session.status === 'settling' ? 'Settling…' : 'Cash out / settle'}
             </button>
           )}
-          {!walletClient && <span className="muted">connect a wallet to play</span>}
-          {walletClient && !trustAcknowledged && (
-            <span className="muted">tap "Got it" on the fairness note above first</span>
+          {!walletClient && <p className="tray-hint">connect a wallet to play</p>}
+          {walletClient && !trustAcknowledged && <p className="tray-hint">tap "Got it" on the fairness note above first</p>}
+          {last && (
+            <p className={last.winner === 'A' ? 'ok' : last.winner === 'B' ? 'bad' : ''}>
+              {winnerLabel(last).text} · {last.deltaA >= 0n ? '+' : ''}{viem.formatEther(last.deltaA)}
+              {pot > 0n && <span className="muted"> · war carry ◈{viem.formatEther(pot)}</span>}
+            </p>
           )}
-        </div>
-        {session.deckCommitment && (
-          <p className="card-meta muted">
-            deck commitment <span className="mono">{session.deckCommitment.slice(0, 10)}…</span>
-            {session.state && (
-              <>
-                {' · '}your balance {viem.formatEther(session.state.balanceA)} · house{' '}
-                {viem.formatEther(session.state.balanceB)}
-                {session.state.pot > 0n && <> · war carry {viem.formatEther(session.state.pot)}</>}
-                {settled && <span className="ok"> · settled</span>}
-              </>
-            )}
-          </p>
-        )}
-        {session.error && <p className="bad">{session.error}</p>}
-      </div>
+          {session.error && <p className="bad">{session.error}</p>}
+        </ControlTray>
 
-      <h2>This table</h2>
-      {!session.ready && session.history.length === 0 && (
-        <p className="muted">No table open — pick your bet, then open one to shuffle a fresh deck.</p>
-      )}
-      {[...session.history].reverse().map((record) => (
-        <FlipReceipt key={record.nonce.toString()} record={record} />
-      ))}
+        <MetaPanel tabs={['Recent', 'Stats']}>
+          {myAddress && session.history.length > 0 ? (
+            <span>
+              <b>{net >= 0n ? '+' : ''}{viem.formatEther(net)}</b> net · {wins}/{session.history.length} won
+              {session.state && <span className="muted"> · balance {viem.formatEther(session.state.balanceA)}</span>}
+            </span>
+          ) : (
+            <span className="muted">{session.ready ? 'table open — Hold or Raise, then Flip' : 'no flips yet'}</span>
+          )}
+        </MetaPanel>
+      </div>
 
       {myAddress && session.history.length > 0 && (
         <>
@@ -182,10 +172,7 @@ export const HiLoWarScreen = ({
           <details className="history" open>
             <summary>
               {session.history.length} flip{session.history.length === 1 ? '' : 's'}
-              <span className="muted">
-                {' '}
-                · {wins}/{session.history.length} won · {viem.formatEther(taken)} net
-              </span>
+              <span className="muted"> · {wins}/{session.history.length} won · {viem.formatEther(net)} net</span>
             </summary>
             {[...session.history].reverse().map((record) => (
               <FlipReceipt key={record.nonce.toString()} record={record} />
@@ -193,6 +180,6 @@ export const HiLoWarScreen = ({
           </details>
         </>
       )}
-    </div>
+    </>
   )
 }
