@@ -28,14 +28,14 @@
     "@msgboard/zk-skill": "*",
     "buffer": "^6.0.3",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "react-dom": "^19.2.8",
     "snarkjs": "^0.7.6",
     "viem": "^2.25.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "@types/react": "^18.3.12",
-    "@types/react-dom": "^18.3.1",
+    "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.3.4",
     "tsx": "^4.19.3",
     "typescript": "~5.8.3",
