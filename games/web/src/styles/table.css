@@ -18,9 +18,13 @@
  */
 
 :root {
-  --gold: #e8b93f;
-  --gold-dim: #b98f2c;
-  --shell-ink: #e9e4d2;
+  /* Reconciled with the lobby token system (index.html): structural brass, not neon casino gold.
+     --gold is the muted structural brass used everywhere; --gold-live is the HOT accent reserved
+     for "something is live / just won" (marker glow, win flashes, the active rail bar). */
+  --gold: #c9a227;
+  --gold-live: #f0c74a;
+  --gold-dim: #8a7634;
+  --shell-ink: #f3ead7;
   --muted: #8a927f;
   --felt-hi: #2a8459;
   --felt-a: #1c6644;
@@ -29,9 +33,9 @@
   --wood-hi: #7a4e2c;
   --wood-a: #5a3820;
   --wood-b: #241207;
-  --bg: #0a0d0b;
-  --panel: #121a15;
-  --panel2: #0d1310;
+  --bg: #07150d;
+  --panel: #0d1e14;
+  --panel2: #0a1710;
   --red: #d05a4e;
   --green: #33c07a;
   --blue: #4a7fd0;
@@ -94,7 +98,7 @@
 }
 .rail .ico.on {
   color: var(--gold);
-  background: #e8b93f14;
+  background: #c9a22714;
 }
 .rail .ico.on::before {
   content: '';
@@ -162,6 +166,8 @@
 .ticker .amt {
   color: var(--gold);
   font-weight: 700;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
 }
 .ticker .who {
   color: #7fd0a0;
@@ -199,10 +205,11 @@
 }
 .gtitle h1 {
   margin: 0;
-  font-size: clamp(20px, 2.4vw, 30px);
+  font-size: clamp(22px, 2.6vw, 33px);
   font-weight: 800;
-  letter-spacing: 0.06em;
-  font-family: 'Arial Narrow', 'Inter', sans-serif;
+  letter-spacing: 0.005em;
+  font-family: var(--serif);
+  font-variation-settings: 'SOFT' 50, 'WONK' 1, 'opsz' 90;
   background: linear-gradient(180deg, #fff, #cfc8ad);
   -webkit-background-clip: text;
   background-clip: text;
@@ -217,7 +224,7 @@
   font-size: 11.5px;
   color: var(--gold-dim);
   cursor: pointer;
-  border: 1px solid #e8b93f30;
+  border: 1px solid #c9a22730;
   padding: 5px 11px;
   border-radius: 20px;
   white-space: nowrap;
@@ -268,6 +275,8 @@
   padding: 11px 13px;
   font-size: 19px;
   font-weight: 700;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
   color: #fff;
 }
 .amount-input {
@@ -307,7 +316,7 @@
   cursor: pointer;
 }
 .quick button:hover {
-  border-color: #e8b93f55;
+  border-color: #c9a22755;
   color: var(--gold);
 }
 /* in-hand action buttons (Blackjack Hit/Stand/Double/Split, etc.) */
@@ -361,7 +370,7 @@
   box-shadow: 0 7px 0 #0006, 0 10px 20px -6px #000;
 }
 .primary.amber {
-  background: linear-gradient(180deg, #e8b93f, #a87d24);
+  background: linear-gradient(180deg, #c9a227, #a87d24);
   color: #241800;
 }
 .pf-link {
@@ -395,12 +404,14 @@
   margin-top: 5px;
   font-size: 16px;
   font-weight: 700;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
   color: #fff;
 }
 .slider {
   height: 5px;
   border-radius: 4px;
-  background: linear-gradient(90deg, #2f57a0, #e8b93f);
+  background: linear-gradient(90deg, #2f57a0, #c9a227);
   margin: 12px 4px 4px;
   position: relative;
 }
@@ -414,7 +425,7 @@
   border-radius: 50%;
   background: #fff;
   transform: translate(-50%, -50%);
-  box-shadow: 0 0 8px #e8b93f, 0 2px 4px #000a;
+  box-shadow: 0 0 8px #c9a227, 0 2px 4px #000a;
 }
 
 .meta {
@@ -444,7 +455,7 @@
   cursor: pointer;
 }
 .tabs div.on {
-  background: #e8b93f14;
+  background: #c9a22714;
   color: var(--gold);
 }
 .pl {
@@ -611,18 +622,18 @@
   width: clamp(46px, 6vw, 72px);
   aspect-ratio: 1;
   border-radius: 50%;
-  border: 2px solid #e8b93f80;
+  border: 2px solid #c9a22780;
   display: grid;
   place-items: center;
-  color: #e8b93f88;
+  color: #c9a22788;
   font-size: 10px;
   font-weight: 700;
-  box-shadow: inset 0 0 20px #00000055, 0 0 20px #e8b93f1f;
+  box-shadow: inset 0 0 20px #00000055, 0 0 20px #c9a2271f;
 }
 .spot.main {
   border-color: var(--gold);
   color: var(--gold);
-  box-shadow: inset 0 0 24px #00000066, 0 0 34px #e8b93f3a;
+  box-shadow: inset 0 0 24px #00000066, 0 0 34px #c9a2273a;
 }
 .fcard {
   position: absolute;
@@ -674,6 +685,62 @@
   transform: rotate(6deg);
 }
 
+/* Real playing-card face (self-contained, flex-friendly) — used by the shared Card component so
+   every felt game shows actual cards instead of text chips. `.big` = foreground hand; `.back` = a
+   face-down committed card stamped with the ◈ seal (the "sealed before you play" motif). */
+.playcard {
+  position: relative;
+  display: inline-flex;
+  width: clamp(38px, 4.6vw, 54px);
+  aspect-ratio: 0.7;
+  border-radius: 7px;
+  background: linear-gradient(158deg, #fefdf6, #e6e2d2);
+  color: #12203a;
+  box-shadow: inset 0 1px 0 #fff, 0 4px 10px -3px #0009;
+  font-family: var(--serif);
+  font-weight: 800;
+  flex: none;
+}
+.playcard.big {
+  width: clamp(52px, 6vw, 76px);
+  border-radius: 9px;
+}
+.playcard.red {
+  color: #b3261e;
+}
+.playcard .corner {
+  position: absolute;
+  top: 5px;
+  left: 6px;
+  line-height: 0.8;
+  font-size: clamp(11px, 1.3vw, 15px);
+  text-align: center;
+  letter-spacing: -0.02em;
+}
+.playcard.big .corner {
+  font-size: clamp(13px, 1.6vw, 19px);
+}
+.playcard .pip {
+  margin: auto;
+  font-size: 1.7em;
+  line-height: 1;
+  opacity: 0.9;
+}
+.playcard.back {
+  color: #c9a227;
+  background:
+    repeating-linear-gradient(45deg, #2c2350 0 6px, #241a44 6px 12px),
+    linear-gradient(160deg, #3a2f5e, #241a44);
+  border: 1px solid #c9a22733;
+  box-shadow: inset 0 0 0 3px #ffffff0a, 0 4px 10px -3px #0009;
+}
+.playcard.back::after {
+  content: '◈';
+  margin: auto;
+  color: #c9a22788;
+  font-size: 1.5em;
+}
+
 /* ============================== canvas (crash) ============================== */
 
 .crashstage {
@@ -699,11 +766,12 @@
   left: 50%;
   transform: translate(-50%, -50%);
   font-size: clamp(44px, 8vw, 96px);
-  font-weight: 900;
+  font-weight: 600;
   color: var(--green);
   text-shadow: 0 0 40px #33c07a66;
-  font-family: 'Arial Narrow', 'Inter', sans-serif;
-  letter-spacing: 1px;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -1px;
 }
 .hist {
   position: absolute;
@@ -720,6 +788,8 @@
   border-radius: 7px;
   font-size: 12px;
   font-weight: 800;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
   background: #0e150f;
   border: 1px solid #ffffff12;
 }
@@ -727,7 +797,7 @@
   color: #d05a4e;
 }
 .hchip.mid {
-  color: #e8b93f;
+  color: #c9a227;
 }
 .hchip.hi {
   color: #33c07a;
@@ -816,6 +886,8 @@
 }
 .stat b {
   font-size: clamp(18px, 2.4vw, 26px);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
   color: #fff;
 }
 .stat.g b {
@@ -853,7 +925,7 @@
   position: relative;
   transform: rotateX(24deg);
   transform-style: preserve-3d;
-  box-shadow: 0 26px 40px -14px #000d, 0 0 0 5px #241207, 0 0 0 8px #e8b93f66, inset 0 0 26px #000a;
+  box-shadow: 0 26px 40px -14px #000d, 0 0 0 5px #241207, 0 0 0 8px #c9a22766, inset 0 0 26px #000a;
 }
 .wheel .pockets {
   position: absolute;
@@ -865,7 +937,7 @@
   inset: 34%;
   border-radius: 50%;
   background: radial-gradient(#2a5f43, #0c2418);
-  border: 2px solid #e8b93f88;
+  border: 2px solid #c9a22788;
   display: grid;
   place-items: center;
   box-shadow: inset 0 0 12px #000a;
@@ -909,6 +981,8 @@
   place-items: center;
   font-size: 12px;
   font-weight: 800;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
   color: #fff;
 }
 .num.r {
@@ -1080,14 +1154,14 @@
 }
 .tile.gem {
   background: radial-gradient(circle at 40% 30%, #2a8459, #0c3a26);
-  border-color: #e8b93f55;
+  border-color: #c9a22755;
   box-shadow: 0 0 18px #33c07a44;
 }
 .tile.bomb {
   background: radial-gradient(circle at 40% 30%, #d05a4e, #5a1a15);
 }
 .tile.hidden:hover {
-  border-color: #e8b93f55;
+  border-color: #c9a22755;
 }
 .mnext {
   position: absolute;
@@ -1100,6 +1174,8 @@
   padding: 6px 16px;
   font-size: 13px;
   font-weight: 800;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
   color: var(--gold);
 }
 
