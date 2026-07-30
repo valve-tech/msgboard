@@ -43,7 +43,7 @@
     "@nomicfoundation/hardhat-network-helpers": "^1.0.8",
     "hardhat": "^2.16.1",
     "nyc": "^17.1.0",
-    "solidity-coverage": "^0.8.15",
+    "solidity-coverage": "^0.8.17",
     "tsx": "^4.19.3",
     "viem": "^2.28.0",
     "vitest": "^3.1.2"
