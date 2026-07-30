@@ -4,9 +4,13 @@ import {
   dealThreeCard, settleThreeCard, commitThreeCard, verifyThreeCard, type ThreeCardDecision,
 } from '@msgboard/games'
 import type { GameDeployment } from '../config'
-import { StakeInput, parseStake } from './StakeInput'
-import { InfoDot } from './Meta'
-import { randomDeckSeed, Card, CardBack, fmtMultD } from './decisionShared'
+import { parseStake } from './StakeInput'
+import { randomDeckSeed, Card, CardBack } from './decisionShared'
+import { GameStage } from './shell/GameStage'
+import { HowItWorksLink } from './HowItWorks'
+import { BetTray } from './shell/BetTray'
+import { MetaPanel } from './shell/MetaPanel'
+import { FeltTable } from './stages/FeltTable'
 
 type Phase = 'idle' | 'decide' | 'done'
 interface Hand {
@@ -15,9 +19,10 @@ interface Hand {
 }
 
 /**
- * Three Card Poker — single-decision dealer game. Deal reveals YOUR 3 cards (the dealer's stay face
- * down, committed); you Play or Fold; settling reveals the dealer and your browser re-checks the deal
- * against the disclosed seed (provably fair). In-process house, same trust model as Mines.
+ * Three Card Poker — single-decision dealer game on the felt. Deal reveals YOUR 3 cards in the
+ * foreground; the dealer's 3 stay face-down at the far end (committed). Play (match your ante) or Fold;
+ * settling flips the dealer and your browser re-checks the deal against the disclosed seed. The dealer
+ * qualifies on Queen-high; straights/trips/straight-flushes earn an ante bonus. In-process (Mines model).
  */
 export const ThreeCardPokerScreen = ({ deployment: _d, walletClient, trustAcknowledged, myAddress }: {
   deployment: GameDeployment; walletClient?: viem.WalletClient; trustAcknowledged: boolean; myAddress?: viem.Hex
@@ -49,43 +54,58 @@ export const ThreeCardPokerScreen = ({ deployment: _d, walletClient, trustAcknow
   }
 
   const folded = hand?.decision === 'fold'
-  return (
-    <div>
-      <div className="card">
-        <h3>Three Card Poker<InfoDot>
-          <strong>Beat the dealer with three cards.</strong> See your hand, then Play (match your ante) or
-          Fold. The dealer qualifies on Queen-high or better; straights, trips and straight flushes earn an
-          ante bonus. Your browser re-checks the deal against the sealed seed.</InfoDot></h3>
-        <div className="row">
-          <StakeInput value={amount} onChange={setAmount} />
-          <button onClick={deal} disabled={!canDeal}>{phase === 'decide' ? 'In hand…' : 'Deal'}</button>
-          {!walletClient && <span className="muted">connect a wallet to play</span>}
-          {walletClient && !trustAcknowledged && <span className="muted">tap "Got it" on the fairness note above first</span>}
-        </div>
+  const net = history.reduce((s, h) => s + (h.delta ?? 0n), 0n)
 
-        {hand && (
-          <div style={{ marginTop: '0.75rem' }}>
-            <p className="muted">your hand</p>
-            <div className="row">{hand.player.map((c) => <Card key={c} index={c} />)}</div>
-            <p className="muted" style={{ marginTop: '0.5rem' }}>dealer</p>
-            <div className="row">
-              {phase === 'decide' ? <><CardBack /><CardBack /><CardBack /></> : hand.dealer.map((c) => <Card key={c} index={c} />)}
-            </div>
-            {phase === 'decide' && (
-              <div className="row" style={{ marginTop: '0.6rem' }}>
-                <button onClick={() => decide('play')}>Play (+{amount} ante)</button>
-                <button className="secondary" onClick={() => decide('fold')}>Fold</button>
+  const dealerNode = hand && (
+    <div className="row" style={{ gap: 6 }}>
+      {phase === 'decide' ? <><CardBack /><CardBack /><CardBack /></> : hand.dealer.map((c) => <Card key={c} index={c} />)}
+    </div>
+  )
+  const playerNode = hand && (
+    <div className="row" style={{ gap: 8 }}>{hand.player.map((c) => <Card key={c} index={c} big />)}</div>
+  )
+  const spotsNode = <div className="spot main">{amount}<span style={{ display: 'block', fontSize: 9, opacity: 0.7, fontWeight: 400 }}>ante</span></div>
+
+  const dealLabel = phase === 'decide' ? 'In hand…' : phase === 'done' ? 'Deal again' : 'Deal'
+
+  return (
+    <>
+      <GameStage title="THREE CARD POKER" subtitle="beat the dealer · queen-high qualifies" action={<HowItWorksLink />}>
+        <FeltTable dealer={dealerNode} player={playerNode} spots={spotsNode} centerMark={null} />
+      </GameStage>
+
+      <div className="tray-col">
+        <BetTray
+          amount={amount}
+          onAmount={setAmount}
+          action={<button className="primary" onClick={deal} disabled={!canDeal}>{dealLabel}</button>}
+        >
+          {phase === 'decide' && (
+            <>
+              <div className="acts">
+                <button className="b-hit" onClick={() => decide('play')}>Play · +{amount}</button>
+                <button className="b-stand" onClick={() => decide('fold')}>Fold</button>
               </div>
-            )}
-            {phase === 'done' && hand.delta !== undefined && (
-              <p style={{ marginTop: '0.6rem' }} className={hand.delta >= 0n ? 'ok' : 'bad'}>
-                {folded ? 'folded · ' : ''}{hand.delta >= 0n ? '+' : ''}{viem.formatEther(hand.delta)}{' '}
-                <span className="muted">· commit {hand.commit.slice(0, 10)}… · {hand.verified ? 'verify ✓' : 'verify ✗'}</span>
-              </p>
-            )}
-          </div>
-        )}
-        {phase === 'done' && <div className="row" style={{ marginTop: '0.5rem' }}><button onClick={deal} disabled={!canDeal}>Deal again</button></div>}
+              <p className="tray-hint">straights · trips · straight flush pay an ante bonus</p>
+            </>
+          )}
+          {!walletClient && <p className="tray-hint">connect a wallet to play</p>}
+          {walletClient && !trustAcknowledged && <p className="tray-hint">tap "Got it" on the fairness note above first</p>}
+          {phase === 'done' && hand?.delta !== undefined && (
+            <p className={hand.delta >= 0n ? 'ok' : 'bad'}>
+              {folded ? 'folded · ' : ''}{hand.delta >= 0n ? '+' : ''}{viem.formatEther(hand.delta)}
+              <span className="muted"> · {hand.verified ? 'verify ✓' : 'verify ✗'}</span>
+            </p>
+          )}
+        </BetTray>
+
+        <MetaPanel tabs={['Recent', 'Stats']}>
+          {myAddress && history.length > 0 ? (
+            <span><b>{net >= 0n ? '+' : ''}{viem.formatEther(net)}</b> net · {history.length} hand{history.length === 1 ? '' : 's'}</span>
+          ) : (
+            <span className="muted">no hands yet</span>
+          )}
+        </MetaPanel>
       </div>
 
       {myAddress && history.length > 0 && (
@@ -93,7 +113,7 @@ export const ThreeCardPokerScreen = ({ deployment: _d, walletClient, trustAcknow
           <h2>Your book</h2>
           <details className="history" open>
             <summary>{history.length} hand{history.length === 1 ? '' : 's'}
-              <span className="muted"> · {viem.formatEther(history.reduce((s, h) => s + (h.delta ?? 0n), 0n))} net</span>
+              <span className="muted"> · {viem.formatEther(net)} net</span>
             </summary>
             {[...history].reverse().map((h, i) => (
               <div className="card" key={i}>
@@ -101,12 +121,12 @@ export const ThreeCardPokerScreen = ({ deployment: _d, walletClient, trustAcknow
                   <span>{h.player.map((c) => <Card key={c} index={c} />)} <span className="muted">vs</span> {h.dealer.map((c) => <Card key={`d${c}`} index={c} dim />)}</span>
                   <span className={(h.delta ?? 0n) >= 0n ? 'ok' : 'bad'}>{(h.delta ?? 0n) >= 0n ? '+' : ''}{viem.formatEther(h.delta ?? 0n)}</span>
                 </div>
-                <p className="card-meta muted">{h.decision} · {h.verified ? 'verify ✓' : 'verify ✗'} · {fmtMultD(100n)} ante</p>
+                <p className="card-meta muted">{h.decision} · {h.verified ? 'verify ✓' : 'verify ✗'}</p>
               </div>
             ))}
           </details>
         </>
       )}
-    </div>
+    </>
   )
 }
