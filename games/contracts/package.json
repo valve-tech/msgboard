@@ -27,7 +27,7 @@
     "chai": "^5.3.3",
     "chai-as-promised": "^8.0.1",
     "ethers": "^6.17.0",
-    "hardhat": "2.28.6",
+    "hardhat": "3.11.1",
     "hardhat-dependency-compiler": "^1.2.1",
     "hardhat-gas-reporter": "^2.2.2",
     "hardhat-tracer": "^3.1.0",
