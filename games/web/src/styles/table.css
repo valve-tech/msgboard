@@ -707,12 +707,21 @@
 .scene.view-flat { perspective-origin: 50% 50%; }
 .scene.view-flat .plane { transform: translate(-50%, -50%) rotateX(3deg) scale(.82); }
 .scene.view-flat .hand { transform: translateX(-50%) scale(.78); bottom: 9%; }
-/* The bet circles are hand-placed for the SEAT rake — the perspective widens the felt's foreground so
-   they sit clear of the cloth's edge. The flatter/zoomed cameras lose that widening, so the circles
-   drift toward the ellipse's narrow lower edge and clip. They're a betting element, not scenery, and
-   you place bets from the seated view; the other cameras are for reading the table + hands. So hide the
-   spots outside Seat rather than ship clipped/mis-placed betting UI. */
-.scene:not(.view-seat) .spots { display: none; }
+/* Flat 2D betting layout — the bet circles laid out in clean screen space (outside the 3D plane) the
+   way a roulette table shows its layout, so nothing mis-projects or clips like the raked .spots do.
+   FeltTable renders the spots node here in 2D and on the plane (.spots) only in Seat; Aerial/Rail show
+   no spots (they're for reading the table). */
+.spots-flat {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: 20%; z-index: 6;
+  display: flex; justify-content: center; align-items: center; gap: clamp(16px, 3.2vw, 44px);
+}
+.spots-flat::before { /* a subtle inset betting-strip so the row reads as a layout, not floating chips */
+  content: ''; position: absolute; z-index: -1; inset: -16px -30px;
+  border-radius: 999px; border: 1px solid #ffffff12;
+  background: radial-gradient(120% 160% at 50% 0%, #ffffff0c, #00000055 70%);
+  box-shadow: inset 0 2px 12px #0007;
+}
+.spots-flat .spot { width: clamp(56px, 6.6vw, 82px); }
 /* the switcher pill (top-centre of the felt, dropped clear of the floating chrome/title/wallet) */
 .felt-views {
   position: absolute; top: 94px; left: 50%; transform: translateX(-50%); z-index: 12;
@@ -1253,7 +1262,9 @@
     backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
     border-right: 1px solid #ffffff16;
   }
-  .app:has(.stage-col) .main { position: absolute; inset: 0; display: block; overflow: hidden; }
+  /* NB: `> .main` (direct child), not `.main` — a descendant selector also matches the `.spot.main`
+     betting buttons (same class name), which would absolutely-position them and wreck the felt layout. */
+  .app:has(.stage-col) > .main { position: absolute; inset: 0; display: block; overflow: hidden; }
 
   /* the surface fills the whole frame, edge to edge, behind the HUD */
   .main:has(.stage-col) .stagewrap { position: absolute; inset: 0; display: block; padding: 0; overflow: hidden; }

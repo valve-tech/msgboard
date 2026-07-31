@@ -78,11 +78,17 @@ export const FeltTable = ({ dealer, player, spots, spread, arc, centerMark, view
             )}
             {arc && <div className="arc">{arc}</div>}
             {centerMark === undefined ? <div className="medal">M</div> : centerMark && <div className="medal">{centerMark}</div>}
-            {spots && <div className="spots">{spots}</div>}
+            {/* On the raked plane the bet circles sit at the felt's front edge — Seat's perspective
+                widens the foreground so they clear the cloth. The flatter/zoomed cameras lose that
+                widening, so here they only ride the plane in Seat; 2D gets a flat strip instead. */}
+            {spots && view === 'seat' && <div className="spots">{spots}</div>}
           </div>
         </div>
       </div>
       {player && <div className="hand">{player}</div>}
+      {/* Flat 2D betting layout: the same bet spots laid out in clean screen space (outside the 3D
+          plane, like a roulette table's layout) so nothing mis-projects or clips. 2D view only. */}
+      {spots && view === 'flat' && <div className="spots-flat">{spots}</div>}
     </div>
   )
 }
