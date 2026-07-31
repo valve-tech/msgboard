@@ -10,6 +10,12 @@ import { LadderPath } from './stages/LadderPath'
 const HUNDREDTHS = 100n
 export const fmtMult = (x100: bigint): string => `${(Number(x100) / 100).toFixed(2)}x`
 
+/** compact multiplier for tight slots (drop buckets): no "x", fewer digits as it grows. */
+export const fmtMultShort = (x100: bigint): string => {
+  const v = Number(x100) / 100
+  return v >= 100 ? String(Math.round(v)) : v >= 10 ? v.toFixed(1) : v.toFixed(2)
+}
+
 /** A labelled row of difficulty toggle chips for a ladder game's tray config. */
 export const DiffChips = <T extends string>({ label = 'difficulty', options, value, onChange, disabled }: {
   label?: string; options: readonly T[]; value: T; onChange: (v: T) => void; disabled?: boolean

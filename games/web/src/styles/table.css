@@ -1250,6 +1250,46 @@
 .lad-choices button:disabled { opacity: .5; cursor: default; }
 
 /* ============================================================================
+   DropBoard — the peg-field surface for the ball-drop games (Plinko, Pachinko).
+   ========================================================================== */
+.drop-scene {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 14px 12px 10px;
+  background: radial-gradient(120% 90% at 50% -10%, #14281c 0%, #0a170f 46%, #06100a 100%);
+}
+/* the plot is inset so edge buckets (centered at 0%/100%) sit fully inside the scene */
+.drop-plot { position: relative; width: min(92%, 460px); aspect-ratio: 4 / 5; margin: 0 auto; }
+.drop-peg {
+  position: absolute; width: 6px; height: 6px; border-radius: 50%; transform: translate(-50%, -50%);
+  background: radial-gradient(circle at 50% 30%, #f3ead7, #9aa79c 70%, #5c6b5e);
+  box-shadow: 0 1px 2px #0009, 0 0 5px #f0c74a22;
+}
+.drop-ball {
+  position: absolute; width: 16px; height: 16px; border-radius: 50%; transform: translate(-50%, -50%); z-index: 3;
+  background: radial-gradient(circle at 38% 30%, #fff3c8, var(--gold-live, #f0c74a) 46%, #b8860b 100%);
+  box-shadow: 0 0 12px 2px #f0c74a88, inset 0 -2px 3px #0006; opacity: .3;
+}
+.drop-ball.live { opacity: 1; }
+.drop-ball.settled { box-shadow: 0 0 18px 4px #f0c74aaa, inset 0 -2px 3px #0006; }
+.drop-buckets { position: absolute; left: 0; right: 0; top: 76%; bottom: 0; }
+.drop-bucket {
+  position: absolute; top: 0; bottom: 0; transform: translateX(-50%);
+  display: flex; align-items: center; justify-content: center; min-width: 20px; padding: 0 2px;
+  border-radius: 0 0 5px 5px; border: 1px solid #ffffff10; border-top: 2px solid #ffffff1c;
+  font: 800 clamp(8px, 1.5vw, 11px)/1 var(--mono); font-variant-numeric: tabular-nums;
+  background: #0e150f; color: #8fa093;
+}
+.drop-bucket.lo { color: #e0796d; border-top-color: #e0574a55; background: linear-gradient(180deg, #1c110e, #0e150f); }
+.drop-bucket.mid { color: #e6c65a; border-top-color: #c9a22766; background: linear-gradient(180deg, #1c180c, #0e150f); }
+.drop-bucket.hi { color: #5cc98f; border-top-color: #33c07a66; background: linear-gradient(180deg, #0f2218, #0e150f); }
+.drop-bucket.hit {
+  color: #0a0f0b; font-weight: 900; transform: translateX(-50%) translateY(-3px);
+  background: radial-gradient(circle at 50% 30%, var(--gold-live, #f0c74a), var(--gold, #c9a227));
+  border-top-color: var(--gold-live, #f0c74a); box-shadow: 0 0 20px #f0c74a99;
+}
+.drop-hint { margin-top: 8px; font-family: var(--mono); font-size: 11px; color: #8fa093; letter-spacing: .04em; }
+
+/* ============================================================================
    CasinoFloor — the first-person "walk the hall" lobby (full-bleed, no rail).
    ========================================================================== */
 .cf-root {
