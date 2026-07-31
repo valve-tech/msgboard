@@ -1290,6 +1290,52 @@
 .drop-hint { margin-top: 8px; font-family: var(--mono); font-size: 11px; color: #8fa093; letter-spacing: .04em; }
 
 /* ============================================================================
+   MultiWheel — the prize-wheel surface for the spin games (Wheel).
+   ========================================================================== */
+.mw-scene {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; padding: 16px;
+  background: radial-gradient(100% 80% at 50% 42%, #14281c 0%, #0a170f 55%, #06100a 100%);
+}
+.mw-stage { position: relative; width: min(74%, 360px); aspect-ratio: 1; }
+/* the spinning ring of tier-tinted wedges */
+.mw-rotor {
+  position: absolute; inset: 0; border-radius: 50%;
+  transition: transform 4.4s cubic-bezier(.13, .78, .22, 1);
+  box-shadow: 0 20px 40px -14px #000c, inset 0 0 44px #0009;
+  filter: saturate(1.05);
+}
+.mw-seps { position: absolute; inset: 0; border-radius: 50%; } /* thin dark spokes between wedges */
+/* brass rim + inner well shadow, fixed (does not spin) */
+.mw-rim {
+  position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
+  border: 4px solid transparent;
+  background:
+    radial-gradient(circle at 50% 50%, transparent 60%, #00000055 74%, transparent 76%),
+    conic-gradient(from 0deg, #7a5c14, #f0c74a 12%, #8a6a1a 25%, #f0c74a 38%, #7a5c14 50%, #f0c74a 62%, #8a6a1a 75%, #f0c74a 88%, #7a5c14) border-box;
+  -webkit-mask: linear-gradient(#000 0 0) padding-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+}
+/* fixed centre hub with the big multiplier readout */
+.mw-hub {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 42%; height: 42%; border-radius: 50%; display: grid; place-items: center; text-align: center;
+  background: radial-gradient(circle at 50% 34%, #16351f, #0c1c12 62%, #071710);
+  border: 2px solid #c9a2277a; box-shadow: 0 6px 16px #000a, inset 0 0 22px #0009, inset 0 2px 0 #ffffff12;
+  font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--cream, #f3ead7);
+  z-index: 3;
+}
+.mw-hub.spun { border-color: var(--gold-live, #f0c74a); box-shadow: 0 0 26px #f0c74a44, inset 0 0 22px #0009; }
+/* the pointer, fixed at 12 o'clock, biting into the rim */
+.mw-pointer {
+  position: absolute; top: -3px; left: 50%; transform: translateX(-50%); z-index: 4;
+  width: 0; height: 0; border-left: 12px solid transparent; border-right: 12px solid transparent;
+  border-top: 22px solid var(--gold-live, #f0c74a); filter: drop-shadow(0 2px 3px #000b);
+}
+.mw-hint { font-family: var(--mono); font-size: 11px; color: #8fa093; letter-spacing: .04em; }
+@media (prefers-reduced-motion: reduce) { .mw-rotor { transition: transform .01s linear; } }
+
+/* ============================================================================
    CasinoFloor — the first-person "walk the hall" lobby (full-bleed, no rail).
    ========================================================================== */
 .cf-root {
