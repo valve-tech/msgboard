@@ -1255,9 +1255,13 @@
   perspective: 1000px; perspective-origin: 50% 40%;
 }
 .cf-scene { position: absolute; inset: 0; transform-style: preserve-3d; }
+.cf-scene::before { /* warm overhead wash so the upper hall reads as lit distance, not dead black */
+  content: ''; position: absolute; left: 50%; top: 0; width: 72%; height: 48%; transform: translateX(-50%);
+  background: radial-gradient(58% 82% at 50% -6%, #f0c74a18, #f0c74a08 44%, transparent 72%); pointer-events: none; z-index: 0;
+}
 .cf-carpet {
-  position: absolute; left: 50%; bottom: -4%; width: min(46vw, 520px); height: 150%;
-  transform: translateX(-50%) rotateX(74deg); transform-origin: 50% 100%;
+  position: absolute; left: 50%; bottom: -4%; width: min(46vw, 520px); height: 220%;
+  transform: translateX(-50%) rotateX(72deg); transform-origin: 50% 100%;
   background:
     linear-gradient(90deg, transparent 0 8%, #7d2233 8% 11%, #3a0e18 11% 89%, #7d2233 89% 92%, transparent 92%),
     linear-gradient(180deg, #4a0f1c, #360a14 60%, #240710);
@@ -1265,12 +1269,12 @@
 }
 .cf-carpet::after { content: ''; position: absolute; inset: 0;
   background: repeating-linear-gradient(180deg, #ffffff00 0 46px, #f0c74a10 46px 48px); }
-.cf-vanish { position: absolute; left: 50%; top: 20%; transform: translate(-50%, -50%); text-align: center; z-index: 1; }
+.cf-vanish { position: absolute; left: 50%; top: 33%; transform: translate(-50%, -50%); text-align: center; z-index: 1; }
 .cf-arch { display: block; font-family: var(--serif); font-weight: 900; font-size: 15px; letter-spacing: .16em;
   color: #e9d9a0; text-shadow: 0 0 18px #f0c74a66; opacity: .66; }
 .cf-more { font-family: var(--mono); font-size: 10.5px; color: #8fa093; opacity: .6; margin-top: 4px; letter-spacing: .1em; }
 /* a pit set into the side of the hall */
-.cf-pit { position: absolute; bottom: 10%; width: min(35vw, 400px); transform-style: preserve-3d; z-index: 2; }
+.cf-pit { position: absolute; bottom: 4%; width: min(35vw, 400px); transform-style: preserve-3d; z-index: 2; }
 .cf-pit.cf-left { left: 1.5%; transform: rotateY(31deg); transform-origin: left bottom; }
 .cf-pit.cf-right { right: 1.5%; transform: rotateY(-31deg); transform-origin: right bottom; }
 .cf-pit.cf-solo { left: 50%; transform: translateX(-50%); width: min(70vw, 720px); text-align: center; }
