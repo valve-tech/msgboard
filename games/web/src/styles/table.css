@@ -1185,6 +1185,90 @@
   color: var(--gold);
 }
 
+/* ============================================================================
+   Immersive HUD — the game surface IS the viewport; every control floats over
+   it (the rail, the title, the bet card, the meta, the book), blocking the
+   edges rather than sitting in a card grid beside it. Scoped with
+   :has(.stage-col) so full-page tabs (standings / live) keep their normal
+   scrolling layout, and gated to desktop so narrow viewports keep the simple
+   stacked fallback below.
+   ========================================================================== */
+@media (min-width: 941px) {
+  /* rail + main stop being grid columns; both float over one full-bleed frame */
+  .app:has(.stage-col) { display: block; position: relative; }
+  .app:has(.stage-col) .rail {
+    position: absolute; left: 0; top: 0; bottom: 0; z-index: 40;
+    background: linear-gradient(180deg, #0d1310d8, #0a0d0bd8);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    border-right: 1px solid #ffffff16;
+  }
+  .app:has(.stage-col) .main { position: absolute; inset: 0; display: block; overflow: hidden; }
+
+  /* the surface fills the whole frame, edge to edge, behind the HUD */
+  .main:has(.stage-col) .stagewrap { position: absolute; inset: 0; display: block; padding: 0; overflow: hidden; }
+  .main:has(.stage-col) .stage-col { position: absolute; inset: 0; gap: 0; }
+  .main:has(.stage-col) .stage {
+    position: absolute; inset: 0; height: auto; min-height: 0;
+    border: none; border-radius: 0; box-shadow: none;
+  }
+
+  /* the game name floats top-left below the chrome, no card — just lettering over the felt */
+  .main:has(.stage-col) .gtitle {
+    position: absolute; top: 90px; left: 76px; right: auto; z-index: 6;
+    flex-direction: column; align-items: flex-start; gap: 3px;
+  }
+  .main:has(.stage-col) .gtitle h1 { text-shadow: 0 3px 18px #000c; }
+  .main:has(.stage-col) .gtitle .sub { text-shadow: 0 1px 8px #000c; }
+  .main:has(.stage-col) .gtitle .pf { margin-left: 0; background: #0b100caa; backdrop-filter: blur(6px); }
+
+  /* bet card floats bottom-right; meta stacks under it; both translucent so the game reads through */
+  .main:has(.stage-col) .tray-col {
+    position: absolute; right: 16px; bottom: 16px; top: auto; left: auto;
+    width: clamp(280px, 25vw, 336px); z-index: 6;
+    max-height: calc(100vh - 96px); overflow-y: auto; scrollbar-width: none;
+  }
+  .main:has(.stage-col) .tray-col::-webkit-scrollbar { display: none; }
+  .main:has(.stage-col) .bet,
+  .main:has(.stage-col) .meta {
+    background: linear-gradient(180deg, #12191ae6, #0b100ce6);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border-color: #ffffff1f; box-shadow: 0 24px 48px -20px #000d;
+  }
+  .main:has(.stage-col) .meta { flex: none; }
+
+  /* the "Your book" heading is redundant (the drawer summary labels itself); float the drawer bottom-left */
+  .main:has(.stage-col) .stagewrap > h2 { display: none; }
+  .main:has(.stage-col) .stagewrap > .history {
+    position: absolute; left: 76px; bottom: 16px; top: auto; z-index: 6; margin: 0;
+    width: clamp(250px, 22vw, 308px); max-height: calc(100vh - 150px); overflow-y: auto;
+    background: linear-gradient(180deg, #12191ae6, #0b100ce6);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border: 1px solid #ffffff1a; border-radius: 14px; padding: 6px 10px;
+    box-shadow: 0 24px 48px -20px #000d; scrollbar-width: none;
+  }
+  .main:has(.stage-col) .stagewrap > .history::-webkit-scrollbar { display: none; }
+
+  /* chrome floats: ticker along the top, wallet cluster top-right, trust strip a slim bar beneath */
+  /* ticker along the top, stopping short of the wallet cluster it shares the strip with */
+  .main:has(.stage-col) > .ticker {
+    position: absolute; top: 0; left: 60px; right: 384px; z-index: 30;
+    background: #0b0f0dcc; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    border-bottom-color: #ffffff16;
+  }
+  .main:has(.stage-col) > .shell-top {
+    position: absolute; top: 0; right: 12px; height: 34px; z-index: 36;
+    align-items: center; padding: 0; margin: 0; width: auto; justify-content: flex-end;
+    background: #0b0f0d; border-bottom: 1px solid #ffffff16;
+  }
+  .main:has(.stage-col) > .shell-chrome {
+    position: absolute; top: 34px; left: 60px; right: 0; z-index: 32;
+    padding: 6px 16px; background: linear-gradient(180deg, #0b0f0dcc, #0b0f0d88);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  }
+  /* the colophon is chrome noise in the immersive frame */
+  .main:has(.stage-col) > .colophon { display: none; }
+}
+
 /* ============================== responsive ============================== */
 
 @media (max-width: 940px) {
