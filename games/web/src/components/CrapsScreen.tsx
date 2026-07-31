@@ -1,16 +1,26 @@
 import { useState } from 'react'
 import * as viem from 'viem'
-import { craps, type CrapsParams, type CrapsBet } from '@msgboard/games'
+import { craps, resolveCraps, type CrapsParams, type CrapsBet } from '@msgboard/games'
 import type { GameDeployment } from '../config'
 import { useSession, type RoundRecord } from '../hooks/useSession'
-import { StakeInput, parseStake } from './StakeInput'
+import { parseStake } from './StakeInput'
 import { TurnTiming } from './TurnTiming'
-import { InfoDot } from './Meta'
+import { GameStage } from './shell/GameStage'
+import { HowItWorksLink } from './HowItWorks'
+import { BetTray } from './shell/BetTray'
+import { MetaPanel } from './shell/MetaPanel'
+import { FeltTable } from './stages/FeltTable'
 
 const BETS: readonly CrapsBet[] = ['pass', 'dontpass']
-const fmtMult = (x100: bigint): string => `${(Number(x100) / 100).toFixed(2)}x`
+const LINE_LABEL: Record<CrapsBet, string> = { pass: 'Pass', dontpass: "Don't Pass" }
+const DIE_FACE = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅']
 
-/** Craps can PUSH (don't-pass bar 12): delta 0, not a win — show it distinctly. */
+const Die = ({ n, dim }: { n: number; dim?: boolean }) => (
+  <span style={{ fontSize: 'clamp(46px, 7vw, 78px)', lineHeight: 1, color: dim ? '#3f5545' : 'var(--cream, #f3ead7)', filter: 'drop-shadow(0 4px 6px #000a)' }}>
+    {DIE_FACE[n - 1]}
+  </span>
+)
+
 const RoundReceipt = ({ record }: { record: RoundRecord }) => {
   const push = !record.win && record.playerDelta === 0n
   return (
@@ -19,13 +29,7 @@ const RoundReceipt = ({ record }: { record: RoundRecord }) => {
         <span>
           <span className="tag">roll {record.round}</span>
           {viem.formatEther(record.stake)} staked
-          {record.win ? (
-            <span className="tag ok">won {fmtMult(record.multiplierX100)}</span>
-          ) : push ? (
-            <span className="tag">push (bar 12)</span>
-          ) : (
-            <span className="tag">lost</span>
-          )}
+          {record.win ? <span className="tag ok">won</span> : push ? <span className="tag">push (bar 12)</span> : <span className="tag">lost</span>}
         </span>
         <span className={record.playerDelta >= 0n ? 'ok' : 'bad'}>
           {record.playerDelta >= 0n ? '+' : ''}
@@ -62,62 +66,93 @@ export const CrapsScreen = ({ deployment, walletClient, trustAcknowledged, myAdd
     void session.play(stake, { bet })
   }
 
+  const last = session.history.length > 0 ? session.history[session.history.length - 1] : undefined
+  // rolls + point are bet-independent (same dice); only the win/lose flips by line, which we take
+  // from the co-signed record. Pass here just to extract the shoot.
+  const shoot = last ? resolveCraps(last.raw, 'pass') : undefined
+  const finalRoll = shoot ? shoot.rolls[shoot.rolls.length - 1] : undefined
+  const point = shoot ? shoot.point : null
+  const outcome = last ? (last.win ? 'win' : last.playerDelta === 0n ? 'push' : 'lose') : undefined
+
   const wins = session.history.filter((r) => r.win).length
-  const taken = session.history.reduce((sum, r) => sum + r.playerDelta, 0n)
+  const net = session.history.reduce((sum, r) => sum + r.playerDelta, 0n)
+
+  const puckNode = (
+    <div className="spot main" style={{ width: 'clamp(52px, 6vw, 68px)', fontSize: 11, letterSpacing: '0.06em', fontVariantNumeric: 'tabular-nums' }}>
+      {point !== null ? <>ON<span style={{ display: 'block', fontSize: 18, fontWeight: 700 }}>{point}</span></> : 'OFF'}
+    </div>
+  )
+  const diceNode = (
+    <div className="row" style={{ flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+      <div className="row" style={{ gap: 'clamp(8px, 2vw, 18px)' }}>
+        {finalRoll ? <><Die n={finalRoll[0]} /><Die n={finalRoll[1]} /></> : <><Die n={3} dim /><Die n={4} dim /></>}
+      </div>
+      <span className="muted" style={{ letterSpacing: '0.1em', fontSize: 12 }}>
+        {finalRoll ? `rolled ${finalRoll[0] + finalRoll[1]}${shoot && shoot.rolls.length > 1 ? ` · ${shoot.rolls.length} rolls` : ''}` : 'set your line and roll'}
+      </span>
+    </div>
+  )
+  const spotsNode = BETS.map((b) => (
+    <button
+      key={b}
+      type="button"
+      className={`spot${bet === b ? ' main' : ''}`}
+      onClick={() => setBet(b)}
+      aria-label={`bet ${b}`}
+      style={outcome && outcome !== 'push' && bet === b ? { outline: `2px solid ${outcome === 'win' ? '#5cc98f' : '#e0574a'}`, outlineOffset: 3 } : undefined}
+    >
+      {b === 'pass' ? 'Pass' : "Don't"}
+      <span style={{ display: 'block', fontSize: 9, opacity: 0.75, fontWeight: 400 }}>2.00x</span>
+    </button>
+  ))
+
+  const rollLabel = session.status === 'playing' ? 'Rolling…' : 'Roll'
+  const openLabel = session.status === 'opening' ? 'Opening…' : 'Open table'
 
   return (
-    <div>
-      <div className="card">
-        <h3>
-          Craps
-          <InfoDot>
-            <strong>Bet the Pass or Don't-Pass line, then roll.</strong> Come-out 7/11 wins the pass line,
-            2/3/12 loses it; any other number is the POINT and you roll until the point (win) or a 7
-            (lose). Don't-Pass is the mirror (12 is a push). Every roll is drawn from the sealed seed, so
-            you can re-check the whole shoot. Even money; instant off-chain settle, no gas.
-          </InfoDot>
-        </h3>
-        <div className="row">
-          <StakeInput value={amount} onChange={setAmount} />
-          <label className="threshold-label">
-            line
-            <span className="row" style={{ gap: '0.25rem' }}>
-              {BETS.map((b) => (
-                <button key={b} type="button" className={`chip${bet === b ? ' active' : ''}`}
-                  onClick={() => setBet(b)} aria-label={`bet ${b}`}>
-                  {b === 'pass' ? 'Pass' : "Don't Pass"}
-                </button>
-              ))}
-            </span>
-          </label>
-          {session.ready ? (
-            <button onClick={roll} disabled={!canRoll}>{session.status === 'playing' ? 'Rolling…' : 'Roll'}</button>
-          ) : (
-            <button onClick={() => void session.start()} disabled={!canOpen}>
-              {session.status === 'opening' ? 'Opening…' : 'Open table'}
-            </button>
-          )}
-          {!walletClient && <span className="muted">connect a wallet to play</span>}
-          {walletClient && !trustAcknowledged && <span className="muted">tap "Got it" on the fairness note above first</span>}
-        </div>
-        <p className="muted">
-          {amount !== '' && stake === undefined && <span className="bad">enter a positive amount · </span>}
-          <span className="ok">{bet === 'pass' ? 'Pass' : "Don't Pass"} pays 2.00x</span>
-        </p>
-        {session.commit && (
-          <p className="card-meta muted">
-            server-seed commit <span className="mono">{session.commit.slice(0, 10)}…</span>
-            {session.balances && <>{' · '}your balance {viem.formatEther(session.balances.player)} · {session.roundsLeft} rolls left</>}
-          </p>
-        )}
-        {session.error && <p className="bad">{session.error}</p>}
-      </div>
+    <>
+      <GameStage title="CRAPS" subtitle="the pass line · sealed dice" action={<HowItWorksLink />}>
+        <FeltTable dealer={puckNode} spread={diceNode} spots={spotsNode} centerMark={null} />
+      </GameStage>
 
-      <h2>This table</h2>
-      {!session.ready && session.history.length === 0 && (
-        <p className="muted">No table open — set your stake and line, then open one to start rolling.</p>
-      )}
-      {[...session.history].reverse().map((record) => <RoundReceipt key={record.round} record={record} />)}
+      <div className="tray-col">
+        <BetTray
+          amount={amount}
+          onAmount={setAmount}
+          action={
+            session.ready ? (
+              <button className="primary" onClick={roll} disabled={!canRoll}>{rollLabel}</button>
+            ) : (
+              <button className="primary" onClick={() => void session.start()} disabled={!canOpen}>{openLabel}</button>
+            )
+          }
+        >
+          <p className="tray-hint">
+            on the <b style={{ color: 'var(--gold)' }}>{LINE_LABEL[bet]}</b> line · pays 2.00x
+            <span className="muted"> · even money</span>
+          </p>
+          {!walletClient && <p className="tray-hint">connect a wallet to play</p>}
+          {walletClient && !trustAcknowledged && <p className="tray-hint">tap "Got it" on the fairness note above first</p>}
+          {last && outcome && (
+            <p className={outcome === 'win' ? 'ok' : outcome === 'push' ? '' : 'bad'}>
+              {outcome === 'win' ? 'line wins' : outcome === 'push' ? 'push · bar 12' : 'line loses'} ·{' '}
+              {last.playerDelta >= 0n ? '+' : ''}{viem.formatEther(last.playerDelta)}
+            </p>
+          )}
+          {session.error && <p className="bad">{session.error}</p>}
+        </BetTray>
+
+        <MetaPanel tabs={['Recent', 'Stats']}>
+          {myAddress && session.history.length > 0 ? (
+            <span>
+              <b>{net >= 0n ? '+' : ''}{viem.formatEther(net)}</b> net · {wins}/{session.history.length} won
+              {session.commit && <span className="muted"> · commit {session.commit.slice(0, 10)}…</span>}
+            </span>
+          ) : (
+            <span className="muted">{session.ready ? 'table open — pick your line and Roll' : 'no rolls yet'}</span>
+          )}
+        </MetaPanel>
+      </div>
 
       {myAddress && session.history.length > 0 && (
         <>
@@ -125,12 +160,12 @@ export const CrapsScreen = ({ deployment, walletClient, trustAcknowledged, myAdd
           <details className="history" open>
             <summary>
               {session.history.length} roll{session.history.length === 1 ? '' : 's'}
-              <span className="muted"> · {wins}/{session.history.length} won · {viem.formatEther(taken)} net</span>
+              <span className="muted"> · {wins}/{session.history.length} won · {viem.formatEther(net)} net</span>
             </summary>
             {[...session.history].reverse().map((record) => <RoundReceipt key={record.round} record={record} />)}
           </details>
         </>
       )}
-    </div>
+    </>
   )
 }
