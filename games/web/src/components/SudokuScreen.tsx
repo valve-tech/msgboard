@@ -8,6 +8,11 @@ import { proveSudokuSolve } from '../lib/sudokuProving'
 import { attestSudokuSolve, sudokuAttestedSet, sudokuEasReady } from '../lib/easAttest'
 import { sendGameTx } from '../tx'
 import { InfoDot } from './Meta'
+import { GameStage } from './shell/GameStage'
+import { HowItWorksLink } from './HowItWorks'
+import { ControlTray } from './shell/ControlTray'
+import { MetaPanel } from './shell/MetaPanel'
+import { PuzzleBoard } from './stages/PuzzleBoard'
 
 const PUZZLE_ID = 1n
 
@@ -40,6 +45,8 @@ const conflictingCells = (grid: number[]): Set<number> => {
   return bad
 }
 
+/** The interactive 9×9. Clues are locked & bright; the 3×3 boxes are tinted in three diagonal groups
+ *  and ruled with a thick brass line; conflicting cells go red. Restyled onto `.sg-*` (was inline). */
 const Board = ({
   grid,
   clues,
@@ -53,27 +60,28 @@ const Board = ({
   disabled: boolean
   onCell: (i: number, v: number) => void
 }) => (
-  <div
-    style={{
-      display: 'grid',
-      gridTemplateColumns: 'repeat(9, 2.4rem)',
-      gridTemplateRows: 'repeat(9, 2.4rem)',
-      gap: 0,
-      width: 'max-content',
-      background: 'var(--felt-700)',
-    }}
-  >
+  <div className="sg-grid">
     {grid.map((v, i) => {
       const r = Math.floor(i / 9)
       const c = i % 9
       const isClue = clues[i]
-      const bad = conflicts.has(i)
-      // 3-colour the nine 3x3 boxes diagonally → three distinct colour groupings across the board.
       const boxGroup = (Math.floor(r / 3) + Math.floor(c / 3)) % 3
-      const groupTint = ['rgba(184, 134, 11, 0.10)', 'rgba(60, 150, 105, 0.15)', 'rgba(95, 125, 175, 0.13)'][boxGroup]
+      const cls = [
+        'sg-cell',
+        `b${boxGroup}`,
+        r % 3 === 0 ? 'boxtop' : '',
+        c % 3 === 0 ? 'boxleft' : '',
+        c === 8 ? 'edger' : '',
+        r === 8 ? 'edgeb' : '',
+        isClue ? 'clue' : '',
+        conflicts.has(i) ? 'bad' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')
       return (
         <input
           key={i}
+          className={cls}
           value={v === 0 ? '' : String(v)}
           disabled={disabled || isClue}
           inputMode="numeric"
@@ -83,83 +91,37 @@ const Board = ({
             const ch = e.target.value.replace(/[^1-9]/g, '').slice(-1)
             onCell(i, ch ? Number(ch) : 0)
           }}
-          style={{
-            width: '2.4rem',
-            height: '2.4rem',
-            borderRadius: 0, // square cells so the 3x3 box rules read as one continuous line
-            textAlign: 'center',
-            fontFamily: 'var(--mono)',
-            fontSize: '1.1rem',
-            fontWeight: isClue ? 700 : 500,
-            color: bad ? 'var(--bad)' : isClue ? 'var(--cream)' : 'var(--brass)',
-            background: isClue
-              ? `linear-gradient(rgba(0, 0, 0, 0.30), rgba(0, 0, 0, 0.30)), ${groupTint}`
-              : groupTint,
-            // Each cell paints only its top + left edge (plus the board's right/bottom rim), so no
-            // two cells ever double a line. Thin green for the minor grid, a thick solid brass rule
-            // on every 3x3 box boundary → clearly joined group lines.
-            borderTop: r % 3 === 0 ? '3px solid var(--brass-soft)' : '1px solid var(--line)',
-            borderLeft: c % 3 === 0 ? '3px solid var(--brass-soft)' : '1px solid var(--line)',
-            borderRight: c === 8 ? '3px solid var(--brass-soft)' : 'none',
-            borderBottom: r === 8 ? '3px solid var(--brass-soft)' : 'none',
-            outline: 'none',
-          }}
         />
       )
     })}
   </div>
 )
 
-const Leaderboard = ({
-  rows,
-  source,
-  myAddress,
-  attested,
-}: {
-  rows: LeaderboardRow[]
-  source: string
-  myAddress?: viem.Hex
-  attested: Set<string>
-}) => (
-  <div className="card">
-    <h3>Leaderboard</h3>
-    {rows.length === 0 ? (
-      <p className="muted">No solves logged yet — be the first to post a time.</p>
-    ) : (
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead>
-          <tr style={{ textAlign: 'left' }}>
-            <th className="muted">#</th>
-            <th className="muted">player</th>
-            <th className="muted">time</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => {
-            const addr = playerAddr(row.player)
-            const mine = myAddress && addr.toLowerCase() === myAddress.toLowerCase()
-            return (
-              <tr key={row.nullifier.toString()}>
-                <td>{row.rank}</td>
-                <td className="mono">
-                  {short(addr)}
-                  {mine && <span className="tag ok" style={{ marginLeft: '0.4rem' }}>you</span>}
-                  {attested.has(row.nullifier.toString()) && (
-                    <span className="tag gold" style={{ marginLeft: '0.4rem' }} title="also recorded as an EAS attestation (proof-gated by the on-chain resolver)">
-                      EAS
-                    </span>
-                  )}
-                </td>
-                <td>{fmtElapsed(row.elapsed)}</td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-    )}
-    <p className="card-meta muted">source: {source === 'indexer' ? 'games indexer' : source === 'logs' ? 'chain logs' : '—'}</p>
-  </div>
-)
+/** The solvers' leaderboard, rendered as compact ledger rows for the floating bottom-left drawer. */
+const LeaderRows = ({ rows, myAddress, attested }: { rows: LeaderboardRow[]; myAddress?: viem.Hex; attested: Set<string> }) => {
+  if (rows.length === 0) return <p className="muted" style={{ padding: '8px 10px' }}>No solves logged yet — be the first to post a time.</p>
+  return (
+    <>
+      {rows.map((row) => {
+        const addr = playerAddr(row.player)
+        const mine = myAddress && addr.toLowerCase() === myAddress.toLowerCase()
+        return (
+          <div className="card" key={row.nullifier.toString()}>
+            <div className="row" style={{ justifyContent: 'space-between' }}>
+              <span>
+                <span className="tag">#{row.rank}</span>
+                <span className="mono">{short(addr)}</span>
+                {mine && <span className="tag ok">you</span>}
+                {attested.has(row.nullifier.toString()) && <span className="tag gold" title="also recorded as an EAS attestation">EAS</span>}
+              </span>
+              <span className="mono">{fmtElapsed(row.elapsed)}</span>
+            </div>
+          </div>
+        )
+      })}
+    </>
+  )
+}
 
 export const SudokuScreen = ({
   deployment,
@@ -289,7 +251,7 @@ export const SudokuScreen = ({
     }
   }
 
-  // ── gates ──
+  // ── gate: no contract on this chain ──
   if (!deployment.sudokuLog) {
     return (
       <div className="card">
@@ -299,103 +261,102 @@ export const SudokuScreen = ({
     )
   }
 
+  const ready = grid !== undefined && work.length === 81
+  const solves = sudoku.leaderboard.length
+  const statusHint = busy ? 'proving…' : complete ? 'ready' : ready ? 'fill the grid' : 'loading'
+
   return (
-    <div>
-      <div className="card">
-        <h3>
-          ZK Sudoku — puzzle #{PUZZLE_ID.toString()}
-          <InfoDot>
-            <strong>Solve the live on-chain puzzle, prove it in your browser, post your time.</strong> The board's
-            hash is pinned on-chain; your browser proves you hold a valid solution (a PLONK proof, generated in a
-            Web Worker — never revealing the solution) and submits it. The leaderboard ranks solvers by elapsed time
-            since the puzzle opened.
-          </InfoDot>
-        </h3>
+    <>
+      <GameStage title="ZK SUDOKU" subtitle={`puzzle #${PUZZLE_ID.toString()} · prove without revealing`} action={<HowItWorksLink />}>
+        <PuzzleBoard
+          tone="sudoku"
+          head={
+            ready ? (
+              <>
+                <span className="muted">board verified <span className="mono">{sudoku.puzzle?.puzzleHash?.slice(0, 10)}…</span></span>
+                {!complete && conflicts.size > 0 && <span className="bad">fix the highlighted conflicts</span>}
+                {!complete && conflicts.size === 0 && <span>fill every cell to submit</span>}
+                {complete && <span className="ok">valid solution — ready to prove</span>}
+              </>
+            ) : (
+              <span className="muted">
+                {sudoku.error ? `chain read failed: ${sudoku.error}` : sudoku.loading ? 'loading puzzle…' : `puzzle #${PUZZLE_ID.toString()} not open yet`}
+              </span>
+            )
+          }
+        >
+          {ready ? (
+            <Board grid={work} clues={clues} conflicts={conflicts} disabled={busy} onCell={setCell} />
+          ) : (
+            <div className="puz-wait muted">{sudoku.puzzle?.gridProblem ?? (sudoku.loading ? 'loading…' : 'puzzle not open')}</div>
+          )}
+        </PuzzleBoard>
+      </GameStage>
 
-        {sudoku.loading && !sudoku.puzzle && <p className="muted">Loading puzzle…</p>}
-        {sudoku.error && <p className="bad">chain read failed: {sudoku.error}</p>}
-
-        {sudoku.puzzle && !sudoku.puzzle.opened && (
-          <p className="muted">Puzzle #{PUZZLE_ID.toString()} is not open yet on {deployment.label}.</p>
-        )}
-        {sudoku.puzzle?.gridProblem && <p className="bad">{sudoku.puzzle.gridProblem}</p>}
-
-        {grid && work.length === 81 && (
-          <>
+      <div className="tray-col">
+        <ControlTray
+          title="Solve"
+          hint={statusHint}
+          action={
+            <button className="primary" onClick={() => void submit()} disabled={!walletClient || !myAddress || wrongChain || !complete || busy}>
+              {status === 'proving' ? 'Proving… (~15s)' : status === 'checking' ? 'Checking…' : status === 'submitting' ? 'Submitting…' : 'Prove & submit'}
+            </button>
+          }
+        >
+          <button className="secondary" style={{ width: '100%' }} onClick={() => grid && setWork([...grid])} disabled={busy}>
+            Reset
+          </button>
+          {!walletClient && <p className="tray-hint">connect a wallet to submit</p>}
+          {walletClient && wrongChain && <p className="bad">switch your wallet to {deployment.label}</p>}
+          {walletClient && !wrongChain && !trustAcknowledged && <p className="tray-hint">solving is trustless — no acknowledgement needed</p>}
+          {status === 'proving' && <p className="tray-hint">generating the PLONK proof in a Web Worker (first run downloads the ~66 MB key, cached after)…</p>}
+          {message && <p className={status === 'done' ? 'ok' : 'bad'}>{message}</p>}
+          {lastSolve && sudokuEasReady(deployment) && (
+            <div className="row" style={{ marginTop: 8 }}>
+              <button
+                className="secondary"
+                onClick={() => void attest()}
+                disabled={attestStatus === 'attesting' || attestStatus === 'done' || wrongChain}
+              >
+                {attestStatus === 'attesting' ? 'Attesting…' : attestStatus === 'done' ? 'Attested ✓' : 'Record to EAS'}
+              </button>
+              <InfoDot label="what an EAS attestation is">
+                Optionally record the same proven solve as an <strong>EAS attestation</strong> — a standard, composable
+                credential other apps can read. It is gated by an on-chain resolver that re-verifies your PLONK proof, so
+                the attestation can only exist because the solve is real, and it can never be revoked.
+              </InfoDot>
+              {attestMessage && <span className={attestStatus === 'done' ? 'ok' : 'bad'}>{attestMessage}</span>}
+              {attestUid && <span className="mono muted">{attestUid.slice(0, 14)}…</span>}
+            </div>
+          )}
+          {txHash && (
             <p className="card-meta muted">
-              board verified against on-chain hash <span className="mono">{sudoku.puzzle?.puzzleHash?.slice(0, 10)}…</span>
-              {sudoku.puzzle?.openedAt ? ` · opened ${new Date(sudoku.puzzle.openedAt * 1000).toLocaleString()}` : ''}
-            </p>
-            <div style={{ margin: '0.75rem 0' }}>
-              <Board grid={work} clues={clues} conflicts={conflicts} disabled={busy} onCell={setCell} />
-            </div>
-            <div className="row">
-              <button onClick={() => void submit()} disabled={!walletClient || !myAddress || wrongChain || !complete || busy}>
-                {status === 'proving'
-                  ? 'Proving… (~15s)'
-                  : status === 'checking'
-                    ? 'Checking…'
-                    : status === 'submitting'
-                      ? 'Submitting…'
-                      : 'Prove & submit'}
-              </button>
-              <button className="secondary" onClick={() => setWork([...grid])} disabled={busy}>
-                Reset
-              </button>
-              {!walletClient && <span className="muted">connect a wallet to submit</span>}
-              {walletClient && wrongChain && <span className="bad">switch your wallet to {deployment.label}</span>}
-              {walletClient && !wrongChain && !trustAcknowledged && (
-                <span className="muted">solving is trustless — no acknowledgement needed</span>
+              tx{' '}
+              {deployment.explorer ? (
+                <a href={`${deployment.explorer}/tx/${txHash}`} target="_blank" rel="noreferrer" className="mono">{short(txHash)}</a>
+              ) : (
+                <span className="mono">{short(txHash)}</span>
               )}
-            </div>
-            <p className="muted">
-              {!complete && conflicts.size > 0 && <span className="bad">fix the highlighted conflicts · </span>}
-              {!complete && conflicts.size === 0 && <span>fill every cell to enable submit</span>}
-              {complete && <span className="ok">valid solution — ready to prove</span>}
             </p>
-            {status === 'proving' && (
-              <p className="muted">
-                Generating the PLONK proof in a Web Worker. First run also downloads the ~66 MB proving key (cached
-                after); proving itself is a few seconds and never blocks this tab.
-              </p>
-            )}
-            {message && <p className={status === 'done' ? 'ok' : 'bad'}>{message}</p>}
-            {lastSolve && sudokuEasReady(deployment) && (
-              <div className="row">
-                <button
-                  className="secondary"
-                  onClick={() => void attest()}
-                  disabled={attestStatus === 'attesting' || attestStatus === 'done' || wrongChain}
-                >
-                  {attestStatus === 'attesting' ? 'Attesting…' : attestStatus === 'done' ? 'Attested ✓' : 'Record to EAS'}
-                </button>
-                <InfoDot label="what an EAS attestation is">
-                  Optionally record the same proven solve as an <strong>EAS attestation</strong> — a standard,
-                  composable credential other apps can read. It is gated by an on-chain resolver that re-verifies
-                  your PLONK proof, so the attestation can only exist because the solve is real, and it can never
-                  be revoked. Same proof, second canonical record; the leaderboard entry above stands either way.
-                </InfoDot>
-                {attestMessage && <span className={attestStatus === 'done' ? 'ok' : 'bad'}>{attestMessage}</span>}
-                {attestUid && <span className="mono muted">{attestUid.slice(0, 14)}…</span>}
-              </div>
-            )}
-            {txHash && (
-              <p className="card-meta muted">
-                tx{' '}
-                {deployment.explorer ? (
-                  <a href={`${deployment.explorer}/tx/${txHash}`} target="_blank" rel="noreferrer" className="mono">
-                    {short(txHash)}
-                  </a>
-                ) : (
-                  <span className="mono">{short(txHash)}</span>
-                )}
-              </p>
-            )}
-          </>
-        )}
+          )}
+        </ControlTray>
+
+        <MetaPanel tabs={['Puzzle', 'Solvers']}>
+          <span>
+            puzzle #{PUZZLE_ID.toString()} · <b>{solves}</b> solve{solves === 1 ? '' : 's'}
+            {sudoku.puzzle?.openedAt && <span className="muted"> · opened {new Date(sudoku.puzzle.openedAt * 1000).toLocaleDateString()}</span>}
+          </span>
+        </MetaPanel>
       </div>
 
-      <Leaderboard rows={sudoku.leaderboard} source={sudoku.source} myAddress={myAddress} attested={attestedRows} />
-    </div>
+      <h2>Leaderboard</h2>
+      <details className="history" open>
+        <summary>
+          {solves} solve{solves === 1 ? '' : 's'}
+          <span className="muted"> · ranked by time · source {sudoku.source === 'indexer' ? 'indexer' : sudoku.source === 'logs' ? 'chain logs' : '—'}</span>
+        </summary>
+        <LeaderRows rows={sudoku.leaderboard} myAddress={myAddress} attested={attestedRows} />
+      </details>
+    </>
   )
 }
