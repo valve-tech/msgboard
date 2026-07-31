@@ -691,6 +691,47 @@
   transform: rotate(6deg);
 }
 
+/* ── camera views: re-aim the perspective + plane tilt like a video-game camera ── */
+.scene { transition: perspective-origin .55s cubic-bezier(.4, .08, .2, 1); }
+.plane, .hand { transition: transform .55s cubic-bezier(.4, .08, .2, 1); }
+/* Seat = the base (.plane rotateX(58deg), .hand at bottom) — no override needed. */
+/* Aerial — lean over the table: flatter rake, the whole oval + both hands visible at once. */
+.scene.view-aerial { perspective-origin: 50% 46%; }
+.scene.view-aerial .plane { transform: translate(-50%, -50%) rotateX(27deg) scale(.9); }
+.scene.view-aerial .hand { transform: translateX(-50%) scale(.82); bottom: 8%; }
+/* Rail — low and close: lean in to study your cards, table looming large. */
+.scene.view-rail { perspective-origin: 50% 12%; }
+.scene.view-rail .plane { transform: translate(-50%, -44%) rotateX(67deg) scale(1.16); }
+.scene.view-rail .hand { transform: translateX(-50%) scale(1.14); bottom: 1%; }
+/* the switcher pill (top-centre of the felt, dropped clear of the floating chrome/title/wallet) */
+.felt-views {
+  position: absolute; top: 94px; left: 50%; transform: translateX(-50%); z-index: 12;
+  display: flex; align-items: center; gap: 3px; padding: 4px; border-radius: 999px;
+  background: linear-gradient(180deg, #2c3a33f2, #1a2620f2);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid #c9a22755; box-shadow: 0 12px 28px -12px #000e, inset 0 1px 0 #ffffff12;
+}
+.felt-views::before {
+  content: '🎥'; font-size: 12px; padding: 0 3px 0 6px; opacity: .85;
+}
+.felt-views button {
+  border: 0; background: transparent; color: #cfd8cf; cursor: pointer;
+  font: 700 11px/1 var(--sans); letter-spacing: .05em; padding: 6px 13px; border-radius: 999px;
+}
+.felt-views button:hover { color: var(--cream, #f3ead7); background: #ffffff12; }
+.felt-views button.on { background: #c9a22733; color: var(--gold-live, #f0c74a); box-shadow: inset 0 0 0 1px #c9a22766; }
+@media (prefers-reduced-motion: reduce) { .scene, .plane, .hand { transition: none; } }
+
+/* ── Pai Gow: the 7-card split (2 front / 5 back), player foreground + dealer far ── */
+.pg-seat { display: flex; gap: clamp(4px, 0.8vw, 9px); align-items: flex-end; }
+.pg-pick { position: relative; background: none; border: 0; padding: 0; cursor: default; transition: transform .18s ease; }
+.pg-pick.tap { cursor: pointer; }
+.pg-pick.tap:hover { transform: translateY(-6px); }
+.pg-pick.on { transform: translateY(-16px); }
+.pg-pick.on .playcard { box-shadow: inset 0 1px 0 #fff, 0 4px 10px -3px #0009, 0 0 0 2px var(--gold-live, #f0c74a), 0 0 16px #f0c74a66; }
+.pg-tag { position: absolute; top: -15px; left: 50%; transform: translateX(-50%); font: 700 8.5px/1 var(--sans); letter-spacing: .12em; color: var(--gold-live, #f0c74a); }
+.pg-dealer { display: flex; gap: clamp(3px, 0.6vw, 6px); align-items: flex-end; }
+
 /* Real playing-card face (self-contained, flex-friendly) — used by the shared Card component so
    every felt game shows actual cards instead of text chips. `.big` = foreground hand; `.back` = a
    face-down committed card stamped with the ◈ seal (the "sealed before you play" motif). */
