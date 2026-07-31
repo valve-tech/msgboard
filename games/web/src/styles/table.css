@@ -1557,6 +1557,56 @@
 .pay-cell b { color: var(--cream, #f3ead7); font-variant-numeric: tabular-nums; }
 
 /* ============================================================================
+   PoolLedger — the stake-weighted pari-mutuel surface (Lottery). One bar carved
+   into a segment per entrant (width = odds); a marker lands on the winner.
+   ========================================================================== */
+.pool-scene {
+  position: absolute; inset: 0; display: flex; flex-direction: column; gap: 16px;
+  padding: clamp(18px, 4vh, 46px) clamp(16px, 6vw, 88px);
+  align-items: center; justify-content: center;
+  background: radial-gradient(120% 90% at 50% -8%, #1a2438 0%, #0f1420 52%, #080b12 100%);
+}
+.pool-head { font-family: var(--mono); font-size: 13px; letter-spacing: .03em; color: #9aa6bc; display: flex; align-items: baseline; gap: 8px; }
+.pool-head .pool-pot b { color: var(--cream, #f3ead7); font-size: 17px; font-variant-numeric: tabular-nums; }
+.pool-empty { margin: auto; font-family: var(--mono); font-size: 12px; color: #7d879c; letter-spacing: .04em; }
+
+/* the pool bar: absolutely-placed segments so widths track exact stake shares */
+.pool-bar {
+  position: relative; width: min(96%, 720px); height: 46px; border-radius: 11px; overflow: hidden;
+  background: #0a0e16; border: 1px solid #ffffff14; box-shadow: inset 0 2px 8px #0008;
+}
+.pool-seg {
+  position: absolute; top: 0; bottom: 0; border-right: 1px solid #00000055;
+  transition: left .45s ease, width .45s ease, filter .2s ease; opacity: .82;
+}
+.pool-seg.mine { opacity: 1; box-shadow: inset 0 0 0 2px #fff6; }
+.pool-seg.won { opacity: 1; filter: brightness(1.25) saturate(1.2); box-shadow: inset 0 0 0 2px #fff8, 0 0 22px #f0c74a66; }
+/* the sweeping winning-point needle */
+.pool-marker { position: absolute; top: -5px; bottom: -5px; width: 3px; background: #fff; box-shadow: 0 0 10px #fff, 0 0 20px #f0c74a; z-index: 3; }
+.pool-marker::before { content: ''; position: absolute; top: -6px; left: 50%; transform: translateX(-50%); width: 12px; height: 12px; border-radius: 50%; background: #fff; box-shadow: 0 0 12px #f0c74a; }
+.pool-marker.landed { background: var(--gold-live, #f0c74a); box-shadow: 0 0 12px #f0c74a, 0 0 26px #f0c74aaa; }
+
+/* the entrant ledger */
+.pool-ledger { width: min(96%, 720px); max-height: 42vh; overflow-y: auto; display: flex; flex-direction: column; gap: 3px; scrollbar-width: none; }
+.pool-ledger::-webkit-scrollbar { display: none; }
+.pool-row {
+  display: grid; grid-template-columns: 12px 1fr auto auto; align-items: center; gap: 10px;
+  padding: 8px 12px; border-radius: 9px; border: 1px solid #ffffff0c; background: #0d1220;
+  font-family: var(--mono); font-size: 12.5px; color: #b7c0d2;
+}
+.pool-row.mine { border-color: #f0c74a55; background: linear-gradient(90deg, #1c1a0e, #0d1220); }
+.pool-row.won { border-color: #f0c74a; background: radial-gradient(120% 100% at 0% 50%, #241f0d, #0d1220); box-shadow: 0 0 18px #c9a22733; }
+.pool-swatch { width: 12px; height: 12px; border-radius: 3px; }
+.pool-name { color: var(--cream, #f3ead7); display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.pool-sub { color: #7d879c; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pool-badge { color: var(--gold-live, #f0c74a); font-size: 11px; font-weight: 700; }
+.pool-odds { color: #9aa6bc; font-variant-numeric: tabular-nums; }
+.pool-stake { color: var(--cream, #f3ead7); font-variant-numeric: tabular-nums; }
+.pool-fair { font-size: 10.5px; line-height: 1.5; margin: 8px 0 0; word-break: break-word; }
+.pool-fair code { font-size: 10px; color: #9aa6bc; }
+@media (prefers-reduced-motion: reduce) { .pool-marker { transition: none !important; } }
+
+/* ============================================================================
    CasinoFloor — the first-person "walk the hall" lobby (full-bleed, no rail).
    ========================================================================== */
 .cf-root {
