@@ -122,7 +122,7 @@ export const BlackjackScreen = ({ deployment: _d, walletClient, trustAcknowledge
       {myAddress && history.length > 0 && (
         <>
           <h2>Your book</h2>
-          <details className="history" open>
+          <details className="history">
             <summary>{history.length} hand{history.length === 1 ? '' : 's'}
               <span className="muted"> · {viem.formatEther(netHistory)} net</span>
             </summary>

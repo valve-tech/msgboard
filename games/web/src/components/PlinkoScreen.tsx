@@ -217,7 +217,7 @@ export const PlinkoScreen = ({
       {myAddress && session.history.length > 0 && (
         <>
           <h2>Your book</h2>
-          <details className="history" open>
+          <details className="history">
             <summary>
               {session.history.length} drop{session.history.length === 1 ? '' : 's'}
               <span className="muted">

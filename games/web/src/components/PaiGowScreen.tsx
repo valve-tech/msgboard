@@ -127,7 +127,7 @@ export const PaiGowScreen = ({ deployment: _d, walletClient, trustAcknowledged, 
       {myAddress && history.length > 0 && (
         <>
           <h2>Your book</h2>
-          <details className="history" open>
+          <details className="history">
             <summary>{history.length} hand{history.length === 1 ? '' : 's'}
               <span className="muted"> · {viem.formatEther(history.reduce((s, h) => s + (h.delta ?? 0n), 0n))} net</span>
             </summary>

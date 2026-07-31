@@ -51,6 +51,10 @@
  *   PETITION_WINDOW_DAYS  rolling read window for petitions/signatures. Default 30.
  *   DRY_RUN               if set, log intended create/sign/settle actions; post/send nothing.
  *   ONCE                  if set, run a single tick (capture + settle) then exit (smoke / typecheck).
+ *   NO_SETTLE             if set, run CAPTURE only (create + gas-free PoW-signed board posts) and SKIP
+ *                         the on-chain SETTLE (submitBatch) phase, which needs 943 gas + a funded
+ *                         CREATOR_INDEX. Lets a fleet drive continuous gas-free petition sending
+ *                         without funding any key (see scripts/petition-fleet.sh).
  */
 import * as viem from 'viem'
 import type { GamesChainId } from '@msgboard/games-core'
@@ -82,6 +86,8 @@ const SIGNER_START_INDEX = Number(env.SIGNER_START_INDEX ?? '1')
 const SETTLE_INTERVAL_MS = Number(env.SETTLE_INTERVAL_MS ?? '300000') // 5 min
 const WINDOW_DAYS = Number(env.PETITION_WINDOW_DAYS ?? '30')
 const DRY_RUN = !!env.DRY_RUN
+// Gas-free mode: capture (create + PoW-signed board posts) only, skip the on-chain submitBatch settle.
+const NO_SETTLE = !!env.NO_SETTLE
 
 const short = (h: string) => `${h.slice(0, 10)}…${h.slice(-4)}`
 const oneLine = (e: unknown) => (e as Error)?.message?.split('\n')[0] ?? String(e)
@@ -281,6 +287,7 @@ const main = async () => {
   // over time, not only at process start.
   const tick = async () => {
     await attempt('capture tick', capture)
+    if (NO_SETTLE) return // gas-free mode: skip the on-chain submitBatch settle (see NO_SETTLE above)
     await attempt('settle tick', settle)
   }
 
