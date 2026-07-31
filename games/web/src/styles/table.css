@@ -707,6 +707,12 @@
 .scene.view-flat { perspective-origin: 50% 50%; }
 .scene.view-flat .plane { transform: translate(-50%, -50%) rotateX(3deg) scale(.82); }
 .scene.view-flat .hand { transform: translateX(-50%) scale(.78); bottom: 9%; }
+/* The bet circles are hand-placed for the SEAT rake — the perspective widens the felt's foreground so
+   they sit clear of the cloth's edge. The flatter/zoomed cameras lose that widening, so the circles
+   drift toward the ellipse's narrow lower edge and clip. They're a betting element, not scenery, and
+   you place bets from the seated view; the other cameras are for reading the table + hands. So hide the
+   spots outside Seat rather than ship clipped/mis-placed betting UI. */
+.scene:not(.view-seat) .spots { display: none; }
 /* the switcher pill (top-centre of the felt, dropped clear of the floating chrome/title/wallet) */
 .felt-views {
   position: absolute; top: 94px; left: 50%; transform: translateX(-50%); z-index: 12;
