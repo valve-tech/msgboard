@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import * as viem from 'viem'
 import {
   keno,
+  kenoDraw,
+  kenoHits,
   BASE_PAYTABLE_X100,
   applyEdgeX100,
   MAX_PICKS,
@@ -11,82 +13,57 @@ import {
 } from '@msgboard/games'
 import type { GameDeployment } from '../config'
 import { useSession, type RoundRecord } from '../hooks/useSession'
-import { StakeInput, parseStake } from './StakeInput'
+import { parseStake } from './StakeInput'
 import { TurnTiming } from './TurnTiming'
-import { InfoDot } from './Meta'
+import { GameStage } from './shell/GameStage'
+import { HowItWorksLink } from './HowItWorks'
+import { BetTray } from './shell/BetTray'
+import { MetaPanel } from './shell/MetaPanel'
+import { fmtMult } from './ladderShared'
+import { NumberBoard } from './stages/NumberBoard'
 
-/** keno multipliers come back from the module's paytable in hundredths (2.00x == 200). */
-const fmtMult = (x100: bigint): string => `${(Number(x100) / 100).toFixed(2)}x`
-
-/** the 1..POOL grid, materialised once. */
-const GRID: number[] = Array.from({ length: POOL }, (_, i) => i + 1)
-
-/**
- * The edge-applied payout ladder for a given pick-count: each (hits → multiplier) cell from the
- * module's BASE_PAYTABLE_X100, with the house edge applied via the module's own helper. We never
- * invent multipliers — the table is read straight from the game module (and is flagged PLACEHOLDER
- * there). Cells that pay nothing (0n) are dropped so the ladder only shows winning hit-counts.
- */
+/** the edge-applied {hits → multiplier} ladder for a pick-count, straight from the module paytable. */
 const payoutLadder = (pickCount: number): { hits: number; multiplierX100: bigint }[] => {
   const row = BASE_PAYTABLE_X100[pickCount]
   if (!row) return []
   const ladder: { hits: number; multiplierX100: bigint }[] = []
   for (let hits = 0; hits < row.length; hits++) {
     const fair = row[hits] ?? 0n
-    if (fair <= 0n) continue
-    ladder.push({ hits, multiplierX100: applyEdgeX100(fair) })
+    if (fair > 0n) ladder.push({ hits, multiplierX100: applyEdgeX100(fair) })
   }
   return ladder
 }
 
-/**
- * OFF-CHAIN session-game screen (Keno) — same shape as DiceScreen/LimboScreen:
- *   1. `useSession({ game, walletClient, chainId })` drives the HouseSession.
- *   2. a params UI (here: a MULTI-SELECT 1..40 number grid) → `session.play(stake, params)`.
- *   3. a result/receipt + history list in the CoinFlip/Raffle visual style.
- * The one meaningful UI difference from Dice is the picks grid in place of a single numeric input.
- */
 const RoundReceipt = ({ record }: { record: RoundRecord }) => (
   <div className="card">
     <div className="row" style={{ justifyContent: 'space-between' }}>
       <span>
         <span className="tag">round {record.round}</span>
         {viem.formatEther(record.stake)} staked
-        {record.win ? (
-          <span className="tag ok">won {fmtMult(record.multiplierX100)}</span>
-        ) : (
-          <span className="tag">lost</span>
-        )}
+        {record.win ? <span className="tag ok">won {fmtMult(record.multiplierX100)}</span> : <span className="tag">lost</span>}
       </span>
       <span className={record.playerDelta >= 0n ? 'ok' : 'bad'}>
         {record.playerDelta >= 0n ? '+' : ''}
         {viem.formatEther(record.playerDelta)}
       </span>
     </div>
-    <p className="card-meta muted">
-      balance {viem.formatEther(record.balancePlayer)} · co-signed by both parties
-    </p>
-    {record.timing && (
-      <p className="card-meta muted">
-        <TurnTiming timing={record.timing} />
-      </p>
-    )}
+    <p className="card-meta muted">balance {viem.formatEther(record.balancePlayer)} · co-signed by both parties</p>
+    {record.timing && <p className="card-meta muted"><TurnTiming timing={record.timing} /></p>}
   </div>
 )
 
-export const KenoScreen = ({
-  deployment,
-  walletClient,
-  trustAcknowledged,
-  myAddress,
-}: {
-  deployment: GameDeployment
-  walletClient?: viem.WalletClient
-  trustAcknowledged: boolean
-  myAddress?: viem.Hex
+/**
+ * OFF-CHAIN session-game screen (Keno), on the shared NumberBoard surface. Pick 1–10 of 40; the round
+ * draws 10 and pays by how many you match. The reveal lights up the round's real draw (`kenoDraw(raw)`,
+ * recomputed from the sealed `raw` — the same set settle counts hits against), not a random light show.
+ */
+export const KenoScreen = ({ deployment, walletClient, trustAcknowledged, myAddress }: {
+  deployment: GameDeployment; walletClient?: viem.WalletClient; trustAcknowledged: boolean; myAddress?: viem.Hex
 }) => {
   const [amount, setAmount] = useState('0.1')
   const [picks, setPicks] = useState<number[]>([])
+  // show the last draw over the grid until the player edits their picks for the next round.
+  const [showResult, setShowResult] = useState(false)
 
   const session = useSession<KenoParams>({
     game: keno,
@@ -105,127 +82,118 @@ export const KenoScreen = ({
   const canOpen = walletClient !== undefined && trustAcknowledged && !busy
   const canRoll = session.ready && !busy && stake !== undefined && picksOk
 
+  // reveal the draw whenever a new round lands.
+  useEffect(() => {
+    if (session.history.length > 0) setShowResult(true)
+  }, [session.history.length])
+
   const togglePick = (n: number) => {
+    if (busy) return
+    setShowResult(false) // editing picks starts a fresh selection — drop the stale draw overlay
     setPicks((prev) =>
       prev.includes(n) ? prev.filter((p) => p !== n) : prev.length >= MAX_PICKS ? prev : [...prev, n],
     )
   }
-  const clearPicks = () => setPicks([])
+  const clearPicks = () => {
+    setShowResult(false)
+    setPicks([])
+  }
 
   const roll = () => {
     if (stake === undefined || !picksOk) return
-    // KenoParams shape: { picks: number[] } — the round always draws DEFAULT_DRAWN (10) of 40.
     void session.play(stake, { picks: [...picks].sort((a, b) => a - b) })
   }
 
+  const last = session.history.length > 0 ? session.history[session.history.length - 1] : undefined
+  const drawn = showResult && last ? [...kenoDraw(last.raw, DEFAULT_DRAWN)] : undefined
+  const hits = drawn ? kenoHits(picks, new Set(drawn)) : undefined
   const wins = session.history.filter((r) => r.win).length
-  const taken = session.history.reduce((sum, r) => sum + r.playerDelta, 0n)
+  const net = session.history.reduce((sum, r) => sum + r.playerDelta, 0n)
+
+  const rollLabel = session.status === 'playing' ? 'Rolling…' : 'Roll'
+  const openLabel = session.status === 'opening' ? 'Opening…' : 'Open table'
+
+  const header = drawn ? (
+    <>
+      <b style={{ color: last!.win ? '#6fe0a4' : '#e0796d' }}>{hits} hit{hits === 1 ? '' : 's'}</b>
+      <span>·</span>
+      <span>{last!.win ? <span className="ok">won {fmtMult(last!.multiplierX100)}</span> : 'no pay'}</span>
+      <span className="muted">· drew {DEFAULT_DRAWN} of {POOL}</span>
+    </>
+  ) : (
+    <>
+      <b>{picks.length}/{MAX_PICKS}</b>
+      <span className="muted">picked · pick 1–{MAX_PICKS} of {POOL}, draws {DEFAULT_DRAWN}</span>
+    </>
+  )
 
   return (
-    <div>
-      <div className="card">
-        <h3>
-          Keno
-          <InfoDot>
-            <strong>Pick your numbers.</strong> The round draws its own set and pays by how many you
-            match — more matches, bigger payout. (Payout values shown are illustrative.) Instant
-            off-chain settle, no gas.
-          </InfoDot>
-        </h3>
-        <div className="row">
-          <StakeInput value={amount} onChange={setAmount} />
-          {session.ready ? (
-            <button onClick={roll} disabled={!canRoll}>
-              {session.status === 'playing' ? 'Rolling…' : 'Roll'}
-            </button>
-          ) : (
-            <button onClick={() => void session.start()} disabled={!canOpen}>
-              {session.status === 'opening' ? 'Opening…' : 'Open table'}
-            </button>
-          )}
-          {!walletClient && <span className="muted">connect a wallet to play</span>}
-          {walletClient && !trustAcknowledged && (
-            <span className="muted">tap "Got it" on the fairness note above first</span>
-          )}
-        </div>
+    <>
+      <GameStage title="KENO" subtitle={`pick up to ${MAX_PICKS} · 10-of-${POOL} draw`} action={<HowItWorksLink />}>
+        <NumberBoard
+          pool={POOL}
+          columns={8}
+          picks={picks}
+          drawn={drawn}
+          onToggle={togglePick}
+          disabled={busy}
+          capReached={capReached}
+          drawId={session.history.length}
+          header={header}
+          idleHint="tap numbers to build your card, then Roll"
+        />
+      </GameStage>
 
-        <label className="threshold-label">
-          your numbers
-          <span className="muted">
-            {' '}
-            {picks.length}/{MAX_PICKS} picked
-            {picks.length > 0 && (
-              <>
-                {' · '}
-                <button onClick={clearPicks} disabled={busy}>
-                  clear
-                </button>
-              </>
-            )}
-          </span>
-        </label>
-        <div
-          className="row"
-          role="group"
-          aria-label="keno number grid"
-          style={{ flexWrap: 'wrap', gap: '0.25rem', marginTop: '0.5rem' }}
-        >
-          {GRID.map((n) => {
-            const selected = picks.includes(n)
-            return (
-              <button
-                key={n}
-                onClick={() => togglePick(n)}
-                disabled={busy || (!selected && capReached)}
-                aria-pressed={selected}
-                className={selected ? 'tag ok' : 'tag'}
-                style={{ width: '2.25rem' }}
-              >
-                {n}
-              </button>
-            )
-          })}
-        </div>
-
-        {picksOk && (
-          <p className="card-meta muted">
-            pays by hits ({picks.length} pick{picks.length === 1 ? '' : 's'}, draws {DEFAULT_DRAWN} of {POOL}):{' '}
-            {ladder.length === 0 ? (
-              <span className="bad">no paying hit-count for this selection</span>
+      <div className="tray-col">
+        <BetTray
+          amount={amount}
+          onAmount={setAmount}
+          action={
+            session.ready ? (
+              <button className="primary" onClick={roll} disabled={!canRoll}>{rollLabel}</button>
             ) : (
-              ladder.map(({ hits, multiplierX100 }) => (
-                <span key={hits} className="tag" style={{ marginRight: '0.25rem' }}>
-                  {hits} → {fmtMult(multiplierX100)}
-                </span>
-              ))
+              <button className="primary" onClick={() => void session.start()} disabled={!canOpen}>{openLabel}</button>
+            )
+          }
+        >
+          <p className="tray-hint">
+            <b style={{ color: 'var(--gold-live)' }}>{picks.length}/{MAX_PICKS}</b> picked
+            {picks.length > 0 && (
+              <> · <button type="button" className="b-link" onClick={clearPicks} disabled={busy}>clear</button></>
             )}
           </p>
-        )}
+          {picksOk && (
+            <p className="tray-hint">
+              pays by hits:{' '}
+              {ladder.length === 0
+                ? <span className="bad">no paying hit-count for {picks.length} pick{picks.length === 1 ? '' : 's'}</span>
+                : ladder.map(({ hits: h, multiplierX100 }) => (
+                    <span key={h} className="tag" style={{ marginRight: 4 }}>{h}→{fmtMult(multiplierX100)}</span>
+                  ))}
+            </p>
+          )}
+          {!picksOk && <p className="tray-hint"><span className="bad">pick at least one number</span></p>}
+          {!walletClient && <p className="tray-hint">connect a wallet to play</p>}
+          {walletClient && !trustAcknowledged && <p className="tray-hint">tap "Got it" on the fairness note above first</p>}
+          {last && showResult && (
+            <p className={last.win ? 'ok' : 'bad'}>
+              {hits} hit{hits === 1 ? '' : 's'} · {fmtMult(last.multiplierX100)} · {last.playerDelta >= 0n ? '+' : ''}{viem.formatEther(last.playerDelta)}
+            </p>
+          )}
+          {session.error && <p className="bad">{session.error}</p>}
+        </BetTray>
 
-        <p className="muted">
-          {amount !== '' && stake === undefined && <span className="bad">enter a positive amount · </span>}
-          {picks.length === 0 && <span className="bad">pick at least one number · </span>}
-        </p>
-        {session.commit && (
-          <p className="card-meta muted">
-            server-seed commit <span className="mono">{session.commit.slice(0, 10)}…</span>
-            {session.balances && (
-              <>
-                {' · '}your balance {viem.formatEther(session.balances.player)} · {session.roundsLeft} rolls left
-              </>
-            )}
-          </p>
-        )}
-        {session.error && <p className="bad">{session.error}</p>}
+        <MetaPanel tabs={['Recent', 'Stats']}>
+          {myAddress && session.history.length > 0 ? (
+            <span>
+              <b>{net >= 0n ? '+' : ''}{viem.formatEther(net)}</b> net · {wins}/{session.history.length} won
+              {session.commit && <span className="muted"> · commit {session.commit.slice(0, 10)}…</span>}
+            </span>
+          ) : (
+            <span className="muted">{session.ready ? 'table open — build your card and Roll' : 'no rolls yet'}</span>
+          )}
+        </MetaPanel>
       </div>
-
-      <h2>This table</h2>
-      {!session.ready && session.history.length === 0 && (
-        <p className="muted">No table open — set your stake and numbers, then open one to start rolling.</p>
-      )}
-      {[...session.history].reverse().map((record) => (
-        <RoundReceipt key={record.round} record={record} />
-      ))}
 
       {myAddress && session.history.length > 0 && (
         <>
@@ -233,17 +201,12 @@ export const KenoScreen = ({
           <details className="history">
             <summary>
               {session.history.length} roll{session.history.length === 1 ? '' : 's'}
-              <span className="muted">
-                {' '}
-                · {wins}/{session.history.length} won · {viem.formatEther(taken)} net
-              </span>
+              <span className="muted"> · {wins}/{session.history.length} won · {viem.formatEther(net)} net</span>
             </summary>
-            {[...session.history].reverse().map((record) => (
-              <RoundReceipt key={record.round} record={record} />
-            ))}
+            {[...session.history].reverse().map((record) => <RoundReceipt key={record.round} record={record} />)}
           </details>
         </>
       )}
-    </div>
+    </>
   )
 }
