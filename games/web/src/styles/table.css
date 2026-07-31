@@ -1428,6 +1428,51 @@
 .bk-lane .card.bk-mine { box-shadow: inset 0 0 0 1px #c9a22733; }
 
 /* ============================================================================
+   TumbleGrid — the cascading-slot surface (Cascade). Matched symbols glow, then
+   the grid re-mounts to the next real post-tumble frame and falls in.
+   ========================================================================== */
+.tg-scene {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 14px; padding: 16px 14px;
+  background: radial-gradient(120% 90% at 50% -8%, #241a2e 0%, #150f1f 50%, #0a0710 100%);
+}
+.tg-head {
+  font-family: var(--mono); font-size: 12px; letter-spacing: .04em; color: #a99bc0;
+  display: flex; align-items: center; gap: 6px; min-height: 18px;
+}
+.tg-head b { font-variant-numeric: tabular-nums; color: var(--cream, #f3ead7); }
+.tg-head b.ok { color: #6fe0a4; }
+.tg-head b.bad { color: #e0796d; }
+.tg-grid { display: grid; gap: clamp(4px, 0.9vw, 8px); width: min(94%, 420px); }
+.tg-cell {
+  aspect-ratio: 1; display: grid; place-items: center;
+  border-radius: 10px; border: 1px solid #ffffff12;
+  background: linear-gradient(180deg, #201830, #150f22);
+  font-size: clamp(18px, 3.4vw, 30px); line-height: 1; user-select: none;
+  box-shadow: inset 0 1px 0 #ffffff0c, inset 0 -3px 6px #0006;
+  animation: tg-fall .32s cubic-bezier(.2, 1.1, .35, 1) both;
+}
+/* a matched cell — glows gold-green while it's held, just before it clears */
+.tg-cell.win {
+  border-color: #6fe0a4; color: #06120b;
+  background: radial-gradient(circle at 50% 32%, #8fefbb, #2fae6a 72%);
+  box-shadow: 0 0 22px #33c07a99, inset 0 1px 0 #fff6;
+  animation: tg-fall .32s cubic-bezier(.2, 1.1, .35, 1) both, tg-pulse .5s ease-in-out .3s infinite alternate;
+}
+@keyframes tg-fall { from { transform: translateY(-42%); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes tg-pulse { from { filter: brightness(1); } to { filter: brightness(1.35); } }
+@media (prefers-reduced-motion: reduce) {
+  .tg-cell, .tg-cell.win { animation: none; }
+}
+/* the symbol paytable shown in Cascade's meta panel */
+.pay-row { display: flex; flex-wrap: wrap; gap: 6px 10px; margin-top: 8px; }
+.pay-cell {
+  font-family: var(--mono); font-size: 11px; color: #9aa79c; letter-spacing: .02em;
+  display: inline-flex; align-items: baseline; gap: 3px;
+}
+.pay-cell b { color: var(--cream, #f3ead7); font-variant-numeric: tabular-nums; }
+
+/* ============================================================================
    CasinoFloor — the first-person "walk the hall" lobby (full-bleed, no rail).
    ========================================================================== */
 .cf-root {
