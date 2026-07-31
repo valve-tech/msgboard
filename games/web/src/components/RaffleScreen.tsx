@@ -462,7 +462,7 @@ export const RaffleScreen = ({
             <p className="muted">Nothing under your name yet — every round you play or validate lands here.</p>
           )}
           {myRounds.length > 0 && (
-            <details className="history" open>
+            <details className="history">
               <summary>
                 {myRounds.length} round{myRounds.length === 1 ? '' : 's'}
                 {myFinished.length > 0 && (

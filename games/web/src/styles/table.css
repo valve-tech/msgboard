@@ -1213,6 +1213,43 @@
 }
 
 /* ============================================================================
+   LadderPath — the vertical climb surface (Towers, Hi-Lo, Chicken, Firewalk…).
+   ========================================================================== */
+.lad-scene { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; overflow-y: auto; padding: 18px 12px; }
+.lad-path { display: flex; flex-direction: column; gap: 7px; width: min(94%, 440px); }
+.lad-summit { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 0 10px; }
+.lad-summit-mark { font-size: 22px; color: #c9a22766; }
+.lad-summit.win .lad-summit-mark { color: var(--gold-live, #f0c74a); text-shadow: 0 0 16px #f0c74a88; }
+.lad-summit-label { font-family: var(--serif); font-weight: 900; letter-spacing: .14em; text-transform: uppercase; font-size: 11.5px; color: #8fa093; }
+.lad-summit.win .lad-summit-label { color: var(--gold-live, #f0c74a); }
+.lad-rung { display: grid; grid-template-columns: 52px 20px 1fr; align-items: stretch; gap: 10px; min-height: 42px; }
+.lad-mult { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 12px; text-align: right; color: #7d8c80; align-self: center; }
+.lad-node { position: relative; display: flex; justify-content: center; align-items: center; }
+.lad-node::before { content: ''; position: absolute; top: -9px; bottom: -9px; width: 2px; background: #ffffff12; }
+.lad-node::after { content: ''; width: 11px; height: 11px; border-radius: 50%; background: #0d2317; border: 2px solid #c9a22755; z-index: 1; }
+.lad-rung.done .lad-node::after { background: #5cc98f; border-color: #5cc98f; }
+.lad-rung.live .lad-node::after { background: var(--gold-live, #f0c74a); border-color: var(--gold-live, #f0c74a); box-shadow: 0 0 12px 2px #f0c74a99; }
+.lad-rung.bust .lad-node::after { background: #e0574a; border-color: #e0574a; }
+.lad-cell { display: flex; align-items: center; padding: 7px 12px; border-radius: 9px; border: 1px solid #ffffff10; background: #0c1a12; }
+.lad-rung.done .lad-cell { border-color: #5cc98f44; background: linear-gradient(90deg, #12281c, #0c1a12); }
+.lad-rung.live .lad-cell { border-color: var(--gold, #c9a227); background: radial-gradient(120% 100% at 0% 50%, #1c2a1d, #0c1a12); box-shadow: 0 0 22px #c9a22726, inset 0 0 0 1px #f0c74a33; }
+.lad-rung.bust .lad-cell { border-color: #e0574a88; background: linear-gradient(90deg, #2a1512, #160c0a); }
+.lad-rung.lock .lad-cell { opacity: .5; }
+.lad-cell-ok { color: #8fd7ac; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+.lad-cell-x { color: #e0574a; font-weight: 700; font-size: 13px; }
+.lad-cell-lock { flex: 1; height: 6px; border-radius: 3px; background: repeating-linear-gradient(90deg, #ffffff08 0 8px, transparent 8px 14px); }
+.lad-cell-live { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; width: 100%; }
+.lad-here { font-family: var(--sans); font-weight: 600; font-size: 13px; color: var(--cream, #f3ead7); }
+.lad-choices { display: flex; gap: 7px; flex-wrap: wrap; margin-left: auto; }
+.lad-choices button {
+  background: radial-gradient(circle at 50% 30%, #16351f, #0c1c12); color: var(--cream, #f3ead7);
+  border: 1px solid #c9a22766; border-radius: 7px; min-width: 40px; height: 38px; padding: 0 12px;
+  font: 600 13px var(--sans); cursor: pointer; box-shadow: inset 0 0 12px #0007;
+}
+.lad-choices button:hover:not(:disabled) { border-color: var(--gold-live, #f0c74a); filter: brightness(1.08); }
+.lad-choices button:disabled { opacity: .5; cursor: default; }
+
+/* ============================================================================
    CasinoFloor — the first-person "walk the hall" lobby (full-bleed, no rail).
    ========================================================================== */
 .cf-root {

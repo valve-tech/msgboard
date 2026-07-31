@@ -1,4 +1,6 @@
 .env
+# petition-fleet secrets (mnemonic + valve RPC key) — the .example is committed, this is not
+games/e2e/.env.petition-fleet
 node_modules
 dist
 postgres-data
