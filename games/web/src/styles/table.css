@@ -1607,6 +1607,71 @@
 @media (prefers-reduced-motion: reduce) { .pool-marker { transition: none !important; } }
 
 /* ============================================================================
+   PuzzleBoard — the shared frame for the ZK puzzle games (Wordle, Sudoku),
+   plus the Wordle tile grid (.wg-*) and the Sudoku board (.sg-*).
+   ========================================================================== */
+.puz-scene { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: clamp(16px, 4vh, 40px) 16px; }
+.puz-wordle { background: radial-gradient(120% 90% at 50% -8%, #16281e 0%, #0c160f 52%, #070f0a 100%); }
+.puz-sudoku { background: radial-gradient(120% 90% at 50% -8%, #241f14 0%, #16120a 52%, #0d0a05 100%); }
+.puz-head { font-family: var(--mono); font-size: 12px; letter-spacing: .03em; color: #9fb0a2; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; justify-content: center; max-width: min(92%, 560px); text-align: center; }
+.puz-slot { display: grid; place-items: center; }
+.puz-wait { font-family: var(--mono); font-size: 12px; letter-spacing: .04em; padding: 40px; text-align: center; }
+
+/* Wordle tiles */
+.wg-grid { display: grid; gap: 6px; }
+.wg-row { display: grid; grid-template-columns: repeat(5, clamp(38px, 7vh, 54px)); gap: 6px; }
+.wg-tile {
+  aspect-ratio: 1; display: grid; place-items: center; text-transform: uppercase;
+  font: 700 clamp(18px, 3.2vh, 26px)/1 var(--mono);
+  border: 2px solid #ffffff1e; border-radius: 6px; color: var(--gold, #c9a227); background: #0d1a12;
+  transition: transform .12s ease;
+}
+.wg-tile.g2 { background: #2f8a4e; border-color: #2f8a4e; color: #fff; }   /* green — right spot */
+.wg-tile.g1 { background: #b59120; border-color: #b59120; color: #17130a; } /* yellow — wrong spot */
+.wg-tile.g0 { background: #263229; border-color: #34433a; color: #cfe0d3; } /* grey — absent */
+.wg-tile.pending { opacity: .55; }
+.wg-tile.cheat { background: #7d2233; border-color: #e0574a; color: #fff; }
+.wg-tile.filled { transform: scale(1.02); }
+/* the setter's activity log, shown on the board area */
+.wg-log { border-collapse: collapse; font-family: var(--mono); font-size: 12.5px; color: #b7c8ba; }
+.wg-log th, .wg-log td { text-align: left; padding: 5px 12px 5px 0; }
+.wg-log .tag { margin-left: 6px; }
+
+/* shared docked-control widgets for the puzzle games (ControlTray children) */
+.puz-input {
+  width: 100%; box-sizing: border-box; margin-top: 8px; padding: 11px 13px;
+  background: #0a0f0c; border: 1px solid #ffffff14; border-radius: 10px;
+  color: #fff; font: 600 16px/1 var(--mono); text-transform: lowercase; letter-spacing: .06em; outline: none;
+}
+.puz-input:focus { border-color: #c9a22766; }
+.puz-input::placeholder { color: var(--muted); text-transform: none; letter-spacing: normal; }
+.puz-code {
+  display: block; margin-top: 8px; padding: 10px 12px; border-radius: 8px;
+  background: #0a0f0c; border: 1px solid #ffffff14; color: var(--gold-live, #f0c74a);
+  font-family: var(--mono); font-size: 12px; word-break: break-all;
+}
+
+/* Sudoku board */
+.sg-grid { display: grid; grid-template-columns: repeat(9, clamp(30px, 4.6vh, 42px)); grid-template-rows: repeat(9, clamp(30px, 4.6vh, 42px)); background: #0a120c; box-shadow: 0 20px 50px -20px #000; }
+.sg-cell {
+  width: 100%; height: 100%; text-align: center; border-radius: 0; outline: none;
+  font: 500 clamp(14px, 2.2vh, 19px)/1 var(--mono); font-variant-numeric: tabular-nums;
+  color: var(--gold, #c9a227); background: transparent;
+  border-top: 1px solid #ffffff14; border-left: 1px solid #ffffff14; border-right: none; border-bottom: none;
+}
+.sg-cell.b0 { background: rgba(184, 134, 11, 0.10); }
+.sg-cell.b1 { background: rgba(60, 150, 105, 0.15); }
+.sg-cell.b2 { background: rgba(95, 125, 175, 0.13); }
+.sg-cell.boxtop { border-top: 3px solid #c9a22788; }
+.sg-cell.boxleft { border-left: 3px solid #c9a22788; }
+.sg-cell.edger { border-right: 3px solid #c9a22788; }
+.sg-cell.edgeb { border-bottom: 3px solid #c9a22788; }
+.sg-cell.clue { color: var(--cream, #f3ead7); font-weight: 700; box-shadow: inset 0 0 0 99px #00000030; }
+.sg-cell.bad { color: #e0574a; }
+.sg-cell:focus { box-shadow: inset 0 0 0 2px var(--gold-live, #f0c74a); }
+.sg-cell:disabled { cursor: default; }
+
+/* ============================================================================
    CasinoFloor — the first-person "walk the hall" lobby (full-bleed, no rail).
    ========================================================================== */
 .cf-root {
