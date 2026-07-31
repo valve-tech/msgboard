@@ -1384,6 +1384,50 @@
 @media (prefers-reduced-motion: reduce) { .nb-cell.hit, .nb-cell.drew { animation: none; } }
 
 /* ============================================================================
+   BookBoard — the P2P offer-book surface (FlipBook, FlipBookX).
+   ========================================================================== */
+.bk-scene {
+  position: absolute; inset: 0; display: flex; flex-direction: column; padding: 10px;
+  background: radial-gradient(120% 90% at 50% -8%, #14251c 0%, #0a150f 52%, #060f0a 100%);
+}
+/* money-critical notices — pinned, never scrolled away */
+.bk-alert { flex: none; display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.bk-alert:empty { display: none; }
+.bk-alert .banner { margin: 0; font-size: 12px; }
+/* the ledger panel */
+.bk-book {
+  flex: 1; min-height: 0; display: flex; flex-direction: column;
+  background: linear-gradient(180deg, #0c1611, #0a120d); border: 1px solid #ffffff10; border-radius: 12px;
+  box-shadow: inset 0 1px 0 #ffffff0c, 0 18px 40px -24px #000;
+}
+.bk-tabs { flex: none; display: flex; gap: 2px; padding: 6px 6px 0; border-bottom: 1px solid #ffffff10; }
+.bk-tab {
+  display: inline-flex; align-items: center; gap: 6px; padding: 8px 13px; cursor: pointer;
+  background: none; border: 0; border-bottom: 2px solid transparent; color: #8fa093;
+  font: 700 12px var(--sans); letter-spacing: .02em; border-radius: 7px 7px 0 0;
+}
+.bk-tab:hover { color: var(--cream, #f3ead7); }
+.bk-tab.on { color: var(--cream, #f3ead7); border-bottom-color: var(--gold-live, #f0c74a); background: #ffffff08; }
+.bk-count {
+  min-width: 18px; padding: 1px 6px; border-radius: 9px; text-align: center;
+  font: 700 10px var(--mono); font-variant-numeric: tabular-nums; color: #06120b;
+  background: #6b7a6e;
+}
+.bk-tab.on .bk-count { background: var(--gold-live, #f0c74a); }
+.bk-lane { flex: 1; min-height: 0; overflow-y: auto; padding: 9px; display: flex; flex-direction: column; gap: 8px; }
+.bk-empty {
+  margin: auto; padding: 24px; text-align: center; color: #7d8c80;
+  font-family: var(--mono); font-size: 12px; letter-spacing: .03em;
+}
+/* tighten the reused .card blocks into ledger lines, with a state-coloured spine */
+.bk-lane .card { margin: 0; padding: 10px 12px; border-radius: 9px; border-left: 3px solid #ffffff14; }
+.bk-lane .card.bk-open { border-left-color: #33c07a; }
+.bk-lane .card.bk-wait { border-left-color: var(--gold-live, #f0c74a); }
+.bk-lane .card.bk-done { border-left-color: #4a5a4e; opacity: .92; }
+.bk-lane .card.bk-expired { border-left-color: #7d2233; opacity: .82; }
+.bk-lane .card.bk-mine { box-shadow: inset 0 0 0 1px #c9a22733; }
+
+/* ============================================================================
    CasinoFloor — the first-person "walk the hall" lobby (full-bleed, no rail).
    ========================================================================== */
 .cf-root {
