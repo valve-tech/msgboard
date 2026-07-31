@@ -1211,3 +1211,109 @@
     display: none;
   }
 }
+
+/* ============================================================================
+   CasinoFloor — the first-person "walk the hall" lobby (full-bleed, no rail).
+   ========================================================================== */
+.cf-root {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: radial-gradient(120% 70% at 50% 8%, #16281c 0%, #0a140d 42%, #05100a 72%, #04080a 100%);
+  color: var(--cream, #f3ead7);
+}
+/* marquee */
+.cf-marquee {
+  display: flex; align-items: center; gap: 1.1rem;
+  padding: 13px clamp(16px, 3vw, 40px);
+  border-bottom: 1px solid #ffffff14;
+  background: linear-gradient(180deg, #0b1a12, #070f0a);
+  flex: none;
+}
+.cf-brand {
+  width: 38px; height: 38px; border-radius: 9px; display: grid; place-items: center;
+  font-family: var(--serif); font-weight: 900; font-size: 23px; color: #0a0f0b;
+  background: radial-gradient(circle at 50% 34%, var(--gold-live, #f0c74a), var(--gold, #c9a227));
+  box-shadow: 0 2px 8px #0009, inset 0 1px 0 #fff6;
+}
+.cf-word { font-family: var(--serif); font-weight: 900; font-size: 19px; letter-spacing: .02em; }
+.cf-word b { color: var(--gold-live, #f0c74a); }
+.cf-tagline { font-family: var(--mono); font-size: 11px; color: #9fb0a2; }
+.cf-controls { margin-left: auto; display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; justify-content: flex-end; }
+/* ticker */
+.cf-ticker { overflow: hidden; background: #060f09; padding: 6px 0; border-bottom: 1px solid #ffffff14; flex: none; }
+.cf-ticker-track { display: inline-flex; white-space: nowrap; animation: cf-slide 42s linear infinite; }
+.cf-ticker-set { display: inline-flex; gap: 2.4rem; padding-left: 2.4rem; }
+.cf-slip { font-family: var(--mono); font-size: 11px; color: #8fa093; }
+.cf-slip b { color: var(--gold, #c9a227); }
+@keyframes cf-slide { to { transform: translateX(-50%); } }
+/* the hall — scroll-snap stations you walk through */
+.cf-hall { flex: 1; overflow-y: auto; scroll-snap-type: y mandatory; scroll-behavior: smooth; }
+.cf-station {
+  height: 100%; min-height: 560px; scroll-snap-align: start; position: relative; overflow: hidden;
+  perspective: 1000px; perspective-origin: 50% 40%;
+}
+.cf-scene { position: absolute; inset: 0; transform-style: preserve-3d; }
+.cf-carpet {
+  position: absolute; left: 50%; bottom: -4%; width: min(46vw, 520px); height: 150%;
+  transform: translateX(-50%) rotateX(74deg); transform-origin: 50% 100%;
+  background:
+    linear-gradient(90deg, transparent 0 8%, #7d2233 8% 11%, #3a0e18 11% 89%, #7d2233 89% 92%, transparent 92%),
+    linear-gradient(180deg, #4a0f1c, #360a14 60%, #240710);
+  box-shadow: 0 0 120px 40px #00000088; border-radius: 40% 40% 0 0 / 12% 12% 0 0; opacity: .95;
+}
+.cf-carpet::after { content: ''; position: absolute; inset: 0;
+  background: repeating-linear-gradient(180deg, #ffffff00 0 46px, #f0c74a10 46px 48px); }
+.cf-vanish { position: absolute; left: 50%; top: 20%; transform: translate(-50%, -50%); text-align: center; z-index: 1; }
+.cf-arch { display: block; font-family: var(--serif); font-weight: 900; font-size: 15px; letter-spacing: .16em;
+  color: #e9d9a0; text-shadow: 0 0 18px #f0c74a66; opacity: .66; }
+.cf-more { font-family: var(--mono); font-size: 10.5px; color: #8fa093; opacity: .6; margin-top: 4px; letter-spacing: .1em; }
+/* a pit set into the side of the hall */
+.cf-pit { position: absolute; bottom: 10%; width: min(35vw, 400px); transform-style: preserve-3d; z-index: 2; }
+.cf-pit.cf-left { left: 1.5%; transform: rotateY(31deg); transform-origin: left bottom; }
+.cf-pit.cf-right { right: 1.5%; transform: rotateY(-31deg); transform-origin: right bottom; }
+.cf-pit.cf-solo { left: 50%; transform: translateX(-50%); width: min(70vw, 720px); text-align: center; }
+.cf-sign { display: inline-flex; align-items: center; gap: .6rem; font-family: var(--serif); font-weight: 900;
+  text-transform: uppercase; letter-spacing: .06em; font-size: clamp(17px, 2.1vw, 25px); color: var(--cream, #f3ead7);
+  text-shadow: 0 0 16px #f0c74a55, 0 1px 0 #0008; }
+.cf-pit.cf-right .cf-sign { flex-direction: row-reverse; }
+.cf-lamp { width: 10px; height: 10px; border-radius: 50%; background: var(--gold-live, #f0c74a); box-shadow: 0 0 14px 3px #f0c74a99; }
+.cf-blurb { font-family: var(--mono); font-size: 11px; color: #8fa093; margin: 6px 0 16px; }
+.cf-pit.cf-right { text-align: right; }
+.cf-tables { display: flex; flex-wrap: wrap; gap: 16px; }
+.cf-pit.cf-right .cf-tables { justify-content: flex-end; }
+.cf-pit.cf-solo .cf-tables { justify-content: center; }
+/* a game table = felt puck + standing nameplate */
+.cf-table { width: 96px; text-align: center; cursor: pointer; background: none; border: 0; padding: 0; font: inherit; color: inherit; }
+.cf-puck {
+  width: 96px; height: 96px; border-radius: 50%; position: relative; display: grid; place-items: center;
+  background: radial-gradient(circle at 50% 32%, #16351f, #0e2417 60%, #071710);
+  box-shadow: 0 20px 26px -12px #000c, inset 0 0 0 2px #c9a2273a, inset 0 0 22px #0009, inset 0 3px 0 #ffffff12;
+  transition: transform .16s ease, box-shadow .16s ease;
+}
+.cf-glyph { font-size: 35px; filter: drop-shadow(0 3px 4px #000a); }
+.cf-seal { position: absolute; top: 7px; right: 9px; font-size: 10px; color: var(--gold-live, #f0c74a); opacity: .85; }
+.cf-plate {
+  display: inline-block; margin-top: 9px; padding: 3px 10px; border-radius: 4px;
+  font-family: var(--sans); font-weight: 600; font-size: 12px; color: var(--cream, #f3ead7);
+  background: linear-gradient(180deg, #241a0c, #140d05); border: 1px solid #c9a22755;
+  box-shadow: 0 2px 6px #0007; white-space: nowrap;
+}
+.cf-table:hover .cf-puck {
+  transform: translateY(-6px) scale(1.05);
+  box-shadow: 0 26px 30px -12px #000c, inset 0 0 0 2px var(--gold-live, #f0c74a), inset 0 0 22px #0009, 0 0 34px #c9a22733;
+}
+.cf-table:focus-visible .cf-puck { outline: 2px solid var(--gold-live, #f0c74a); outline-offset: 3px; }
+/* flatten to a readable stacked floor on narrow screens / reduced motion */
+@media (max-width: 860px), (prefers-reduced-motion: reduce) {
+  .cf-root { height: auto; min-height: 100vh; overflow: visible; }
+  .cf-hall { scroll-snap-type: none; overflow: visible; }
+  .cf-station { height: auto; min-height: 0; perspective: none; padding: 26px clamp(16px, 4vw, 40px); border-bottom: 1px solid #ffffff10; }
+  .cf-scene { position: static; transform: none; }
+  .cf-carpet, .cf-vanish { display: none; }
+  .cf-pit { position: static; transform: none !important; width: auto; bottom: auto; text-align: left; margin-bottom: 22px; }
+  .cf-pit.cf-right .cf-sign, .cf-pit.cf-right .cf-tables { flex-direction: row; justify-content: flex-start; }
+  .cf-pit.cf-right, .cf-pit.cf-solo { text-align: left; }
+  .cf-pit.cf-solo { width: auto; }
+}

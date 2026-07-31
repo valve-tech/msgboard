@@ -40,7 +40,7 @@ import { SudokuScreen } from './components/SudokuScreen'
 import { WordleScreen } from './components/WordleScreen'
 import { LiveFeed } from './components/LiveFeed'
 import { StandingsScreen } from './components/StandingsScreen'
-import { Lobby } from './components/Lobby'
+import { CasinoFloor } from './components/CasinoFloor'
 import { Menu } from './components/Menu'
 import { AppShell } from './components/shell/AppShell'
 import { HowItWorksProvider, HowItWorksModal } from './components/HowItWorks'
@@ -206,6 +206,15 @@ export const App = () => {
         deployment={deployment}
         model={trustModel}
       />
+      {tab === 'lobby' ? (
+        <CasinoFloor
+          deployment={deployment}
+          games={GAMES.filter((g) => !['lobby', 'standings', 'live'].includes(g.id))}
+          trustFor={(id) => trustModelFor(id as Tab)}
+          onPick={(id) => setTab(id as Tab)}
+          topRight={topRight}
+        />
+      ) : (
       <AppShell
         deployment={deployment}
         games={[...GAMES]}
@@ -248,14 +257,6 @@ export const App = () => {
           </div>
         }
       >
-      {tab === 'lobby' && (
-        <Lobby
-          deployment={deployment}
-          games={GAMES.filter((g) => !['lobby', 'standings', 'live'].includes(g.id))}
-          trustFor={(id) => trustModelFor(id as Tab)}
-          onPick={(id) => setTab(id as Tab)}
-        />
-      )}
       {tab === 'coinflip' && (
         <FlipBookScreen
           deployment={deployment}
@@ -532,6 +533,7 @@ export const App = () => {
       {tab === 'standings' && <StandingsScreen deployment={deployment} myAddress={wallet.address} />}
       {tab === 'live' && <LiveFeed deployment={deployment} />}
       </AppShell>
+      )}
     </HowItWorksProvider>
   )
 }
