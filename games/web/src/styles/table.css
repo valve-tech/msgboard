@@ -703,6 +703,10 @@
 .scene.view-rail { perspective-origin: 50% 12%; }
 .scene.view-rail .plane { transform: translate(-50%, -44%) rotateX(67deg) scale(1.16); }
 .scene.view-rail .hand { transform: translateX(-50%) scale(1.14); bottom: 1%; }
+/* 2D — flat straight-down layout, the way an online roulette table reads (no rake). */
+.scene.view-flat { perspective-origin: 50% 50%; }
+.scene.view-flat .plane { transform: translate(-50%, -50%) rotateX(3deg) scale(.82); }
+.scene.view-flat .hand { transform: translateX(-50%) scale(.78); bottom: 9%; }
 /* the switcher pill (top-centre of the felt, dropped clear of the floating chrome/title/wallet) */
 .felt-views {
   position: absolute; top: 94px; left: 50%; transform: translateX(-50%); z-index: 12;
@@ -1252,6 +1256,11 @@
     position: absolute; inset: 0; height: auto; min-height: 0;
     border: none; border-radius: 0; box-shadow: none;
   }
+  /* BookBoard's tabs are top-anchored (unlike the centred surfaces), so the ledger stacks BELOW
+     the floating title instead of behind it; the floating "How it works" pill is redundant here
+     (it's also in the top bar), so it's dropped to keep the header compact. */
+  .main:has(.bk-scene) .gtitle .pf { display: none; }
+  .main:has(.stage-col) .bk-scene { padding-top: 150px; }
 
   /* the game name floats top-left below the chrome, no card — just lettering over the felt */
   .main:has(.stage-col) .gtitle {

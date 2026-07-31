@@ -9,10 +9,15 @@ import { saveSalt, loadSalt, exportBackup, importBackup } from '../model/salts'
 import { sendGameTx, nextHeatLocations } from '../tx'
 import { publicClientFor } from '../wallet'
 import { RaffleVerifyPanel } from './VerifyPanel'
-import { AddressLink, InfoDot, Provenance, SourceNote, archiveTrailUrl, explorerUrl, fmtAmount, formatWhen } from './Meta'
-import { StakeInput, parseStake } from './StakeInput'
+import { AddressLink, Provenance, explorerUrl, fmtAmount, formatWhen } from './Meta'
+import { parseStake } from './StakeInput'
 import { RoundTiming } from './TurnTiming'
 import { involvement } from '../model/participation'
+import { GameStage } from './shell/GameStage'
+import { HowItWorksLink } from './HowItWorks'
+import { BetTray } from './shell/BetTray'
+import { MetaPanel } from './shell/MetaPanel'
+import { BookBoard } from './stages/BookBoard'
 
 const commitmentFor = (guess: bigint, salt: viem.Hex, player: viem.Hex): viem.Hex =>
   viem.keccak256(
@@ -20,6 +25,16 @@ const commitmentFor = (guess: bigint, salt: viem.Hex, player: viem.Hex): viem.He
   )
 
 const ACTIVE_PHASES = new Set(['filling', 'drawing', 'claiming'])
+
+/** the lifecycle spine colour for a round card (matches BookBoard's .bk-open/.bk-wait/.bk-done). */
+const roundSpine = (round: RaffleRoundView): 'open' | 'wait' | 'done' | 'expired' =>
+  round.phase === 'filling'
+    ? 'open'
+    : round.phase === 'drawing' || round.phase === 'claiming'
+      ? 'wait'
+      : round.phase === 'no-contest'
+        ? 'expired'
+        : 'done'
 
 /**
  * Hoisted to module level on purpose: a nested definition gets a fresh component identity
@@ -55,7 +70,7 @@ onReveal: (ticketId: bigint) => void
 onRefund: (ticketId: bigint) => void
 validated?: boolean
 }) => (
-  <div className="card">
+  <div className={`card bk-${roundSpine(round)}${validated ? ' bk-mine' : ''}`}>
     <div className="row" style={{ justifyContent: 'space-between' }}>
       <span>
         <span className="tag">{phaseTag(round)}</span>
@@ -337,206 +352,142 @@ export const RaffleScreen = ({
       ? formatWhen(data.timestamps[lastDone.finalisedAtBlock.toString()])
       : undefined
 
+  // money-critical alerts, pinned above the lanes: a reveal window closing, or a stalled round to refund.
+  const myUnrevealed = (r: RaffleRoundView) => r.tickets.filter((t) => t.mine && !t.revealed && !t.cancelled && !t.refunded)
+  const revealDueRounds = data.rounds.filter((r) => r.phase === 'claiming' && r.revealOpen && myUnrevealed(r).length > 0)
+  const staleRefundRounds = data.rounds.filter((r) => r.staleRefundCandidate && r.tickets.some((t) => t.mine && !t.refunded))
+
+  const renderRounds = (rounds: RaffleRoundView[]) =>
+    [...rounds].reverse().map((round) => (
+      <RoundCard
+        key={round.roundId}
+        round={round}
+        deployment={deployment}
+        data={data}
+        seed={seeds[round.roundId]}
+        busy={busy}
+        canPlay={canPlay}
+        phaseTag={phaseTag}
+        onArm={(r) => void arm(r)}
+        onFinalise={(r) => void finalise(r)}
+        onLoadSeed={(r) => void loadSeed(r)}
+        onReveal={(t) => void reveal(t)}
+        onRefund={(t) => void refund(t)}
+        validated={mineByRound.get(round.roundId)?.validated}
+      />
+    ))
+
+  const alertNode =
+    revealDueRounds.length > 0 || staleRefundRounds.length > 0 ? (
+      <>
+        {revealDueRounds.map((r) => (
+          <div className="banner" key={r.roundId}>
+            ⏰ Reveal your number now — {r.blocksUntilClose?.toString() ?? 'few'} blocks left in this round, or the stake is forfeit.
+          </div>
+        ))}
+        {staleRefundRounds.map((r) => (
+          <div className="banner bad" key={`stale-${r.roundId}`}>
+            Round stalled — open <b>Your book</b> and refund your stake.
+          </div>
+        ))}
+      </>
+    ) : undefined
+
+  const invalidTicket = amount !== '' && stake === undefined
+  const invalidThreshold = threshold !== '' && (thresholdN === undefined || thresholdN < 2n)
+
   return (
-    <div>
-      <div className="card">
-        <h3>
-          Play a number
-          <InfoDot>
-            Tickets with the same price and player count pool into the same round. The draw fires once the
-            round has its players. Your number stays hidden until you reveal — the salt proving it lives in
-            THIS browser; lose it before revealing and the stake is forfeit. Keep the backup string safe.
-          </InfoDot>
-        </h3>
-        <div className="row">
-          <StakeInput value={amount} onChange={setAmount} placeholder="ticket price" />
-          <label className="threshold-label">
-            players
-            <input
-              type="number"
-              min={2}
-              max={256}
-              value={threshold}
-              onChange={(e) => setThreshold(e.target.value)}
-              style={{ width: '4.2rem' }}
-              aria-label="player threshold"
-            />
-          </label>
-          <input
-            type="number"
-            min={1}
-            max={256}
-            placeholder="your number 1–256"
-            value={guess}
-            onChange={(e) => setGuess(e.target.value)}
-            style={{ width: '9rem' }}
-          />
-          <button onClick={() => void commit()} disabled={!canPlay || guess === '' || !paramsOk}>
-            {busy ? 'Sending…' : 'Commit'}
-          </button>
-          {!walletClient && <span className="muted">connect a wallet to play</span>}
-          {walletClient && !trustAcknowledged && <span className="muted">tap "Got it" on the fairness note above first</span>}
-        </div>
-        {(amount !== '' && stake === undefined) ||
-        (threshold !== '' && (thresholdN === undefined || thresholdN < 2n)) ||
-        joinsRound ? (
-          <p className="muted" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-            {amount !== '' && stake === undefined && <span className="bad">enter a positive ticket price</span>}
-            {threshold !== '' && (thresholdN === undefined || thresholdN < 2n) && (
-              <span className="bad">threshold must be at least 2 players</span>
-            )}
-            {joinsRound && (
-              <span className="ok">
-                joins the round filling now ({joinsRound.commitCount.toString()}/{joinsRound.threshold.toString()})
-              </span>
+    <>
+      <GameStage title="THE NUMBERS" subtitle="pick 1–256 · closest to the draw wins the pot" action={<HowItWorksLink />}>
+        <BookBoard
+          alert={alertNode}
+          defaultKey={revealDueRounds.length > 0 ? 'mine' : 'open'}
+          empty="No round on the table — play a number to open one."
+          lanes={[
+            { key: 'open', label: 'Open rounds', count: liveRounds.length, node: renderRounds(liveRounds) },
+            { key: 'mine', label: 'Your book', count: myRounds.length, node: renderRounds(myRounds) },
+            { key: 'record', label: 'The record', count: doneRounds.length, node: renderRounds(doneRounds) },
+          ]}
+        />
+      </GameStage>
+
+      <div className="tray-col">
+        <BetTray
+          amount={amount}
+          onAmount={setAmount}
+          action={
+            <button className="primary" onClick={() => void commit()} disabled={!canPlay || guess === '' || !paramsOk}>
+              {busy ? 'Sending…' : 'Commit'}
+            </button>
+          }
+        >
+          <div className="acts" style={{ marginTop: 8 }}>
+            <label className="threshold-label">
+              players
+              <input type="number" min={2} max={256} value={threshold} onChange={(e) => setThreshold(e.target.value)} aria-label="player threshold" />
+            </label>
+            <label className="threshold-label">
+              your #
+              <input type="number" min={1} max={256} placeholder="1–256" value={guess} onChange={(e) => setGuess(e.target.value)} aria-label="your number" />
+            </label>
+          </div>
+          <p className="tray-hint">
+            {invalidTicket && <span className="bad">enter a positive ticket price · </span>}
+            {invalidThreshold && <span className="bad">threshold ≥ 2 · </span>}
+            {joinsRound ? (
+              <span className="ok">joins the round filling now ({joinsRound.commitCount.toString()}/{joinsRound.threshold.toString()})</span>
+            ) : (
+              <span className="muted">same price + player count pool into one round</span>
             )}
           </p>
-        ) : null}
-        {backupShown && (
-          <div className="banner">
-            <strong>Backup your salts now:</strong>
-            <p className="mono">{backupShown}</p>
-            <button className="secondary" onClick={() => void navigator.clipboard.writeText(backupShown)}>
-              Copy backup
+          {!walletClient && <p className="tray-hint">connect a wallet to play</p>}
+          {walletClient && !trustAcknowledged && <p className="tray-hint">tap "Got it" on the fairness note above first</p>}
+          <p className="tray-hint">your number stays hidden until you reveal — the salt lives in THIS browser. Back it up.</p>
+          {backupShown && (
+            <div className="banner">
+              <strong>Back up your salts now:</strong>
+              <p className="mono" style={{ wordBreak: 'break-all' }}>{backupShown}</p>
+              <button className="secondary" onClick={() => void navigator.clipboard.writeText(backupShown)}>Copy backup</button>
+            </div>
+          )}
+          <div className="row" style={{ marginTop: 8 }}>
+            <input
+              className="puz-input"
+              style={{ flex: 1, marginTop: 0 }}
+              placeholder="paste a backup to restore salts"
+              value={importText}
+              onChange={(e) => setImportText(e.target.value)}
+            />
+            <button
+              className="secondary"
+              disabled={importText === ''}
+              onClick={() => {
+                try {
+                  const count = importBackup(localStorage, importText.trim())
+                  setError(undefined)
+                  setImportText('')
+                  setBackupShown(undefined)
+                  window.alert(`${count} ticket salt(s) restored`)
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : String(e))
+                }
+              }}
+            >
+              Import
             </button>
           </div>
-        )}
-        <div className="row" style={{ marginTop: '0.5rem' }}>
-          <input
-            placeholder="paste a backup string to restore salts"
-            value={importText}
-            onChange={(e) => setImportText(e.target.value)}
-            style={{ flex: 1 }}
-          />
-          <button
-            className="secondary"
-            disabled={importText === ''}
-            onClick={() => {
-              try {
-                const count = importBackup(localStorage, importText.trim())
-                setError(undefined)
-                setImportText('')
-                setBackupShown(undefined)
-                alert(`${count} ticket salt(s) restored`)
-              } catch (e) {
-                setError(e instanceof Error ? e.message : String(e))
-              }
-            }}
-          >
-            Import backup
-          </button>
-        </div>
-        {error && <p className="bad">{error}</p>}
-      </div>
+          {error && <p className="bad">{error}</p>}
+        </BetTray>
 
-      <h2>
-        Open rounds
-        <SourceNote deployment={deployment} contract={deployment.raffle} contractLabel="Raffle" />
-      </h2>
-      {liveRounds.length === 0 && <p className="muted">No round on the table — play a number to open one.</p>}
-      {[...liveRounds].reverse().map((round) => (
-        <RoundCard
-          key={round.roundId}
-          round={round}
-          deployment={deployment}
-          data={data}
-          seed={seeds[round.roundId]}
-          busy={busy}
-          canPlay={canPlay}
-          phaseTag={phaseTag}
-          onArm={(r) => void arm(r)}
-          onFinalise={(r) => void finalise(r)}
-          onLoadSeed={(r) => void loadSeed(r)}
-          onReveal={(t) => void reveal(t)}
-          onRefund={(t) => void refund(t)}
-        />
-      ))}
-
-      {myAddress && (
-        <>
-          <h2>
-            Your book
-            <SourceNote deployment={deployment} contract={deployment.raffle} contractLabel="Raffle" />
-          </h2>
-          {myRounds.length === 0 && (
-            <p className="muted">Nothing under your name yet — every round you play or validate lands here.</p>
-          )}
-          {myRounds.length > 0 && (
-            <details className="history">
-              <summary>
-                {myRounds.length} round{myRounds.length === 1 ? '' : 's'}
-                {myFinished.length > 0 && (
-                  <span className="muted">
-                    {' '}
-                    · {myWon.length}/{myFinished.length} won · {fmtAmount(deployment, myTakings)} taken
-                  </span>
-                )}
-              </summary>
-              {[...myRounds].reverse().map((round) => (
-                <RoundCard
-                  key={round.roundId}
-                  round={round}
-                  deployment={deployment}
-                  data={data}
-                  seed={seeds[round.roundId]}
-                  busy={busy}
-                  canPlay={canPlay}
-                  phaseTag={phaseTag}
-                  onArm={(r) => void arm(r)}
-                  onFinalise={(r) => void finalise(r)}
-                  onLoadSeed={(r) => void loadSeed(r)}
-                  onReveal={(t) => void reveal(t)}
-                  onRefund={(t) => void refund(t)}
-                  validated={mineByRound.get(round.roundId)!.validated}
-                />
-              ))}
-            </details>
-          )}
-        </>
-      )}
-
-      <h2>
-        The record
-        <SourceNote deployment={deployment} contract={deployment.raffle} contractLabel="Raffle" />
-      </h2>
-      {doneRounds.length === 0 && <p className="muted">No finished rounds yet.</p>}
-      {doneRounds.length > 0 && (
-        <details className="history">
-          <summary>
-            {doneRounds.length} finished round{doneRounds.length === 1 ? '' : 's'} · {fmtAmount(deployment, paidOut)} paid
-            out
+        <MetaPanel tabs={['Rounds', 'Record']}>
+          <span>
+            <b>{liveRounds.length}</b> open · <b>{doneRounds.length}</b> finished
+            {paidOut > 0n && <span className="muted"> · {fmtAmount(deployment, paidOut)} paid out</span>}
+            {myTakings > 0n && <span className="muted"> · you took {fmtAmount(deployment, myTakings)}</span>}
             {lastDoneWhen && <span className="muted"> · last {lastDoneWhen}</span>}
-            {archiveTrailUrl(deployment) && (
-              <a
-                href={archiveTrailUrl(deployment)}
-                target="_blank"
-                rel="noreferrer"
-                onClick={(e) => e.stopPropagation()}
-              >
-                msgboard trail ↗
-              </a>
-            )}
-            <span className="muted history-hint">every one verifiable — open the book</span>
-          </summary>
-          {[...doneRounds].reverse().map((round) => (
-            <RoundCard
-              key={round.roundId}
-              round={round}
-              deployment={deployment}
-              data={data}
-              seed={seeds[round.roundId]}
-              busy={busy}
-              canPlay={canPlay}
-              phaseTag={phaseTag}
-              onArm={(r) => void arm(r)}
-              onFinalise={(r) => void finalise(r)}
-              onLoadSeed={(r) => void loadSeed(r)}
-              onReveal={(t) => void reveal(t)}
-              onRefund={(t) => void refund(t)}
-            />
-          ))}
-        </details>
-      )}
-    </div>
+          </span>
+        </MetaPanel>
+      </div>
+    </>
   )
 }

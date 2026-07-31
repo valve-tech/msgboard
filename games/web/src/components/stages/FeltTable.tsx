@@ -10,9 +10,10 @@ import { useState, type ReactNode } from 'react'
  *
  * CAMERA: a small switcher moves the vantage point like a video game — Seat (the default seated
  * rake), Aerial (lean over the table, flatter, the whole layout visible at once — handy when both
- * sides show hands, e.g. Pai Gow's front/back split), and Rail (low and close, leaning in to study
- * your cards). It only re-aims the CSS perspective + plane tilt; no game state is touched. Pass
- * `views={false}` to pin a table to the seated view.
+ * sides show hands, e.g. Pai Gow's front/back split), Rail (low and close, leaning in to study your
+ * cards), and 2D (a flat straight-down layout, the way an online roulette table reads). It only
+ * re-aims the CSS perspective + plane tilt; no game state is touched. Pass `views={false}` to pin a
+ * table to the seated view.
  *
  * Furniture (chip rack, shoe) is decorative — no game state. Real game data flows only through the
  * `dealer` / `player` / `spread` / `spots` slots; `arc` (felt caption) and `centerMark` (the medal)
@@ -22,6 +23,7 @@ const VIEWS = [
   { key: 'seat', label: 'Seat' },
   { key: 'aerial', label: 'Aerial' },
   { key: 'rail', label: 'Rail' },
+  { key: 'flat', label: '2D' },
 ] as const
 type FeltView = (typeof VIEWS)[number]['key']
 
