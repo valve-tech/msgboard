@@ -356,4 +356,30 @@ describe('CoinFlipTables', () => {
       )
     })
   })
+
+  describe('params bind only new rounds', () => {
+    it('settles a live round on the multiplier it was opened under, even after the operator lowers it', async () => {
+      const ctx = await helpers.loadFixture(testUtils.deploy)
+      const { subset, locations, secrets } = await testUtils.setUpValidators(ctx, ctx.coinFlipTables, 3)
+      const op = ctx.signers[0]!.account
+      const player = ctx.signers[1]!.account
+      const tableId = await mkTable(ctx, { mult: 200, maxStake: viem.parseEther('10'), account: op })
+      await approveChips(ctx, op, viem.parseEther('50'))
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.fundHot([tableId, viem.parseEther('50')], { account: op }))
+      await approveChips(ctx, player, viem.parseEther('1'))
+      // opened at 2.00x -> payout snapshot 2e18
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.open([tableId, 0, viem.parseEther('1'), subset, locations], { account: player }))
+      const round = (await ctx.coinFlipTables.getEvents.RoundOpened()).slice(-1)[0]!.args
+      expect(round.payout).to.equal(viem.parseEther('2'))
+      // operator drops the table to 1.50x AFTER the bet
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.setParams([tableId, 150, viem.parseEther('10'), viem.parseEther('100')], { account: op }))
+      const before = await ctx.ERC20.read.balanceOf([player.address])
+      await testUtils.confirmTx(ctx, ctx.random.write.cast([round.key as viem.Hex, locations, secrets]))
+      const seed = (await ctx.random.read.randomness([round.key as viem.Hex])).seed as viem.Hex
+      if ((BigInt(seed) & 1n) === 0n) {
+        const after = await ctx.ERC20.read.balanceOf([player.address])
+        expect(after - before).to.equal(viem.parseEther('2')) // paid at 2.00x, NOT 1.50x
+      }
+    })
+  })
 })
