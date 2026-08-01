@@ -216,5 +216,31 @@ describe('CoinFlipTables', () => {
         'StakeTooHigh',
       )
     })
+
+    it('rejects a degenerate validator subset (below MIN_SUBSET or duplicated)', async () => {
+      const ctx = await helpers.loadFixture(testUtils.deploy)
+      const { subset, locations } = await testUtils.setUpValidators(ctx, ctx.coinFlipTables, 3)
+      const op = ctx.signers[0]!.account
+      const player = ctx.signers[1]!.account
+      const tableId = await mkTable(ctx, { mult: 196, maxStake: viem.parseEther('10'), hotTarget: viem.parseEther('100'), account: op })
+      await approveChips(ctx, op, viem.parseEther('50'))
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.fundHot([tableId, viem.parseEther('50')], { account: op }))
+      await approveChips(ctx, player, viem.parseEther('5'))
+      const stake = viem.parseEther('1')
+      // single-element subset -> below MIN_SUBSET
+      await expectations.revertedWithCustomError(
+        ctx.coinFlipTables,
+        ctx.coinFlipTables.write.open([tableId, 0, stake, [subset[0]!], [locations[0]!]], { account: player }),
+        'BadSubset',
+      )
+      // duplicated subset -> collapses to one distinct validator
+      const dupSubset = [subset[0]!, subset[0]!, subset[0]!]
+      const dupLocations = [locations[0]!, locations[0]!, locations[0]!]
+      await expectations.revertedWithCustomError(
+        ctx.coinFlipTables,
+        ctx.coinFlipTables.write.open([tableId, 0, stake, dupSubset, dupLocations], { account: player }),
+        'BadSubset',
+      )
+    })
   })
 })
