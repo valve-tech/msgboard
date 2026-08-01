@@ -711,6 +711,10 @@ function open(
     if (side > TAILS) revert WrongSide();
     if (stake == 0) revert ZeroStake();
     if (stake > t.maxStake) revert StakeTooHigh();
+    // Enforce the anti-grinding floor BEFORE heating: MIN_SUBSET(3) distinct, all allowlisted.
+    // _heatBound alone does NOT check the distinct-count floor — CoinFlip.enterAndMatch validates
+    // first, and so must we, or a degenerate 1-element/[V,V,V] subset defeats the entropy guarantee.
+    _validateSubset(validatorSubset);
 
     uint256 payout = stake * t.maxMultiplierX100 / 100;
     uint256 exposure = payout - stake; // operator's at-risk portion

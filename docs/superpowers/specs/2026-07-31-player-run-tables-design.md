@@ -212,6 +212,13 @@ produced by validator preimages; the operator contributes nothing and signs noth
 picks the subset (or the frontend defaults it to the deployment's canonical set), so "don't trust
 this set? contribute your own randomness" holds unchanged.
 
+**The subset must clear `GameBase._validateSubset` before it is heated** — `MIN_SUBSET` (3) distinct,
+all-allowlisted validators, exactly as `CoinFlip.enterAndMatch` does. `_heatBound` alone enforces
+binding + per-member allowlist but NOT the distinct-count floor, so `open` must call
+`_validateSubset(validatorSubset)` first. This is the load-bearing anti-grinding guarantee: a
+degenerate 1-element or duplicate-validator subset would collapse "one honest validator defeats any
+cartel" to "trust this one validator." Never heat an unvalidated subset.
+
 ### Historical verifiability — validate past rounds from immutable chain data
 
 The platform's whole pitch is "we only provide the validation." That validation has to hold *after*
