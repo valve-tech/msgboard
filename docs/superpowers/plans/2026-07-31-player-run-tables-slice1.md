@@ -1328,7 +1328,72 @@ git commit -m "feat(games-web): table read model — fold events, sort by armed/
 
 ---
 
-## Task 12: `TablePicker` — browse, create, join
+## ⚠️ UI PHASE REVISED (post-recon, 2026-08-01) — supersedes the original Tasks 12–14 below
+
+**Why revised:** recon of the live `games/web` found the original plan's UI assumption wrong.
+There is **no existing house-vs-player coin-flip screen to reuse** — the web "coin flip" is now the
+**P2P FlipBook duel** (`App.tsx:95-99`), and the only validator-settled game is **The Numbers
+(`RaffleScreen`)**. `CoinFlipTables` is a new game model (bet vs an operator bankroll, on-chain
+validator settle), so the UI is a **new validator-style screen**, modeled on `RaffleScreen`, not a
+reuse. The `useTableEvents` hook the original tasks assumed does not exist. User direction
+(2026-08-01): build it now, using existing screens for inspiration; do the lobby fix in parallel.
+
+**Reference files to model on (integration tasks — follow these established patterns, don't invent):**
+`games/web/src/components/RaffleScreen.tsx` (validator open→heat→settle→verify flow), `src/tx.ts`
+(`sendGameTx`, `nextHeatLocations`), `src/hooks/useChainData.ts` + `src/model/raffle-rounds.ts`
+(event→view model — the analog of our `reduceTables`), `src/components/VerifyPanel.tsx` (receipt),
+`src/components/shell/{GameStage,BetTray,MetaPanel}.tsx` (screen shell), `src/config.ts`
+(`GameDeployment` shape: `coinFlip`/`raffle`/`random`/`chips`/`rpc`/`canonicalSubset`), and how
+`@msgboard/games-core` exports `raffleAbi`/`randomAbi` (add `coinFlipTablesAbi` the same way).
+Reuse the already-built `src/lib/tablesIndex.ts` (`reduceTables`) and `src/lib/tablesVerify.ts`
+(`verifyRound`).
+
+### Task 12 (revised): ABI export + config field + `useTableEvents` hook (plumbing)
+- Add `coinFlipTablesAbi` to `@msgboard/games-core` the same way `raffleAbi` is exported (from the
+  compiled artifact / abi module — read how it's generated).
+- Add `coinFlipTables?: viem.Hex` and `coinFlipTablesDeployBlock?: string` to `GameDeployment` in
+  `config.ts` (optional; the address is filled at deploy in Task 15).
+- Create `src/model/table-rounds.ts` (or a `useTableEvents(deployment)` hook) that `getLogs` the
+  CoinFlipTables events from `coinFlipTablesDeployBlock`→latest and watches for new ones, decodes
+  them into the `TableEvent[]` shape `reduceTables` consumes, modeled on `useChainData` /
+  `raffle-rounds`. Guard: if `deployment.coinFlipTables` is unset, return an empty list (no-op) so
+  the app builds/runs before the contract is deployed.
+- Gate: `npm run build` clean. Unit-test the event→`TableEvent` decode mapping if it's a pure
+  function; otherwise rely on build + the existing `reduceTables` tests.
+
+### Task 13 (revised): `TablePicker` component (browse + create + join)
+- `src/components/TablePicker.tsx`: consume the hook → `reduceTables` → sorted `TableView[]`; render
+  the list (operator, armed `hot`, edge ×, recent rounds, stake), a "Create a table" form
+  (`createTable` → `fundHot`/`fundCold`/`stakeForRank` via `sendGameTx`), and `onSelect(tableId)`.
+  Use the house form components (NO native selects — see `no-native-form-controls`). Reuse `fmtAmount`
+  from `Meta`. Disable join on a paused/unfunded table.
+- Gate: `npm run build` clean.
+
+### Task 14 (revised): `CoinFlipTablesScreen` (play + verify) + register the game
+- `src/components/CoinFlipTablesScreen.tsx`: a new validator-style screen using the shell
+  (`GameStage`/`BetTray`/`MetaPanel`) with `TablePicker` for selection. Given a selected `tableId`:
+  pick side + stake, call `open(tableId, side, stake, canonicalSubset, nextHeatLocations(...))` via
+  `sendGameTx`, arm/heat the validators and poll settlement (read the seed from `deployment.random`,
+  call `claim` if the push didn't land — the `RaffleScreen` claiming-phase pattern), show the
+  outcome, and render a verify receipt via `verifyRound` + the `VerifyPanel` pattern from the
+  `RoundOpened`/`RoundSettled` logs. Trust model = `validator`.
+- Register the game in `App.tsx`: import + add to the game/tab list + route it, and add its id to
+  `VALIDATOR_GAMES` so the `validator` `TrustBanner` shows. Choose a tab label (e.g. "🎲 Tables" or
+  "Coin-Flip Tables").
+- Gate: `npm run build` clean; the new tab renders and (against a deployed contract) can create/join/
+  play. Before deploy the screen shows an "not yet available on this chain" state when
+  `deployment.coinFlipTables` is unset.
+
+### Task 15 (revised): deploy + fill config (DEPLOY-GATED on user go-ahead)
+- Deploy `CoinFlipTables(random, chips)` on 943 (and 369 if desired) following the existing games
+  deploy path; allowlist the chain's canonical validator set (GameBase owner `addValidator`); record
+  the deploy block. Fill `coinFlipTables` + `coinFlipTablesDeployBlock` in `config.ts`.
+- `npm run build`; deploy games-web via the ansible runbook (`ansible/deploy-games-web.yml`, box
+  `:2222`) **only on the user's explicit go-ahead** — do NOT deploy automatically.
+
+---
+
+## (ORIGINAL, SUPERSEDED) Task 12: `TablePicker` — browse, create, join
 
 **Files:**
 - Create: `games/web/src/components/TablePicker.tsx`
