@@ -26,7 +26,7 @@ const PITS: { key: string; sign: string; blurb: string; ids: string[] }[] = [
   { key: 'cards', sign: 'The Card Room', blurb: 'seed sealed before the deal',
     ids: ['blackjack', 'baccarat', 'dragon-tiger', 'andar-bahar', 'three-card', 'pai-gow', 'video-poker', 'monte', 'hilo'] },
   { key: 'wheels', sign: 'Wheels & Dice', blurb: 'spun from the sealed seed',
-    ids: ['roulette', 'wheel', 'dice', 'dicex2', 'craps', 'keno', 'greed-dice', 'lottery', 'raffle'] },
+    ids: ['roulette', 'wheel', 'dice', 'dicex2', 'craps', 'keno', 'greed-dice', 'lottery', 'raffle', 'tables'] },
   { key: 'crash', sign: 'Crash Lane', blurb: 'cash out before the bust',
     ids: ['crash', 'limbo', 'plinko', 'pachinko', 'cascade'] },
   { key: 'climb', sign: 'The Climb', blurb: 'press your luck, step by step',
