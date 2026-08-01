@@ -139,10 +139,16 @@ to the ceiling they set.
 
 **Create a table (permissionless).**
 `createTable(uint16 maxMultiplierX100, uint256 maxStake, uint256 hotTarget) → tableId`. Anyone.
-Records `operator = msg.sender`, `open = true`, zero balances. `maxMultiplierX100` must be `≤ 200`
-(can't promise more than 2×, i.e. no negative house edge that would let an operator be drained by
-design) and `≥` a floor (e.g. 150) so tables can't advertise a predatory edge. Emits `TableCreated`.
-`setRisk(tableId, maxMultiplierX100, maxStake, hotTarget)` — operator only, adjust later.
+Records `operator = msg.sender`, `open = true`, zero balances. `maxMultiplierX100` must be within
+`[150, 200]` (≤ 2× so no negative house edge that would let an operator be drained by design; ≥ 1.5×
+so tables can't advertise a predatory edge). Emits `TableCreated`.
+
+**Operator can change any param at will.** `setParams(tableId, maxMultiplierX100, maxStake, hotTarget)`
+and `setOpen(tableId, bool)` — operator only. Every table parameter is freely editable anytime
+(`maxMultiplierX100` still clamped to `[150,200]`). Crucially, **param changes bind only NEW rounds**:
+a `Round` snapshots its `payout` (hence its multiplier) and escrows against it at `open`, so a live
+round is settled on the terms it was opened under — an operator lowering the multiplier or pausing
+the table can never retroactively cut a bet already in flight. Emits `ParamsSet`.
 
 **Fund / withdraw bankroll (two tiers).**
 - `fundHot(tableId, amount)` / `fundCold(tableId, amount)` — `chips.transferFrom(operator → contract)`
@@ -274,9 +280,12 @@ The frontend already lists games. Player-run tables add a second axis: for a giv
   2026-07-31): `maxMultiplierX100`, `maxStake`, `hotTarget`; only `hot` arms rounds, `cold` is a
   safe reserve promoted on demand.
 
-### Still open for review
+### Resolved with defaults (user: "go with the defaults", 2026-07-31)
 
-1. **`maxMultiplierX100` range** — proposed `[150, 200]` (0–25% edge). Confirm.
-2. **Subset default** — frontend defaults the validator subset to the deployment's canonical set with
-   an override (recommended, matches today's Coin Flip), vs. forcing an explicit choice.
-3. **`maxStake`** — per-table operator choice (proposed) vs. a global cap.
+1. **`maxMultiplierX100` range = `[150, 200]`** (0–25% edge), enforced on create and on every
+   `setParams`.
+2. **Validator subset = default-with-override** — the frontend defaults to the deployment's canonical
+   set; the player may substitute their own (matches today's Coin Flip).
+3. **`maxStake` = per-table operator choice**, editable at will (no global cap).
+4. **Every table param is operator-editable at will** (user directive 2026-07-31); changes apply to
+   future rounds only, never to a round already open.
