@@ -85,6 +85,62 @@ contract CoinFlipTables is GameBase {
         emit OpenSet(tableId, isOpen);
     }
 
+    error InsufficientHot();
+    error InsufficientCold();
+
+    event HotFunded(bytes32 indexed tableId, uint256 amount);
+    event ColdFunded(bytes32 indexed tableId, uint256 amount);
+    event HotWithdrawn(bytes32 indexed tableId, uint256 amount);
+    event ColdWithdrawn(bytes32 indexed tableId, uint256 amount);
+    event Promoted(bytes32 indexed tableId, uint256 amount);
+    event Demoted(bytes32 indexed tableId, uint256 amount);
+
+    function fundHot(bytes32 tableId, uint256 amount) external {
+        if (tables[tableId].operator == address(0)) revert NoTable();
+        tables[tableId].hot += amount;
+        chips.safeTransferFrom(msg.sender, address(this), amount);
+        emit HotFunded(tableId, amount);
+    }
+
+    function fundCold(bytes32 tableId, uint256 amount) external {
+        if (tables[tableId].operator == address(0)) revert NoTable();
+        tables[tableId].cold += amount;
+        chips.safeTransferFrom(msg.sender, address(this), amount);
+        emit ColdFunded(tableId, amount);
+    }
+
+    function withdrawHot(bytes32 tableId, uint256 amount) external onlyOperator(tableId) {
+        Table storage t = tables[tableId];
+        if (t.hot < amount) revert InsufficientHot();
+        t.hot -= amount;
+        chips.safeTransfer(msg.sender, amount);
+        emit HotWithdrawn(tableId, amount);
+    }
+
+    function withdrawCold(bytes32 tableId, uint256 amount) external onlyOperator(tableId) {
+        Table storage t = tables[tableId];
+        if (t.cold < amount) revert InsufficientCold();
+        t.cold -= amount;
+        chips.safeTransfer(msg.sender, amount);
+        emit ColdWithdrawn(tableId, amount);
+    }
+
+    function promote(bytes32 tableId, uint256 amount) external onlyOperator(tableId) {
+        Table storage t = tables[tableId];
+        if (t.cold < amount) revert InsufficientCold();
+        t.cold -= amount;
+        t.hot += amount;
+        emit Promoted(tableId, amount);
+    }
+
+    function demote(bytes32 tableId, uint256 amount) external onlyOperator(tableId) {
+        Table storage t = tables[tableId];
+        if (t.hot < amount) revert InsufficientHot();
+        t.hot -= amount;
+        t.cold += amount;
+        emit Demoted(tableId, amount);
+    }
+
     /// @notice Rounds/settlement land in a later task in this slice; Task 1 only scaffolds table
     /// storage and admin, so there is nothing to settle yet. Overriding is compile-mandatory —
     /// GameBase declares `_settle` with no body, which otherwise forces this contract abstract.

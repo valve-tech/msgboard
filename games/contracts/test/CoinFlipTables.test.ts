@@ -4,6 +4,20 @@ import * as helpers from '@nomicfoundation/hardhat-toolbox-viem/network-helpers'
 import * as expectations from './expectations'
 import * as testUtils from './utils'
 
+const mkTable = async (ctx: testUtils.Context, opts?: { mult?: number; maxStake?: bigint; hotTarget?: bigint; account?: any }) => {
+  const account = opts?.account ?? ctx.signers[0]!.account
+  await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.createTable(
+    [opts?.mult ?? 196, opts?.maxStake ?? viem.parseEther('10'), opts?.hotTarget ?? viem.parseEther('100')],
+    { account },
+  ))
+  const evs = await ctx.coinFlipTables.getEvents.TableCreated()
+  return evs[evs.length - 1]!.args.tableId as viem.Hex
+}
+
+const approveChips = async (ctx: testUtils.Context, account: any, amount: bigint) => {
+  await testUtils.confirmTx(ctx, ctx.ERC20.write.approve([ctx.coinFlipTables.address, amount], { account }))
+}
+
 describe('CoinFlipTables', () => {
   describe('createTable', () => {
     it('records the operator, params, open=true, and zero balances', async () => {
@@ -54,6 +68,51 @@ describe('CoinFlipTables', () => {
         ctx.coinFlipTables,
         ctx.coinFlipTables.write.setParams([tableId, 160, 0n, 0n], { account: other!.account }),
         'NotOperator',
+      )
+    })
+  })
+
+  describe('bankroll', () => {
+    it('funds hot and cold, and withdraws from each', async () => {
+      const ctx = await helpers.loadFixture(testUtils.deploy)
+      const op = ctx.signers[0]!.account
+      const tableId = await mkTable(ctx)
+      await approveChips(ctx, op, viem.parseEther('30'))
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.fundHot([tableId, viem.parseEther('10')], { account: op }))
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.fundCold([tableId, viem.parseEther('20')], { account: op }))
+      let t = await ctx.coinFlipTables.read.tables([tableId])
+      expect(t[1]).to.equal(viem.parseEther('10')) // hot
+      expect(t[2]).to.equal(viem.parseEther('20')) // cold
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.withdrawCold([tableId, viem.parseEther('20')], { account: op }))
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.withdrawHot([tableId, viem.parseEther('4')], { account: op }))
+      t = await ctx.coinFlipTables.read.tables([tableId])
+      expect(t[1]).to.equal(viem.parseEther('6'))
+      expect(t[2]).to.equal(0n)
+    })
+
+    it('promotes cold to hot and demotes hot to cold', async () => {
+      const ctx = await helpers.loadFixture(testUtils.deploy)
+      const op = ctx.signers[0]!.account
+      const tableId = await mkTable(ctx)
+      await approveChips(ctx, op, viem.parseEther('20'))
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.fundCold([tableId, viem.parseEther('20')], { account: op }))
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.promote([tableId, viem.parseEther('12')], { account: op }))
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.demote([tableId, viem.parseEther('2')], { account: op }))
+      const t = await ctx.coinFlipTables.read.tables([tableId])
+      expect(t[1]).to.equal(viem.parseEther('10')) // hot
+      expect(t[2]).to.equal(viem.parseEther('10')) // cold
+    })
+
+    it('reverts withdrawing more hot than available', async () => {
+      const ctx = await helpers.loadFixture(testUtils.deploy)
+      const op = ctx.signers[0]!.account
+      const tableId = await mkTable(ctx)
+      await approveChips(ctx, op, viem.parseEther('5'))
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.fundHot([tableId, viem.parseEther('5')], { account: op }))
+      await expectations.revertedWithCustomError(
+        ctx.coinFlipTables,
+        ctx.coinFlipTables.write.withdrawHot([tableId, viem.parseEther('6')], { account: op }),
+        'InsufficientHot',
       )
     })
   })
