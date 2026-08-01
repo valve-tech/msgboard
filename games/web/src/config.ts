@@ -61,6 +61,11 @@ export type GameDeployment = {
   flipBookX?: viem.Hex
   /** Scan FlipBookX events from here (its deploy block). */
   flipBookXDeployBlock?: string
+  /** CoinFlipTables contract address — permissionless player-run coin-flip tables (players bet
+   *  against an operator's Chips bankroll; validators settle on-chain). Unset until deployed. */
+  coinFlipTables?: viem.Hex
+  /** Scan CoinFlipTables events from here (its deploy block); unset until deployed. */
+  coinFlipTablesDeployBlock?: string
   /** The x402PLS wrapper (EIP-3009+7598 wrapped native PLS; valve's canonical deployment). */
   x402Pls?: viem.Hex
   /** The Provex-controlled EAS instance (EAS has no canonical PulseChain deployment; @provex/eas). */
