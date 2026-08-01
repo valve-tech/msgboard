@@ -141,6 +141,25 @@ contract CoinFlipTables is GameBase {
         emit Demoted(tableId, amount);
     }
 
+    error InsufficientStake();
+
+    event Staked(bytes32 indexed tableId, uint256 amount);
+    event Unstaked(bytes32 indexed tableId, uint256 amount);
+
+    function stakeForRank(bytes32 tableId, uint256 amount) external onlyOperator(tableId) {
+        tables[tableId].stake += amount;
+        chips.safeTransferFrom(msg.sender, address(this), amount);
+        emit Staked(tableId, amount);
+    }
+
+    function unstake(bytes32 tableId, uint256 amount) external onlyOperator(tableId) {
+        Table storage t = tables[tableId];
+        if (t.stake < amount) revert InsufficientStake();
+        t.stake -= amount;
+        chips.safeTransfer(msg.sender, amount);
+        emit Unstaked(tableId, amount);
+    }
+
     /// @notice Rounds/settlement land in a later task in this slice; Task 1 only scaffolds table
     /// storage and admin, so there is nothing to settle yet. Overriding is compile-mandatory —
     /// GameBase declares `_settle` with no body, which otherwise forces this contract abstract.
