@@ -261,8 +261,48 @@ contract CoinFlipTables is GameBase {
         emit RoundOpened(roundId, tableId, msg.sender, side, stake, payout, keccak256(abi.encode(validatorSubset)), key, block.number);
     }
 
-    /// @notice Rounds/settlement land in a later task in this slice; Task 1 only scaffolds table
-    /// storage and admin, so there is nothing to settle yet. Overriding is compile-mandatory —
-    /// GameBase declares `_settle` with no body, which otherwise forces this contract abstract.
-    function _settle(bytes32 instanceId, bytes32 seed) internal override {}
+    error AlreadyResolved();
+    error TooEarly();
+
+    event RoundSettled(
+        bytes32 indexed roundId,
+        bytes32 indexed tableId,
+        address indexed player,
+        bool won,
+        uint256 payout,
+        bytes32 seed,
+        uint256 settledAtBlock
+    );
+
+    /// @notice Single settlement path shared by onCast (push) and claim (pull). Guards status before
+    /// any transfer (checks-effects-interactions) so a double payout is impossible. No reentrancy
+    /// guard — it would block the claim retry after a swallowed onCast (same rationale as
+    /// CoinFlip._settle).
+    function _settle(bytes32 roundId, bytes32 seed) internal override {
+        Round storage r = rounds[roundId];
+        if (r.status != Status.Pending) revert AlreadyResolved();
+        r.status = Status.Settled;
+
+        Table storage t = tables[r.tableId];
+        t.escrowed -= r.payout; // release reservation either way
+
+        bool won = uint8(uint256(seed) & 1) == r.side;
+        if (won) {
+            // exposure already left hot at open; pay the player the full payout from escrow
+            chips.safeTransfer(r.player, r.payout);
+        } else {
+            // whole reservation (operator exposure + player's forfeited stake) returns to armed balance
+            t.hot += r.payout;
+        }
+        emit RoundSettled(roundId, r.tableId, r.player, won, r.payout, seed, block.number);
+    }
+
+    /// @notice Pull fallback when the onCast push did not complete though the seed is finalized.
+    function claim(bytes32 roundId) external {
+        Round storage r = rounds[roundId];
+        if (r.status != Status.Pending) revert AlreadyResolved();
+        bytes32 seed = IRandom(random).randomness(r.key).seed;
+        if (seed == bytes32(0)) revert TooEarly();
+        _settle(roundId, seed);
+    }
 }
