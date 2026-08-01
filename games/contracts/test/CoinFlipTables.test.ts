@@ -116,4 +116,31 @@ describe('CoinFlipTables', () => {
       )
     })
   })
+
+  describe('stake', () => {
+    it('stakes and unstakes, kept separate from bankroll', async () => {
+      const ctx = await helpers.loadFixture(testUtils.deploy)
+      const op = ctx.signers[0]!.account
+      const tableId = await mkTable(ctx)
+      await approveChips(ctx, op, viem.parseEther('10'))
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.stakeForRank([tableId, viem.parseEther('10')], { account: op }))
+      let t = await ctx.coinFlipTables.read.tables([tableId])
+      expect(t[4]).to.equal(viem.parseEther('10')) // stake
+      expect(t[1]).to.equal(0n) // hot untouched
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.unstake([tableId, viem.parseEther('4')], { account: op }))
+      t = await ctx.coinFlipTables.read.tables([tableId])
+      expect(t[4]).to.equal(viem.parseEther('6'))
+    })
+
+    it('reverts unstaking more than staked', async () => {
+      const ctx = await helpers.loadFixture(testUtils.deploy)
+      const op = ctx.signers[0]!.account
+      const tableId = await mkTable(ctx)
+      await expectations.revertedWithCustomError(
+        ctx.coinFlipTables,
+        ctx.coinFlipTables.write.unstake([tableId, 1n], { account: op }),
+        'InsufficientStake',
+      )
+    })
+  })
 })
