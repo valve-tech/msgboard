@@ -174,4 +174,47 @@ describe('CoinFlipTables', () => {
       )
     })
   })
+
+  describe('open', () => {
+    it('escrows the full payout (hot debited by payout-stake), pulls the player stake, heats validators', async () => {
+      const ctx = await helpers.loadFixture(testUtils.deploy)
+      const { subset, locations } = await testUtils.setUpValidators(ctx, ctx.coinFlipTables, 3)
+      const op = ctx.signers[0]!.account
+      const player = ctx.signers[1]!.account
+      const tableId = await mkTable(ctx, { mult: 196, maxStake: viem.parseEther('10'), hotTarget: viem.parseEther('100'), account: op })
+      await approveChips(ctx, op, viem.parseEther('50'))
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.fundHot([tableId, viem.parseEther('50')], { account: op }))
+      await approveChips(ctx, player, viem.parseEther('1'))
+      const stake = viem.parseEther('1')
+      const payout = (stake * 196n) / 100n // 1.96e18
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.open([tableId, 0, stake, subset, locations], { account: player }))
+      const opened = await ctx.coinFlipTables.getEvents.RoundOpened()
+      expect(opened.length).to.equal(1)
+      expect(opened[0]!.args.payout).to.equal(payout)
+      const t = await ctx.coinFlipTables.read.tables([tableId])
+      expect(t[1]).to.equal(viem.parseEther('50') - (payout - stake)) // hot debited by exposure only
+      expect(t[3]).to.equal(payout) // escrowed == full payout
+    })
+
+    it('reverts when stake exceeds maxStake, table closed, or hot cannot cover exposure', async () => {
+      const ctx = await helpers.loadFixture(testUtils.deploy)
+      const { subset, locations } = await testUtils.setUpValidators(ctx, ctx.coinFlipTables, 3)
+      const op = ctx.signers[0]!.account
+      const player = ctx.signers[1]!.account
+      const tableId = await mkTable(ctx, { mult: 196, maxStake: viem.parseEther('2'), account: op })
+      await approveChips(ctx, player, viem.parseEther('5'))
+      // no hot funded -> exposure uncovered
+      await expectations.revertedWithCustomError(
+        ctx.coinFlipTables,
+        ctx.coinFlipTables.write.open([tableId, 0, viem.parseEther('1'), subset, locations], { account: player }),
+        'InsufficientBankroll',
+      )
+      // stake above maxStake
+      await expectations.revertedWithCustomError(
+        ctx.coinFlipTables,
+        ctx.coinFlipTables.write.open([tableId, 0, viem.parseEther('3'), subset, locations], { account: player }),
+        'StakeTooHigh',
+      )
+    })
+  })
 })

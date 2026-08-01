@@ -24,6 +24,43 @@ contract CoinFlipTables is GameBase {
     uint16 internal constant MULT_MIN = 150;
     uint16 internal constant MULT_MAX = 200;
 
+    enum Status { None, Pending, Settled, Refunded }
+
+    struct Round {
+        bytes32 tableId;
+        address player;
+        uint8   side;
+        uint256 stake;
+        uint256 payout;
+        bytes32 key;
+        uint256 openedAtBlock;
+        Status  status;
+    }
+
+    uint8 internal constant HEADS = 0;
+    uint8 internal constant TAILS = 1;
+
+    mapping(bytes32 roundId => Round) public rounds;
+    uint256 internal _roundNonce;
+
+    error TableClosed();
+    error StakeTooHigh();
+    error ZeroStake();
+    error WrongSide();
+    error InsufficientBankroll();
+
+    event RoundOpened(
+        bytes32 indexed roundId,
+        bytes32 indexed tableId,
+        address indexed player,
+        uint8 side,
+        uint256 stake,
+        uint256 payout,
+        bytes32 subsetHash,
+        bytes32 key,
+        uint256 openedAtBlock
+    );
+
     struct Table {
         address operator;
         uint256 hot;              // armed — the only balance a new round can escrow against
@@ -176,6 +213,51 @@ contract CoinFlipTables is GameBase {
         t.stake -= amount;
         chips.safeTransfer(msg.sender, amount);
         emit Unstaked(tableId, amount);
+    }
+
+    /// @notice Player opens a round: picks a side and a stake, pulls the stake into the contract, and
+    /// escrows the FULL payout (stake + operator exposure) so settlement never has to re-derive it.
+    /// Only the operator's exposure (payout - stake) leaves `hot` — the player's own stake funds the
+    /// rest of the escrow. Heats the declared validator subset through GameBase's bound heat so a
+    /// later settlement can be driven by validator entropy.
+    function open(
+        bytes32 tableId,
+        uint8 side,
+        uint256 stake,
+        address[] calldata validatorSubset,
+        PreimageLocation.Info[] calldata validatorLocations
+    ) external returns (bytes32 roundId) {
+        Table storage t = tables[tableId];
+        if (t.operator == address(0)) revert NoTable();
+        if (!t.open) revert TableClosed();
+        if (side > TAILS) revert WrongSide();
+        if (stake == 0) revert ZeroStake();
+        if (stake > t.maxStake) revert StakeTooHigh();
+
+        uint256 payout = stake * t.maxMultiplierX100 / 100;
+        uint256 exposure = payout - stake; // operator's at-risk portion
+        if (t.hot < exposure) revert InsufficientBankroll();
+
+        // Pull the player's stake into the contract, then lock the full payout: exposure leaves hot,
+        // the player's own stake is now held as the remainder of the escrow.
+        chips.safeTransferFrom(msg.sender, address(this), stake);
+        t.hot -= exposure;
+        t.escrowed += payout;
+
+        bytes32 key = _heatBound(validatorSubset, validatorLocations);
+        roundId = keccak256(abi.encode(address(this), ++_roundNonce, tableId, msg.sender));
+        rounds[roundId] = Round({
+            tableId: tableId,
+            player: msg.sender,
+            side: side,
+            stake: stake,
+            payout: payout,
+            key: key,
+            openedAtBlock: block.number,
+            status: Status.Pending
+        });
+        instanceByKey[key] = roundId;
+        emit RoundOpened(roundId, tableId, msg.sender, side, stake, payout, keccak256(abi.encode(validatorSubset)), key, block.number);
     }
 
     /// @notice Rounds/settlement land in a later task in this slice; Task 1 only scaffolds table
