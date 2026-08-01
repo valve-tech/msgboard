@@ -382,4 +382,35 @@ describe('CoinFlipTables', () => {
       }
     })
   })
+
+  describe('multi-table isolation & invariant', () => {
+    it('keeps two tables\' balances independent and preserves hot+cold+escrowed+stake == contract chips', async () => {
+      const ctx = await helpers.loadFixture(testUtils.deploy)
+      const { subset, locations, secrets } = await testUtils.setUpValidators(ctx, ctx.coinFlipTables, 3)
+      const opA = ctx.signers[0]!.account
+      const opB = ctx.signers[2]!.account
+      const player = ctx.signers[1]!.account
+      const a = await mkTable(ctx, { mult: 196, maxStake: viem.parseEther('10'), account: opA })
+      const b = await mkTable(ctx, { mult: 150, maxStake: viem.parseEther('10'), account: opB })
+      for (const [op, id] of [[opA, a], [opB, b]] as const) {
+        await approveChips(ctx, op, viem.parseEther('30'))
+        await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.fundHot([id, viem.parseEther('20')], { account: op }))
+        await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.fundCold([id, viem.parseEther('10')], { account: op }))
+      }
+      await approveChips(ctx, player, viem.parseEther('1'))
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.open([a, 0, viem.parseEther('1'), subset, locations], { account: player }))
+      const key = (await ctx.coinFlipTables.getEvents.RoundOpened()).slice(-1)[0]!.args.key as viem.Hex
+      await testUtils.confirmTx(ctx, ctx.random.write.cast([key, locations, secrets]))
+      // table B never moved
+      const tb = await ctx.coinFlipTables.read.tables([b])
+      expect(tb[1]).to.equal(viem.parseEther('20')) // hot
+      expect(tb[2]).to.equal(viem.parseEther('10')) // cold
+      expect(tb[3]).to.equal(0n) // escrowed
+      // global invariant: sum of both tables' pools == contract chip balance
+      const ta = await ctx.coinFlipTables.read.tables([a])
+      const sum = ta[1] + ta[2] + ta[3] + ta[4] + tb[1] + tb[2] + tb[3] + tb[4]
+      const bal = await ctx.ERC20.read.balanceOf([ctx.coinFlipTables.address])
+      expect(sum).to.equal(bal)
+    })
+  })
 })
