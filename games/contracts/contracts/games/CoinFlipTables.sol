@@ -141,6 +141,24 @@ contract CoinFlipTables is GameBase {
         emit Demoted(tableId, amount);
     }
 
+    error NothingToRefill();
+
+    event Refilled(bytes32 indexed tableId, uint256 amount);
+
+    /// @notice Permissionless top-up of hot from cold, capped at hotTarget. Anyone may call this —
+    /// it moves no tokens (pure internal cold->hot accounting) so there is nothing to gate.
+    function refillHot(bytes32 tableId) external {
+        Table storage t = tables[tableId];
+        if (t.operator == address(0)) revert NoTable();
+        if (t.hot >= t.hotTarget) revert NothingToRefill();
+        uint256 need = t.hotTarget - t.hot;
+        uint256 move = need < t.cold ? need : t.cold;
+        if (move == 0) revert NothingToRefill();
+        t.cold -= move;
+        t.hot += move;
+        emit Refilled(tableId, move);
+    }
+
     error InsufficientStake();
 
     event Staked(bytes32 indexed tableId, uint256 amount);

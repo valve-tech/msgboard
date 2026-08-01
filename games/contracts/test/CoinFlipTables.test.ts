@@ -143,4 +143,35 @@ describe('CoinFlipTables', () => {
       )
     })
   })
+
+  describe('refillHot', () => {
+    it('tops hot up to hotTarget from cold, callable by anyone', async () => {
+      const ctx = await helpers.loadFixture(testUtils.deploy)
+      const op = ctx.signers[0]!.account
+      const stranger = ctx.signers[3]!.account
+      const tableId = await mkTable(ctx, { hotTarget: viem.parseEther('10') })
+      await approveChips(ctx, op, viem.parseEther('30'))
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.fundHot([tableId, viem.parseEther('3')], { account: op }))
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.fundCold([tableId, viem.parseEther('20')], { account: op }))
+      // stranger triggers refill; hot goes 3 -> 10, cold 20 -> 13
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.refillHot([tableId], { account: stranger }))
+      const t = await ctx.coinFlipTables.read.tables([tableId])
+      expect(t[1]).to.equal(viem.parseEther('10'))
+      expect(t[2]).to.equal(viem.parseEther('13'))
+    })
+
+    it('caps at cold when cold < needed, and reverts when hot already at target', async () => {
+      const ctx = await helpers.loadFixture(testUtils.deploy)
+      const op = ctx.signers[0]!.account
+      const tableId = await mkTable(ctx, { hotTarget: viem.parseEther('10') })
+      await approveChips(ctx, op, viem.parseEther('12'))
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.fundHot([tableId, viem.parseEther('10')], { account: op }))
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.fundCold([tableId, viem.parseEther('2')], { account: op }))
+      await expectations.revertedWithCustomError(
+        ctx.coinFlipTables,
+        ctx.coinFlipTables.write.refillHot([tableId], { account: op }),
+        'NothingToRefill',
+      )
+    })
+  })
 })
