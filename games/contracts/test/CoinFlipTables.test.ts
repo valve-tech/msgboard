@@ -243,4 +243,51 @@ describe('CoinFlipTables', () => {
       )
     })
   })
+
+  describe('settle', () => {
+    const fundAndOpen = async (ctx: testUtils.Context, side: number) => {
+      const { subset, locations, secrets } = await testUtils.setUpValidators(ctx, ctx.coinFlipTables, 3)
+      const op = ctx.signers[0]!.account
+      const player = ctx.signers[1]!.account
+      const tableId = await mkTable(ctx, { mult: 196, maxStake: viem.parseEther('10'), account: op })
+      await approveChips(ctx, op, viem.parseEther('50'))
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.fundHot([tableId, viem.parseEther('50')], { account: op }))
+      await approveChips(ctx, player, viem.parseEther('1'))
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.open([tableId, side, viem.parseEther('1'), subset, locations], { account: player }))
+      const opened = (await ctx.coinFlipTables.getEvents.RoundOpened())
+      const round = opened[opened.length - 1]!.args
+      return { tableId, player, op, key: round.key as viem.Hex, roundId: round.roundId as viem.Hex, subset, locations, secrets }
+    }
+
+    it('pays the player on a parity win, debiting only the exposure from the table', async () => {
+      const ctx = await helpers.loadFixture(testUtils.deploy)
+      const { key, player, tableId, locations, secrets } = await fundAndOpen(ctx, 0)
+      const before = await ctx.ERC20.read.balanceOf([player.address])
+      await testUtils.confirmTx(ctx, ctx.random.write.cast([key, locations, secrets]))
+      const seed = (await ctx.random.read.randomness([key])).seed as viem.Hex
+      const settled = (await ctx.coinFlipTables.getEvents.RoundSettled())[0]!.args
+      const playerWon = (BigInt(seed) & 1n) === 0n // side was HEADS(0)
+      expect(settled.won).to.equal(playerWon)
+      const after = await ctx.ERC20.read.balanceOf([player.address])
+      if (playerWon) expect(after - before).to.equal(viem.parseEther('1.96'))
+      else expect(after).to.equal(before)
+      // escrow always released
+      const t = await ctx.coinFlipTables.read.tables([tableId])
+      expect(t[3]).to.equal(0n) // escrowed
+      // on a loss the whole payout (incl. the player's forfeited stake) is back in hot
+      if (!playerWon) expect(t[1]).to.equal(viem.parseEther('50') + viem.parseEther('1'))
+      else expect(t[1]).to.equal(viem.parseEther('50') - viem.parseEther('0.96'))
+    })
+
+    it('claim() pays after a swallowed onCast, and double-settle reverts', async () => {
+      const ctx = await helpers.loadFixture(testUtils.deploy)
+      const { key, roundId, locations, secrets } = await fundAndOpen(ctx, 1)
+      await testUtils.confirmTx(ctx, ctx.random.write.cast([key, locations, secrets]))
+      await expectations.revertedWithCustomError(
+        ctx.coinFlipTables,
+        ctx.coinFlipTables.write.claim([roundId]),
+        'AlreadyResolved',
+      )
+    })
+  })
 })
