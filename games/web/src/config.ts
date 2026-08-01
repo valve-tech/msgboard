@@ -124,6 +124,9 @@ export const deployments: GameDeployment[] = [
     gamesIndexer: 'https://games.msgboard.xyz/games-indexer/graphql',
     // Chips ERC-20 token — fresh valve-deployer-owned token (2026-07-24 valve migration off gibs).
     chips: '0x81f130c7d9ff020f46f3b01918424173f8d5ca64',
+    // CoinFlipTables — permissionless player-run coin-flip tables (validator-settled); valve_deployer-owned, deployed 2026-08-01.
+    coinFlipTables: '0xe10be94d21b0ddcefadf5ed997b892b9bf4a15f0',
+    coinFlipTablesDeployBlock: '25023553',
     // HouseChannel — close-authorization settle + walk-away forfeiture; valve_deployer-owned, 943 @ block 24957355
     houseChannel: '0xd0fe186fd3ad3d5766d2fd8af35215ab5d3dfc94',
     // ZK skill games — full real-dictionary set (Sudoku leaderboard + Wordle over Chips escrow).
