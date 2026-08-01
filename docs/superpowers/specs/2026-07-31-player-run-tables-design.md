@@ -74,19 +74,22 @@ a table's pooled Chips instead of a matched heads/tails player.
 > cross-contract Chips approvals and call surface for zero MVP benefit. The vault accounting lives as
 > a clearly-bounded section of `CoinFlipTables` (its own structs + funcs, no game logic mixed in), so
 > extracting it into a standalone `TableVault` in Slice 2 — when a second game needs it — is a
-> mechanical lift, not a rewrite. Flagged here for the reviewer to veto if they'd rather build the
-> abstraction now.
+> mechanical lift, not a rewrite. **Approved by the user 2026-07-31 — one contract for the MVP.**
 
 ### Data model
 
 ```solidity
 struct Table {
     address operator;        // who funds and profits; set once at creation
-    uint256 bankroll;        // free (withdrawable) Chips; the operator's un-reserved balance
+    // --- hot/cold bankroll (see "Risk constraints & hot/cold bankroll") ---
+    uint256 hot;             // ARMED free Chips — the ONLY balance a new round can escrow against
+    uint256 cold;            // reserve; never backs a round until promoted to hot; always withdrawable
     uint256 escrowed;        // Chips locked by live (unsettled) rounds; the full payout of each
     uint256 stake;           // Chips the operator locked purely as a ranking/skin-in-game signal
+    // --- risk constraints the table defines ---
     uint16  maxMultiplierX100; // payout multiple ×100 (e.g. 196 = 1.96×, a 2% house edge)
-    uint256 maxStake;        // per-round cap the operator will cover (bounds `escrowed` growth)
+    uint256 maxStake;        // per-round stake cap the operator will cover
+    uint256 hotTarget;       // desired armed level; refillHot tops `hot` up to this from `cold`
     bool    open;            // operator can pause new rounds without withdrawing
 }
 
@@ -109,24 +112,52 @@ uint256 internal _roundNonce;
 
 `tableId = keccak256(abi.encode(address(this), operator, ++_tableNonce))`.
 
+### Risk constraints & hot/cold bankroll
+
+A table **defines its own risk envelope**, and its bankroll is split into two tiers so a bad run
+can't drain the operator's whole reserve automatically:
+
+- **`hot`** — the *armed* balance. It is the **only** balance a new round can escrow against. Its
+  size is the operator's cap on automated exposure: no matter how many rounds open, the contract can
+  never arm more than `hot` currently holds, so the most an unattended losing streak can cost is
+  `hot` (+ whatever is already `escrowed`). `hot` never exceeds what the operator chose to arm.
+- **`cold`** — the *reserve*. It never backs a round directly and is never at risk; it is always
+  fully withdrawable. To put it to work the operator (or a permissionless top-up, below) must
+  **promote** it into `hot`.
+- **Risk constraints** the operator sets at creation and can tighten later: `maxMultiplierX100` (the
+  edge), `maxStake` (biggest bet accepted), and `hotTarget` (the level `refillHot` arms `hot` up
+  to). `hot` itself is the aggregate-exposure cap; `maxStake` bounds any single round.
+
+Refill: **`refillHot(tableId)`** moves `min(cold, hotTarget − hot)` from `cold` to `hot`. Callable by
+the operator anytime; also **permissionless when `hot` has fallen below `hotTarget`**, so a keeper or
+the frontend can keep a live table armed without the operator babysitting it — but only ever up to
+the operator's own `hotTarget`, never beyond, and only from that operator's own `cold`. This is the
+"hot/cold resources to pull from": the operator parks the bulk in cold and the table re-arms itself
+to the ceiling they set.
+
 ### Flows
 
 **Create a table (permissionless).**
-`createTable(uint16 maxMultiplierX100, uint256 maxStake) → tableId`. Anyone. Records
-`operator = msg.sender`, `open = true`, zero balances. `maxMultiplierX100` must be `≤ 200` (can't
-promise more than 2×, i.e. no negative house edge that would let an operator be drained by design)
-and `≥` a floor (e.g. 150) so tables can't advertise a predatory edge. Emits `TableCreated`.
+`createTable(uint16 maxMultiplierX100, uint256 maxStake, uint256 hotTarget) → tableId`. Anyone.
+Records `operator = msg.sender`, `open = true`, zero balances. `maxMultiplierX100` must be `≤ 200`
+(can't promise more than 2×, i.e. no negative house edge that would let an operator be drained by
+design) and `≥` a floor (e.g. 150) so tables can't advertise a predatory edge. Emits `TableCreated`.
+`setRisk(tableId, maxMultiplierX100, maxStake, hotTarget)` — operator only, adjust later.
 
-**Fund / withdraw bankroll.**
-`fundBankroll(tableId, amount)` — `chips.transferFrom(operator → contract)`, `bankroll += amount`.
-`withdrawBankroll(tableId, amount)` — operator only; revert if `amount > bankroll`. Because `bankroll`
-holds only the *free* balance and every live round's payout has already been moved into `escrowed`
-(see `open`), this single check is the load-bearing invariant: **escrowed Chips are never
-withdrawable**, so a live round's payout can't be pulled out from under the player.
+**Fund / withdraw bankroll (two tiers).**
+- `fundHot(tableId, amount)` / `fundCold(tableId, amount)` — `chips.transferFrom(operator → contract)`
+  into the chosen tier.
+- `promote(tableId, amount)` (cold→hot) / `demote(tableId, amount)` (hot→cold) — operator moves
+  funds between tiers without an external transfer. `demote` banks profit out of harm's way.
+- `withdrawHot(tableId, amount)` — operator only; revert if `amount > hot`. Because `hot` holds only
+  the *free armed* balance and every live round's payout has already been moved into `escrowed` (see
+  `open`), this one check is the load-bearing invariant: **escrowed Chips are never withdrawable**.
+- `withdrawCold(tableId, amount)` — operator only; revert if `amount > cold`. Cold is never at risk,
+  so it is always fully withdrawable.
 
 **Stake for ranking.**
 `stakeForRank(tableId, amount)` / `unstake(tableId, amount)` — operator only. `stake` is separate
-from `bankroll`, freely withdrawable, and never touched by settlement. It exists solely as a
+from the bankroll tiers, freely withdrawable, and never touched by settlement. It exists solely as a
 sorting/skin-in-the-game signal (see "Ranking"). **No slashing** in the MVP — under full on-chain
 settle there is nothing to slash for; the escrow already guarantees payout and validators already
 guarantee fairness. (Slashing only becomes meaningful if a future slice adds off-chain co-signed
@@ -136,11 +167,12 @@ settlement, where an operator *could* withhold a signature. Noted, out of scope.
 `open(tableId, uint8 side, uint256 stake, address[] validatorSubset, PreimageLocation.Info[] locations) → roundId`.
 - Validate: table `open`, `stake ≤ maxStake`, `side ≤ TAILS`, subset valid.
 - `payout = stake * maxMultiplierX100 / 100`. The operator only needs to cover winnings beyond the
-  player's own returned stake, so require the free bankroll covers that exposure:
-  `bankroll ≥ payout - stake`. Pull the player's stake in
+  player's own returned stake, so require the **armed** balance covers that exposure:
+  `hot ≥ payout - stake` (revert otherwise — never a partial arm; the player can `refillHot` and
+  retry, or pick a better-funded table). Pull the player's stake in
   (`chips.transferFrom(player → contract, stake)`), then lock the **full** payout:
-  `bankroll -= (payout - stake); escrowed += payout`. The `payout - stake` came from the operator's
-  bankroll; the remaining `stake` is the player's own money now held in escrow. So `escrowed` always
+  `hot -= (payout - stake); escrowed += payout`. The `payout - stake` came from the operator's armed
+  balance; the remaining `stake` is the player's own money now held in escrow. So `escrowed` always
   equals the exact amount owed to the player if they win, fully funded.
 - Heat the validator subset (`_heatBound`, exactly as `CoinFlip._pairAndHeat`), store `key`, set
   `status = Pending`. Emit `RoundOpened`.
@@ -150,20 +182,22 @@ Parity of the validator seed decides, identical to `CoinFlip._settle`:
 - `_settle(roundId, seed)` (called by `onCast` push or `claim` pull): guard `Pending`; set
   `Settled`; `won = (uint8(seed & 1) == round.side)`. Either branch first releases the reservation
   (`escrowed -= payout`), then:
-  - **Win:** `chips.transfer(player, payout)`. The payout leaves the contract; bankroll is untouched
-    here (the operator's `payout - stake` exposure was already debited at `open`). Net bankroll over
-    the round: `-(payout - stake)`.
-  - **Loss:** `bankroll += payout` (the whole reservation — the operator's exposure *plus* the
-    player's now-forfeited stake — becomes free bankroll; nothing leaves the contract). Net bankroll
-    over the round: `+stake`.
+  - **Win:** `chips.transfer(player, payout)`. The payout leaves the contract; `hot` is untouched
+    here (the operator's `payout - stake` exposure was already debited at `open`). Net `hot` over the
+    round: `-(payout - stake)`.
+  - **Loss:** `hot += payout` (the whole reservation — the operator's exposure *plus* the player's
+    now-forfeited stake — returns to the armed balance; nothing leaves the contract). Net `hot` over
+    the round: `+stake`. The operator can `demote` accumulated winnings to cold at will.
 - `claim(roundId)` pull-fallback and `refundStale(roundId)` (seed genuinely missing + chopped or
   liveness timeout) are copied from `CoinFlip` almost verbatim; refund does
-  `escrowed -= payout; chips.transfer(player, stake); bankroll += (payout - stake)` — the player gets
-  their stake back and the operator's exposure returns to free bankroll.
+  `escrowed -= payout; chips.transfer(player, stake); hot += (payout - stake)` — the player gets
+  their stake back and the operator's exposure returns to the armed balance.
 
 Accounting invariant (asserted in tests): for every table,
-`contract Chips attributable to table == bankroll + escrowed + stake`, and
-`escrowed == Σ payout over Pending rounds`.
+`contract Chips attributable to table == hot + cold + escrowed + stake`, and
+`escrowed == Σ payout over Pending rounds`. `cold` moves only via explicit fund/withdraw/promote/
+demote/refill — **settlement never touches `cold`**, which is what makes the reserve safe by
+construction.
 
 ### Randomness — no operator in the loop
 
@@ -178,13 +212,16 @@ The frontend already lists games. Player-run tables add a second axis: for a giv
 **live tables** sorted by a composite of **recent activity** (rounds settled in a window) and
 **operator stake**. Concretely:
 
-- The indexer subscribes to `TableCreated` / `RoundOpened` / `Settled` / bankroll + stake events and
-  maintains, per table: `stake`, `bankroll - escrowed` (free liquidity), rounds in the last N blocks,
-  and last-active block. No consensus needed — it's a read model over public events.
-- Sort key (MVP): `(open AND freeLiquidity ≥ someMin)` desc, then `activity` desc, then `stake` desc.
-  Tables that can't cover a meaningful bet or are paused sink. This is the user's
-  "34 games / x tables" — the catalog shows 34 game *types*; each expands to the live *tables*
-  running it, best-funded and busiest first.
+- The indexer subscribes to `TableCreated` / `RoundOpened` / `Settled` / fund/withdraw/promote/stake
+  events and maintains, per table: `stake`, `hot` (armed liquidity — the bet-backing capacity a
+  player actually cares about), `cold` (reserve depth), rounds in the last N blocks, and last-active
+  block. No consensus needed — it's a read model over public events.
+- Sort key (MVP): `(open AND hot ≥ someMin)` desc, then `activity` desc, then `stake` desc. A table
+  whose `hot` can't cover a meaningful bet sinks even if its `cold` is deep — armed liquidity is what
+  a player can bet against right now (the frontend can surface "deep reserve, tap to arm" via the
+  permissionless `refillHot`). Paused tables sink too. This is the user's "34 games / x tables" —
+  the catalog shows 34 game *types*; each expands to the live *tables* running it, best-armed and
+  busiest first.
 - The games-web UI gets: a table list under Coin Flip, a "Create a table" flow (create + fund +
   stake in one guided step), and "join this table" wiring `open()` to the chosen `tableId`. The
   existing Coin Flip felt surface is reused for play; only the table-selection chrome is new.
@@ -211,24 +248,35 @@ The frontend already lists games. Player-run tables add a second axis: for a giv
 ## Testing
 
 - **Accounting invariants** (Foundry/Hardhat, matching the repo's existing game tests): after any
-  sequence of create/fund/open/win/loss/refund/withdraw/stake, assert
-  `bankroll + escrowed + stake == tracked Chips` and `escrowed == Σ Pending payout`.
-- **Escrow safety:** `withdrawBankroll` can never reduce `bankroll` below `escrowed`; a Pending
-  round always has its full payout covered.
+  sequence of create/fund(hot|cold)/promote/demote/open/win/loss/refund/withdraw/stake/refill, assert
+  `hot + cold + escrowed + stake == tracked Chips` and `escrowed == Σ Pending payout`.
+- **Cold is never at risk:** no settlement/open/refund path ever reads or writes `cold`; a losing
+  streak drains at most `hot + escrowed`, and `cold` is always fully withdrawable.
+- **Escrow safety:** `withdrawHot` can never leave a Pending round's payout uncovered (payout already
+  moved into `escrowed`, so `hot` only ever holds free funds).
+- **Refill bounds:** `refillHot` moves at most `min(cold, hotTarget − hot)`, only from that table's
+  own `cold`, never above `hotTarget`; permissionless caller can't exceed the operator's ceiling.
 - **No double-settle / double-refund:** status guard before every transfer (checks-effects-
   interactions, no reentrancy guard — same reasoning as `CoinFlip._settle`, so the `claim` retry
   after a swallowed `onCast` still works).
 - **Fairness parity:** seed parity → winner matches `CoinFlip` semantics; ported refundStale gates
   (seed missing AND chopped/stale) hold.
 - **Multi-table isolation:** rounds and balances on table A never move table B's Chips.
-- **Bounds:** `maxMultiplierX100` clamped; `stake ≤ maxStake`; insufficient free bankroll reverts
-  `open` (never a partial escrow).
+- **Bounds:** `maxMultiplierX100` clamped to `[150,200]`; `stake ≤ maxStake`; `hot < payout − stake`
+  reverts `open` (never a partial arm).
 
-## Open decisions for review
+## Decisions
 
-1. **One contract vs. TableVault+Factory now** — spec recommends one contract for the MVP; reviewer
-   may prefer building the abstraction immediately.
-2. **`maxMultiplierX100` floor** — proposed `[150, 200]` (0–25% edge). Confirm the range.
-3. **Subset default** — frontend defaults the validator subset to the deployment's canonical set, or
-   force the player to choose? (Recommend default-with-override, matching today's Coin Flip.)
-4. **`maxStake` — per-table operator choice (proposed) vs. a global cap.**
+- **RESOLVED — one contract.** MVP is a single `CoinFlipTables` (user approved 2026-07-31);
+  `TableVault`/`TableFactory` extraction deferred to Slice 2.
+- **RESOLVED — Chips for both bankroll and stake; Coin Flip is the MVP game** (user approved).
+- **RESOLVED — tables define their own risk envelope + two-tier hot/cold bankroll** (user directive
+  2026-07-31): `maxMultiplierX100`, `maxStake`, `hotTarget`; only `hot` arms rounds, `cold` is a
+  safe reserve promoted on demand.
+
+### Still open for review
+
+1. **`maxMultiplierX100` range** — proposed `[150, 200]` (0–25% edge). Confirm.
+2. **Subset default** — frontend defaults the validator subset to the deployment's canonical set with
+   an override (recommended, matches today's Coin Flip), vs. forcing an explicit choice.
+3. **`maxStake`** — per-table operator choice (proposed) vs. a global cap.
