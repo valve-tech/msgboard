@@ -1863,3 +1863,14 @@
 .tp-op { min-width: 108px; }
 .tp-hot { font-weight: 600; }
 .tp-reason { margin-left: auto; font-size: 11px; }
+
+/* ============================== player tables (CoinFlipTablesScreen.tsx) ============================== */
+/* The play/verify surface fills the stage the way BookBoard does (absolute-inset, scrolls its own body)
+   so the TablePicker + round slips read as a stacked ledger, not a centred single card. All scoped
+   under .cft-* — no shared rules touched. */
+.cft-surface {
+  position: absolute; inset: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 10px; padding: 12px;
+  background: radial-gradient(120% 90% at 50% -8%, #14251c 0%, #0a150f 52%, #060f0a 100%);
+}
+.cft-rounds { display: flex; flex-direction: column; gap: 8px; }
