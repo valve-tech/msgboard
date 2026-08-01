@@ -290,4 +290,28 @@ describe('CoinFlipTables', () => {
       )
     })
   })
+
+  describe('refundStale', () => {
+    it('refunds the player and returns exposure to hot when the seed never finalizes', async () => {
+      const ctx = await helpers.loadFixture(testUtils.deploy)
+      const { subset, locations } = await testUtils.setUpValidators(ctx, ctx.coinFlipTables, 3)
+      const op = ctx.signers[0]!.account
+      const player = ctx.signers[1]!.account
+      const tableId = await mkTable(ctx, { mult: 196, maxStake: viem.parseEther('10'), account: op })
+      await approveChips(ctx, op, viem.parseEther('50'))
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.fundHot([tableId, viem.parseEther('50')], { account: op }))
+      await approveChips(ctx, player, viem.parseEther('1'))
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.open([tableId, 0, viem.parseEther('1'), subset, locations], { account: player }))
+      const round = (await ctx.coinFlipTables.getEvents.RoundOpened()).slice(-1)[0]!.args
+      const before = await ctx.ERC20.read.balanceOf([player.address])
+      // mine past STALE_BLOCKS (200) without any cast
+      await helpers.mine(201)
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.refundStale([round.roundId as viem.Hex], { account: player }))
+      const after = await ctx.ERC20.read.balanceOf([player.address])
+      expect(after - before).to.equal(viem.parseEther('1'))
+      const t = await ctx.coinFlipTables.read.tables([tableId])
+      expect(t[1]).to.equal(viem.parseEther('50')) // hot fully restored
+      expect(t[3]).to.equal(0n) // escrow released
+    })
+  })
 })

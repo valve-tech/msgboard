@@ -305,4 +305,21 @@ contract CoinFlipTables is GameBase {
         if (seed == bytes32(0)) revert TooEarly();
         _settle(roundId, seed);
     }
+
+    /// @notice Refund a round whose seed never finalized in time. Mirrors CoinFlip.refundStale: a seed
+    /// that HAS finalized is value-decided and can only be settled to the parity result, never unwound.
+    function refundStale(bytes32 roundId) external {
+        Round storage r = rounds[roundId];
+        if (r.status != Status.Pending) revert AlreadyResolved();
+        bool seedMissing = IRandom(random).randomness(r.key).seed == bytes32(0);
+        if (!seedMissing) revert TooEarly();
+        if (!choppedInstance[roundId] && !_isStale(r.openedAtBlock)) revert TooEarly();
+        r.status = Status.Refunded;
+
+        Table storage t = tables[r.tableId];
+        uint256 exposure = r.payout - r.stake;
+        t.escrowed -= r.payout;
+        t.hot += exposure;                     // operator's at-risk portion returns to armed balance
+        chips.safeTransfer(r.player, r.stake); // player reclaims their own stake
+    }
 }
