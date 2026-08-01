@@ -70,6 +70,19 @@ const config: HardhatUserConfig = {
           },
         },
       },
+      // CoinFlipTables deploys to 943 like the other games contracts — pin Shanghai so the emitted
+      // bytecode has no MCOPY (943 is pre-Cancun and reverts on it as "invalid opcode: MCOPY").
+      'contracts/games/CoinFlipTables.sol': {
+        version: '0.8.25',
+        settings: {
+          viaIR: true,
+          evmVersion: 'shanghai',
+          optimizer: {
+            enabled: true,
+            runs: 1_000,
+          },
+        },
+      },
       'contracts/GameBase.sol': {
         version: '0.8.25',
         settings: {
