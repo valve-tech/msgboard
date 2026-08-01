@@ -212,6 +212,43 @@ produced by validator preimages; the operator contributes nothing and signs noth
 picks the subset (or the frontend defaults it to the deployment's canonical set), so "don't trust
 this set? contribute your own randomness" holds unchanged.
 
+### Historical verifiability — validate past rounds from immutable chain data
+
+The platform's whole pitch is "we only provide the validation." That validation has to hold *after*
+the fact and *without* trusting the platform's server or the contract's current getters (a getter
+returns present state; an audit needs what was true at settlement). So the round record must be
+reconstructable purely from **immutable on-chain history — event logs anchored to the block they
+were mined in, plus the finalized seed the validators produced.**
+
+Concretely:
+
+- **Open and settle emit the full round, not just a pointer.** `RoundOpened` carries
+  `roundId, tableId, player, side, stake, payout, subsetHash, key, openedAtBlock`; `RoundSettled`
+  carries `roundId, seed, won, payout, settledAtBlock`. Everything needed to recompute the outcome is
+  in the logs — no reliance on mutable storage that a later transaction could overwrite.
+- **The seed is chain-anchored and permanent.** The winning parity is `seed & 1`, where `seed` is the
+  validator-produced value in `IRandom` for the round's `key`. `IRandom` retains finalized seeds
+  (settled Coin Flips already read them back), and the seed is echoed in `RoundSettled`, so a verifier
+  can confirm it two independent ways: from the settle log and from `IRandom.randomness(key).seed`.
+- **A standalone verifier replays any past round from logs alone.** Given a `roundId`, read its
+  `RoundOpened` + `RoundSettled` logs (by block range / topic filter), recompute
+  `winner = (seed & 1 == side) ? player : house`, recompute `payout = stake * maxMultiplierX100/100`
+  using the multiplier snapshotted in the open log, and assert the settle log agrees. This is the
+  "replayed by your browser" receipt, now anchored to block-mined logs rather than a live server —
+  and any third party can run it against an archive/RPC node without the platform's cooperation.
+- **Block values anchor liveness, too.** `openedAtBlock` (and `GameBase`'s `STALE_BLOCKS` /
+  `block.number` timeout) let a verifier confirm a `refundStale` was legitimate: the round's seed was
+  genuinely absent for the required number of blocks after `openedAtBlock`.
+- **Tamper-evidence of the sequence (design note, MVP-optional):** because each round's identity is
+  `roundId = keccak(contract, tableId, ++roundNonce)` and every open/settle is logged, the settled
+  history of a table is an append-only, gap-detectable log — a missing nonce is visible. A running
+  per-table settlement hash (each settle folds `keccak(prev, roundId, seed, playerDelta)`) would make
+  the sequence a single verifiable commitment; **noted as optional for the MVP**, added in the
+  reputation slice if a stronger cross-round guarantee is wanted.
+
+This section imposes one hard rule on the implementation: **emit complete round data in events**, and
+ship an off-chain verifier (in the games client) that reconstructs outcomes from logs, not getters.
+
 ### Ranking / discovery (frontend + indexer)
 
 The frontend already lists games. Player-run tables add a second axis: for a given game, list the
