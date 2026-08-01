@@ -233,6 +233,7 @@ contract CoinFlipTables is GameBase {
         if (side > TAILS) revert WrongSide();
         if (stake == 0) revert ZeroStake();
         if (stake > t.maxStake) revert StakeTooHigh();
+        _validateSubset(validatorSubset);
 
         uint256 payout = stake * t.maxMultiplierX100 / 100;
         uint256 exposure = payout - stake; // operator's at-risk portion
