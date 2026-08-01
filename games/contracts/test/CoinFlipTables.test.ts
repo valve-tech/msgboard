@@ -313,5 +313,47 @@ describe('CoinFlipTables', () => {
       expect(t[1]).to.equal(viem.parseEther('50')) // hot fully restored
       expect(t[3]).to.equal(0n) // escrow released
     })
+
+    it('reverts a finalized (settled) round even after the stale window passes — a decided round can never unwind', async () => {
+      const ctx = await helpers.loadFixture(testUtils.deploy)
+      const { subset, locations, secrets } = await testUtils.setUpValidators(ctx, ctx.coinFlipTables, 3)
+      const op = ctx.signers[0]!.account
+      const player = ctx.signers[1]!.account
+      const tableId = await mkTable(ctx, { mult: 196, maxStake: viem.parseEther('10'), account: op })
+      await approveChips(ctx, op, viem.parseEther('50'))
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.fundHot([tableId, viem.parseEther('50')], { account: op }))
+      await approveChips(ctx, player, viem.parseEther('1'))
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.open([tableId, 0, viem.parseEther('1'), subset, locations], { account: player }))
+      const round = (await ctx.coinFlipTables.getEvents.RoundOpened()).slice(-1)[0]!.args
+      // finalize the seed -> onCast settles the round (status becomes Settled)
+      await testUtils.confirmTx(ctx, ctx.random.write.cast([round.key as viem.Hex, locations, secrets]))
+      // mine past STALE_BLOCKS anyway
+      await helpers.mine(201)
+      await expectations.revertedWithCustomError(
+        ctx.coinFlipTables,
+        ctx.coinFlipTables.write.refundStale([round.roundId as viem.Hex], { account: player }),
+        'AlreadyResolved',
+      )
+    })
+
+    it('reverts a second refundStale call on an already-refunded round', async () => {
+      const ctx = await helpers.loadFixture(testUtils.deploy)
+      const { subset, locations } = await testUtils.setUpValidators(ctx, ctx.coinFlipTables, 3)
+      const op = ctx.signers[0]!.account
+      const player = ctx.signers[1]!.account
+      const tableId = await mkTable(ctx, { mult: 196, maxStake: viem.parseEther('10'), account: op })
+      await approveChips(ctx, op, viem.parseEther('50'))
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.fundHot([tableId, viem.parseEther('50')], { account: op }))
+      await approveChips(ctx, player, viem.parseEther('1'))
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.open([tableId, 0, viem.parseEther('1'), subset, locations], { account: player }))
+      const round = (await ctx.coinFlipTables.getEvents.RoundOpened()).slice(-1)[0]!.args
+      await helpers.mine(201)
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.refundStale([round.roundId as viem.Hex], { account: player }))
+      await expectations.revertedWithCustomError(
+        ctx.coinFlipTables,
+        ctx.coinFlipTables.write.refundStale([round.roundId as viem.Hex], { account: player }),
+        'AlreadyResolved',
+      )
+    })
   })
 })
