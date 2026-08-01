@@ -723,22 +723,29 @@
 }
 .spots-flat .spot { width: clamp(56px, 6.6vw, 82px); }
 /* the switcher pill (top-centre of the felt, dropped clear of the floating chrome/title/wallet) */
+/* Collapsed by default to just the 🎥 icon (top-centre) so it isn't permanent clutter; hovering or
+   focusing it slides the view options (Seat/Aerial/Rail/2D) out. */
 .felt-views {
-  position: absolute; top: 94px; left: 50%; transform: translateX(-50%); z-index: 12;
-  display: flex; align-items: center; gap: 3px; padding: 4px; border-radius: 999px;
-  background: linear-gradient(180deg, #2c3a33f2, #1a2620f2);
+  position: absolute; top: 80px; left: 50%; transform: translateX(-50%); z-index: 12;
+  display: flex; align-items: center; gap: 0; padding: 4px 6px; border-radius: 999px; cursor: pointer;
+  background: linear-gradient(180deg, #2c3a33cc, #1a2620cc);
   backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
-  border: 1px solid #c9a22755; box-shadow: 0 12px 28px -12px #000e, inset 0 1px 0 #ffffff12;
+  border: 1px solid #c9a22733; box-shadow: 0 12px 28px -12px #000c; opacity: .7;
+  transition: opacity .2s ease, border-color .2s ease;
 }
-.felt-views::before {
-  content: '🎥'; font-size: 12px; padding: 0 3px 0 6px; opacity: .85;
-}
+.felt-views:hover, .felt-views:focus-within { opacity: 1; border-color: #c9a22766; }
+.felt-views::before { content: '🎥'; font-size: 13px; padding: 0 2px; opacity: .9; }
 .felt-views button {
-  border: 0; background: transparent; color: #cfd8cf; cursor: pointer;
-  font: 700 11px/1 var(--sans); letter-spacing: .05em; padding: 6px 13px; border-radius: 999px;
+  border: 0; background: transparent; color: #cfd8cf; cursor: pointer; white-space: nowrap; overflow: hidden;
+  font: 700 11px/1 var(--sans); letter-spacing: .05em; border-radius: 999px;
+  max-width: 0; padding: 6px 0; opacity: 0;
+  transition: max-width .22s ease, padding .22s ease, opacity .18s ease, background .12s ease, color .12s ease;
 }
+.felt-views:hover button, .felt-views:focus-within button { max-width: 64px; padding: 6px 12px; opacity: 1; }
 .felt-views button:hover { color: var(--cream, #f3ead7); background: #ffffff12; }
 .felt-views button.on { background: #c9a22733; color: var(--gold-live, #f0c74a); box-shadow: inset 0 0 0 1px #c9a22766; }
+/* the active view stays visible even when collapsed, so you can tell the current angle at a glance */
+.felt-views button.on { max-width: 64px; padding: 6px 12px; opacity: 1; }
 @media (prefers-reduced-motion: reduce) { .scene, .plane, .hand { transition: none; } }
 
 /* ── Pai Gow: the 7-card split (2 front / 5 back), player foreground + dealer far ── */
@@ -1835,8 +1842,10 @@
   box-shadow: 0 26px 30px -12px #000c, inset 0 0 0 2px var(--gold-live, #f0c74a), inset 0 0 22px #0009, 0 0 34px #c9a22733;
 }
 .cf-table:focus-visible .cf-puck { outline: 2px solid var(--gold-live, #f0c74a); outline-offset: 3px; }
-/* flatten to a readable stacked floor on narrow screens / reduced motion */
-@media (max-width: 860px), (prefers-reduced-motion: reduce) {
+/* Flatten to a readable stacked floor on NARROW screens only. Reduced-motion keeps the full 3D floor
+   (a static perspective view is not "motion") — it only drops the animated transitions/snap below, so
+   reduced-motion desktop users get the casino floor, not three stacked plain sections. */
+@media (max-width: 860px) {
   .cf-root { height: auto; min-height: 100vh; overflow: visible; }
   .cf-hall { scroll-snap-type: none; overflow: visible; }
   .cf-station { height: auto; min-height: 0; perspective: none; padding: 26px clamp(16px, 4vw, 40px); border-bottom: 1px solid #ffffff10; }
@@ -1846,4 +1855,10 @@
   .cf-pit.cf-right .cf-sign, .cf-pit.cf-right .cf-tables { flex-direction: row; justify-content: flex-start; }
   .cf-pit.cf-right, .cf-pit.cf-solo { text-align: left; }
   .cf-pit.cf-solo { width: auto; }
+}
+/* Reduced-motion: keep the 3D floor, just remove animated transitions + snap-scrolling. */
+@media (prefers-reduced-motion: reduce) {
+  .cf-hall { scroll-snap-type: none; scroll-behavior: auto; }
+  .cf-station { scroll-snap-align: none; }
+  .cf-puck, .cf-table { transition: none; }
 }
