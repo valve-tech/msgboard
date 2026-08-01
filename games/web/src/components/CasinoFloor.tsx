@@ -2,11 +2,13 @@ import { useEffect, useState, type ReactNode } from 'react'
 import type { GameDeployment } from '../config'
 
 /**
- * CasinoFloor — the venue's entrance, built as a first-person walk down the hall rather than a grid.
- * You stand in the aisle: pits flank you left and right (organized by game type), a carpet recedes to
- * a vanishing point, and scrolling walks you deeper past each pit. Every table is a felt puck stamped
- * with the trust seal of the model it rests on. Full-bleed (no rail) — you "enter" a table to get the
- * game shell. Collapses to a flat, readable stacked floor on narrow screens / reduced-motion.
+ * CasinoFloor — the venue's entrance: a flat, ordinary-document-flow list of pits (organized by game
+ * type) that you scroll down through like walking a hall. Every table is a felt puck stamped with the
+ * trust seal of the model it rests on. No CSS 3D (no `perspective`, `preserve-3d`, or `rotateX/Y/Z`) is
+ * used for layout — those constructs don't composite reliably in every browser (observed collapsing
+ * into stacked full-viewport blocks in Safari), so the floor is built to render correctly with plain
+ * 2D flexbox everywhere. Each pit's row of tables scrolls horizontally in its own container when it
+ * doesn't fit, so the page itself never scrolls sideways.
  */
 
 type TrustModel = 'validator' | 'p2p' | 'zk' | 'cosigned'
@@ -32,8 +34,6 @@ const PITS: { key: string; sign: string; blurb: string; ids: string[] }[] = [
   { key: 'proof', sign: 'Duels & The Proof Parlor', blurb: 'peer vs peer · trust only the math',
     ids: ['coinflip', 'flipx', 'sudoku', 'wordle'] },
 ]
-/** Pairs of pit indices you pass at each stop down the hall (last stop is a single, centered pit). */
-const STATIONS: number[][] = [[0, 1], [2, 3], [4]]
 
 /** "🂡 Blackjack" -> { glyph:"🂡", name:"Blackjack" }. */
 const splitLabel = (label: string) => {
@@ -82,15 +82,15 @@ const Puck = ({ game, seal, onPick }: { game: FloorGame; seal: { icon: string; t
   )
 }
 
-const Pit = ({ pitIndex, side, games, trustFor, onPick }: {
-  pitIndex: number; side: 'left' | 'right' | 'solo'
+const Pit = ({ pitIndex, games, trustFor, onPick }: {
+  pitIndex: number
   games: Map<string, FloorGame>; trustFor: (id: string) => TrustModel | null; onPick: (id: string) => void
 }) => {
   const pit = PITS[pitIndex]!
   const list = pit.ids.map((id) => games.get(id)).filter((g): g is FloorGame => !!g)
   if (!list.length) return null
   return (
-    <div className={`cf-pit cf-${side}`}>
+    <section className="cf-pit">
       <div className="cf-sign"><span className="cf-lamp" />{pit.sign}</div>
       <div className="cf-blurb">{pit.blurb}</div>
       <div className="cf-tables">
@@ -99,7 +99,7 @@ const Pit = ({ pitIndex, side, games, trustFor, onPick }: {
           return <Puck key={g.id} game={g} seal={SEAL[model]} onPick={onPick} />
         })}
       </div>
-    </div>
+    </section>
   )
 }
 
@@ -138,29 +138,9 @@ export const CasinoFloor = ({ deployment, games, trustFor, onPick, topRight }: {
       )}
 
       <div className="cf-hall">
-        {STATIONS.map((pair, i) => {
-          const next = STATIONS[i + 1]
-          const ahead = next ? next.map((pi) => PITS[pi]!.sign).join(' · ') : null
-          return (
-            <section className="cf-station" key={i}>
-              <div className="cf-scene">
-                <div className="cf-carpet" />
-                <div className="cf-vanish">
-                  {ahead ? <><span className="cf-arch">◈ {ahead} ◈</span><span className="cf-more">keep walking ↓</span></>
-                    : <span className="cf-arch">◈ end of the floor ◈</span>}
-                </div>
-                {pair.length === 2 ? (
-                  <>
-                    <Pit pitIndex={pair[0]!} side="left" games={byId} trustFor={trustFor} onPick={onPick} />
-                    <Pit pitIndex={pair[1]!} side="right" games={byId} trustFor={trustFor} onPick={onPick} />
-                  </>
-                ) : (
-                  <Pit pitIndex={pair[0]!} side="solo" games={byId} trustFor={trustFor} onPick={onPick} />
-                )}
-              </div>
-            </section>
-          )
-        })}
+        {PITS.map((_, i) => (
+          <Pit key={i} pitIndex={i} games={byId} trustFor={trustFor} onPick={onPick} />
+        ))}
       </div>
     </div>
   )
