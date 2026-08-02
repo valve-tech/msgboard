@@ -48,6 +48,15 @@ export const reduceTables = (events: TableEvent[], now: bigint, windowBlocks: bi
         break
       }
       case 'RoundSettled': v.escrowed -= e.payout; if (!e.won) v.hot += e.payout; break
+      // Stale round refunded: escrow released, operator's exposure (payout - stake) returns to hot, the
+      // player's stake leaves the contract. Mirrors CoinFlipTables.refundStale exactly.
+      case 'Refunded': {
+        const payout: bigint = e.payout
+        const stake: bigint = e.stake ?? 0n
+        v.escrowed -= payout
+        v.hot += payout - stake
+        break
+      }
     }
   }
   for (const r of recent) {

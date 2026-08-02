@@ -71,6 +71,18 @@ describe('reduceTables', () => {
     expect(v.hot).to.equal(49n) // unchanged by the settle; win payout does not return to hot
   })
 
+  it('Refunded: releases escrow and returns only the exposure (payout - stake) to hot', () => {
+    const events = [
+      { type: 'TableCreated', tableId: T, operator: OP, maxMultiplierX100: 196, maxStake: 10n, hotTarget: 100n, blockNumber: 1n },
+      { type: 'HotFunded', tableId: T, amount: 50n, blockNumber: 2n },
+      { type: 'RoundOpened', tableId: T, roundId: '0xr1', payout: 2n, stake: 1n, blockNumber: 9n },
+      { type: 'Refunded', tableId: T, roundId: '0xr1', payout: 2n, stake: 1n, blockNumber: 220n },
+    ] as any
+    const v = reduceTables(events, 220n, 100n)[0]!
+    expect(v.escrowed).to.equal(0n) // reservation released
+    expect(v.hot).to.equal(50n) // 49 + exposure (payout 2 - stake 1); the player's stake left the contract
+  })
+
   it('sorts armed tables by roundsRecent then stake', () => {
     const A = '0x0a' as any
     const B = '0x0b' as any

@@ -312,6 +312,13 @@ describe('CoinFlipTables', () => {
       const t = await ctx.coinFlipTables.read.tables([tableId])
       expect(t[1]).to.equal(viem.parseEther('50')) // hot fully restored
       expect(t[3]).to.equal(0n) // escrow released
+      // Refunded event mirrors the accounting so the off-chain index can release escrow/exposure.
+      const refunded = (await ctx.coinFlipTables.getEvents.Refunded()).slice(-1)[0]!.args
+      expect(refunded.roundId).to.equal(round.roundId)
+      expect(refunded.tableId).to.equal(tableId)
+      expect((refunded.player as string).toLowerCase()).to.equal(player.address.toLowerCase())
+      expect(refunded.stake).to.equal(viem.parseEther('1'))
+      expect(refunded.payout).to.equal(viem.parseEther('1') * 196n / 100n)
     })
 
     it('reverts a finalized (settled) round even after the stale window passes — a decided round can never unwind', async () => {
