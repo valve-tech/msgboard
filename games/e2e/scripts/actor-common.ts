@@ -9,6 +9,7 @@ import {
   defaultRpc,
   makePublicClient,
   coinFlipAbi,
+  coinFlipTablesAbi,
   raffleAbi,
   type GamesChainId,
 } from '@msgboard/games-core'
@@ -19,6 +20,10 @@ export type Deployment = {
   chainId: number
   coinFlip: viem.Hex
   raffle: viem.Hex
+  /** Permissionless player-run coin-flip tables (validator-settled). Optional: absent on chains where
+   *  CoinFlipTables isn't deployed. When set, its heats share the same validator preimage pools as
+   *  coinFlip/raffle, so heatsSince MUST include them to keep the caster's slot counter correct. */
+  coinFlipTables?: viem.Hex
   random: viem.Hex
   canonicalSubset: viem.Hex[]
   /** BASE offsets; pools chain at base + n*poolSize (core poolLocationFor). */
@@ -116,11 +121,17 @@ export const heatsSince = async (
   config: Deployment,
 ): Promise<{ key: viem.Hex; blockNumber: bigint }[]> => {
   const from = BigInt(config.deployBlock)
-  const [heated, armed] = await Promise.all([
+  const [heated, armed, opened] = await Promise.all([
     chunkedEvents(publicClient, { address: config.coinFlip, abi: coinFlipAbi as viem.Abi, eventName: 'Heated', fromBlock: from }),
     chunkedEvents(publicClient, { address: config.raffle, abi: raffleAbi as viem.Abi, eventName: 'Armed', fromBlock: from }),
+    // CoinFlipTables consumes the SAME validator pools; every open() heats one slot and emits
+    // RoundOpened{key,...}. Omitting these would desync the chronological slot counter and corrupt
+    // casts for ALL games once any table round exists. No-op until coinFlipTables is set + played.
+    config.coinFlipTables
+      ? chunkedEvents(publicClient, { address: config.coinFlipTables, abi: coinFlipTablesAbi as viem.Abi, eventName: 'RoundOpened', fromBlock: from })
+      : Promise.resolve([]),
   ])
-  return [...heated, ...armed]
+  return [...heated, ...armed, ...opened]
     .map((log) => ({ key: (log.args as { key: viem.Hex }).key, blockNumber: log.blockNumber, logIndex: log.logIndex }))
     .sort((a, b) => (a.blockNumber === b.blockNumber ? a.logIndex - b.logIndex : a.blockNumber < b.blockNumber ? -1 : 1))
     .map(({ key, blockNumber }) => ({ key, blockNumber }))

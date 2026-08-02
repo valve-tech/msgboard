@@ -4,9 +4,13 @@ import {
   drawVideoPoker, settleVideoPoker, commitVideoPoker, verifyVideoPoker, FiveCardCategory,
 } from '@msgboard/games'
 import type { GameDeployment } from '../config'
-import { StakeInput, parseStake } from './StakeInput'
-import { InfoDot } from './Meta'
-import { randomDeckSeed, Card } from './decisionShared'
+import { parseStake } from './StakeInput'
+import { randomDeckSeed, Card, CardBack } from './decisionShared'
+import { GameStage } from './shell/GameStage'
+import { HowItWorksLink } from './HowItWorks'
+import { BetTray } from './shell/BetTray'
+import { MetaPanel } from './shell/MetaPanel'
+import { FeltTable } from './stages/FeltTable'
 
 const CATEGORY_LABEL: Record<number, string> = {
   [FiveCardCategory.NOTHING]: 'nothing',
@@ -21,13 +25,27 @@ const CATEGORY_LABEL: Record<number, string> = {
   [FiveCardCategory.ROYAL_FLUSH]: 'royal flush',
 }
 
+/** The 9/6 Jacks-or-Better paytable (return multiple per winning category), high → low. */
+const PAYTABLE: { cat: FiveCardCategory; label: string; mult: number }[] = [
+  { cat: FiveCardCategory.ROYAL_FLUSH, label: 'Royal flush', mult: 800 },
+  { cat: FiveCardCategory.STRAIGHT_FLUSH, label: 'Straight flush', mult: 50 },
+  { cat: FiveCardCategory.FOUR_OF_A_KIND, label: 'Four of a kind', mult: 25 },
+  { cat: FiveCardCategory.FULL_HOUSE, label: 'Full house', mult: 9 },
+  { cat: FiveCardCategory.FLUSH, label: 'Flush', mult: 6 },
+  { cat: FiveCardCategory.STRAIGHT, label: 'Straight', mult: 4 },
+  { cat: FiveCardCategory.THREE_OF_A_KIND, label: 'Three of a kind', mult: 3 },
+  { cat: FiveCardCategory.TWO_PAIR, label: 'Two pair', mult: 2 },
+  { cat: FiveCardCategory.JACKS_OR_BETTER, label: 'Jacks or better', mult: 1 },
+]
+
 type Phase = 'idle' | 'hold' | 'done'
 interface Hand { seed: bigint; commit: viem.Hex; dealt: number[]; final?: number[]; category?: number; delta?: bigint; verified?: boolean }
 
 /**
- * Video Poker (Jacks or Better) — single-decision draw game. Deal 5, toggle which to HOLD, then Draw:
- * discards are replaced from the same sealed deck (you choose holds without seeing the replacements),
- * the final hand is paid by the 9/6 paytable, and your browser re-checks it against the disclosed seed.
+ * Video Poker (Jacks or Better) — single-decision draw. Deal 5 into the foreground, tap the cards to
+ * HOLD, then Draw: discards are replaced from the same sealed deck (holds chosen blind), the final hand
+ * is paid by the 9/6 paytable docked in the tray (winning row lit), and the browser re-checks it against
+ * the disclosed seed. In-process house (Blackjack model).
  */
 export const VideoPokerScreen = ({ deployment: _d, walletClient, trustAcknowledged, myAddress }: {
   deployment: GameDeployment; walletClient?: viem.WalletClient; trustAcknowledged: boolean; myAddress?: viem.Hex
@@ -60,52 +78,88 @@ export const VideoPokerScreen = ({ deployment: _d, walletClient, trustAcknowledg
     setHand(done); setHistory((h) => [...h, done]); setPhase('done')
   }
 
-  return (
-    <div>
-      <div className="card">
-        <h3>Video Poker<InfoDot>
-          <strong>Jacks or Better.</strong> Tap the cards you want to keep, then Draw — the rest are
-          replaced from the sealed deck you can't see ahead. Pairs of jacks or better pay; a royal flush
-          pays 800×. Your browser re-checks the draw against the disclosed seed.</InfoDot></h3>
-        <div className="row">
-          <StakeInput value={amount} onChange={setAmount} />
-          <button onClick={deal} disabled={!canDeal}>{phase === 'hold' ? 'In hand…' : 'Deal'}</button>
-          {!walletClient && <span className="muted">connect a wallet to play</span>}
-          {walletClient && !trustAcknowledged && <span className="muted">tap "Got it" on the fairness note above first</span>}
-        </div>
+  const toggleHold = (i: number) => setHolds((hs) => hs.map((h, j) => (j === i ? !h : h)))
 
-        {hand && (
-          <div style={{ marginTop: '0.75rem' }}>
-            <div className="row">
-              {(phase === 'done' ? hand.final! : hand.dealt).map((c, i) => (
-                <span key={i} style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: '0.2rem' }}>
-                  <Card index={c} />
-                  {phase === 'hold' && (
-                    <button type="button" className={`chip${holds[i] ? ' active' : ''}`} onClick={() => setHolds((hs) => hs.map((h, j) => (j === i ? !h : h)))}>
-                      {holds[i] ? 'held' : 'hold'}
-                    </button>
-                  )}
-                </span>
-              ))}
-            </div>
-            {phase === 'hold' && <div className="row" style={{ marginTop: '0.6rem' }}><button onClick={draw}>Draw</button></div>}
-            {phase === 'done' && hand.delta !== undefined && (
-              <p style={{ marginTop: '0.6rem' }} className={hand.delta >= 0n ? 'ok' : 'bad'}>
-                {CATEGORY_LABEL[hand.category!]} · {hand.delta >= 0n ? '+' : ''}{viem.formatEther(hand.delta)}{' '}
-                <span className="muted">· commit {hand.commit.slice(0, 10)}… · {hand.verified ? 'verify ✓' : 'verify ✗'}</span>
-              </p>
-            )}
+  const shown = hand ? (phase === 'done' ? hand.final! : hand.dealt) : undefined
+  const net = history.reduce((s, h) => s + (h.delta ?? 0n), 0n)
+
+  const handNode = (
+    <div className="row" style={{ gap: 8 }}>
+      {(shown ?? [null, null, null, null, null]).map((c, i) => (
+        <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 7 }}>
+          {c === null ? <CardBack big /> : <Card index={c} big />}
+          {phase === 'hold' && (
+            <button type="button" className={`chip${holds[i] ? ' active' : ''}`} onClick={() => toggleHold(i)}
+              style={{ letterSpacing: '0.1em', minWidth: 52 }}>
+              {holds[i] ? 'HELD' : 'hold'}
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+
+  const cat = phase === 'done' ? hand?.category : undefined
+  const wonRow = cat !== undefined ? PAYTABLE.find((p) => p.cat === cat) : undefined
+  const arc = cat !== undefined
+    ? `${(CATEGORY_LABEL[cat] ?? '').toUpperCase()}${wonRow ? ` · ${wonRow.mult}×` : ''}`
+    : undefined
+
+  const action = phase === 'hold'
+    ? <button className="primary" onClick={draw}>Draw</button>
+    : <button className="primary" onClick={deal} disabled={!canDeal}>{phase === 'done' ? 'Deal again' : 'Deal'}</button>
+
+  return (
+    <>
+      <GameStage title="VIDEO POKER" subtitle="jacks or better · 9/6" action={<HowItWorksLink />}>
+        <FeltTable player={handNode} arc={arc} centerMark={null} />
+      </GameStage>
+
+      <div className="tray-col">
+        <BetTray amount={amount} onAmount={setAmount} action={action}>
+          {/* Paytable ladder — the winning category lights when the hand settles. */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontFamily: 'var(--mono)', fontSize: 11.5 }}>
+            {PAYTABLE.map((p) => {
+              const on = phase === 'done' && hand?.category === p.cat
+              return (
+                <div key={p.cat} className="row" style={{
+                  justifyContent: 'space-between', padding: '2px 7px', borderRadius: 4,
+                  color: on ? 'var(--felt-900, #07150d)' : '#b9b09a',
+                  background: on ? 'var(--gold-live, #f0c74a)' : 'transparent',
+                  fontWeight: on ? 700 : 400,
+                }}>
+                  <span style={{ fontFamily: 'var(--sans)' }}>{p.label}</span>
+                  <span style={{ fontVariantNumeric: 'tabular-nums' }}>{p.mult}×</span>
+                </div>
+              )
+            })}
           </div>
-        )}
-        {phase === 'done' && <div className="row" style={{ marginTop: '0.5rem' }}><button onClick={deal} disabled={!canDeal}>Deal again</button></div>}
+          {phase === 'hold' && <p className="tray-hint">tap cards to hold, then Draw</p>}
+          {!walletClient && <p className="tray-hint">connect a wallet to play</p>}
+          {walletClient && !trustAcknowledged && <p className="tray-hint">tap "Got it" on the fairness note above first</p>}
+          {phase === 'done' && hand?.delta !== undefined && (
+            <p className={hand.delta >= 0n ? 'ok' : 'bad'}>
+              {CATEGORY_LABEL[hand.category!]} · {hand.delta >= 0n ? '+' : ''}{viem.formatEther(hand.delta)}
+              <span className="muted"> · {hand.verified ? 'verify ✓' : 'verify ✗'}</span>
+            </p>
+          )}
+        </BetTray>
+
+        <MetaPanel tabs={['Recent', 'Stats']}>
+          {myAddress && history.length > 0 ? (
+            <span><b>{net >= 0n ? '+' : ''}{viem.formatEther(net)}</b> net · {history.length} hand{history.length === 1 ? '' : 's'}</span>
+          ) : (
+            <span className="muted">no hands yet</span>
+          )}
+        </MetaPanel>
       </div>
 
       {myAddress && history.length > 0 && (
         <>
           <h2>Your book</h2>
-          <details className="history" open>
+          <details className="history">
             <summary>{history.length} hand{history.length === 1 ? '' : 's'}
-              <span className="muted"> · {viem.formatEther(history.reduce((s, h) => s + (h.delta ?? 0n), 0n))} net</span>
+              <span className="muted"> · {viem.formatEther(net)} net</span>
             </summary>
             {[...history].reverse().map((h, i) => (
               <div className="card" key={i}>
@@ -119,6 +173,6 @@ export const VideoPokerScreen = ({ deployment: _d, walletClient, trustAcknowledg
           </details>
         </>
       )}
-    </div>
+    </>
   )
 }

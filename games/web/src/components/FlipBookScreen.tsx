@@ -15,6 +15,11 @@ import {
 } from '../lib/flipBookContract'
 import { AddressLink, InfoDot, SourceNote, explorerUrl, fmtAmount } from './Meta'
 import { StakeInput, parseStake } from './StakeInput'
+import { GameStage } from './shell/GameStage'
+import { BetTray } from './shell/BetTray'
+import { MetaPanel } from './shell/MetaPanel'
+import { DiffChips } from './ladderShared'
+import { BookBoard } from './stages/BookBoard'
 
 const OPEN_FOR = [
   { label: '1 hour', seconds: 3_600 },
@@ -51,13 +56,13 @@ const TxLink = ({ deployment, tx }: { deployment: GameDeployment; tx?: viem.Hex 
 
 /**
  * The coin flip as an OFFER BOOK — the P2P guessing game (matching pennies) played against
- * FlipBook. A maker escrows stake+bond behind a hidden heads/tails commit; a taker matches the
- * stake and states a public guess; the maker opens the commit within the window or forfeits
- * stake AND bond. No validators, no house, no shared randomness: guessing uniformly wins exactly
- * half against ANY opponent strategy, so each side's odds are protected by their own coin.
+ * FlipBook, on the shared BookBoard surface. A maker escrows stake+bond behind a hidden heads/tails
+ * commit; a taker matches the stake and states a public guess; the maker opens the commit within the
+ * window or forfeits stake AND bond. No validators, no house, no shared randomness: guessing uniformly
+ * wins exactly half against ANY opponent strategy, so each side's odds are protected by their own coin.
  *
- * The maker's (choice, salt) lives ONLY in this browser's localStorage (written before the post
- * tx) — the screen's job is to make the reveal deadline impossible to miss.
+ * The maker's (choice, salt) lives ONLY in this browser's localStorage (written before the post tx) —
+ * the book's alert lane makes the reveal deadline impossible to miss.
  */
 export const FlipBookScreen = ({
   deployment,
@@ -193,125 +198,10 @@ export const FlipBookScreen = ({
   // My reveals due — the one deadline on this screen that costs real money if missed.
   const revealsDue = pending.filter((o) => mine(o.maker))
 
-  return (
-    <div>
-      {data.error && <div className="banner bad">chain read failed: {data.error}</div>}
-      {error && <div className="banner bad">{error}</div>}
-      {data.owed > 0n && (
-        <div className="banner">
-          the book owes you {fmtAmount(deployment, data.owed)} (a payout couldn't be pushed to your address){' '}
-          <button onClick={() => void withdraw()} disabled={!canAct}>
-            Withdraw
-          </button>
-        </div>
-      )}
-
-      {revealsDue.length > 0 && (
-        <div className="banner bad">
-          <strong>Reveal due:</strong> you have {revealsDue.length === 1 ? 'a taken flip' : `${revealsDue.length} taken flips`} —
-          miss the window and you forfeit stake <em>and</em> bond.
-          {revealsDue.map((o) => {
-            const secret = flipSecretFor(deployment.chainId, flipBook, o.commit)
-            const left = (o.revealBy ?? 0) - now
-            return (
-              <span key={o.offerId.toString()} style={{ marginLeft: '0.5rem' }}>
-                #{o.offerId.toString()} ({fmtLeft(left)} left){' '}
-                {secret ? (
-                  <button onClick={() => void reveal(o)} disabled={!canAct || left <= 0}>
-                    Reveal now
-                  </button>
-                ) : (
-                  <span className="bad">— secret not in this browser; reveal from the browser that posted it</span>
-                )}
-              </span>
-            )
-          })}
-        </div>
-      )}
-
-      <div className="card">
-        <div className="row" style={{ justifyContent: 'space-between' }}>
-          <strong>
-            Post an offer{' '}
-            <InfoDot label="how posting works">
-              You pick a side and it is hidden behind a hash; your <strong>stake + bond</strong> escrow immediately, so
-              the offer can't be yanked once someone takes it. When a taker calls your coin, you have the reveal window
-              to open your commit — win or lose. Reveal a loss and you only lose the stake; sit on it and you forfeit
-              the stake <strong>and</strong> the bond. Your hidden side is stored only in this browser.
-            </InfoDot>
-          </strong>
-          <SourceNote deployment={deployment} contract={flipBook} contractLabel="FlipBook" />
-        </div>
-        <div className="row">
-          <span className="muted">your hidden side</span>
-          <button className={choice ? '' : 'secondary'} onClick={() => setChoice(true)} disabled={busy}>
-            heads
-          </button>
-          <button className={choice ? 'secondary' : ''} onClick={() => setChoice(false)} disabled={busy}>
-            tails
-          </button>
-        </div>
-        <div className="row">
-          <span className="muted">stake</span>
-          <StakeInput value={amount} onChange={setAmount} />
-        </div>
-        <div className="row">
-          <span className="muted">
-            bond{' '}
-            <InfoDot label="why a bond">
-              The bond is what makes walking away from a lost flip a mistake: revealing a loss costs your stake, bailing
-              costs your stake <strong>plus</strong> this bond. It comes straight back to you the moment you reveal —
-              win or lose.
-            </InfoDot>
-          </span>
-          <StakeInput value={bondAmount} onChange={setBondAmount} placeholder="bond" />
-        </div>
-        <div className="row">
-          <span className="muted">open for</span>
-          {OPEN_FOR.map((o) => (
-            <button
-              key={o.seconds}
-              className={`chip${openFor === o.seconds ? ' active' : ''}`}
-              onClick={() => setOpenFor(o.seconds)}
-              disabled={busy}
-            >
-              {o.label}
-            </button>
-          ))}
-          <span className="muted">reveal within</span>
-          {REVEAL_WINDOWS.map((o) => (
-            <button
-              key={o.seconds}
-              className={`chip${revealWindow === o.seconds ? ' active' : ''}`}
-              onClick={() => setRevealWindow(o.seconds)}
-              disabled={busy}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-        <div className="row">
-          <button onClick={() => void post()} disabled={!canAct || stake === undefined || bond === undefined}>
-            {busy ? 'working…' : `Escrow ${stake !== undefined && bond !== undefined ? fmtAmount(deployment, stake + bond) : ''} & post`}
-          </button>
-          {!connected && <span className="muted">connect a wallet to post or take</span>}
-          {connected && !trustAcknowledged && <span className="muted">acknowledge the fairness note above first</span>}
-        </div>
-      </div>
-
-      <h3>
-        Open offers{' '}
-        <InfoDot label="how taking works">
-          Match the stake and call the maker's hidden coin — your guess is your whole move, nothing more to do. Guess
-          right and the pot (2×stake) is yours at reveal; if the maker refuses to reveal, the window lapses and you
-          claim the pot <strong>plus their bond</strong>. Calling at random wins exactly half against anyone, so no
-          maker can out-strategy you.
-        </InfoDot>
-        {data.loading && <span className="muted"> refreshing…</span>}
-      </h3>
-      {open.length === 0 && <div className="muted">no open offers — post one above and let the board find your opponent</div>}
+  const openLane = (
+    <>
       {open.map((o) => (
-        <div className="card" key={o.offerId.toString()}>
+        <div className={`card bk-open${mine(o.maker) ? ' bk-mine' : ''}`} key={o.offerId.toString()}>
           <div className="row" style={{ justifyContent: 'space-between' }}>
             <span>
               <span className="tag">#{o.offerId.toString()}</span>
@@ -344,7 +234,7 @@ export const FlipBookScreen = ({
         </div>
       ))}
       {expired.map((o) => (
-        <div className="card" key={o.offerId.toString()}>
+        <div className={`card bk-expired${mine(o.maker) ? ' bk-mine' : ''}`} key={o.offerId.toString()}>
           <div className="row" style={{ justifyContent: 'space-between' }}>
             <span>
               <span className="tag">#{o.offerId.toString()}</span>
@@ -361,13 +251,16 @@ export const FlipBookScreen = ({
           </div>
         </div>
       ))}
+    </>
+  )
 
-      {pending.length > 0 && <h3>Awaiting reveal</h3>}
+  const flightLane = (
+    <>
       {pending.map((o) => {
         const left = (o.revealBy ?? 0) - now
         const secret = flipSecretFor(deployment.chainId, flipBook, o.commit)
         return (
-          <div className="card" key={o.offerId.toString()}>
+          <div className={`card bk-wait${mine(o.maker) || mine(o.taker) ? ' bk-mine' : ''}`} key={o.offerId.toString()}>
             <div className="row" style={{ justifyContent: 'space-between' }}>
               <span>
                 <span className="tag">#{o.offerId.toString()}</span>
@@ -407,10 +300,13 @@ export const FlipBookScreen = ({
           </div>
         )
       })}
+    </>
+  )
 
-      {settled.length > 0 && <h3>Settled</h3>}
+  const settledLane = (
+    <>
       {settled.map((o) => (
-        <div className="card" key={o.offerId.toString()}>
+        <div className="card bk-done" key={o.offerId.toString()}>
           <div className="row" style={{ justifyContent: 'space-between' }}>
             <span>
               <span className="tag">#{o.offerId.toString()}</span>
@@ -437,6 +333,115 @@ export const FlipBookScreen = ({
           </div>
         </div>
       ))}
-    </div>
+    </>
+  )
+
+  const alert = (
+    <>
+      {data.error && <div className="banner bad">chain read failed: {data.error}</div>}
+      {error && <div className="banner bad">{error}</div>}
+      {data.owed > 0n && (
+        <div className="banner">
+          the book owes you {fmtAmount(deployment, data.owed)} (a payout couldn't be pushed to your address){' '}
+          <button onClick={() => void withdraw()} disabled={!canAct}>
+            Withdraw
+          </button>
+        </div>
+      )}
+      {revealsDue.length > 0 && (
+        <div className="banner bad">
+          <strong>Reveal due:</strong> you have {revealsDue.length === 1 ? 'a taken flip' : `${revealsDue.length} taken flips`} —
+          miss the window and you forfeit stake <em>and</em> bond.
+          {revealsDue.map((o) => {
+            const secret = flipSecretFor(deployment.chainId, flipBook, o.commit)
+            const left = (o.revealBy ?? 0) - now
+            return (
+              <span key={o.offerId.toString()} style={{ marginLeft: '0.5rem' }}>
+                #{o.offerId.toString()} ({fmtLeft(left)} left){' '}
+                {secret ? (
+                  <button onClick={() => void reveal(o)} disabled={!canAct || left <= 0}>
+                    Reveal now
+                  </button>
+                ) : (
+                  <span className="bad">— secret not in this browser; reveal from the browser that posted it</span>
+                )}
+              </span>
+            )
+          })}
+        </div>
+      )}
+    </>
+  )
+
+  const openForLabel = OPEN_FOR.find((o) => o.seconds === openFor)!.label
+  const revealLabel = REVEAL_WINDOWS.find((o) => o.seconds === revealWindow)!.label
+
+  return (
+    <>
+      <GameStage
+        title="FLIP BOOK"
+        subtitle="P2P coin flip · matching pennies"
+        action={<SourceNote deployment={deployment} contract={flipBook} contractLabel="FlipBook" />}
+      >
+        <BookBoard
+          alert={alert}
+          defaultKey={revealsDue.length > 0 ? 'flight' : 'open'}
+          empty={data.loading ? 'reading the book…' : 'no offers here — post one to open the book'}
+          lanes={[
+            { key: 'open', label: 'Open', count: open.length + expired.length, node: openLane },
+            { key: 'flight', label: 'Awaiting reveal', count: pending.length, node: flightLane },
+            { key: 'settled', label: 'Settled', count: settled.length, node: settledLane },
+          ]}
+        />
+      </GameStage>
+
+      <div className="tray-col">
+        <BetTray
+          amount={amount}
+          onAmount={setAmount}
+          action={
+            <button className="primary" onClick={() => void post()} disabled={!canAct || stake === undefined || bond === undefined}>
+              {busy ? 'working…' : `Escrow ${stake !== undefined && bond !== undefined ? fmtAmount(deployment, stake + bond) : ''} & post`}
+            </button>
+          }
+        >
+          <DiffChips label="your side" options={['heads', 'tails']} value={choice ? 'heads' : 'tails'} onChange={(v) => setChoice(v === 'heads')} disabled={busy} />
+          <div className="row" style={{ gap: 8, alignItems: 'center', marginTop: 8 }}>
+            <span className="muted" style={{ fontSize: 12, minWidth: 66 }}>
+              bond{' '}
+              <InfoDot label="why a bond">
+                The bond is what makes walking away from a lost flip a mistake: revealing a loss costs your stake, bailing
+                costs your stake <strong>plus</strong> this bond. It comes straight back to you the moment you reveal —
+                win or lose.
+              </InfoDot>
+            </span>
+            <StakeInput value={bondAmount} onChange={setBondAmount} placeholder="bond" />
+          </div>
+          <DiffChips label="open for" options={OPEN_FOR.map((o) => o.label)} value={openForLabel} onChange={(l) => setOpenFor(OPEN_FOR.find((o) => o.label === l)!.seconds)} disabled={busy} />
+          <DiffChips label="reveal in" options={REVEAL_WINDOWS.map((o) => o.label)} value={revealLabel} onChange={(l) => setRevealWindow(REVEAL_WINDOWS.find((o) => o.label === l)!.seconds)} disabled={busy} />
+          <p className="tray-hint">
+            your side is hidden behind a hash; stake + bond escrow now so the offer can't be yanked once taken.{' '}
+            <InfoDot label="how it works">
+              You pick a side and it is hidden behind a hash; your <strong>stake + bond</strong> escrow immediately. When a
+              taker calls your coin, you have the reveal window to open your commit — win or lose. Reveal a loss and you only
+              lose the stake; sit on it and you forfeit the stake <strong>and</strong> the bond. Your hidden side is stored
+              only in this browser.
+            </InfoDot>
+          </p>
+          {!connected && <p className="tray-hint">connect a wallet to post or take</p>}
+          {connected && !trustAcknowledged && <p className="tray-hint">acknowledge the fairness note above first</p>}
+        </BetTray>
+
+        <MetaPanel tabs={['Book', 'Guide']}>
+          {revealsDue.length > 0 ? (
+            <span className="bad"><b>{revealsDue.length}</b> reveal{revealsDue.length === 1 ? '' : 's'} due — open the alert above</span>
+          ) : (
+            <span className="muted">
+              <b>{open.length}</b> open · <b>{pending.length}</b> awaiting reveal · guessing wins exactly half vs any strategy
+            </span>
+          )}
+        </MetaPanel>
+      </div>
+    </>
   )
 }

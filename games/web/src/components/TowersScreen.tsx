@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react'
-import * as viem from 'viem'
-import { startTowers, towersResolveStep, verifyTowers, type TowersConfig } from '@msgboard/games'
+import {
+  startTowers, towersResolveStep, verifyTowers, towersMultiplierX100, towersMaxMultiplierX100,
+  type TowersConfig,
+} from '@msgboard/games'
 import type { GameDeployment } from '../config'
 import { useLadderSession, type LadderAdapter } from '../hooks/useLadderSession'
 import { parseStake } from './StakeInput'
-import { LadderShell } from './ladderShared'
+import { LadderShell, DiffChips, fmtMult } from './ladderShared'
 
 const DIFFICULTIES = {
   easy: { tilesPerFloor: 3, safePerFloor: 2 },
@@ -12,10 +14,11 @@ const DIFFICULTIES = {
   hard: { tilesPerFloor: 4, safePerFloor: 1 },
 } as const
 type Difficulty = keyof typeof DIFFICULTIES
+const OPTIONS = Object.keys(DIFFICULTIES) as Difficulty[]
 const FLOORS = 8
 
 export const TowersScreen = ({ deployment, walletClient, trustAcknowledged, myAddress }: {
-  deployment: GameDeployment; walletClient?: viem.WalletClient; trustAcknowledged: boolean; myAddress?: viem.Hex
+  deployment: GameDeployment; walletClient?: import('viem').WalletClient; trustAcknowledged: boolean; myAddress?: import('viem').Hex
 }) => {
   const [amount, setAmount] = useState('0.1')
   const [difficulty, setDifficulty] = useState<Difficulty>('easy')
@@ -28,45 +31,29 @@ export const TowersScreen = ({ deployment, walletClient, trustAcknowledged, myAd
     start: (seed) => startTowers(config, seed),
     resolveStep: (seed, step, choice) => towersResolveStep(seed, config)(step, choice),
     verify: (claim, seed) => verifyTowers(claim, seed, config),
-  }), [difficulty])
+  }), [difficulty]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const stake = parseStake(amount)
-  const canStart = walletClient !== undefined && trustAcknowledged && stake !== undefined && session.status !== 'playing'
-
-  const configRow = (
-    <label className="threshold-label">
-      difficulty
-      <span className="row" style={{ gap: '0.25rem' }}>
-        {(Object.keys(DIFFICULTIES) as Difficulty[]).map((d) => (
-          <button key={d} type="button" className={`chip${difficulty === d ? ' active' : ''}`}
-            onClick={() => setDifficulty(d)} disabled={session.status === 'playing'} aria-label={`difficulty ${d}`}>
-            {d}
-          </button>
-        ))}
-      </span>
-    </label>
-  )
-
-  const controls = (
-    <div className="row" style={{ gap: '0.3rem' }}>
-      <span className="muted">floor {session.step + 1} — pick a tile:</span>
-      {Array.from({ length: config.tilesPerFloor }, (_, t) => (
-        <button key={t} type="button" className="tag" onClick={() => session.takeStep(t)} aria-label={`tile ${t + 1}`}>
-          {t + 1}
-        </button>
-      ))}
-    </div>
-  )
+  const playing = session.status === 'playing'
+  const canStart = walletClient !== undefined && trustAcknowledged && stake !== undefined && !playing
+  const marks = session.state?.choices ?? []
 
   return (
     <LadderShell
-      title="Towers" noun="climb" startLabel="New climb"
-      info={<><strong>Climb the tower.</strong> Each floor, pick a tile — most are safe, but one (or more)
-        drops you. Each safe floor multiplies your prize; cash out any time. The safe tiles are sealed
-        before you start, so the house can't move them under you. Re-checkable after.</>}
-      amount={amount} setAmount={setAmount} configRow={configRow} controls={controls}
-      session={session} canStart={canStart} onStart={() => stake !== undefined && session.newGame(adapter, stake)}
-      walletClient={walletClient} trustAcknowledged={trustAcknowledged} myAddress={myAddress} stake={stake}
+      title="TOWERS" subtitle={`climb ${FLOORS} floors · ${difficulty}`} noun="climb" startLabel="New climb"
+      amount={amount} setAmount={setAmount} session={session} stake={stake}
+      canStart={canStart} onStart={() => stake !== undefined && session.newGame(adapter, stake)}
+      walletClient={walletClient} trustAcknowledged={trustAcknowledged} myAddress={myAddress}
+      steps={config.floors}
+      summit={fmtMult(towersMaxMultiplierX100(config))}
+      multAt={(i) => fmtMult(towersMultiplierX100(config, i + 1))}
+      markAt={(i) => (marks[i] !== undefined ? `tile ${marks[i]! + 1} ✓` : '✓')}
+      currentLabel={`floor ${session.step + 1} · pick a tile`}
+      nextHint={session.step < config.floors ? <> · next {fmtMult(towersMultiplierX100(config, session.step + 1))}</> : undefined}
+      configTray={<DiffChips options={OPTIONS} value={difficulty} onChange={setDifficulty} disabled={playing} />}
+      choices={Array.from({ length: config.tilesPerFloor }, (_, t) => (
+        <button key={t} type="button" onClick={() => session.takeStep(t)} aria-label={`tile ${t + 1}`}>{t + 1}</button>
+      ))}
     />
   )
 }

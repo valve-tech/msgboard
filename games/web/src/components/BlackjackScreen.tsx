@@ -84,7 +84,7 @@ export const BlackjackScreen = ({ deployment: _d, walletClient, trustAcknowledge
   return (
     <>
       <GameStage title="BLACKJACK" subtitle="sealed before you play" action={<HowItWorksLink />}>
-        <FeltTable dealer={dealerNode} player={playerNode} spots={spotsNode} />
+        <FeltTable dealer={dealerNode} player={playerNode} spots={spotsNode} arc="BLACKJACK PAYS 3 TO 2 · INSURANCE PAYS 2 TO 1" />
       </GameStage>
 
       <div className="tray-col">
@@ -122,7 +122,7 @@ export const BlackjackScreen = ({ deployment: _d, walletClient, trustAcknowledge
       {myAddress && history.length > 0 && (
         <>
           <h2>Your book</h2>
-          <details className="history" open>
+          <details className="history">
             <summary>{history.length} hand{history.length === 1 ? '' : 's'}
               <span className="muted"> · {viem.formatEther(netHistory)} net</span>
             </summary>

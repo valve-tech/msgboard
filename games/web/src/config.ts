@@ -61,6 +61,11 @@ export type GameDeployment = {
   flipBookX?: viem.Hex
   /** Scan FlipBookX events from here (its deploy block). */
   flipBookXDeployBlock?: string
+  /** CoinFlipTables contract address — permissionless player-run coin-flip tables (players bet
+   *  against an operator's Chips bankroll; validators settle on-chain). Unset until deployed. */
+  coinFlipTables?: viem.Hex
+  /** Scan CoinFlipTables events from here (its deploy block); unset until deployed. */
+  coinFlipTablesDeployBlock?: string
   /** The x402PLS wrapper (EIP-3009+7598 wrapped native PLS; valve's canonical deployment). */
   x402Pls?: viem.Hex
   /** The Provex-controlled EAS instance (EAS has no canonical PulseChain deployment; @provex/eas). */
@@ -103,12 +108,15 @@ export const deployments: GameDeployment[] = [
       '0x2a638D7135966a5cA1973c930bD0317cd7d6874c',
       '0x0D3148A85608708Fe944EE71E13B4C9181b7cc83',
     ],
+    // Fresh validator pools inked 2026-08-02 (reset off the corrupted section — the old pools were
+    // inked with a stuck secret index, wedging cast settlement for all games; see randomness-recovery).
+    // deployBlock = the fresh pools' block so the web app + cast-watcher count heats from the same origin.
     poolOffsets: {
-      '0xae96b0748f933914867d59486251043790cb2896': '34',
-      '0x2a638d7135966a5ca1973c930bd0317cd7d6874c': '34',
-      '0x0d3148a85608708fe944ee71e13b4c9181b7cc83': '18',
+      '0xae96b0748f933914867d59486251043790cb2896': '7970',
+      '0x2a638d7135966a5ca1973c930bd0317cd7d6874c': '6434',
+      '0x0d3148a85608708fe944ee71e13b4c9181b7cc83': '6418',
     },
-    deployBlock: '24645214',
+    deployBlock: '25024811',
     poolSize: 64,
     explorer: 'https://scan.v4.testnet.pulsechain.com/#',
     archive: 'https://archive.msgboard.xyz',
@@ -119,6 +127,9 @@ export const deployments: GameDeployment[] = [
     gamesIndexer: 'https://games.msgboard.xyz/games-indexer/graphql',
     // Chips ERC-20 token — fresh valve-deployer-owned token (2026-07-24 valve migration off gibs).
     chips: '0x81f130c7d9ff020f46f3b01918424173f8d5ca64',
+    // CoinFlipTables — permissionless player-run coin-flip tables (validator-settled); valve_deployer-owned, deployed 2026-08-01.
+    coinFlipTables: '0xe10be94d21b0ddcefadf5ed997b892b9bf4a15f0',
+    coinFlipTablesDeployBlock: '25023553',
     // HouseChannel — close-authorization settle + walk-away forfeiture; valve_deployer-owned, 943 @ block 24957355
     houseChannel: '0xd0fe186fd3ad3d5766d2fd8af35215ab5d3dfc94',
     // ZK skill games — full real-dictionary set (Sudoku leaderboard + Wordle over Chips escrow).

@@ -129,6 +129,12 @@ export const TrustBanner = ({
       </p>
     )
 
+  // Once acknowledged, the strip is DONE — it gets out of the way entirely (the full explanation still
+  // lives behind the top-bar "How it works"). It's a one-time gate per (chain, model), persisted, so a
+  // return visit with a stored ack never shows it again. Leaving a permanent "✓ understood" bar pinned
+  // above every table was just clutter.
+  if (acknowledged) return null
+
   return (
     <div className="trust-strip">
       <span className="trust-seal" title={TRUST_ICON[model].title} aria-hidden>
@@ -138,13 +144,9 @@ export const TrustBanner = ({
         {line}
         <InfoDot label="how the fairness works">{detail}</InfoDot>
       </span>
-      {acknowledged ? (
-        <span className="rules-ack">✓ understood</span>
-      ) : (
-        <button className="secondary trust-ack" onClick={acknowledge}>
-          Got it
-        </button>
-      )}
+      <button className="secondary trust-ack" onClick={acknowledge}>
+        Got it
+      </button>
     </div>
   )
 }
