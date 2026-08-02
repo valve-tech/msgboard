@@ -72,6 +72,31 @@ describe('CoinFlipTables', () => {
     })
   })
 
+  describe('setName', () => {
+    it('emits TableNamed for the operator, rejects non-operators and over-long names', async () => {
+      const ctx = await helpers.loadFixture(testUtils.deploy)
+      const [op, other] = ctx.signers
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.createTable([196, viem.parseEther('10'), viem.parseEther('100')], { account: op.account }))
+      const tableId = (await ctx.coinFlipTables.getEvents.TableCreated())[0]!.args.tableId as viem.Hex
+      await testUtils.confirmTx(ctx, ctx.coinFlipTables.write.setName([tableId, "Mike's table"], { account: op.account }))
+      const named = (await ctx.coinFlipTables.getEvents.TableNamed()).slice(-1)[0]!.args
+      expect(named.tableId).to.equal(tableId)
+      expect(named.name).to.equal("Mike's table")
+      // non-operator cannot name someone else's table
+      await expectations.revertedWithCustomError(
+        ctx.coinFlipTables,
+        ctx.coinFlipTables.write.setName([tableId, 'hijack'], { account: other!.account }),
+        'NotOperator',
+      )
+      // a name over 64 bytes is rejected
+      await expectations.revertedWithCustomError(
+        ctx.coinFlipTables,
+        ctx.coinFlipTables.write.setName([tableId, 'x'.repeat(65)], { account: op.account }),
+        'NameTooLong',
+      )
+    })
+  })
+
   describe('bankroll', () => {
     it('funds hot and cold, and withdraws from each', async () => {
       const ctx = await helpers.loadFixture(testUtils.deploy)

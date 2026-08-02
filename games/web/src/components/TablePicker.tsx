@@ -4,7 +4,7 @@ import { coinFlipTablesAbi } from '@msgboard/games-core'
 import type { GameDeployment } from '../config'
 import { useTableEvents } from '../model/table-rounds'
 import { reduceTables, type TableView } from '../lib/tablesIndex'
-import { getTableName } from '../lib/tableNames'
+import { getTableName, cleanTableName } from '../lib/tableNames'
 import { parseTableIdFromReceipt } from '../lib/tableCreate'
 import { sendGameTx } from '../tx'
 import { fmtAmount } from './Meta'
@@ -53,7 +53,8 @@ const TableRow = ({
   onSelect: (tableId: viem.Hex) => void
 }) => {
   const reason = tableBlockReason(table)
-  const name = getTableName(deployment.chainId, table.tableId)
+  // Authenticated on-chain name wins; fall back to a locally-remembered optimistic name (just-saved).
+  const name = cleanTableName(table.name ?? '') || getTableName(deployment.chainId, table.tableId)
   return (
     <li>
       <button

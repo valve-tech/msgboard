@@ -5,6 +5,8 @@ export type TableView = {
   hot: bigint; cold: bigint; escrowed: bigint; stake: bigint
   maxMultiplierX100: number; maxStake: bigint; hotTarget: bigint; open: boolean
   roundsRecent: number; lastActiveBlock: bigint
+  /** Authenticated on-chain display name (last TableNamed wins); raw — clean before rendering. */
+  name?: string
 }
 
 export type TableEvent = { type: string; tableId: Hex; blockNumber: bigint } & Record<string, any>
@@ -30,6 +32,7 @@ export const reduceTables = (events: TableEvent[], now: bigint, windowBlocks: bi
       case 'TableCreated': v.operator = e.operator; v.maxMultiplierX100 = e.maxMultiplierX100; v.maxStake = e.maxStake; v.hotTarget = e.hotTarget; v.open = true; break
       case 'ParamsSet': v.maxMultiplierX100 = e.maxMultiplierX100; v.maxStake = e.maxStake; v.hotTarget = e.hotTarget; break
       case 'OpenSet': v.open = e.open; break
+      case 'TableNamed': v.name = e.name; break // authenticated on-chain name; last one wins
       case 'HotFunded': v.hot += e.amount; break
       case 'ColdFunded': v.cold += e.amount; break
       case 'HotWithdrawn': v.hot -= e.amount; break
