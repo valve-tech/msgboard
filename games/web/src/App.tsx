@@ -129,6 +129,12 @@ const initialDeploymentIndex = (): number => {
   const i = c ? deployments.findIndex((d) => String(d.chainId) === c) : -1
   return i >= 0 ? i : 0
 }
+// A shared table-invite link carries `?game=tables&table=<tableId>`; pre-select that table so a friend
+// who clicks it lands straight on it. Ignored unless it's a well-formed tableId (bytes32).
+const initialTableId = (): viem.Hex | undefined => {
+  const t = readParams().get('table')
+  return t && /^0x[0-9a-fA-F]{64}$/.test(t) ? (t as viem.Hex) : undefined
+}
 
 export const App = () => {
   const [deploymentIndex, setDeploymentIndex] = useState(initialDeploymentIndex)
@@ -291,6 +297,7 @@ export const App = () => {
           walletClient={wallet.walletClient}
           trustAcknowledged={trustAcknowledged}
           myAddress={wallet.address}
+          initialTableId={initialTableId()}
         />
       )}
       {tab === 'dice' && (

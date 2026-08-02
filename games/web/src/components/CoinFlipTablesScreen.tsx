@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import * as viem from 'viem'
 import { coinFlipTablesAbi, randomAbi } from '@msgboard/games-core'
 import type { GameDeployment } from '../config'
@@ -208,15 +208,41 @@ export const CoinFlipTablesScreen = ({
   walletClient,
   trustAcknowledged,
   myAddress,
+  initialTableId,
 }: {
   deployment: GameDeployment
   data: ChainData
   walletClient?: viem.WalletClient
   trustAcknowledged: boolean
   myAddress?: viem.Hex
+  /** Pre-selected table from a shared invite link (?table=…). */
+  initialTableId?: viem.Hex
 }) => {
   const tableEvents = useTableEvents(deployment)
-  const [tableId, setTableId] = useState<viem.Hex | null>(null)
+  const [tableId, setTableId] = useState<viem.Hex | null>(initialTableId ?? null)
+  const [copied, setCopied] = useState(false)
+  // Mirror the picked table into the URL query so the address bar is itself a shareable invite and a
+  // refresh keeps you on the same table (merges with App's game/chain params — replaceState, no spam).
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search)
+    if (tableId) sp.set('table', tableId)
+    else sp.delete('table')
+    window.history.replaceState(null, '', `${window.location.pathname}?${sp}${window.location.hash}`)
+  }, [tableId])
+  // The full invite URL for the currently-selected table — copied to the clipboard by the invite bar.
+  const inviteUrl = tableId
+    ? `${window.location.origin}${window.location.pathname}?game=tables&table=${tableId}`
+    : ''
+  const copyInvite = async () => {
+    if (!inviteUrl) return
+    try {
+      await navigator.clipboard.writeText(inviteUrl)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      setError('could not copy — select the link and copy it manually')
+    }
+  }
   const [side, setSide] = useState(HEADS) // 0 = HEADS, 1 = TAILS
   const [amount, setAmount] = useState('1')
   const [busy, setBusy] = useState(false)
@@ -372,6 +398,15 @@ export const CoinFlipTablesScreen = ({
       <GameStage title="PLAYER TABLES" subtitle="bet a coin flip against an operator's bankroll" action={<HowItWorksLink />}>
         <div className="cft-surface">
           <TablePicker deployment={deployment} walletClient={walletClient} selected={tableId} onSelect={setTableId} />
+
+          {tableId && (
+            <div className="row cft-invite" style={{ justifyContent: 'space-between', gap: 10, margin: '6px 2px' }}>
+              <span className="muted">Invite players — share this table's link so friends land right on it</span>
+              <button className="secondary" onClick={() => void copyInvite()}>
+                {copied ? 'Copied ✓' : 'Copy invite link'}
+              </button>
+            </div>
+          )}
 
           {tableEvents.error && <div className="banner bad">table read failed: {tableEvents.error}</div>}
 
