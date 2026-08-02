@@ -1,11 +1,33 @@
 import type { ReactNode } from 'react'
 import * as viem from 'viem'
 import type { LadderGameRecord, LadderSessionApi } from '../hooks/useLadderSession'
-import { StakeInput } from './StakeInput'
-import { InfoDot } from './Meta'
+import { GameStage } from './shell/GameStage'
+import { HowItWorksLink } from './HowItWorks'
+import { BetTray } from './shell/BetTray'
+import { MetaPanel } from './shell/MetaPanel'
+import { LadderPath } from './stages/LadderPath'
 
 const HUNDREDTHS = 100n
 export const fmtMult = (x100: bigint): string => `${(Number(x100) / 100).toFixed(2)}x`
+
+/** compact multiplier for tight slots (drop buckets): no "x", fewer digits as it grows. */
+export const fmtMultShort = (x100: bigint): string => {
+  const v = Number(x100) / 100
+  return v >= 100 ? String(Math.round(v)) : v >= 10 ? v.toFixed(1) : v.toFixed(2)
+}
+
+/** A labelled row of difficulty toggle chips for a ladder game's tray config. */
+export const DiffChips = <T extends string>({ label = 'difficulty', options, value, onChange, disabled }: {
+  label?: string; options: readonly T[]; value: T; onChange: (v: T) => void; disabled?: boolean
+}) => (
+  <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+    <span className="muted" style={{ fontSize: 12, minWidth: 66 }}>{label}</span>
+    {options.map((o) => (
+      <button key={o} type="button" disabled={disabled} onClick={() => onChange(o)}
+        className={o === value ? 'tag ok' : 'tag'} style={{ cursor: disabled ? 'default' : 'pointer', textTransform: 'capitalize' }}>{o}</button>
+    ))}
+  </div>
+)
 
 /** A finished ladder-game receipt with the provably-fair verify line (seed re-checked). */
 export const LadderReceipt = ({ record, noun }: { record: LadderGameRecord; noun: string }) => {
@@ -16,11 +38,7 @@ export const LadderReceipt = ({ record, noun }: { record: LadderGameRecord; noun
         <span>
           <span className="tag">{noun} {record.id}</span>
           {viem.formatEther(record.stake)} staked
-          {won ? (
-            <span className="tag ok">cashed {fmtMult(record.multiplierX100)}</span>
-          ) : (
-            <span className="tag">busted</span>
-          )}
+          {won ? <span className="tag ok">cashed {fmtMult(record.multiplierX100)}</span> : <span className="tag">busted</span>}
         </span>
         <span className={record.playerDelta >= 0n ? 'ok' : 'bad'}>
           {record.playerDelta >= 0n ? '+' : ''}
@@ -32,111 +50,126 @@ export const LadderReceipt = ({ record, noun }: { record: LadderGameRecord; noun
       </p>
       <p className="card-meta muted">
         provably fair · commit <span className="mono">{record.commit.slice(0, 10)}…</span> ·{' '}
-        {record.verdict.ok ? (
-          <span className="ok">verify ✓ (seed re-checked)</span>
-        ) : (
-          <span className="bad">verify ✗ {record.verdict.reason}</span>
-        )}
+        {record.verdict.ok ? <span className="ok">verify ✓ (seed re-checked)</span> : <span className="bad">verify ✗ {record.verdict.reason}</span>}
       </p>
     </div>
   )
 }
 
 /**
- * Shared chrome for the stateful ladder screens: stake input + game-specific config row, a start
- * button, the live running multiplier + cash-out button, the seed commit line, and the receipt/history
- * lists. Each game supplies its config controls and in-progress step controls as children.
+ * Shared shell for the stateful ladder screens on the LadderPath surface. Each game supplies its
+ * climb visuals (per-rung multiplier + marker, the live rung's label + choice controls, the summit
+ * crown) and its tray config; this renders the stage + docked tray (stake · config · running
+ * multiplier · New/Cash-out) + the collapsed receipt history. Game mechanics live in the injected
+ * `session` (useLadderSession) — this is presentation only.
  */
 export const LadderShell = ({
-  title, info, noun, startLabel, amount, setAmount, configRow, controls,
-  session, canStart, onStart, walletClient, trustAcknowledged, myAddress, stake,
+  title, subtitle, noun, startLabel,
+  amount, setAmount, session, canStart, onStart, stake,
+  walletClient, trustAcknowledged, myAddress,
+  steps, summit, multAt, markAt, currentLabel, choices, configTray, nextHint,
 }: {
   title: string
-  info: ReactNode
+  subtitle?: string
   noun: string
   startLabel: string
   amount: string
   setAmount: (v: string) => void
-  configRow: ReactNode
-  controls: ReactNode
   session: LadderSessionApi
   canStart: boolean
   onStart: () => void
+  stake?: bigint
   walletClient?: viem.WalletClient
   trustAcknowledged: boolean
   myAddress?: viem.Hex
-  stake?: bigint
+  // climb visuals
+  steps: number
+  summit?: ReactNode
+  multAt?: (i: number) => string
+  markAt?: (i: number) => ReactNode
+  currentLabel?: ReactNode
+  choices: ReactNode
+  /** config controls for the tray (difficulty chips, etc.). */
+  configTray?: ReactNode
+  /** game-specific "next Xx" hint appended to the running-multiplier line. */
+  nextHint?: ReactNode
 }) => {
   const playing = session.status === 'playing'
-  const cashOutValue =
-    stake !== undefined && session.step > 0 ? (stake * session.multiplierX100) / HUNDREDTHS : undefined
+  const cashOut = stake !== undefined && session.step > 0 ? (stake * session.multiplierX100) / HUNDREDTHS : undefined
   const cashed = session.history.filter((g) => g.status === 'cashed').length
-  const net = session.history.reduce((sum, g) => sum + g.playerDelta, 0n)
+  const net = session.history.reduce((s, g) => s + g.playerDelta, 0n)
 
   return (
-    <div>
-      <div className="card">
-        <h3>
-          {title}
-          <InfoDot>{info}</InfoDot>
-        </h3>
-        <div className="row">
-          <StakeInput value={amount} onChange={setAmount} />
-          {configRow}
-          <button onClick={onStart} disabled={!canStart}>
-            {playing ? 'In progress…' : startLabel}
-          </button>
+    <>
+      <GameStage title={title} subtitle={subtitle} action={<HowItWorksLink />}>
+        <LadderPath
+          steps={steps}
+          current={session.step}
+          status={session.status}
+          bustedStep={session.state?.bustStep ?? undefined}
+          multAt={multAt}
+          markAt={markAt}
+          currentLabel={currentLabel}
+          choices={choices}
+          summit={summit}
+        />
+      </GameStage>
+
+      <div className="tray-col">
+        <BetTray
+          amount={amount}
+          onAmount={setAmount}
+          action={
+            playing ? (
+              <button className="primary" onClick={() => session.cashOut()} disabled={!session.canCashOut}>
+                Cash out{cashOut !== undefined ? ` · ${viem.formatEther(cashOut)}` : ''}
+              </button>
+            ) : (
+              <button className="primary" onClick={onStart} disabled={!canStart}>{startLabel}</button>
+            )
+          }
+        >
+          {configTray}
           {playing && (
-            <button onClick={() => session.cashOut()} disabled={!session.canCashOut}>
-              Cash out {cashOutValue !== undefined ? `(${viem.formatEther(cashOutValue)})` : ''}
-            </button>
+            <p className="tray-hint">
+              now <b style={{ color: 'var(--gold-live)' }}>{fmtMult(session.multiplierX100)}</b>
+              {nextHint}
+              {cashOut !== undefined && <span className="muted"> · cash out {viem.formatEther(cashOut)}</span>}
+            </p>
           )}
-          {!walletClient && <span className="muted">connect a wallet to play</span>}
-          {walletClient && !trustAcknowledged && (
-            <span className="muted">tap "Got it" on the fairness note above first</span>
+          {!walletClient && <p className="tray-hint">connect a wallet to play</p>}
+          {walletClient && !trustAcknowledged && <p className="tray-hint">tap "Got it" on the fairness note above first</p>}
+          {session.lastGame && (
+            <p className={session.lastGame.status === 'cashed' ? 'ok' : 'bad'}>
+              {session.lastGame.status === 'cashed'
+                ? `cashed ${fmtMult(session.lastGame.multiplierX100)} · +${viem.formatEther(session.lastGame.playerDelta)}`
+                : `busted · ${viem.formatEther(session.lastGame.playerDelta)}`}
+            </p>
           )}
-        </div>
-        {playing && <p className="muted"><span className="ok">now {fmtMult(session.multiplierX100)}</span> · step {session.step}</p>}
-        {/* game-specific in-progress controls (tile grid / higher-lower / advance / roll) */}
-        {playing && <div style={{ marginTop: '0.5rem' }}>{controls}</div>}
-        {session.commit && (
-          <p className="card-meta muted">
-            layout commit <span className="mono">{session.commit.slice(0, 10)}…</span>
-            {session.step > 0 && <> · {fmtMult(session.multiplierX100)}{cashOutValue !== undefined && <> · cash-out {viem.formatEther(cashOutValue)}</>}</>}
-          </p>
-        )}
-        {session.error && <p className="bad">{session.error}</p>}
+          {session.error && <p className="bad">{session.error}</p>}
+        </BetTray>
+
+        <MetaPanel tabs={['Recent', 'Stats']}>
+          {myAddress && session.history.length > 0 ? (
+            <span><b>{net >= 0n ? '+' : ''}{viem.formatEther(net)}</b> net · {cashed}/{session.history.length} cashed</span>
+          ) : (
+            <span className="muted">{playing ? `climbing — ${noun} in progress` : `no ${noun}s yet`}</span>
+          )}
+        </MetaPanel>
       </div>
-
-      {session.lastGame && (
-        <>
-          <h2>Result</h2>
-          <LadderReceipt record={session.lastGame} noun={noun} />
-        </>
-      )}
-
-      <h2>This table</h2>
-      {session.status === 'idle' && session.history.length === 0 && (
-        <p className="muted">No {noun} yet — set your stake and options, then start one.</p>
-      )}
-      {[...session.history].reverse().map((record) => (
-        <LadderReceipt key={record.id} record={record} noun={noun} />
-      ))}
 
       {myAddress && session.history.length > 0 && (
         <>
           <h2>Your book</h2>
-          <details className="history" open>
+          <details className="history">
             <summary>
               {session.history.length} {noun}{session.history.length === 1 ? '' : 's'}
               <span className="muted"> · {cashed}/{session.history.length} cashed · {viem.formatEther(net)} net</span>
             </summary>
-            {[...session.history].reverse().map((record) => (
-              <LadderReceipt key={record.id} record={record} noun={noun} />
-            ))}
+            {[...session.history].reverse().map((record) => <LadderReceipt key={record.id} record={record} noun={noun} />)}
           </details>
         </>
       )}
-    </div>
+    </>
   )
 }

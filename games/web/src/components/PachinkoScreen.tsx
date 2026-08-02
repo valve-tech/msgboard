@@ -10,15 +10,18 @@ import {
 } from '@msgboard/games'
 import type { GameDeployment } from '../config'
 import { useSession, type RoundRecord } from '../hooks/useSession'
-import { StakeInput, parseStake } from './StakeInput'
+import { parseStake } from './StakeInput'
 import { TurnTiming } from './TurnTiming'
-import { InfoDot } from './Meta'
+import { GameStage } from './shell/GameStage'
+import { HowItWorksLink } from './HowItWorks'
+import { BetTray } from './shell/BetTray'
+import { MetaPanel } from './shell/MetaPanel'
+import { DiffChips, fmtMult, fmtMultShort } from './ladderShared'
+import { DropBoard, type DropBucket } from './stages/DropBoard'
 
 /** the row counts this screen offers; only 12 ships a table for now (PACHINKO_DEFAULT_ROWS). */
 const ALLOWED_ROWS = [PACHINKO_DEFAULT_ROWS] as const
 const RISKS: readonly PachinkoRisk[] = ['low', 'medium', 'high']
-
-const fmtMult = (x100: bigint): string => `${(Number(x100) / 100).toFixed(2)}x`
 
 /** the edged per-slot multiplier ladder for a (risk, rows) pair, straight from the package helpers. */
 const ladderFor = (risk: PachinkoRisk, rows: number): bigint[] | undefined => {
@@ -30,52 +33,42 @@ const ladderFor = (risk: PachinkoRisk, rows: number): bigint[] | undefined => {
   }
 }
 
-/**
- * OFF-CHAIN session-game screen (Pachinko). A ball deflects through pegs into a slot; the slot sets the
- * multiplier. Mechanically the plinko engine with a pachinko paytable. Settles off-chain, co-signed.
- */
+/** payout tier for a slot: a loss (<1x), near-even (~1x), or a real multiplier (>=2x). */
+const tierOf = (x100: bigint): DropBucket['tier'] => (x100 >= 200n ? 'hi' : x100 >= 100n ? 'mid' : 'lo')
+
+/** the committed deflections of a settled drop, low bit = first (top) row — the same bits settle counts. */
+const pathOf = (raw: bigint, rows: number): number[] =>
+  Array.from({ length: rows }, (_, i) => Number((raw >> BigInt(i)) & 1n))
+
 const RoundReceipt = ({ record }: { record: RoundRecord }) => (
   <div className="card">
     <div className="row" style={{ justifyContent: 'space-between' }}>
       <span>
         <span className="tag">round {record.round}</span>
         {viem.formatEther(record.stake)} staked
-        {record.win ? (
-          <span className="tag ok">won {fmtMult(record.multiplierX100)}</span>
-        ) : (
-          <span className="tag">lost</span>
-        )}
+        {record.win ? <span className="tag ok">won {fmtMult(record.multiplierX100)}</span> : <span className="tag">lost</span>}
       </span>
       <span className={record.playerDelta >= 0n ? 'ok' : 'bad'}>
         {record.playerDelta >= 0n ? '+' : ''}
         {viem.formatEther(record.playerDelta)}
       </span>
     </div>
-    <p className="card-meta muted">
-      balance {viem.formatEther(record.balancePlayer)} · co-signed by both parties
-    </p>
-    {record.timing && (
-      <p className="card-meta muted">
-        <TurnTiming timing={record.timing} />
-      </p>
-    )}
+    <p className="card-meta muted">balance {viem.formatEther(record.balancePlayer)} · co-signed by both parties</p>
+    {record.timing && <p className="card-meta muted"><TurnTiming timing={record.timing} /></p>}
   </div>
 )
 
-export const PachinkoScreen = ({
-  deployment,
-  walletClient,
-  trustAcknowledged,
-  myAddress,
-}: {
-  deployment: GameDeployment
-  walletClient?: viem.WalletClient
-  trustAcknowledged: boolean
-  myAddress?: viem.Hex
+/**
+ * OFF-CHAIN session-game screen (Pachinko), on the shared DropBoard surface. Mechanically the plinko
+ * engine with a pachinko paytable: a ball deflects through the pins into a slot that sets the multiplier.
+ * The descent is the round's real committed path (recomputed from the sealed `raw`), not decoration.
+ */
+export const PachinkoScreen = ({ deployment, walletClient, trustAcknowledged, myAddress }: {
+  deployment: GameDeployment; walletClient?: viem.WalletClient; trustAcknowledged: boolean; myAddress?: viem.Hex
 }) => {
   const [amount, setAmount] = useState('0.1')
   const [risk, setRisk] = useState<PachinkoRisk>('medium')
-  const [rows, setRows] = useState<number>(PACHINKO_DEFAULT_ROWS)
+  const rows = PACHINKO_DEFAULT_ROWS // only one table ships for now; no row selector
 
   const session = useSession<PachinkoParams>({
     game: pachinko,
@@ -88,9 +81,9 @@ export const PachinkoScreen = ({
   const stake = parseStake(amount)
   const rowsOk = (ALLOWED_ROWS as readonly number[]).includes(rows)
   const ladder = rowsOk ? ladderFor(risk, rows) : undefined
-  const paramsOk = rowsOk && ladder !== undefined
-  const params: PachinkoParams | undefined = paramsOk ? { rows, risk } : undefined
+  const params: PachinkoParams | undefined = rowsOk && ladder !== undefined ? { rows, risk } : undefined
   const maxMult = ladder?.reduce((m, x) => (x > m ? x : m), 0n)
+  const buckets: DropBucket[] = ladder ? ladder.map((x) => ({ mult: fmtMultShort(x), tier: tierOf(x) })) : []
 
   const busy = session.status === 'opening' || session.status === 'playing'
   const canOpen = walletClient !== undefined && trustAcknowledged && !busy
@@ -101,125 +94,72 @@ export const PachinkoScreen = ({
     void session.play(stake, params)
   }
 
+  const last = session.history.length > 0 ? session.history[session.history.length - 1] : undefined
+  const path = last ? pathOf(last.raw, rows) : undefined
   const wins = session.history.filter((r) => r.win).length
-  const taken = session.history.reduce((sum, r) => sum + r.playerDelta, 0n)
+  const net = session.history.reduce((sum, r) => sum + r.playerDelta, 0n)
+
+  const dropLabel = session.status === 'playing' ? 'Dropping…' : 'Drop'
+  const openLabel = session.status === 'opening' ? 'Opening…' : 'Open table'
 
   return (
-    <div>
-      <div className="card">
-        <h3>
-          Pachinko
-          <InfoDot>
-            <strong>Drop a ball through the pins.</strong> Where it settles sets your multiplier — higher
-            risk spreads the payouts wider, and the edge slots pay the most. (Payout values shown are
-            illustrative.) Instant off-chain settle, no gas, sealed seed you can re-check.
-          </InfoDot>
-        </h3>
-        <div className="row">
-          <StakeInput value={amount} onChange={setAmount} />
-          <label className="threshold-label">
-            risk
-            <span className="row" style={{ gap: '0.25rem' }}>
-              {RISKS.map((r) => (
-                <button
-                  key={r}
-                  type="button"
-                  className={`chip${risk === r ? ' active' : ''}`}
-                  onClick={() => setRisk(r)}
-                  aria-label={`risk ${r}`}
-                >
-                  {r}
-                </button>
-              ))}
-            </span>
-          </label>
-          <label className="threshold-label">
-            rows
-            <span className="row" style={{ gap: '0.25rem' }}>
-              {ALLOWED_ROWS.map((n) => (
-                <button
-                  key={n}
-                  type="button"
-                  className={`chip${rows === n ? ' active' : ''}`}
-                  onClick={() => setRows(n)}
-                  aria-label={`rows ${n}`}
-                >
-                  {n}
-                </button>
-              ))}
-            </span>
-          </label>
-          {session.ready ? (
-            <button onClick={drop} disabled={!canDrop}>
-              {session.status === 'playing' ? 'Dropping…' : 'Drop'}
-            </button>
-          ) : (
-            <button onClick={() => void session.start()} disabled={!canOpen}>
-              {session.status === 'opening' ? 'Opening…' : 'Open table'}
-            </button>
-          )}
-          {!walletClient && <span className="muted">connect a wallet to play</span>}
-          {walletClient && !trustAcknowledged && (
-            <span className="muted">tap "Got it" on the fairness note above first</span>
-          )}
-        </div>
-        {ladder && (
-          <p className="card-meta muted">
-            payout ladder{' '}
-            {ladder.map((x, slot) => (
-              <span key={slot} className="tag">
-                {slot}
-                <span className="mono"> {fmtMult(x)}</span>
-              </span>
-            ))}
-          </p>
-        )}
-        <p className="muted">
-          {amount !== '' && stake === undefined && <span className="bad">enter a positive amount · </span>}
-          {!rowsOk && <span className="bad">rows must be one of {ALLOWED_ROWS.join(' / ')} · </span>}
-          {rowsOk && ladder === undefined && (
-            <span className="bad">no paytable for {risk} risk at {rows} rows · </span>
-          )}
-          {maxMult !== undefined && maxMult > 0n && <span className="ok">up to {fmtMult(maxMult)}</span>}
-        </p>
-        {session.commit && (
-          <p className="card-meta muted">
-            server-seed commit <span className="mono">{session.commit.slice(0, 10)}…</span>
-            {session.balances && (
-              <>
-                {' · '}your balance {viem.formatEther(session.balances.player)} · {session.roundsLeft} drops left
-              </>
-            )}
-          </p>
-        )}
-        {session.error && <p className="bad">{session.error}</p>}
-      </div>
+    <>
+      <GameStage title="PACHINKO" subtitle={`${rows} pins · ${risk} risk`} action={<HowItWorksLink />}>
+        <DropBoard rows={rows} buckets={buckets} path={path} dropId={session.history.length} idleHint="set your risk, then drop" />
+      </GameStage>
 
-      <h2>This table</h2>
-      {!session.ready && session.history.length === 0 && (
-        <p className="muted">No table open — set your stake and board, then open one to start dropping.</p>
-      )}
-      {[...session.history].reverse().map((record) => (
-        <RoundReceipt key={record.round} record={record} />
-      ))}
+      <div className="tray-col">
+        <BetTray
+          amount={amount}
+          onAmount={setAmount}
+          action={
+            session.ready ? (
+              <button className="primary" onClick={drop} disabled={!canDrop}>{dropLabel}</button>
+            ) : (
+              <button className="primary" onClick={() => void session.start()} disabled={!canOpen}>{openLabel}</button>
+            )
+          }
+        >
+          <DiffChips label="risk" options={RISKS} value={risk} onChange={setRisk} disabled={busy} />
+          <p className="tray-hint">
+            {maxMult !== undefined && maxMult > 0n
+              ? <>edge slots pay up to <b style={{ color: 'var(--gold-live)' }}>{fmtMult(maxMult)}</b><span className="muted"> · payouts illustrative</span></>
+              : <span className="bad">no paytable for {risk} risk at {rows} rows</span>}
+          </p>
+          {!walletClient && <p className="tray-hint">connect a wallet to play</p>}
+          {walletClient && !trustAcknowledged && <p className="tray-hint">tap "Got it" on the fairness note above first</p>}
+          {last && (
+            <p className={last.win ? 'ok' : 'bad'}>
+              landed {fmtMult(last.multiplierX100)} · {last.playerDelta >= 0n ? '+' : ''}{viem.formatEther(last.playerDelta)}
+            </p>
+          )}
+          {session.error && <p className="bad">{session.error}</p>}
+        </BetTray>
+
+        <MetaPanel tabs={['Recent', 'Stats']}>
+          {myAddress && session.history.length > 0 ? (
+            <span>
+              <b>{net >= 0n ? '+' : ''}{viem.formatEther(net)}</b> net · {wins}/{session.history.length} won
+              {session.commit && <span className="muted"> · commit {session.commit.slice(0, 10)}…</span>}
+            </span>
+          ) : (
+            <span className="muted">{session.ready ? 'table open — set risk and Drop' : 'no drops yet'}</span>
+          )}
+        </MetaPanel>
+      </div>
 
       {myAddress && session.history.length > 0 && (
         <>
           <h2>Your book</h2>
-          <details className="history" open>
+          <details className="history">
             <summary>
               {session.history.length} drop{session.history.length === 1 ? '' : 's'}
-              <span className="muted">
-                {' '}
-                · {wins}/{session.history.length} won · {viem.formatEther(taken)} net
-              </span>
+              <span className="muted"> · {wins}/{session.history.length} won · {viem.formatEther(net)} net</span>
             </summary>
-            {[...session.history].reverse().map((record) => (
-              <RoundReceipt key={record.round} record={record} />
-            ))}
+            {[...session.history].reverse().map((record) => <RoundReceipt key={record.round} record={record} />)}
           </details>
         </>
       )}
-    </div>
+    </>
   )
 }

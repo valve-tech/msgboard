@@ -7,6 +7,7 @@ import { TrustBanner, isTrustAcknowledgedFor, type TrustModel } from './componen
 import { FlipBookScreen } from './components/FlipBookScreen'
 import { FlipBookXScreen } from './components/FlipBookXScreen'
 import { RaffleScreen } from './components/RaffleScreen'
+import { CoinFlipTablesScreen } from './components/CoinFlipTablesScreen'
 import { DiceScreen } from './components/DiceScreen'
 import { DiceX2Screen } from './components/DiceX2Screen'
 import { LimboScreen } from './components/LimboScreen'
@@ -40,7 +41,7 @@ import { SudokuScreen } from './components/SudokuScreen'
 import { WordleScreen } from './components/WordleScreen'
 import { LiveFeed } from './components/LiveFeed'
 import { StandingsScreen } from './components/StandingsScreen'
-import { Lobby } from './components/Lobby'
+import { CasinoFloor } from './components/CasinoFloor'
 import { Menu } from './components/Menu'
 import { AppShell } from './components/shell/AppShell'
 import { HowItWorksProvider, HowItWorksModal } from './components/HowItWorks'
@@ -56,6 +57,7 @@ const GAMES = [
   { id: 'coinflip', label: '🪙 Coin Flip' },
   { id: 'flipx', label: '✍️ Signed Flips' },
   { id: 'raffle', label: '🎟 The Numbers' },
+  { id: 'tables', label: '🎲 Tables' },
   { id: 'dice', label: '🎲 Dice' },
   { id: 'dicex2', label: '🎲 Dice X2' },
   { id: 'limbo', label: '🚀 Limbo' },
@@ -96,7 +98,7 @@ type Tab = (typeof GAMES)[number]['id']
 // validator set; the coin flip is now the P2P guessing duel (FlipBook — no randomness anywhere);
 // the tables are commit-before-bet + co-signed recompute; the ZK games trust only the proof.
 // 'live' is a feed, not a game, so it shows no trust strip.
-const VALIDATOR_GAMES = new Set<Tab>(['raffle'])
+const VALIDATOR_GAMES = new Set<Tab>(['raffle', 'tables'])
 const P2P_GAMES = new Set<Tab>(['coinflip', 'flipx'])
 const ZK_GAMES = new Set<Tab>(['sudoku', 'wordle'])
 const trustModelFor = (tab: Tab): TrustModel | null =>
@@ -206,6 +208,15 @@ export const App = () => {
         deployment={deployment}
         model={trustModel}
       />
+      {tab === 'lobby' ? (
+        <CasinoFloor
+          deployment={deployment}
+          games={GAMES.filter((g) => !['lobby', 'standings', 'live'].includes(g.id))}
+          trustFor={(id) => trustModelFor(id as Tab)}
+          onPick={(id) => setTab(id as Tab)}
+          topRight={topRight}
+        />
+      ) : (
       <AppShell
         deployment={deployment}
         games={[...GAMES]}
@@ -248,14 +259,6 @@ export const App = () => {
           </div>
         }
       >
-      {tab === 'lobby' && (
-        <Lobby
-          deployment={deployment}
-          games={GAMES.filter((g) => !['lobby', 'standings', 'live'].includes(g.id))}
-          trustFor={(id) => trustModelFor(id as Tab)}
-          onPick={(id) => setTab(id as Tab)}
-        />
-      )}
       {tab === 'coinflip' && (
         <FlipBookScreen
           deployment={deployment}
@@ -274,6 +277,15 @@ export const App = () => {
       )}
       {tab === 'raffle' && (
         <RaffleScreen
+          deployment={deployment}
+          data={data}
+          walletClient={wallet.walletClient}
+          trustAcknowledged={trustAcknowledged}
+          myAddress={wallet.address}
+        />
+      )}
+      {tab === 'tables' && (
+        <CoinFlipTablesScreen
           deployment={deployment}
           data={data}
           walletClient={wallet.walletClient}
@@ -532,6 +544,7 @@ export const App = () => {
       {tab === 'standings' && <StandingsScreen deployment={deployment} myAddress={wallet.address} />}
       {tab === 'live' && <LiveFeed deployment={deployment} />}
       </AppShell>
+      )}
     </HowItWorksProvider>
   )
 }

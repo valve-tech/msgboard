@@ -7,6 +7,7 @@ import {
   makeDomain,
   runPlayerSide,
   runHouseSide,
+  roundRandom,
   type BoardClient,
   type Game,
   type Signer,
@@ -41,7 +42,10 @@ import { saveClientSeed, removeClientSeed, type SeedStore } from '../lib/clientS
 export type RoundRecord = {
   round: number
   stake: bigint
-  /** the per-round randomness the outcome was computed from (post-reveal). */
+  /** the per-round randomness the outcome was computed from (post-reveal). Recomputed in play()
+   *  from the round proof (`roundRandom(serverSeed, clientSeed, nonce)`) — the SAME value the house
+   *  used and the player already verified before co-signing. Game screens derive the visual outcome
+   *  from it (e.g. `dealBaccarat(raw)` → the felt hands). `0n` only if the proof was unavailable. */
   raw: bigint
   win: boolean
   playerDelta: bigint
@@ -282,6 +286,9 @@ export const useSession = <TParams>(config: UseSessionConfig<TParams>): SessionA
   // The last co-signed ROUND SessionState (nonce > 0) accepted by the player side.
   // Captured in buildCoSignPair's onAccept callback and read by play() to derive the RoundRecord.
   const acceptedRoundStateRef = useRef<SessionState>()
+  // The round proof (serverSeed/clientSeed/params) that accompanied that state — lets play()
+  // recompute `raw` (and thus the visual deal) exactly as the player verified before signing.
+  const acceptedRoundProofRef = useRef<RoundProof<unknown>>()
 
   // The transport board is stable for the hook's lifetime (in-memory fallback unless one is passed).
   const board = useMemo(() => boardClient ?? inMemoryBoardClient(), [boardClient])
@@ -340,13 +347,15 @@ export const useSession = <TParams>(config: UseSessionConfig<TParams>): SessionA
       // Build the in-memory co-sign pair and launch runPlayerSide.
       // The onAccept callback captures the accepted ROUND state (nonce > 0) so play() can derive
       // the RoundRecord from the real co-signed outcome rather than a fabricated literal.
-      const { playerT, houseT } = buildCoSignPair((state) => {
+      const { playerT, houseT } = buildCoSignPair((state, proof) => {
         if (state.nonce > 0n) {
           acceptedRoundStateRef.current = state
+          acceptedRoundProofRef.current = proof
         }
       })
       coSignPairRef.current = { playerT, houseT }
       acceptedRoundStateRef.current = undefined
+      acceptedRoundProofRef.current = undefined
 
       const domain = makeDomain(chainId, verifyingContract)
       // Launch the player side. It registers a listener (via playerT.serve) that co-signs OPEN
@@ -423,14 +432,23 @@ export const useSession = <TParams>(config: UseSessionConfig<TParams>): SessionA
         const roundState = acceptedRoundStateRef.current
         if (!roundState) throw new Error('play: no accepted ROUND state after co-sign')
 
+        // Recompute the round's post-reveal entropy from the accepted proof — identical to what the
+        // house used and the player already verified before co-signing. Surfaces the real deal to the
+        // UI (e.g. dealBaccarat(raw)) and the true payout multiplier. Falls back to 0n/derived if a
+        // proof wasn't captured (should not happen for a co-signed round).
+        const proof = acceptedRoundProofRef.current
+        const raw = proof ? roundRandom(proof.serverSeed, proof.clientSeed, roundState.nonce) : 0n
+        const multiplierX100 =
+          proof ? game.settleRound(stake, proof.params as TParams, raw).multiplierX100 : 0n
+
         const prevBalance = currentBalances.player
         const record: RoundRecord = {
           round: Number(roundState.nonce),
           stake,
-          raw: 0n, // raw entropy is in the transcript body; not needed for the UI record
+          raw,
           win: roundState.balancePlayer > prevBalance,
           playerDelta: roundState.balancePlayer - prevBalance,
-          multiplierX100: 0n, // can be parsed from transcript body if needed by the UI
+          multiplierX100,
           balancePlayer: roundState.balancePlayer,
           balanceHouse: roundState.balanceHouse,
           timing: undefined,

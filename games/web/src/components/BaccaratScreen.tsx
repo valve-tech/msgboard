@@ -1,14 +1,20 @@
 import { useState } from 'react'
 import * as viem from 'viem'
-import { baccarat, type BaccaratParams, type BaccaratBet } from '@msgboard/games'
+import { baccarat, dealBaccarat, type BaccaratParams, type BaccaratBet } from '@msgboard/games'
 import type { GameDeployment } from '../config'
 import { useSession, type RoundRecord } from '../hooks/useSession'
-import { StakeInput, parseStake } from './StakeInput'
+import { parseStake } from './StakeInput'
 import { TurnTiming } from './TurnTiming'
-import { InfoDot } from './Meta'
+import { Card, CardBack } from './decisionShared'
+import { GameStage } from './shell/GameStage'
+import { HowItWorksLink } from './HowItWorks'
+import { BetTray } from './shell/BetTray'
+import { MetaPanel } from './shell/MetaPanel'
+import { FeltTable } from './stages/FeltTable'
 
 const BETS: readonly BaccaratBet[] = ['player', 'banker', 'tie']
 const fmtMult = (x100: bigint): string => `${(Number(x100) / 100).toFixed(2)}x`
+const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1)
 
 /** Card games can PUSH (delta 0, not a win) — show that distinctly from a loss. */
 const RoundReceipt = ({ record }: { record: RoundRecord }) => {
@@ -44,6 +50,24 @@ const RoundReceipt = ({ record }: { record: RoundRecord }) => {
   )
 }
 
+/** A labelled hand on the felt — cards over a name·total caption. Face-down backs before the deal. */
+const Hand = ({ cards, total, label, big }: { cards?: number[]; total?: number; label: string; big?: boolean }) => (
+  <div className="row" style={{ flexDirection: 'column', alignItems: 'center', gap: big ? 8 : 6 }}>
+    <div className="row" style={{ gap: big ? 10 : 6 }}>
+      {cards ? cards.map((c, i) => <Card key={i} index={c} big={big} />) : <><CardBack big={big} /><CardBack big={big} /></>}
+    </div>
+    <span className="muted" style={{ letterSpacing: '0.12em', fontSize: big ? 12 : 10 }}>
+      {label}{total !== undefined ? ` · ${total}` : ''}
+    </span>
+  </div>
+)
+
+/**
+ * Baccarat — punto banco. Bet Player, Banker, or Tie; both hands are dealt by the fixed third-card
+ * rules from the sealed shoe (no choices to steer). On the felt the Banker hand sits at the far end,
+ * the Player hand stands up close, and the three bet circles line the front rail. Split co-sign
+ * session (open a table, then deal); the dealt cards are recomputed from the round's revealed seed.
+ */
 export const BaccaratScreen = ({
   deployment,
   walletClient,
@@ -67,8 +91,6 @@ export const BaccaratScreen = ({
   })
 
   const stake = parseStake(amount)
-  const payoutX100 = baccarat.maxMultiplierX100({ bet })
-
   const busy = session.status === 'opening' || session.status === 'playing'
   const canOpen = walletClient !== undefined && trustAcknowledged && !busy
   const canDeal = session.ready && !busy && stake !== undefined
@@ -78,88 +100,90 @@ export const BaccaratScreen = ({
     void session.play(stake, { bet })
   }
 
+  const last = session.history.length > 0 ? session.history[session.history.length - 1] : undefined
+  const coup = last ? dealBaccarat(last.raw) : undefined
+
   const wins = session.history.filter((r) => r.win).length
-  const taken = session.history.reduce((sum, r) => sum + r.playerDelta, 0n)
+  const net = session.history.reduce((sum, r) => sum + r.playerDelta, 0n)
+
+  const bankerNode = <Hand label="Banker" cards={coup?.bankerCards} total={coup?.bankerTotal} />
+  const playerNode = <Hand label="Player" cards={coup?.playerCards} total={coup?.playerTotal} big />
+  const spotsNode = BETS.map((b) => (
+    <button
+      key={b}
+      type="button"
+      className={`spot${bet === b ? ' main' : ''}`}
+      onClick={() => setBet(b)}
+      aria-label={`bet ${b}`}
+      style={coup && coup.winner === b ? { outline: '2px solid var(--gold-live)', outlineOffset: 3 } : undefined}
+    >
+      {cap(b)}
+      <span style={{ display: 'block', fontSize: 9, opacity: 0.75, fontWeight: 400 }}>
+        {fmtMult(baccarat.maxMultiplierX100({ bet: b }))}
+      </span>
+    </button>
+  ))
+
+  const dealLabel = session.status === 'playing' ? 'Dealing…' : 'Deal'
+  const openLabel = session.status === 'opening' ? 'Opening…' : 'Open table'
 
   return (
-    <div>
-      <div className="card">
-        <h3>
-          Baccarat
-          <InfoDot>
-            <strong>Bet on Player, Banker, or Tie.</strong> Both hands are dealt by the fixed punto-banco
-            rules from a deck shuffled off the sealed seed — no choices, nothing the house can steer.
-            Banker pays 0.95:1, Player 1:1, Tie 8:1. Instant off-chain settle, no gas.
-          </InfoDot>
-        </h3>
-        <div className="row">
-          <StakeInput value={amount} onChange={setAmount} />
-          <label className="threshold-label">
-            bet
-            <span className="row" style={{ gap: '0.25rem' }}>
-              {BETS.map((b) => (
-                <button
-                  key={b}
-                  type="button"
-                  className={`chip${bet === b ? ' active' : ''}`}
-                  onClick={() => setBet(b)}
-                  aria-label={`bet ${b}`}
-                >
-                  {b}
-                </button>
-              ))}
-            </span>
-          </label>
-          {session.ready ? (
-            <button onClick={deal} disabled={!canDeal}>
-              {session.status === 'playing' ? 'Dealing…' : 'Deal'}
-            </button>
-          ) : (
-            <button onClick={() => void session.start()} disabled={!canOpen}>
-              {session.status === 'opening' ? 'Opening…' : 'Open table'}
-            </button>
-          )}
-          {!walletClient && <span className="muted">connect a wallet to play</span>}
-          {walletClient && !trustAcknowledged && (
-            <span className="muted">tap "Got it" on the fairness note above first</span>
-          )}
-        </div>
-        <p className="muted">
-          {amount !== '' && stake === undefined && <span className="bad">enter a positive amount · </span>}
-          <span className="ok">{bet} pays {fmtMult(payoutX100)}</span>
-          {bet !== 'tie' && <span className="muted"> · ties push</span>}
-        </p>
-        {session.commit && (
-          <p className="card-meta muted">
-            server-seed commit <span className="mono">{session.commit.slice(0, 10)}…</span>
-            {session.balances && (
-              <>
-                {' · '}your balance {viem.formatEther(session.balances.player)} · {session.roundsLeft} hands left
-              </>
-            )}
-          </p>
-        )}
-        {session.error && <p className="bad">{session.error}</p>}
-      </div>
+    <>
+      <GameStage title="BACCARAT" subtitle="punto banco · sealed shoe" action={<HowItWorksLink />}>
+        <FeltTable
+          dealer={bankerNode}
+          player={playerNode}
+          spots={spotsNode}
+          centerMark={null}
+        />
+      </GameStage>
 
-      <h2>This table</h2>
-      {!session.ready && session.history.length === 0 && (
-        <p className="muted">No table open — set your stake and bet, then open one to start dealing.</p>
-      )}
-      {[...session.history].reverse().map((record) => (
-        <RoundReceipt key={record.round} record={record} />
-      ))}
+      <div className="tray-col">
+        <BetTray
+          amount={amount}
+          onAmount={setAmount}
+          action={
+            session.ready ? (
+              <button className="primary" onClick={deal} disabled={!canDeal}>{dealLabel}</button>
+            ) : (
+              <button className="primary" onClick={() => void session.start()} disabled={!canOpen}>{openLabel}</button>
+            )
+          }
+        >
+          <p className="tray-hint">
+            betting <b style={{ color: 'var(--gold)' }}>{cap(bet)}</b> · pays {fmtMult(baccarat.maxMultiplierX100({ bet }))}
+            {bet !== 'tie' && <span className="muted"> · ties push</span>}
+          </p>
+          {!walletClient && <p className="tray-hint">connect a wallet to play</p>}
+          {walletClient && !trustAcknowledged && <p className="tray-hint">tap "Got it" on the fairness note above first</p>}
+          {last && coup && (
+            <p className={last.win ? 'ok' : last.playerDelta === 0n ? '' : 'bad'}>
+              {coup.winner === 'tie' ? 'Tie' : `${cap(coup.winner)} wins`} ·{' '}
+              {last.win ? `+${viem.formatEther(last.playerDelta)}` : last.playerDelta === 0n ? 'push' : viem.formatEther(last.playerDelta)}
+            </p>
+          )}
+          {session.error && <p className="bad">{session.error}</p>}
+        </BetTray>
+
+        <MetaPanel tabs={['Recent', 'Stats']}>
+          {myAddress && session.history.length > 0 ? (
+            <span>
+              <b>{net >= 0n ? '+' : ''}{viem.formatEther(net)}</b> net · {wins}/{session.history.length} won
+              {session.commit && <span className="muted"> · commit {session.commit.slice(0, 10)}…</span>}
+            </span>
+          ) : (
+            <span className="muted">{session.ready ? 'table open — set your bet and deal' : 'no hands yet'}</span>
+          )}
+        </MetaPanel>
+      </div>
 
       {myAddress && session.history.length > 0 && (
         <>
           <h2>Your book</h2>
-          <details className="history" open>
+          <details className="history">
             <summary>
               {session.history.length} hand{session.history.length === 1 ? '' : 's'}
-              <span className="muted">
-                {' '}
-                · {wins}/{session.history.length} won · {viem.formatEther(taken)} net
-              </span>
+              <span className="muted"> · {wins}/{session.history.length} won · {viem.formatEther(net)} net</span>
             </summary>
             {[...session.history].reverse().map((record) => (
               <RoundReceipt key={record.round} record={record} />
@@ -167,6 +191,6 @@ export const BaccaratScreen = ({
           </details>
         </>
       )}
-    </div>
+    </>
   )
 }

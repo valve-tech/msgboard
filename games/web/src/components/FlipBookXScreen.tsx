@@ -19,7 +19,12 @@ import {
   type XOffer,
 } from '../lib/flipBookXContract'
 import { AddressLink, InfoDot, SourceNote, fmtAmount } from './Meta'
-import { StakeInput, parseStake } from './StakeInput'
+import { parseStake } from './StakeInput'
+import { GameStage } from './shell/GameStage'
+import { BetTray } from './shell/BetTray'
+import { MetaPanel } from './shell/MetaPanel'
+import { DiffChips } from './ladderShared'
+import { BookBoard } from './stages/BookBoard'
 
 const fmtLeft = (seconds: number): string => {
   if (seconds <= 0) return 'now'
@@ -32,12 +37,12 @@ const fmtLeft = (seconds: number): string => {
 }
 
 /**
- * VARIANT B — the SIGNED flip book. An offer here is nothing but a signature: your hidden coin
- * choice (a commit) plus an EIP-3009/7598 transfer authorization over x402PLS, sprayed to
- * msgboard for free. Nothing is escrowed until someone takes; the taker's guess is hidden too,
- * so cancelling can never dodge a loss. Two-phase reveal (maker's choice, then taker's guess),
- * each side bonded for its own reveal. The book arrives over a WEBSOCKET — every new chain head
- * pushes a refresh; no polling.
+ * VARIANT B — the SIGNED flip book, on the shared BookBoard surface. An offer here is nothing but a
+ * signature: your hidden coin choice (a commit) plus an EIP-3009/7598 transfer authorization over
+ * x402PLS, sprayed to msgboard for free. Nothing is escrowed until someone takes; the taker's guess
+ * is hidden too, so cancelling can never dodge a loss. Two-phase reveal (maker's choice, then taker's
+ * guess), each side bonded for its own reveal. The book arrives over a WEBSOCKET — every new chain
+ * head pushes a refresh; no polling.
  */
 export const FlipBookXScreen = ({
   deployment,
@@ -248,70 +253,10 @@ export const FlipBookXScreen = ({
       (f.status === 'choiceRevealed' && mine(f.taker) && now <= (f.guessRevealBy ?? 0)),
   )
 
-  return (
-    <div>
-      {data.error && <div className="banner bad">read failed: {data.error}</div>}
-      {error && <div className="banner bad">{error}</div>}
-      {notice && <div className="banner">{notice}</div>}
-      {myDue.length > 0 && (
-        <div className="banner bad">
-          <strong>Reveal due:</strong> miss your window and you forfeit your bond{myDue.some((f) => mine(f.maker)) ? ' (and the pot)' : ''}.
-        </div>
-      )}
-
-      <div className="card">
-        <div className="row" style={{ justifyContent: 'space-between' }}>
-          <strong>
-            Post a signed offer{' '}
-            <InfoDot label="how signed offers work">
-              Your offer is <strong>just a signature</strong> — a hidden coin choice plus a transfer
-              authorization over x402PLS (wrapped PLS, 1:1). Posting costs a proof-of-work stamp, not gas, and
-              locks nothing: funds move only if someone takes it, and you can cancel any time by voiding the
-              authorization. The taker's guess is hidden too, so nobody can dodge a loss. After a take: you
-              reveal your choice within 15 minutes, then the taker reveals their guess — each reveal returns
-              that side's bond, and going silent forfeits it.
-            </InfoDot>
-          </strong>
-          <SourceNote deployment={deployment} contract={book} contractLabel="FlipBookX" />
-        </div>
-        <div className="row">
-          <span className="muted">your x402PLS</span>
-          <span className="mono">{x402Balance !== undefined ? fmtAmount(deployment, x402Balance) : '—'}</span>
-          <button className="secondary" onClick={() => void wrap(viem.parseEther('1'))} disabled={!canAct}>
-            Wrap 1 PLS
-          </button>
-          <InfoDot label="what wrapping is">
-            x402PLS is native PLS wrapped 1:1 into a token that supports signed transfers (EIP-3009/7598) —
-            the valve x402 wrapper, adminless and redeemable any time. Your stake + bond must be in x402PLS
-            before an offer or take can settle against your signature.
-          </InfoDot>
-        </div>
-        <div className="row">
-          <span className="muted">your hidden side</span>
-          <button className={choice ? '' : 'secondary'} onClick={() => setChoice(true)} disabled={busy}>
-            heads
-          </button>
-          <button className={choice ? 'secondary' : ''} onClick={() => setChoice(false)} disabled={busy}>
-            tails
-          </button>
-          <span className="muted">stake</span>
-          <StakeInput value={amount} onChange={setAmount} />
-        </div>
-        <div className="row">
-          <button onClick={() => void postOffer()} disabled={!canAct || stake === undefined}>
-            {busy ? 'working…' : 'Sign & post (free — no escrow)'}
-          </button>
-          {!connected && <span className="muted">connect a wallet to play</span>}
-          <span className="muted">
-            live over websocket · {data.wsHeads} head{data.wsHeads === 1 ? '' : 's'} pushed
-          </span>
-        </div>
-      </div>
-
-      <h3>Signed offers on the board {data.loading && <span className="muted">refreshing…</span>}</h3>
-      {open.length === 0 && <div className="muted">no signed offers right now — post one above, it costs nothing</div>}
+  const openLane = (
+    <>
       {open.map((o) => (
-        <div className="card" key={o.id}>
+        <div className={`card bk-open${mine(o.offer.maker) ? ' bk-mine' : ''}`} key={o.id}>
           <div className="row" style={{ justifyContent: 'space-between' }}>
             <span>
               <span className="tag">{o.id.slice(0, 10)}…</span>
@@ -339,14 +284,17 @@ export const FlipBookXScreen = ({
           </div>
         </div>
       ))}
+    </>
+  )
 
-      {inflight.length > 0 && <h3>In flight</h3>}
+  const flightLane = (
+    <>
       {inflight.map((f) => {
         const phase1 = f.status === 'taken'
         const deadline = phase1 ? f.choiceRevealBy : (f.guessRevealBy ?? 0)
         const left = deadline - now
         return (
-          <div className="card" key={f.offerId}>
+          <div className={`card bk-wait${mine(f.maker) || mine(f.taker) ? ' bk-mine' : ''}`} key={f.offerId}>
             <div className="row" style={{ justifyContent: 'space-between' }}>
               <span>
                 <span className="tag">{f.offerId.slice(0, 10)}…</span>
@@ -379,10 +327,13 @@ export const FlipBookXScreen = ({
           </div>
         )
       })}
+    </>
+  )
 
-      {settled.length > 0 && <h3>Settled</h3>}
+  const settledLane = (
+    <>
       {settled.map((f) => (
-        <div className="card" key={f.offerId}>
+        <div className="card bk-done" key={f.offerId}>
           <div className="row" style={{ justifyContent: 'space-between' }}>
             <span>
               <span className="tag">{f.offerId.slice(0, 10)}…</span>
@@ -403,6 +354,86 @@ export const FlipBookXScreen = ({
           </div>
         </div>
       ))}
-    </div>
+    </>
+  )
+
+  const alert = (
+    <>
+      {data.error && <div className="banner bad">read failed: {data.error}</div>}
+      {error && <div className="banner bad">{error}</div>}
+      {notice && <div className="banner">{notice}</div>}
+      {myDue.length > 0 && (
+        <div className="banner bad">
+          <strong>Reveal due:</strong> miss your window and you forfeit your bond{myDue.some((f) => mine(f.maker)) ? ' (and the pot)' : ''}.
+        </div>
+      )}
+    </>
+  )
+
+  return (
+    <>
+      <GameStage
+        title="SIGNED FLIPS"
+        subtitle="P2P coin flip · signed offers, no escrow"
+        action={<SourceNote deployment={deployment} contract={book} contractLabel="FlipBookX" />}
+      >
+        <BookBoard
+          alert={alert}
+          defaultKey={myDue.length > 0 ? 'flight' : 'open'}
+          empty={data.loading ? 'reading the board…' : 'no signed offers right now — post one, it costs nothing'}
+          lanes={[
+            { key: 'open', label: 'Signed offers', count: open.length, node: openLane },
+            { key: 'flight', label: 'In flight', count: inflight.length, node: flightLane },
+            { key: 'settled', label: 'Settled', count: settled.length, node: settledLane },
+          ]}
+        />
+      </GameStage>
+
+      <div className="tray-col">
+        <BetTray
+          amount={amount}
+          onAmount={setAmount}
+          action={
+            <button className="primary" onClick={() => void postOffer()} disabled={!canAct || stake === undefined}>
+              {busy ? 'working…' : 'Sign & post — free, no escrow'}
+            </button>
+          }
+        >
+          <DiffChips label="your side" options={['heads', 'tails']} value={choice ? 'heads' : 'tails'} onChange={(v) => setChoice(v === 'heads')} disabled={busy} />
+          <div className="row" style={{ gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+            <span className="muted" style={{ fontSize: 12, minWidth: 66 }}>x402PLS</span>
+            <span className="mono">{x402Balance !== undefined ? fmtAmount(deployment, x402Balance) : '—'}</span>
+            <button className="b-link" onClick={() => void wrap(viem.parseEther('1'))} disabled={!canAct}>Wrap 1 PLS</button>
+            <InfoDot label="what wrapping is">
+              x402PLS is native PLS wrapped 1:1 into a token that supports signed transfers (EIP-3009/7598) —
+              the valve x402 wrapper, adminless and redeemable any time. Your stake + bond must be in x402PLS
+              before an offer or take can settle against your signature.
+            </InfoDot>
+          </div>
+          <p className="tray-hint">
+            your offer is just a signature — nothing escrows until someone takes, and you can void it any time.{' '}
+            <InfoDot label="how signed offers work">
+              A hidden coin choice plus a transfer authorization over x402PLS. Posting costs a proof-of-work stamp, not
+              gas, and locks nothing: funds move only if someone takes it. The taker's guess is hidden too, so nobody can
+              dodge a loss. After a take: you reveal your choice within 15 minutes, then the taker reveals their guess —
+              each reveal returns that side's bond, and going silent forfeits it.
+            </InfoDot>
+          </p>
+          {!connected && <p className="tray-hint">connect a wallet to play</p>}
+          {connected && !trustAcknowledged && <p className="tray-hint">acknowledge the fairness note above first</p>}
+          <p className="tray-hint">live over websocket · {data.wsHeads} head{data.wsHeads === 1 ? '' : 's'} pushed</p>
+        </BetTray>
+
+        <MetaPanel tabs={['Board', 'Guide']}>
+          {myDue.length > 0 ? (
+            <span className="bad"><b>{myDue.length}</b> reveal{myDue.length === 1 ? '' : 's'} due — open the alert above</span>
+          ) : (
+            <span className="muted">
+              <b>{open.length}</b> signed · <b>{inflight.length}</b> in flight · gas-free posting, cancel any time
+            </span>
+          )}
+        </MetaPanel>
+      </div>
+    </>
   )
 }
