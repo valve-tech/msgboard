@@ -222,39 +222,21 @@ export const CoinFlipTablesScreen = ({
   const tableEvents = useTableEvents(deployment)
   const [tableId, setTableId] = useState<viem.Hex | null>(initialTableId ?? null)
   const [copied, setCopied] = useState(false)
-  const [name, setName] = useState('') // the selected table's display label (client-side invite name)
-  // One-time: an arriving invite link (?table=&name=) — remember the shared name for that table so it
-  // shows here and in the picker. Client-side label only; the tableId stays the source of truth.
-  useEffect(() => {
-    const sp = new URLSearchParams(window.location.search)
-    const t = sp.get('table')
-    const n = sp.get('name')
-    if (t && /^0x[0-9a-fA-F]{64}$/.test(t) && n) setTableName(deployment.chainId, t as viem.Hex, n)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-  // Load the selected table's remembered name whenever the selection changes.
-  useEffect(() => {
-    setName(tableId ? getTableName(deployment.chainId, tableId) ?? '' : '')
-  }, [tableId, deployment.chainId])
-  // Mirror the picked table (+ its name) into the URL so the address bar is itself a shareable invite
-  // and a refresh keeps you on the same table (merges with App's game/chain params — replaceState).
+  const [name, setName] = useState('') // operator's edit buffer for the on-chain table name
+  // Mirror the picked table into the URL so the address bar is itself a shareable invite and a refresh
+  // keeps you on the same table (merges with App's game/chain params — replaceState, no history spam).
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search)
     if (tableId) sp.set('table', tableId)
     else sp.delete('table')
-    const nm = tableId ? cleanTableName(name) : ''
-    if (nm) sp.set('name', nm)
-    else sp.delete('name')
     window.history.replaceState(null, '', `${window.location.pathname}?${sp}${window.location.hash}`)
-  }, [tableId, name])
-  const editName = (v: string) => {
-    setName(v)
-    if (tableId) setTableName(deployment.chainId, tableId, v)
-  }
+  }, [tableId])
+  // Reset the rename buffer when the selection changes — the CURRENT name is shown live from chain below.
+  useEffect(() => setName(''), [tableId])
+  // The invite link is just the deep link — the name is authenticated on-chain, not carried in the URL.
   const copyInvite = async () => {
     if (!tableId) return
-    const nm = cleanTableName(name)
-    const url = `${window.location.origin}${window.location.pathname}?game=tables&table=${tableId}${nm ? `&name=${encodeURIComponent(nm)}` : ''}`
+    const url = `${window.location.origin}${window.location.pathname}?game=tables&table=${tableId}`
     try {
       await navigator.clipboard.writeText(url)
       setCopied(true)
@@ -304,6 +286,28 @@ export const CoinFlipTablesScreen = ({
   // Refundable once STALE_BLOCKS have passed since open (seed-missing is enforced on-chain).
   const staleOf = (o: OpenedLog) =>
     tableEvents.head > 0n && o.openedAtBlock > 0n && tableEvents.head >= o.openedAtBlock + STALE_BLOCKS
+
+  // The selected table's authenticated on-chain name + operator, folded from the indexed events (the
+  // last TableNamed wins). Only the operator may (re)name it; everyone else sees the name read-only.
+  const selectedMeta = useMemo(() => {
+    let operator: viem.Hex | undefined
+    let onChainName: string | undefined
+    if (tableId) {
+      for (const e of tableEvents.events) {
+        if (e.tableId !== tableId) continue
+        if (e.type === 'TableCreated') operator = e.operator as viem.Hex
+        if (e.type === 'TableNamed') onChainName = e.name as string
+      }
+    }
+    return { operator, onChainName }
+  }, [tableEvents.events, tableId])
+  const isOperator =
+    !!myAddress && !!selectedMeta.operator && myAddress.toLowerCase() === selectedMeta.operator.toLowerCase()
+  // Authenticated on-chain name wins; fall back to a locally-remembered optimistic name (the operator's
+  // just-saved name, before its TableNamed event indexes). Empty → the picker shows the address.
+  const displayName = tableId
+    ? cleanTableName(selectedMeta.onChainName ?? '') || getTableName(deployment.chainId, tableId) || ''
+    : ''
 
   const run = async (work: () => Promise<void>) => {
     setBusy(true)
@@ -395,6 +399,22 @@ export const CoinFlipTablesScreen = ({
       setRefundedLocal((prev) => (prev.includes(opened.roundId) ? prev : [...prev, opened.roundId]))
     })
 
+  // Operator-only: set/change the table's authenticated on-chain name (setName → TableNamed event).
+  const saveName = () =>
+    run(async () => {
+      if (!tableId) throw new Error('pick a table first')
+      const clean = cleanTableName(name)
+      if (!clean) throw new Error('enter a name')
+      await sendGameTx(deployment, walletClient!, {
+        address: deployment.coinFlipTables!,
+        abi: coinFlipTablesAbi,
+        functionName: 'setName',
+        args: [tableId, clean],
+      })
+      setTableName(deployment.chainId, tableId, clean) // optimistic until the TableNamed event indexes
+      setName('')
+    })
+
   if (!deployed) {
     return (
       <GameStage title="PLAYER TABLES" subtitle="bet a coin flip against an operator's bankroll" action={<HowItWorksLink />}>
@@ -421,23 +441,31 @@ export const CoinFlipTablesScreen = ({
 
           {tableId && (
             <div className="cft-invite">
+              {displayName && <span className="cft-tablename">🎲 {displayName}</span>}
               <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                <input
-                  className="cft-name-input"
-                  type="text"
-                  value={name}
-                  maxLength={MAX_NAME}
-                  placeholder="name this table (optional)"
-                  onChange={(e) => editName(e.target.value)}
-                  style={{ flex: '1 1 200px' }}
-                />
+                {isOperator && (
+                  <>
+                    <input
+                      className="cft-name-input"
+                      type="text"
+                      value={name}
+                      maxLength={MAX_NAME}
+                      placeholder={displayName ? 'rename this table (on-chain)' : 'name this table (on-chain)'}
+                      onChange={(e) => setName(e.target.value)}
+                      style={{ flex: '1 1 180px' }}
+                    />
+                    <button className="secondary" onClick={() => void saveName()} disabled={busy || !cleanTableName(name)}>
+                      {busy ? 'Saving…' : 'Save name'}
+                    </button>
+                  </>
+                )}
                 <button className="secondary" onClick={() => void copyInvite()}>
                   {copied ? 'Copied ✓' : 'Copy invite link'}
                 </button>
               </div>
               <span className="muted cft-invite-hint">
-                {name ? <>Share <b>“{cleanTableName(name)}”</b> — </> : 'Invite players — '}
-                friends who click the link land right on this table
+                {isOperator ? 'Name your table on-chain, then share the link — ' : 'Share the link — '}
+                friends who click it land right on this table
               </span>
             </div>
           )}

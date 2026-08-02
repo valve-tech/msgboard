@@ -1877,8 +1877,9 @@
   background: radial-gradient(120% 90% at 50% -8%, #14251c 0%, #0a150f 52%, #060f0a 100%);
 }
 .cft-rounds { display: flex; flex-direction: column; gap: 8px; }
-/* Invite bar — name the table + copy a deep link (deep-link + invite flow). */
+/* Invite bar — name the table (on-chain) + copy a deep link (deep-link + invite flow). */
 .cft-invite { display: flex; flex-direction: column; gap: 4px; margin: 2px; }
+.cft-tablename { font-weight: 700; font-size: 15px; color: var(--gold-live, #f0c74a); }
 .cft-invite-hint { font-size: 12px; }
 .cft-name-input {
   background: #ffffff0a; border: 1px solid #ffffff1f; border-radius: 8px;

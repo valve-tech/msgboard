@@ -122,6 +122,18 @@ contract CoinFlipTables is GameBase {
         emit OpenSet(tableId, isOpen);
     }
 
+    error NameTooLong();
+    event TableNamed(bytes32 indexed tableId, string name);
+
+    /// @notice Set (or change) the table's public display name — an authenticated label the off-chain
+    /// index folds into the table's identity so an invite reads like a name, not a hash. Operator-only;
+    /// the last TableNamed wins. Capped so one operator can't bloat the event for every viewer. The name
+    /// is carried in the event only (not stored) — the indexer already reads events for the table list.
+    function setName(bytes32 tableId, string calldata name) external onlyOperator(tableId) {
+        if (bytes(name).length > 64) revert NameTooLong();
+        emit TableNamed(tableId, name);
+    }
+
     error InsufficientHot();
     error InsufficientCold();
 

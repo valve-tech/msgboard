@@ -36,6 +36,15 @@ describe('reduceTables', () => {
     expect(v.open).to.equal(false)
   })
 
+  it('folds TableNamed onto the view, last name winning', () => {
+    const events = [
+      { type: 'TableCreated', tableId: T, operator: OP, maxMultiplierX100: 196, maxStake: 10n, hotTarget: 100n, blockNumber: 1n },
+      { type: 'TableNamed', tableId: T, name: 'first', blockNumber: 2n },
+      { type: 'TableNamed', tableId: T, name: "Mike's table", blockNumber: 3n },
+    ] as any
+    expect(reduceTables(events, 10n, 100n)[0]!.name).to.equal("Mike's table")
+  })
+
   it('debits hot by (payout - stake) on RoundOpened with a real nonzero stake', () => {
     const events = [
       { type: 'TableCreated', tableId: T, operator: OP, maxMultiplierX100: 196, maxStake: 10n, hotTarget: 100n, blockNumber: 1n },

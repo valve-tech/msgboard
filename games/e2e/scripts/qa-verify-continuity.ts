@@ -12,14 +12,21 @@ import { makePublicClient } from '@msgboard/games-core'
 
 async function main() {
   /* eslint-disable no-console */
-  const OLD = process.env.OLD as `0x${string}`
   const NEW = process.env.NEW as `0x${string}`
-  if (!OLD || !NEW) throw new Error('set OLD and NEW table addresses')
+  if (!NEW) throw new Error('set NEW (the freshly-deployed table address); reads the CURRENT config from disk')
+  // base = the ACTUAL current live config (943-deployment.json, unedited). The new config keeps counting
+  // everything the current one does by retiring the current coinFlipTables into the retired list.
   const base = loadDeployment(943)
   const pc = makePublicClient(943, process.env.RPC_URL)
 
-  const oldCfg: Deployment = { ...base, coinFlipTables: OLD, coinFlipTablesRetired: undefined }
-  const newCfg: Deployment = { ...base, coinFlipTables: NEW, coinFlipTablesRetired: [OLD] }
+  const oldCfg: Deployment = base
+  const newCfg: Deployment = {
+    ...base,
+    coinFlipTables: NEW,
+    coinFlipTablesRetired: [...(base.coinFlipTablesRetired ?? []), base.coinFlipTables!],
+  }
+  console.log(`current: coinFlipTables ${base.coinFlipTables}, retired ${JSON.stringify(base.coinFlipTablesRetired ?? [])}`)
+  console.log(`new:     coinFlipTables ${NEW}, retired ${JSON.stringify(newCfg.coinFlipTablesRetired)}`)
 
   // Same head for both (heatsSince reads getBlockNumber internally; run back-to-back, tolerate a small
   // organic tail from coinflip/raffle heats landing between the two scans).
@@ -31,9 +38,9 @@ async function main() {
   const prefixMatch = oldKeys.every((k, i) => newKeys[i] === k)
   const delta = newKeys.length - oldKeys.length
 
-  console.log(`OLD-only config:      ${oldKeys.length} heats`)
-  console.log(`NEW + retired[OLD]:   ${newKeys.length} heats  (delta ${delta >= 0 ? '+' : ''}${delta})`)
-  console.log(`old sequence is a prefix of new: ${prefixMatch}`)
+  console.log(`current live config:  ${oldKeys.length} heats`)
+  console.log(`new config:           ${newKeys.length} heats  (delta ${delta >= 0 ? '+' : ''}${delta})`)
+  console.log(`current slot sequence is a prefix of new: ${prefixMatch}`)
   // Continuity holds when the new config counts AT LEAST as many (never fewer — fewer = dropped slots)
   // and the old slot order is preserved as a prefix. A small positive delta is organic heats between
   // the two scans; a NEGATIVE delta means the swap dropped the old contract's slots → NOT SAFE.
