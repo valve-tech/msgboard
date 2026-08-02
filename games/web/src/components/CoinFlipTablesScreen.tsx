@@ -5,6 +5,7 @@ import type { GameDeployment } from '../config'
 import type { ChainData } from '../hooks/useChainData'
 import { useTableEvents } from '../model/table-rounds'
 import type { TableEvent } from '../lib/tablesIndex'
+import { getTableName, setTableName, cleanTableName, MAX_NAME } from '../lib/tableNames'
 import { verifyRound, type OpenedLog, type SettledLog } from '../lib/tablesVerify'
 import { sendGameTx, nextHeatLocations } from '../tx'
 import { publicClientFor } from '../wallet'
@@ -221,22 +222,41 @@ export const CoinFlipTablesScreen = ({
   const tableEvents = useTableEvents(deployment)
   const [tableId, setTableId] = useState<viem.Hex | null>(initialTableId ?? null)
   const [copied, setCopied] = useState(false)
-  // Mirror the picked table into the URL query so the address bar is itself a shareable invite and a
-  // refresh keeps you on the same table (merges with App's game/chain params — replaceState, no spam).
+  const [name, setName] = useState('') // the selected table's display label (client-side invite name)
+  // One-time: an arriving invite link (?table=&name=) — remember the shared name for that table so it
+  // shows here and in the picker. Client-side label only; the tableId stays the source of truth.
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search)
+    const t = sp.get('table')
+    const n = sp.get('name')
+    if (t && /^0x[0-9a-fA-F]{64}$/.test(t) && n) setTableName(deployment.chainId, t as viem.Hex, n)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  // Load the selected table's remembered name whenever the selection changes.
+  useEffect(() => {
+    setName(tableId ? getTableName(deployment.chainId, tableId) ?? '' : '')
+  }, [tableId, deployment.chainId])
+  // Mirror the picked table (+ its name) into the URL so the address bar is itself a shareable invite
+  // and a refresh keeps you on the same table (merges with App's game/chain params — replaceState).
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search)
     if (tableId) sp.set('table', tableId)
     else sp.delete('table')
+    const nm = tableId ? cleanTableName(name) : ''
+    if (nm) sp.set('name', nm)
+    else sp.delete('name')
     window.history.replaceState(null, '', `${window.location.pathname}?${sp}${window.location.hash}`)
-  }, [tableId])
-  // The full invite URL for the currently-selected table — copied to the clipboard by the invite bar.
-  const inviteUrl = tableId
-    ? `${window.location.origin}${window.location.pathname}?game=tables&table=${tableId}`
-    : ''
+  }, [tableId, name])
+  const editName = (v: string) => {
+    setName(v)
+    if (tableId) setTableName(deployment.chainId, tableId, v)
+  }
   const copyInvite = async () => {
-    if (!inviteUrl) return
+    if (!tableId) return
+    const nm = cleanTableName(name)
+    const url = `${window.location.origin}${window.location.pathname}?game=tables&table=${tableId}${nm ? `&name=${encodeURIComponent(nm)}` : ''}`
     try {
-      await navigator.clipboard.writeText(inviteUrl)
+      await navigator.clipboard.writeText(url)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch {
@@ -400,11 +420,25 @@ export const CoinFlipTablesScreen = ({
           <TablePicker deployment={deployment} walletClient={walletClient} selected={tableId} onSelect={setTableId} />
 
           {tableId && (
-            <div className="row cft-invite" style={{ justifyContent: 'space-between', gap: 10, margin: '6px 2px' }}>
-              <span className="muted">Invite players — share this table's link so friends land right on it</span>
-              <button className="secondary" onClick={() => void copyInvite()}>
-                {copied ? 'Copied ✓' : 'Copy invite link'}
-              </button>
+            <div className="cft-invite">
+              <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <input
+                  className="cft-name-input"
+                  type="text"
+                  value={name}
+                  maxLength={MAX_NAME}
+                  placeholder="name this table (optional)"
+                  onChange={(e) => editName(e.target.value)}
+                  style={{ flex: '1 1 200px' }}
+                />
+                <button className="secondary" onClick={() => void copyInvite()}>
+                  {copied ? 'Copied ✓' : 'Copy invite link'}
+                </button>
+              </div>
+              <span className="muted cft-invite-hint">
+                {name ? <>Share <b>“{cleanTableName(name)}”</b> — </> : 'Invite players — '}
+                friends who click the link land right on this table
+              </span>
             </div>
           )}
 

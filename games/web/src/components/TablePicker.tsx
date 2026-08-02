@@ -4,6 +4,7 @@ import { coinFlipTablesAbi } from '@msgboard/games-core'
 import type { GameDeployment } from '../config'
 import { useTableEvents } from '../model/table-rounds'
 import { reduceTables, type TableView } from '../lib/tablesIndex'
+import { getTableName } from '../lib/tableNames'
 import { parseTableIdFromReceipt } from '../lib/tableCreate'
 import { sendGameTx } from '../tx'
 import { fmtAmount } from './Meta'
@@ -52,6 +53,7 @@ const TableRow = ({
   onSelect: (tableId: viem.Hex) => void
 }) => {
   const reason = tableBlockReason(table)
+  const name = getTableName(deployment.chainId, table.tableId)
   return (
     <li>
       <button
@@ -61,6 +63,7 @@ const TableRow = ({
         title={reason}
         onClick={() => onSelect(table.tableId)}
       >
+        {name && <span className="tp-name">{name}</span>}
         <span className="mono tp-op">{shortAddr(table.operator)}</span>
         <span className="tag">{fmtMultiplier(table.maxMultiplierX100)}</span>
         <span className="tp-hot">{fmtAmount(deployment, table.hot)} armed</span>
