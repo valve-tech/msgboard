@@ -15,6 +15,9 @@
   "poolSize": 64,
   "coinFlip": "0x8d3a58d77d22636026066200f8868cd653ec2b2a",
   "raffle": "0x33f506fafe4f05c8de9a07e1c8a7f73f50f1da36",
-  "coinFlipTables": "0x659602cE3e7F8046F4c0602de039228398d1DbEB",
-  "coinFlipTablesRetired": ["0xe10be94d21b0ddcefadf5ed997b892b9bf4a15f0"]
+  "coinFlipTables": "0xcB71E7124F89a4078F683AFaa8681E3532f8c6bd",
+  "coinFlipTablesRetired": [
+    "0xe10be94d21b0ddcefadf5ed997b892b9bf4a15f0",
+    "0x659602cE3e7F8046F4c0602de039228398d1DbEB"
+  ]
 }
