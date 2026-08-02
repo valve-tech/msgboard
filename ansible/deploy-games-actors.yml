@@ -69,6 +69,17 @@
         mode: "0644"
       register: compose_sync
 
+    # loadDeployment reads <chain>-deployment.json at RUNTIME (pool offsets, deployBlock, game
+    # addresses). It is NOT bundled — so it MUST be synced here or the actors run stale config
+    # (this exact gap silently pinned the 943 caster to old, corrupted pools).
+    - name: Ship the deployment configs
+      ansible.builtin.copy:
+        src: "{{ games_repo }}/games/e2e/scripts/{{ item }}-deployment.json"
+        dest: "{{ actors_dir }}/{{ item }}-deployment.json"
+        mode: "0644"
+      loop: [943, 369]
+      register: config_sync
+
     - name: Bring the fleet up (compose reconciles service set + env changes)
       ansible.builtin.command:
         cmd: docker compose up -d
@@ -84,17 +95,20 @@
         chdir: "{{ actors_dir }}"
       vars:
         changed_bundles: "{{ bundle_sync.results | selectattr('changed') | map(attribute='item') | list }}"
+        # a changed <chain>-deployment.json must restart that chain's config consumers (cast-watcher +
+        # player-bots read it at runtime); the file is bind-mounted so compose won't restart on its own.
+        changed_configs: "{{ config_sync.results | selectattr('changed') | map(attribute='item') | map('string') | list }}"
         # cast-watcher + player-bots each run per-chain service pairs; flipbook-bots and cosign-bot
         # are 943-only.
         restart_targets: >-
-          {{ (['cast-watcher', 'cast-watcher-369'] if 'cast-watcher' in changed_bundles else [])
-           + (['player-bots', 'player-bots-369'] if 'player-bots' in changed_bundles else [])
+          {{ ((['cast-watcher', 'player-bots'] if ('cast-watcher' in changed_bundles or 'player-bots' in changed_bundles or '943' in changed_configs) else [])
+           + (['cast-watcher-369', 'player-bots-369'] if ('cast-watcher' in changed_bundles or 'player-bots' in changed_bundles or '369' in changed_configs) else [])
            + (['flipbook-bots'] if 'flipbook-bots' in changed_bundles else [])
            + (['cosign-bot'] if 'cosign-bot' in changed_bundles else [])
            + (['session-bots'] if ('session-bots' in changed_bundles or 'pow-worker' in changed_bundles) else [])
            + (['landing-house', 'landing-house-369'] if 'landing-house' in changed_bundles else [])
            + (['chip-faucet'] if 'chip-faucet' in changed_bundles else [])
-           + (['petition-bot'] if 'petition-bot' in changed_bundles else []) }}
+           + (['petition-bot'] if 'petition-bot' in changed_bundles else [])) | unique }}
       when: restart_targets | length > 0
 
     - name: Smoke — all eleven services are up
