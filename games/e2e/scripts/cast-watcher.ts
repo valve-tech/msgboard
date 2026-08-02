@@ -152,45 +152,109 @@ const main = async () => {
     }
   }
 
+  // Keys past the point of casting — finalized (already settled) OR expired (window closed, can
+  // never be cast). Both are terminal, so once a key lands here we never read it again. Without this
+  // the per-tick scan re-reads EVERY heat since the origin, and fanning those reads out concurrently
+  // (below) would hammer the RPC as history grows. With it, each tick reads only the handful of
+  // still-in-flight rounds. Process-lifetime cache; a restart re-scans once (harmless).
+  const resolved = new Set<string>()
+
   const pass = async () => {
     await topUpOps()
     const heats = await heatsSince(publicClient, config)
     await maintainPools(BigInt(heats.length))
-    for (const [index, heat] of heats.entries()) {
-      const k = BigInt(index)
-      const randomness = (await publicClient.readContract({
-        address: config.random,
-        abi: randomAbi,
-        functionName: 'randomness',
-        args: [heat.key],
-      })) as { seed: viem.Hex; timeline: bigint }
-      if (randomness.seed !== ZERO32) continue // already finalized
-      // Skip requests whose cast window has closed. A stuck/expired request can NEVER be cast, so
-      // re-attempting it every tick (a failing simulate + revert) only slows the tick — and a slow
-      // tick makes FRESH heats expire before they're cast, the exact death spiral that wedged this
-      // watcher for 10 days. Dropping dead keys keeps ticks short enough to hit the ~12-block window.
-      const isExpired = (await publicClient.readContract({
-        address: config.random,
-        abi: randomAbi,
-        functionName: 'expired',
-        args: [randomness.timeline],
-      })) as boolean
-      if (isExpired) continue
-      const secrets = config.canonicalSubset.map((_v, i) =>
-        seeds0Secret(env.SEEDS0!, i * SECRET_STRIDE + Number(k)),
+    // Decide which heats are castable this tick — unfinalized AND with the cast window still open.
+    // These reads are independent, so fan them out: a serial per-heat scan of a long backlog is
+    // itself slow enough to let fresh heats expire before the caster reaches them.
+    //
+    // A stuck/expired request can NEVER be cast, so re-attempting it every tick (a failing simulate
+    // + revert) only wastes time — and a slow tick makes FRESH heats expire before they're cast, the
+    // exact death spiral that wedged this watcher for 10 days. Dropping dead keys keeps the tick short
+    // enough to hit the ~12-block window.
+    const castable = (
+      await Promise.all(
+        heats.map(async (heat, index) => {
+          const k = BigInt(index)
+          if (resolved.has(heat.key)) return null // finalized or expired on an earlier tick
+          const randomness = (await publicClient.readContract({
+            address: config.random,
+            abi: randomAbi,
+            functionName: 'randomness',
+            args: [heat.key],
+          })) as { seed: viem.Hex; timeline: bigint }
+          if (randomness.seed !== ZERO32) {
+            resolved.add(heat.key) // already finalized
+            return null
+          }
+          const isExpired = (await publicClient.readContract({
+            address: config.random,
+            abi: randomAbi,
+            functionName: 'expired',
+            args: [randomness.timeline],
+          })) as boolean
+          if (isExpired) {
+            resolved.add(heat.key) // dead key — can never be cast
+            return null
+          }
+          const secrets = config.canonicalSubset.map((_v, i) =>
+            seeds0Secret(env.SEEDS0!, i * SECRET_STRIDE + Number(k)),
+          )
+          return { key: heat.key, k, secrets }
+        }),
       )
-      try {
-        const receipt = await sendAs(publicClient, wallet, {
-          address: config.random,
-          abi: randomAbi,
-          functionName: 'cast',
-          args: [heat.key, locationsAt(k), secrets],
-        })
-        console.log(`cast key ${heat.key} (slot ${k}) in block ${receipt.blockNumber}`)
-        await postNotice(`cast ${heat.key.slice(0, 10)} blk ${receipt.blockNumber} chain ${CHAIN}`)
-      } catch (error) {
-        // expired window, raced by another caster, etc. — log and keep watching
-        console.error(`cast ${heat.key} failed: ${(error as Error).message?.split('\n').slice(0, 3).join(' ¦ ')}`)
+    ).filter((c): c is { key: viem.Hex; k: bigint; secrets: viem.Hex[] } => c !== null)
+    if (castable.length === 0) return
+
+    // Simulate every castable cast concurrently. A sim failure (raced by another caster, or the
+    // window closing between the expired-check and now) drops just that one — the rest still go out.
+    // Simulating BEFORE assigning nonces means only viable casts consume a nonce, so a dropped cast
+    // can't leave a nonce gap that strands every later cast in the batch as unminable-pending.
+    const fees = await flooredFees(publicClient)
+    const simulated = (
+      await Promise.all(
+        castable.map(async (c) => {
+          try {
+            const { request } = await publicClient.simulateContract({
+              address: config.random,
+              abi: randomAbi,
+              functionName: 'cast',
+              args: [c.key, locationsAt(c.k), c.secrets],
+              account,
+              ...fees,
+            })
+            return { c, request }
+          } catch (error) {
+            console.error(`cast ${c.key} (slot ${c.k}) sim failed: ${(error as Error).message?.split('\n').slice(0, 3).join(' ¦ ')}`)
+            return null
+          }
+        }),
+      )
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ).filter(Boolean) as { c: { key: viem.Hex; k: bigint; secrets: viem.Hex[] }; request: any }[]
+    if (simulated.length === 0) return
+
+    // All casts fire from the one ops wallet, so they MUST carry explicit, contiguous nonces — viem
+    // would otherwise fetch the same 'pending' count for every concurrent send and they'd collide on
+    // a single slot. topUpOps/maintainPools already awaited their ops-wallet sends above, so the
+    // pending count here is a clean base for the batch.
+    const baseNonce = await publicClient.getTransactionCount({ address: account.address, blockTag: 'pending' })
+    const results = await Promise.allSettled(
+      simulated.map(async ({ c, request }, i) => {
+        const hash = await wallet.writeContract({ ...request, nonce: baseNonce + i })
+        const receipt = await publicClient.waitForTransactionReceipt({ hash })
+        if (receipt.status !== 'success') throw new Error(`cast ${c.key} reverted`)
+        console.log(`cast key ${c.key} (slot ${c.k}) in block ${receipt.blockNumber}`)
+        return { c, receipt }
+      }),
+    )
+    // PoW-stamp the settlement notices sequentially AFTER the batch lands — grinding several stamps
+    // at once would spike CPU and stall the concurrent sends' receipts.
+    for (const r of results) {
+      if (r.status === 'fulfilled') {
+        resolved.add(r.value.c.key) // our cast finalized it — don't re-read next tick
+        await postNotice(`cast ${r.value.c.key.slice(0, 10)} blk ${r.value.receipt.blockNumber} chain ${CHAIN}`)
+      } else {
+        console.error(`cast failed: ${(r.reason as Error)?.message?.split('\n').slice(0, 3).join(' ¦ ')}`)
       }
     }
   }
