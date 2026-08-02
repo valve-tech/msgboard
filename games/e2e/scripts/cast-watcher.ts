@@ -163,8 +163,19 @@ const main = async () => {
         abi: randomAbi,
         functionName: 'randomness',
         args: [heat.key],
-      })) as { seed: viem.Hex }
-      if (randomness.seed !== ZERO32) continue
+      })) as { seed: viem.Hex; timeline: bigint }
+      if (randomness.seed !== ZERO32) continue // already finalized
+      // Skip requests whose cast window has closed. A stuck/expired request can NEVER be cast, so
+      // re-attempting it every tick (a failing simulate + revert) only slows the tick — and a slow
+      // tick makes FRESH heats expire before they're cast, the exact death spiral that wedged this
+      // watcher for 10 days. Dropping dead keys keeps ticks short enough to hit the ~12-block window.
+      const isExpired = (await publicClient.readContract({
+        address: config.random,
+        abi: randomAbi,
+        functionName: 'expired',
+        args: [randomness.timeline],
+      })) as boolean
+      if (isExpired) continue
       const secrets = config.canonicalSubset.map((_v, i) =>
         seeds0Secret(env.SEEDS0!, i * SECRET_STRIDE + Number(k)),
       )
