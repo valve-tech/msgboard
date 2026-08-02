@@ -108,12 +108,15 @@ export const deployments: GameDeployment[] = [
       '0x2a638D7135966a5cA1973c930bD0317cd7d6874c',
       '0x0D3148A85608708Fe944EE71E13B4C9181b7cc83',
     ],
+    // Fresh validator pools inked 2026-08-02 (reset off the corrupted section — the old pools were
+    // inked with a stuck secret index, wedging cast settlement for all games; see randomness-recovery).
+    // deployBlock = the fresh pools' block so the web app + cast-watcher count heats from the same origin.
     poolOffsets: {
-      '0xae96b0748f933914867d59486251043790cb2896': '34',
-      '0x2a638d7135966a5ca1973c930bd0317cd7d6874c': '34',
-      '0x0d3148a85608708fe944ee71e13b4c9181b7cc83': '18',
+      '0xae96b0748f933914867d59486251043790cb2896': '7970',
+      '0x2a638d7135966a5ca1973c930bd0317cd7d6874c': '6434',
+      '0x0d3148a85608708fe944ee71e13b4c9181b7cc83': '6418',
     },
-    deployBlock: '24645214',
+    deployBlock: '25024811',
     poolSize: 64,
     explorer: 'https://scan.v4.testnet.pulsechain.com/#',
     archive: 'https://archive.msgboard.xyz',
