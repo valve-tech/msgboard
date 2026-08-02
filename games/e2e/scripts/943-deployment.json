@@ -14,5 +14,6 @@
   "deployBlock": "24645214",
   "poolSize": 64,
   "coinFlip": "0x8d3a58d77d22636026066200f8868cd653ec2b2a",
-  "raffle": "0x33f506fafe4f05c8de9a07e1c8a7f73f50f1da36"
+  "raffle": "0x33f506fafe4f05c8de9a07e1c8a7f73f50f1da36",
+  "coinFlipTables": "0xe10be94d21b0ddcefadf5ed997b892b9bf4a15f0"
 }
