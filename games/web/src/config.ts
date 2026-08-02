@@ -128,10 +128,11 @@ export const deployments: GameDeployment[] = [
     // Chips ERC-20 token — fresh valve-deployer-owned token (2026-07-24 valve migration off gibs).
     chips: '0x81f130c7d9ff020f46f3b01918424173f8d5ca64',
     // CoinFlipTables — permissionless player-run coin-flip tables (validator-settled); valve_deployer-owned.
-    // Redeployed 2026-08-02 to add the Refunded event (prev 0xe10be94d… retired; the caster still counts
-    // its past rounds via coinFlipTablesRetired in 943-deployment.json to keep the pool slot count intact).
-    coinFlipTables: '0x659602cE3e7F8046F4c0602de039228398d1DbEB',
-    coinFlipTablesDeployBlock: '25028935',
+    // Redeployed 2026-08-02 to add on-chain table names (setName/TableNamed) — prior addresses
+    // 0xe10be94d… (Refunded event) + 0x659602cE… are retired in 943-deployment.json so the caster keeps
+    // counting their past rounds (pool slot integrity). Continuity-verified (delta +0) before the swap.
+    coinFlipTables: '0xcB71E7124F89a4078F683AFaa8681E3532f8c6bd',
+    coinFlipTablesDeployBlock: '25032044',
     // HouseChannel — close-authorization settle + walk-away forfeiture; valve_deployer-owned, 943 @ block 24957355
     houseChannel: '0xd0fe186fd3ad3d5766d2fd8af35215ab5d3dfc94',
     // ZK skill games — full real-dictionary set (Sudoku leaderboard + Wordle over Chips escrow).
