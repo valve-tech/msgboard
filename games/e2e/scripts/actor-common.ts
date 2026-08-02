@@ -24,6 +24,11 @@ export type Deployment = {
    *  CoinFlipTables isn't deployed. When set, its heats share the same validator preimage pools as
    *  coinFlip/raffle, so heatsSince MUST include them to keep the caster's slot counter correct. */
   coinFlipTables?: viem.Hex
+  /** RETIRED CoinFlipTables addresses (superseded by a redeploy). Their past RoundOpened events still
+   *  consumed pool slots forever, so heatsSince MUST keep counting them or the chronological slot
+   *  counter drops by that many on the swap → SecretMismatch. Append the old address here whenever
+   *  coinFlipTables is repointed to a fresh deployment. */
+  coinFlipTablesRetired?: viem.Hex[]
   random: viem.Hex
   canonicalSubset: viem.Hex[]
   /** BASE offsets; pools chain at base + n*poolSize (core poolLocationFor). */
@@ -121,17 +126,24 @@ export const heatsSince = async (
   config: Deployment,
 ): Promise<{ key: viem.Hex; blockNumber: bigint }[]> => {
   const from = BigInt(config.deployBlock)
-  const [heated, armed, opened] = await Promise.all([
+  // CoinFlipTables consumes the SAME validator pools; every open() heats one slot and emits
+  // RoundOpened{key,...}. Omitting these would desync the chronological slot counter and corrupt casts
+  // for ALL games once any table round exists. A redeploy moves the address but the OLD address's past
+  // rounds still consumed slots, so count every current + retired table address. logIndex is unique
+  // within a block across all contracts, so the (block, logIndex) sort below is a true chronological
+  // merge across sources. No-op until coinFlipTables is set + played.
+  const tableAddresses = [
+    ...(config.coinFlipTables ? [config.coinFlipTables] : []),
+    ...(config.coinFlipTablesRetired ?? []),
+  ]
+  const [heated, armed, ...tableOpens] = await Promise.all([
     chunkedEvents(publicClient, { address: config.coinFlip, abi: coinFlipAbi as viem.Abi, eventName: 'Heated', fromBlock: from }),
     chunkedEvents(publicClient, { address: config.raffle, abi: raffleAbi as viem.Abi, eventName: 'Armed', fromBlock: from }),
-    // CoinFlipTables consumes the SAME validator pools; every open() heats one slot and emits
-    // RoundOpened{key,...}. Omitting these would desync the chronological slot counter and corrupt
-    // casts for ALL games once any table round exists. No-op until coinFlipTables is set + played.
-    config.coinFlipTables
-      ? chunkedEvents(publicClient, { address: config.coinFlipTables, abi: coinFlipTablesAbi as viem.Abi, eventName: 'RoundOpened', fromBlock: from })
-      : Promise.resolve([]),
+    ...tableAddresses.map((address) =>
+      chunkedEvents(publicClient, { address, abi: coinFlipTablesAbi as viem.Abi, eventName: 'RoundOpened', fromBlock: from }),
+    ),
   ])
-  return [...heated, ...armed, ...opened]
+  return [...heated, ...armed, ...tableOpens.flat()]
     .map((log) => ({ key: (log.args as { key: viem.Hex }).key, blockNumber: log.blockNumber, logIndex: log.logIndex }))
     .sort((a, b) => (a.blockNumber === b.blockNumber ? a.logIndex - b.logIndex : a.blockNumber < b.blockNumber ? -1 : 1))
     .map(({ key, blockNumber }) => ({ key, blockNumber }))

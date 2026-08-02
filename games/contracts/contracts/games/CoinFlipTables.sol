@@ -306,6 +306,15 @@ contract CoinFlipTables is GameBase {
         _settle(roundId, seed);
     }
 
+    event Refunded(
+        bytes32 indexed roundId,
+        bytes32 indexed tableId,
+        address indexed player,
+        uint256 stake,
+        uint256 payout,
+        uint256 refundedAtBlock
+    );
+
     /// @notice Refund a round whose seed never finalized in time. Mirrors CoinFlip.refundStale: a seed
     /// that HAS finalized is value-decided and can only be settled to the parity result, never unwound.
     function refundStale(bytes32 roundId) external {
@@ -321,5 +330,9 @@ contract CoinFlipTables is GameBase {
         t.escrowed -= r.payout;
         t.hot += exposure;                     // operator's at-risk portion returns to armed balance
         chips.safeTransfer(r.player, r.stake); // player reclaims their own stake
+        // Mirror RoundSettled so the off-chain index can release the escrow/exposure and surface the
+        // refunded state (without this event a refunded round is indistinguishable from a still-pending
+        // one — phantom escrow, stuck "waiting on validators").
+        emit Refunded(roundId, r.tableId, r.player, r.stake, r.payout, block.number);
     }
 }

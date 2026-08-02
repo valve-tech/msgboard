@@ -34,6 +34,10 @@ const ERC20_APPROVE_ABI = [
 const HEADS = 0
 const SIDE_OPTIONS = ['Heads (even)', 'Tails (odd)'] as const
 const ZERO32 = viem.padHex('0x0', { size: 32 })
+// A round is refundable once its seed is missing AND STALE_BLOCKS have passed since it opened —
+// GameBase.STALE_BLOCKS. We gate the Refund button on the block gap (cheap, from the poll head); the
+// seed-missing half is enforced by the contract (refundStale reverts TooEarly if a seed did finalize).
+const STALE_BLOCKS = 200n
 
 /** Lift the flat CoinFlipTables events into the OpenedLog / SettledLog shapes verifyRound wants.
  *  useTableEvents already spreads every named arg onto the row, so this is a typed projection. */
@@ -115,27 +119,35 @@ const TablesVerifyPanel = ({
 
 const shortRound = (roundId: viem.Hex) => `${roundId.slice(0, 10)}…${roundId.slice(-6)}`
 
-/** One of the player's rounds — pending (poll + settle) or settled (outcome + verify slip). */
+/** One of the player's rounds — pending (poll + settle, or refund once stale), settled (outcome +
+ *  verify slip), or refunded (stale round whose stake was returned). */
 const RoundCard = ({
   deployment,
   opened,
   settled,
+  refunded,
   seed,
   busy,
   canSettle,
+  stale,
   onSettle,
+  onRefund,
 }: {
   deployment: GameDeployment
   opened: OpenedLog
   settled?: SettledLog
+  refunded?: boolean
   seed?: viem.Hex
   busy: boolean
   canSettle: boolean
+  stale?: boolean
   onSettle: (opened: OpenedLog) => void
+  onRefund?: (opened: OpenedLog) => void
 }) => {
   const settledPending = seed !== undefined && seed !== ZERO32 && !settled
+  const spine = settled ? (settled.won ? 'done' : 'expired') : refunded ? 'expired' : 'wait'
   return (
-    <div className={`card bk-${settled ? (settled.won ? 'done' : 'expired') : 'wait'}`}>
+    <div className={`card bk-${spine}`}>
       <div className="row" style={{ justifyContent: 'space-between' }}>
         <span>
           <span className="tag">{opened.side === HEADS ? 'Heads' : 'Tails'}</span>
@@ -144,10 +156,17 @@ const RoundCard = ({
           <span className="mono muted">{shortRound(opened.roundId)}</span>
         </span>
         <span className="row">
-          {!settled && (
-            <button className="secondary" onClick={() => onSettle(opened)} disabled={!canSettle}>
-              {busy ? 'Settling…' : 'Settle / claim'}
-            </button>
+          {!settled && !refunded && (
+            <>
+              <button className="secondary" onClick={() => onSettle(opened)} disabled={!canSettle}>
+                {busy ? 'Settling…' : 'Settle / claim'}
+              </button>
+              {stale && onRefund && (
+                <button className="secondary" onClick={() => onRefund(opened)} disabled={!canSettle}>
+                  {busy ? '…' : 'Refund stake'}
+                </button>
+              )}
+            </>
           )}
         </span>
       </div>
@@ -160,11 +179,15 @@ const RoundCard = ({
           )}{' '}
           · player <AddressLink deployment={deployment} address={settled.player} />
         </p>
+      ) : refunded ? (
+        <p className="muted">this round went stale — your {fmtAmount(deployment, opened.stake)} stake was refunded</p>
       ) : (
         <p className="muted">
           {settledPending
             ? 'seed is finalized — settle it now'
-            : 'waiting on the validators to cast the seed for this round'}
+            : stale
+              ? 'the validators never cast a seed for this round — you can refund your stake'
+              : 'waiting on the validators to cast the seed for this round'}
         </p>
       )}
       {settled && <TablesVerifyPanel deployment={deployment} opened={opened} settled={settled} />}
@@ -201,6 +224,8 @@ export const CoinFlipTablesScreen = ({
   const [seeds, setSeeds] = useState<Record<string, viem.Hex>>({})
   // Rounds opened THIS session, before the 12s event poll indexes them (merged with the indexed set).
   const [sessionRounds, setSessionRounds] = useState<OpenedLog[]>([])
+  // Rounds refunded THIS session, shown as refunded before the poll indexes the Refunded event.
+  const [refundedLocal, setRefundedLocal] = useState<viem.Hex[]>([])
 
   const stake = parseStake(amount)
   const deployed = deployment.coinFlipTables !== undefined
@@ -209,23 +234,30 @@ export const CoinFlipTablesScreen = ({
 
   // Index every RoundOpened / RoundSettled the poll has seen, then keep only the connected wallet's
   // rounds (merged with this session's just-opened ones so a fresh bet shows before it's indexed).
-  const { myRounds, settledByRound } = useMemo(() => {
+  const { myRounds, settledByRound, refundedByRound } = useMemo(() => {
     const openedByRound = new Map<string, OpenedLog>()
     const settledByRound = new Map<string, SettledLog>()
+    const refundedByRound = new Set<string>(refundedLocal) // optimistic — shown before the poll indexes it
     for (const e of tableEvents.events) {
       if (e.type === 'RoundOpened' && e.roundId) openedByRound.set(e.roundId, toOpened(e))
       if (e.type === 'RoundSettled' && e.roundId) settledByRound.set(e.roundId, toSettled(e))
+      if (e.type === 'Refunded' && e.roundId) refundedByRound.add(e.roundId as string)
     }
     for (const o of sessionRounds) if (!openedByRound.has(o.roundId)) openedByRound.set(o.roundId, o)
     const mine = myAddress?.toLowerCase()
     const myRounds = [...openedByRound.values()]
       .filter((o) => !mine || o.player.toLowerCase() === mine)
       .sort((a, b) => (b.openedAtBlock > a.openedAtBlock ? 1 : b.openedAtBlock < a.openedAtBlock ? -1 : 0))
-    return { myRounds, settledByRound }
-  }, [tableEvents.events, sessionRounds, myAddress])
+    return { myRounds, settledByRound, refundedByRound }
+  }, [tableEvents.events, sessionRounds, myAddress, refundedLocal])
 
-  const pending = myRounds.filter((r) => !settledByRound.has(r.roundId))
+  // Disjoint by construction: the contract lets a round reach only ONE of Settled / Refunded.
+  const pending = myRounds.filter((r) => !settledByRound.has(r.roundId) && !refundedByRound.has(r.roundId))
   const settled = myRounds.filter((r) => settledByRound.has(r.roundId))
+  const refunded = myRounds.filter((r) => refundedByRound.has(r.roundId) && !settledByRound.has(r.roundId))
+  // Refundable once STALE_BLOCKS have passed since open (seed-missing is enforced on-chain).
+  const staleOf = (o: OpenedLog) =>
+    tableEvents.head > 0n && o.openedAtBlock > 0n && tableEvents.head >= o.openedAtBlock + STALE_BLOCKS
 
   const run = async (work: () => Promise<void>) => {
     setBusy(true)
@@ -304,6 +336,19 @@ export const CoinFlipTablesScreen = ({
       }
     })
 
+  // Reclaim the stake on a round whose seed never finalized (stale). Only offered once STALE_BLOCKS
+  // have passed; refundStale reverts TooEarly if a seed did finalize (then the player should settle).
+  const refundRound = (opened: OpenedLog) =>
+    run(async () => {
+      await sendGameTx(deployment, walletClient!, {
+        address: deployment.coinFlipTables!,
+        abi: coinFlipTablesAbi,
+        functionName: 'refundStale',
+        args: [opened.roundId],
+      })
+      setRefundedLocal((prev) => (prev.includes(opened.roundId) ? prev : [...prev, opened.roundId]))
+    })
+
   if (!deployed) {
     return (
       <GameStage title="PLAYER TABLES" subtitle="bet a coin flip against an operator's bankroll" action={<HowItWorksLink />}>
@@ -344,7 +389,20 @@ export const CoinFlipTablesScreen = ({
                   seed={seeds[o.roundId]}
                   busy={busy}
                   canSettle={walletClient !== undefined && !busy}
+                  stale={staleOf(o)}
                   onSettle={(r) => void settleRound(r)}
+                  onRefund={(r) => void refundRound(r)}
+                />
+              ))}
+              {refunded.map((o) => (
+                <RoundCard
+                  key={o.roundId}
+                  deployment={deployment}
+                  opened={o}
+                  refunded
+                  busy={busy}
+                  canSettle={false}
+                  onSettle={() => {}}
                 />
               ))}
               {settled.map((o) => (
@@ -397,6 +455,7 @@ export const CoinFlipTablesScreen = ({
         <MetaPanel tabs={['Rounds', 'Record']}>
           <span>
             <b>{pending.length}</b> live · <b>{settled.length}</b> settled
+            {refunded.length > 0 && <span className="muted"> · {refunded.length} refunded</span>}
             {wonCount > 0 && <span className="muted"> · you won {wonCount}</span>}
             {takings > 0n && <span className="muted"> · took {fmtAmount(deployment, takings)}</span>}
           </span>
