@@ -709,8 +709,8 @@
 .scene.view-flat .hand { transform: translateX(-50%) scale(.78); bottom: 9%; }
 /* Flat 2D betting layout — the bet circles laid out in clean screen space (outside the 3D plane) the
    way a roulette table shows its layout, so nothing mis-projects or clips like the raked .spots do.
-   FeltTable renders the spots node here in 2D and on the plane (.spots) only in Seat; Aerial/Rail show
-   no spots (they're for reading the table). */
+   FeltTable renders the spots node on the plane (.spots) only in Seat, and here (.spots-flat) for every
+   other camera (2D/Aerial/Rail) so the bet selector stays reachable regardless of view. */
 .spots-flat {
   position: absolute; left: 50%; transform: translateX(-50%); bottom: 20%; z-index: 6;
   display: flex; justify-content: center; align-items: center; gap: clamp(16px, 3.2vw, 44px);

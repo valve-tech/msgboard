@@ -86,9 +86,12 @@ export const FeltTable = ({ dealer, player, spots, spread, arc, centerMark, view
         </div>
       </div>
       {player && <div className="hand">{player}</div>}
-      {/* Flat 2D betting layout: the same bet spots laid out in clean screen space (outside the 3D
-          plane, like a roulette table's layout) so nothing mis-projects or clips. 2D view only. */}
-      {spots && view === 'flat' && <div className="spots-flat">{spots}</div>}
+      {/* Flat betting layout: the same bet spots laid out in clean screen space (outside the 3D
+          plane, like a roulette table's layout) so nothing mis-projects or clips. Used by every
+          camera EXCEPT Seat — Seat rides the raked plane above; Aerial/Rail/2D lose the plane's
+          foreground widening, so the bet selector must stay reachable here (else changing the bet
+          is impossible from those cameras). */}
+      {spots && view !== 'seat' && <div className="spots-flat">{spots}</div>}
     </div>
   )
 }
