@@ -79,3 +79,68 @@ contract CoinFlipTablesFuzzTest is Test {
         assertEq(escA, 0, "escrow released on settle");
     }
 }
+
+/// @notice Unit coverage for setName's operator gate and length cap. The existing TS suite covers
+/// the happy path and a single unrelated caller reverting; this fills the gap it misses — an
+/// operator who legitimately owns a DIFFERENT table must still be rejected on someone else's table.
+contract CoinFlipTablesSetNameTest is Test {
+    CoinFlipTables internal tables;
+    MockRandom internal rnd;
+    Chips internal chips;
+
+    address internal operatorA = address(this);
+    address internal operatorB = address(0xB0B);
+    address internal stranger = address(0xBEEF);
+
+    function setUp() public {
+        rnd = new MockRandom();
+        chips = new Chips();
+        tables = new CoinFlipTables(address(rnd), address(chips));
+    }
+
+    function test_setName_nonOperatorReverts() public {
+        bytes32 tableIdA = tables.createTable(150, 1 ether, 0);
+
+        // a completely unrelated wallet cannot name A's table
+        vm.prank(stranger);
+        vm.expectRevert(CoinFlipTables.NotOperator.selector);
+        tables.setName(tableIdA, "stranger's table");
+
+        // operator B creates their OWN table, then tries to name A's table — must also revert,
+        // even though B is a legitimate operator (just not of THIS table)
+        vm.prank(operatorB);
+        tables.createTable(150, 1 ether, 0);
+
+        vm.prank(operatorB);
+        vm.expectRevert(CoinFlipTables.NotOperator.selector);
+        tables.setName(tableIdA, "B trying to rename A's table");
+
+        // operator A can name their own table
+        vm.expectEmit(true, false, false, true, address(tables));
+        emit CoinFlipTables.TableNamed(tableIdA, "Mike's table");
+        tables.setName(tableIdA, "Mike's table");
+    }
+
+    function test_setName_boundaryLength() public {
+        bytes32 tableId = tables.createTable(150, 1 ether, 0);
+
+        bytes memory name64Bytes = new bytes(64);
+        for (uint256 i = 0; i < 64; i++) {
+            name64Bytes[i] = "a";
+        }
+        string memory name64 = string(name64Bytes);
+
+        vm.expectEmit(true, false, false, true, address(tables));
+        emit CoinFlipTables.TableNamed(tableId, name64);
+        tables.setName(tableId, name64);
+
+        bytes memory name65Bytes = new bytes(65);
+        for (uint256 i = 0; i < 65; i++) {
+            name65Bytes[i] = "a";
+        }
+        string memory name65 = string(name65Bytes);
+
+        vm.expectRevert(CoinFlipTables.NameTooLong.selector);
+        tables.setName(tableId, name65);
+    }
+}
