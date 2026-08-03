@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.24;
 
+import {FlipBookBase} from "./FlipBookBase.sol";
+
 /// The P2P coin flip, VARIANT B of examples/games/P2P_COINFLIP_DESIGN.md: fully OFF-CHAIN offers
 /// over signed transfer authorizations, hidden guesses on both sides.
 ///
@@ -55,7 +57,7 @@ interface IX402Token {
     function transfer(address to, uint256 value) external returns (bool);
 }
 
-contract FlipBookX {
+contract FlipBookX is FlipBookBase {
     struct Offer {
         address maker;
         bytes32 commit; // keccak256(abi.encode(maker, choice, salt)) — maker-bound, salt-blinded
@@ -82,26 +84,14 @@ contract FlipBookX {
         bool choice; // meaningful once choiceRevealedAt != 0
     }
 
-    uint32 public constant MIN_REVEAL_WINDOW = 5 minutes;
-    uint32 public constant MAX_REVEAL_WINDOW = 7 days;
-
     /// The x402 wrapper this book settles in (e.g. x402PLS — same address on 943 and 369).
     IX402Token public immutable token;
 
     mapping(bytes32 offerId => Flip) public flips;
 
-    error ZeroStake();
-    error ZeroBond(); // both bonds must be positive — they price the two reveal duties
-    error BadWindow(); // a reveal window outside [MIN_REVEAL_WINDOW, MAX_REVEAL_WINDOW]
-    error SelfTake();
-    error OfferExpired(); // take after takeDeadline
-    error AlreadyTaken(); // this offer is already in flight
     error UnknownFlip(); // no such in-flight flip (never taken, or already settled)
     error ChoiceAlreadyRevealed();
     error ChoiceNotRevealed(); // guess reveal / taker-default claim before the choice reveal
-    error BadReveal(); // (choice, salt) or (guess, salt2) does not open the matching commit
-    error RevealWindowOver(); // reveal after the window — the default path owns the flip now
-    error RevealWindowOpen(); // default claim before the window lapsed
 
     event Taken(
         bytes32 indexed offerId,
@@ -161,12 +151,10 @@ contract FlipBookX {
     ) external returns (bytes32 id) {
         if (o.stake == 0) revert ZeroStake();
         if (o.makerBond == 0 || o.takerBond == 0) revert ZeroBond();
-        if (
-            o.makerRevealWindow < MIN_REVEAL_WINDOW || o.makerRevealWindow > MAX_REVEAL_WINDOW
-                || o.takerRevealWindow < MIN_REVEAL_WINDOW || o.takerRevealWindow > MAX_REVEAL_WINDOW
-        ) revert BadWindow();
-        if (taker == o.maker) revert SelfTake();
-        if (block.timestamp > o.takeDeadline) revert OfferExpired();
+        _checkWindow(o.makerRevealWindow);
+        _checkWindow(o.takerRevealWindow);
+        _checkNotSelf(taker, o.maker);
+        _checkNotExpired(o.takeDeadline);
 
         id = offerId(o);
         if (flips[id].maker != address(0)) revert AlreadyTaken();
@@ -200,8 +188,8 @@ contract FlipBookX {
         Flip storage f = flips[id];
         if (f.maker == address(0)) revert UnknownFlip();
         if (f.choiceRevealedAt != 0) revert ChoiceAlreadyRevealed();
-        if (block.timestamp > uint256(f.takenAt) + f.makerRevealWindow) revert RevealWindowOver();
-        if (keccak256(abi.encode(f.maker, choice, salt)) != f.commit) revert BadReveal();
+        _checkWithinWindow(f.takenAt, f.makerRevealWindow);
+        _checkCommit(f.maker, choice, salt, f.commit);
 
         f.choice = choice;
         f.choiceRevealedAt = uint64(block.timestamp);
@@ -215,8 +203,8 @@ contract FlipBookX {
         Flip memory f = flips[id];
         if (f.maker == address(0)) revert UnknownFlip();
         if (f.choiceRevealedAt == 0) revert ChoiceNotRevealed();
-        if (block.timestamp > uint256(f.choiceRevealedAt) + f.takerRevealWindow) revert RevealWindowOver();
-        if (keccak256(abi.encode(f.taker, guess, salt2)) != f.guessCommit) revert BadReveal();
+        _checkWithinWindow(f.choiceRevealedAt, f.takerRevealWindow);
+        _checkCommit(f.taker, guess, salt2, f.guessCommit);
 
         delete flips[id];
         address winner = (guess == f.choice) ? f.taker : f.maker;
@@ -232,7 +220,7 @@ contract FlipBookX {
         Flip memory f = flips[id];
         if (f.maker == address(0)) revert UnknownFlip();
         if (f.choiceRevealedAt != 0) revert ChoiceAlreadyRevealed();
-        if (block.timestamp <= uint256(f.takenAt) + f.makerRevealWindow) revert RevealWindowOpen();
+        _checkWindowElapsed(f.takenAt, f.makerRevealWindow);
 
         delete flips[id];
         uint256 amount = f.stake * 2 + f.makerBond + f.takerBond;
@@ -247,7 +235,7 @@ contract FlipBookX {
         Flip memory f = flips[id];
         if (f.maker == address(0)) revert UnknownFlip();
         if (f.choiceRevealedAt == 0) revert ChoiceNotRevealed();
-        if (block.timestamp <= uint256(f.choiceRevealedAt) + f.takerRevealWindow) revert RevealWindowOpen();
+        _checkWindowElapsed(f.choiceRevealedAt, f.takerRevealWindow);
 
         delete flips[id];
         uint256 amount = f.stake * 2 + f.takerBond;

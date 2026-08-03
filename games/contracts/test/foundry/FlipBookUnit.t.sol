@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {FlipBook} from "../../contracts/games/FlipBook.sol";
+import {FlipBookBase} from "../../contracts/games/FlipBookBase.sol";
 import {RejectingTaker} from "../../contracts/test/RejectingTaker.sol";
 
 /// Coverage-only Foundry suite for FlipBook (native-ETH P2P coin flip, variant A). FlipBook
@@ -93,14 +94,14 @@ contract FlipBookUnitTest is Test {
     }
 
     function test_post_zeroBond_reverts() public {
-        vm.expectRevert(FlipBook.ZeroBond.selector);
+        vm.expectRevert(FlipBookBase.ZeroBond.selector);
         vm.prank(maker);
         book.post{value: STAKE}(SALT, 0, uint64(block.timestamp + DAY), REVEAL_WINDOW);
     }
 
     function test_post_zeroStake_reverts() public {
         // msg.value <= bond_ leaves no stake to flip; boundary case msg.value == bond_.
-        vm.expectRevert(FlipBook.ZeroStake.selector);
+        vm.expectRevert(FlipBookBase.ZeroStake.selector);
         vm.prank(maker);
         book.post{value: BOND}(SALT, BOND, uint64(block.timestamp + DAY), REVEAL_WINDOW);
     }
@@ -113,13 +114,13 @@ contract FlipBookUnitTest is Test {
     }
 
     function test_post_badWindow_belowMin_reverts() public {
-        vm.expectRevert(FlipBook.BadWindow.selector);
+        vm.expectRevert(FlipBookBase.BadWindow.selector);
         vm.prank(maker);
         book.post{value: STAKE + BOND}(SALT, BOND, uint64(block.timestamp + DAY), 60);
     }
 
     function test_post_badWindow_aboveMax_reverts() public {
-        vm.expectRevert(FlipBook.BadWindow.selector);
+        vm.expectRevert(FlipBookBase.BadWindow.selector);
         vm.prank(maker);
         book.post{value: STAKE + BOND}(SALT, BOND, uint64(block.timestamp + DAY), 8 * uint32(DAY));
     }
@@ -166,7 +167,7 @@ contract FlipBookUnitTest is Test {
     function test_cancel_alreadyTaken_reverts() public {
         uint256 id = _post(true);
         _take(id, false);
-        vm.expectRevert(FlipBook.AlreadyTaken.selector);
+        vm.expectRevert(FlipBookBase.AlreadyTaken.selector);
         vm.prank(maker);
         book.cancel(id);
     }
@@ -191,14 +192,14 @@ contract FlipBookUnitTest is Test {
     function test_take_alreadyTaken_reverts() public {
         uint256 id = _post(true);
         _take(id, true);
-        vm.expectRevert(FlipBook.AlreadyTaken.selector);
+        vm.expectRevert(FlipBookBase.AlreadyTaken.selector);
         vm.prank(stranger);
         book.take{value: STAKE}(id, false);
     }
 
     function test_take_selfTake_reverts() public {
         uint256 id = _post(true);
-        vm.expectRevert(FlipBook.SelfTake.selector);
+        vm.expectRevert(FlipBookBase.SelfTake.selector);
         vm.prank(maker);
         book.take{value: STAKE}(id, true);
     }
@@ -223,7 +224,7 @@ contract FlipBookUnitTest is Test {
         uint256 id2 = _post(true);
         (,,,, uint64 takeDeadline2,,,,) = book.offers(id2);
         vm.warp(takeDeadline2 + 1);
-        vm.expectRevert(FlipBook.OfferExpired.selector);
+        vm.expectRevert(FlipBookBase.OfferExpired.selector);
         vm.prank(taker);
         book.take{value: STAKE}(id2, true);
     }
@@ -266,14 +267,14 @@ contract FlipBookUnitTest is Test {
     function test_reveal_badReveal_wrongChoice_reverts() public {
         uint256 id = _post(true);
         _take(id, true);
-        vm.expectRevert(FlipBook.BadReveal.selector);
+        vm.expectRevert(FlipBookBase.BadReveal.selector);
         book.reveal(id, false, SALT);
     }
 
     function test_reveal_badReveal_wrongSalt_reverts() public {
         uint256 id = _post(true);
         _take(id, true);
-        vm.expectRevert(FlipBook.BadReveal.selector);
+        vm.expectRevert(FlipBookBase.BadReveal.selector);
         book.reveal(id, true, keccak256("wrong-salt"));
     }
 
@@ -281,7 +282,7 @@ contract FlipBookUnitTest is Test {
         uint256 id = _post(true);
         _take(id, true);
         vm.warp(block.timestamp + REVEAL_WINDOW + 1);
-        vm.expectRevert(FlipBook.RevealWindowOver.selector);
+        vm.expectRevert(FlipBookBase.RevealWindowOver.selector);
         book.reveal(id, true, SALT);
     }
 
@@ -323,7 +324,7 @@ contract FlipBookUnitTest is Test {
     function test_claim_windowOpen_reverts() public {
         uint256 id = _post(true);
         _take(id, true);
-        vm.expectRevert(FlipBook.RevealWindowOpen.selector);
+        vm.expectRevert(FlipBookBase.RevealWindowOpen.selector);
         book.claim(id);
     }
 
@@ -336,7 +337,7 @@ contract FlipBookUnitTest is Test {
         uint256 edge = uint256(takenAt) + REVEAL_WINDOW;
 
         vm.warp(edge);
-        vm.expectRevert(FlipBook.RevealWindowOpen.selector);
+        vm.expectRevert(FlipBookBase.RevealWindowOpen.selector);
         book.claim(id);
         // still at the edge — reveal succeeds (only `>` reverts, and this is `==`).
         book.reveal(id, true, SALT);
@@ -346,7 +347,7 @@ contract FlipBookUnitTest is Test {
         _take(id2, true);
         (,,,,,,, uint64 takenAt2,) = book.offers(id2);
         vm.warp(uint256(takenAt2) + REVEAL_WINDOW + 1);
-        vm.expectRevert(FlipBook.RevealWindowOver.selector);
+        vm.expectRevert(FlipBookBase.RevealWindowOver.selector);
         book.reveal(id2, true, SALT);
         book.claim(id2);
     }
@@ -402,7 +403,7 @@ contract FlipBookUnitTest is Test {
         book.take{value: STAKE}(id2, true);
 
         // even knowing (choice, salt), the commit hashes with THIS offer's maker (the copier).
-        vm.expectRevert(FlipBook.BadReveal.selector);
+        vm.expectRevert(FlipBookBase.BadReveal.selector);
         book.reveal(id2, true, SALT);
 
         // the copier's only exit: never reveal → forfeit to the taker.

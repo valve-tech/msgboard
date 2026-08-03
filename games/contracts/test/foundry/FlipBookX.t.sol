@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {FlipBookX} from "../../contracts/games/FlipBookX.sol";
+import {FlipBookBase} from "../../contracts/games/FlipBookBase.sol";
 import {MockX402, Mock1271Wallet} from "../../contracts/test/MockX402.sol";
 
 /// Variant B of the P2P coin flip: off-chain signed offers over the x402 wrapper, hidden guesses
@@ -190,11 +191,11 @@ contract FlipBookXTest is Test {
         uint256 t0 = token.balanceOf(taker);
         bytes32 id = _take(true, true);
 
-        vm.expectRevert(FlipBookX.RevealWindowOpen.selector);
+        vm.expectRevert(FlipBookBase.RevealWindowOpen.selector);
         book.claimMakerDefault(id);
 
         vm.warp(block.timestamp + W1 + 1);
-        vm.expectRevert(FlipBookX.RevealWindowOver.selector);
+        vm.expectRevert(FlipBookBase.RevealWindowOver.selector);
         book.revealChoice(id, true, SALT); // too late — the default path owns it
 
         vm.prank(crank);
@@ -208,11 +209,11 @@ contract FlipBookXTest is Test {
         bytes32 id = _take(true, false); // losing guess — the taker who might bail
         book.revealChoice(id, true, SALT);
 
-        vm.expectRevert(FlipBookX.RevealWindowOpen.selector);
+        vm.expectRevert(FlipBookBase.RevealWindowOpen.selector);
         book.claimTakerDefault(id);
 
         vm.warp(block.timestamp + W2 + 1);
-        vm.expectRevert(FlipBookX.RevealWindowOver.selector);
+        vm.expectRevert(FlipBookBase.RevealWindowOver.selector);
         book.revealGuess(id, false, SALT2);
 
         vm.prank(crank);
@@ -233,10 +234,10 @@ contract FlipBookXTest is Test {
 
     function test_wrongReveals_revert() public {
         bytes32 id = _take(true, true);
-        vm.expectRevert(FlipBookX.BadReveal.selector);
+        vm.expectRevert(FlipBookBase.BadReveal.selector);
         book.revealChoice(id, false, SALT); // wrong choice
         book.revealChoice(id, true, SALT);
-        vm.expectRevert(FlipBookX.BadReveal.selector);
+        vm.expectRevert(FlipBookBase.BadReveal.selector);
         book.revealGuess(id, true, keccak256("wrong-salt"));
     }
 
@@ -245,23 +246,23 @@ contract FlipBookXTest is Test {
         bytes32 gc = _guessCommit(true);
         bytes memory ts = _takerSig(o, id);
 
-        vm.expectRevert(FlipBookX.SelfTake.selector);
+        vm.expectRevert(FlipBookBase.SelfTake.selector);
         book.take(o, makerSig, maker, gc, makerSig);
 
         // NOTE: memory-struct assignment aliases (no copy), so each case restores its field.
         FlipBookX.Offer memory bad = o;
         bad.takerBond = 0;
-        vm.expectRevert(FlipBookX.ZeroBond.selector);
+        vm.expectRevert(FlipBookBase.ZeroBond.selector);
         book.take(bad, makerSig, taker, gc, ts);
         bad.takerBond = TAKER_BOND;
 
         bad.makerRevealWindow = 60; // under MIN
-        vm.expectRevert(FlipBookX.BadWindow.selector);
+        vm.expectRevert(FlipBookBase.BadWindow.selector);
         book.take(bad, makerSig, taker, gc, ts);
         bad.makerRevealWindow = W1;
 
         vm.warp(o.takeDeadline + 1);
-        vm.expectRevert(FlipBookX.OfferExpired.selector);
+        vm.expectRevert(FlipBookBase.OfferExpired.selector);
         book.take(o, makerSig, taker, gc, ts);
     }
 
