@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
+import {FixedPointMathLib} from "solady/src/utils/FixedPointMathLib.sol";
 import {MinesRules} from "../../contracts/games/MinesRules.sol";
 import {MinesRulesHarness} from "./MinesRules.t.sol";
 
@@ -396,25 +397,105 @@ contract MinesRulesUnitTest is Test {
         ph.fairMultiplierX100(tiles, mines, safeRevealed);
     }
 
-    /// fairMultiplierX100 in-range never reverts and multiplierX100At is exactly its 99%-edged
-    /// counterpart, across fuzzed (tiles, mines, safeRevealed) triples.
+    /// multiplierX100At is exactly the 99%-edged counterpart of fairMultiplierX100, across fuzzed
+    /// (tiles, mines, safeRevealed) triples spanning the FULL supported board range [2, 256] — the
+    /// `_binom`-based rewrite prices thin/large boards (e.g. tiles=58 mines=1) without overflowing.
+    /// Peak-binomial boards whose fair multiplier itself exceeds 2**256 revert cleanly
+    /// (FullMulDivFailed) and are skipped here — that tail is pinned by
+    /// test_fairMultiplierX100_residualOverflow_revertsCleanly.
     function testFuzz_fairMultiplier_edgeRelation(uint256 tilesRaw, uint256 minesRaw, uint256 safeRevealedRaw)
         public
     {
-        // tiles capped at 40: fair's numerator is a falling factorial of `tiles`, worst case
-        // (mines=1, safeRevealed=tiles-1) == tiles!; tiles=40 -> ~8.16e47, comfortably inside
-        // uint256, whereas tiles ~58+ would genuinely overflow the product (a real limitation of
-        // the fixed-point formula on very thin, very large boards — not something this coverage
-        // pass changes, just avoided here so the fuzzer explores valid, non-overflowing inputs).
-        uint16 tiles = uint16(bound(tilesRaw, 2, 40));
+        uint16 tiles = uint16(bound(tilesRaw, 2, 256));
+        uint16 mines = uint16(bound(minesRaw, 1, tiles - 1));
+        uint256 safe = uint256(tiles) - mines;
+        uint256 safeRevealed = bound(safeRevealedRaw, 0, safe);
+
+        uint256 fair;
+        try ph.fairMultiplierX100(tiles, mines, safeRevealed) returns (uint256 f) {
+            fair = f;
+        } catch {
+            return; // fair > 2**256 for this peak board — unrepresentable, covered elsewhere
+        }
+        uint256 edged = ph.multiplierX100At(tiles, mines, safeRevealed);
+        // Oracle uses fullMulDiv (not native fair*99/100) to match the contract exactly and to avoid
+        // the test-side intermediate overflow for a large-but-representable fair multiplier.
+        assertEq(edged, FixedPointMathLib.fullMulDiv(fair, 99, 100));
+        if (safeRevealed == 0) assertEq(fair, 100);
+    }
+
+    /// The ORIGINAL (pre-fix) fairMultiplierX100 body, reproduced verbatim as a parity oracle: one
+    /// unreduced product-then-divide, `num = Π(tiles-i)`, `den = Π(safe-i)`, `(num*100)/den`. Used
+    /// below to prove the rewritten implementation is byte-identical for every input where this
+    /// straightforward version does not itself overflow — i.e. every input that "worked today".
+    function _oldFairMultiplierX100(uint256 tiles, uint256 mines, uint256 safeRevealed)
+        internal
+        pure
+        returns (uint256)
+    {
+        uint256 safe = tiles - mines;
+        uint256 num = 1;
+        uint256 den = 1;
+        for (uint256 i = 0; i < safeRevealed; i++) {
+            num *= (tiles - i);
+            den *= (safe - i);
+        }
+        return (num * 100) / den;
+    }
+
+    /// Direct parity fuzz against `_oldFairMultiplierX100`: tiles capped at 56 — the exact largest
+    /// board for which the old unreduced formula NEVER overflows for any (mines, safeRevealed). Its
+    /// worst case is mines=1 at full reveal, where `num` degenerates to `tiles!`, and the old formula
+    /// then evaluates `num * 100` BEFORE dividing: 56! * 100 ≈ 7.1e76 fits under 2**256 (≈1.16e77),
+    /// but 57! * 100 ≈ 4e78 overflows (the `*100`, not `num` alone, sets the ceiling — 57! itself
+    /// fits). Every input in this space is a "currently-valid" input per the bug report, and the new
+    /// MinesRules.fairMultiplierX100 must match the old formula on it exactly.
+    function testFuzz_fairMultiplier_matchesOldFormula_belowOverflowThreshold(
+        uint256 tilesRaw,
+        uint256 minesRaw,
+        uint256 safeRevealedRaw
+    ) public {
+        uint16 tiles = uint16(bound(tilesRaw, 2, 56));
         uint16 mines = uint16(bound(minesRaw, 1, tiles - 1));
         uint256 safe = uint256(tiles) - mines;
         uint256 safeRevealed = bound(safeRevealedRaw, 0, safe);
 
         uint256 fair = ph.fairMultiplierX100(tiles, mines, safeRevealed);
-        uint256 edged = ph.multiplierX100At(tiles, mines, safeRevealed);
-        assertEq(edged, (fair * 99) / 100);
-        if (safeRevealed == 0) assertEq(fair, 100);
+        uint256 oldFair = _oldFairMultiplierX100(tiles, mines, safeRevealed);
+        assertEq(fair, oldFair);
+    }
+
+    /// Regression for the EXACT overflow the bug report names: tiles=58, mines=1, full reveal
+    /// (safeRevealed=57). The old formula's numerator there is 58! (261 bits) and reverts with a
+    /// plain arithmetic panic; the fixed formula computes it via C(58,57)/C(57,57) = 58/1 and must
+    /// return the correct, hand-verified fair multiplier without reverting.
+    function test_fairMultiplierX100_regression_thinLargeBoard_noLongerOverflows() public pure {
+        uint256 fair = MinesRules.fairMultiplierX100(58, 1, 57);
+        assertEq(fair, 5800); // fair = C(58,57)/C(57,57) * 100 = 58/1 * 100
+        uint256 edged = MinesRules.multiplierX100At(58, 1, 57);
+        assertEq(edged, 5742); // 5800 * 99 / 100
+    }
+
+    /// A second, larger thin-board regression at the MAX_TILES ceiling: tiles=256, mines=1, full
+    /// reveal (safeRevealed=255). The old formula's numerator there is 256! (way beyond even 58!'s
+    /// overflow); the fixed formula still resolves it exactly via C(256,255)/C(255,255) = 256/1.
+    function test_fairMultiplierX100_regression_maxTiles_singleMine() public pure {
+        uint256 fair = MinesRules.fairMultiplierX100(256, 1, 255);
+        assertEq(fair, 25600); // fair = 256/1 * 100
+        uint256 edged = MinesRules.multiplierX100At(256, 1, 255);
+        assertEq(edged, 25344); // 25600 * 99 / 100
+    }
+
+    /// Documents the one residual, well-defined failure mode: boards near the binomial peak (many
+    /// mines, deep into a full reveal) whose fair value itself no longer fits a uint256 even after
+    /// removing the artificial overflow — e.g. tiles=256, mines=128, safeRevealed=128, where
+    /// C(256,128) alone is ~5.8e75 and *100 needs ~259 bits. No uint256-based x100 fixed point can
+    /// represent that value; `fullMulDiv` reverts deterministically (`FullMulDivFailed`) rather than
+    /// wrapping or corrupting state. Such boards were never practically playable anyway (no house
+    /// escrow realistically covers a >1e75x multiplier).
+    function test_fairMultiplierX100_residualOverflow_revertsCleanly() public {
+        vm.expectRevert(FixedPointMathLib.FullMulDivFailed.selector);
+        ph.fairMultiplierX100(256, 128, 128);
     }
 
     // ---------------------------------------------------------------------------
