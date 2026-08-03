@@ -191,6 +191,29 @@ contract SolveResolversTest is Test {
         eas.revoke(RevocationRequest({schema: sudokuSchemaUid, data: RevocationRequestData({uid: uid, value: 0})}));
     }
 
+    /// The depth-2 defense itself: register a SECOND schema pointing at the SAME resolver but
+    /// revocable=true, so EAS's own Irrevocable early-out (covered above) does not fire and the
+    /// revocation request actually reaches SudokuSolveResolver.onRevoke, which must still refuse.
+    function test_sudoku_onRevoke_reverts_notRevocable_evenWhenSchemaAllowsIt() public {
+        bytes32 revocableSchema = registry.register(SUDOKU_SCHEMA, ISchemaResolver(address(sudokuResolver)), true);
+        sudokuLog.openPuzzle(PUZZLE_ID, puzzle);
+        bytes32 uid = eas.attest(
+            AttestationRequest({
+                schema: revocableSchema,
+                data: AttestationRequestData({
+                    recipient: address(this),
+                    expirationTime: 0,
+                    revocable: true,
+                    refUID: bytes32(0),
+                    data: abi.encode(PUZZLE_ID, player, nullifier, sProof, puzzle),
+                    value: 0
+                })
+            })
+        );
+        vm.expectRevert(SudokuSolveResolver.NotRevocable.selector);
+        eas.revoke(RevocationRequest({schema: revocableSchema, data: RevocationRequestData({uid: uid, value: 0})}));
+    }
+
     // ---- wordle -----------------------------------------------------------------------------------
 
     function test_wordle_attest_gatedByRealProof() public {
@@ -224,5 +247,28 @@ contract SolveResolversTest is Test {
     function test_wordle_unopenedChallenge_reverts() public {
         vm.expectRevert(WordleSolveResolver.NotOpened.selector);
         eas.attest(_wordleRequest(address(this), guessesUsed));
+    }
+
+    /// Mirrors test_sudoku_onRevoke_reverts_notRevocable_evenWhenSchemaAllowsIt: a schema
+    /// registered revocable=true bypasses EAS's own Irrevocable early-out, so the revocation
+    /// request reaches WordleSolveResolver.onRevoke, whose depth-2 defense must still refuse.
+    function test_wordle_onRevoke_reverts_notRevocable_evenWhenSchemaAllowsIt() public {
+        bytes32 revocableSchema = registry.register(WORDLE_SCHEMA, ISchemaResolver(address(wordleResolver)), true);
+        wordleLog.openChallenge(CHALLENGE_ID, wCommit);
+        bytes32 uid = eas.attest(
+            AttestationRequest({
+                schema: revocableSchema,
+                data: AttestationRequestData({
+                    recipient: address(this),
+                    expirationTime: 0,
+                    revocable: true,
+                    refUID: bytes32(0),
+                    data: abi.encode(CHALLENGE_ID, guessesUsed, guessesCommit, wProof),
+                    value: 0
+                })
+            })
+        );
+        vm.expectRevert(WordleSolveResolver.NotRevocable.selector);
+        eas.revoke(RevocationRequest({schema: revocableSchema, data: RevocationRequestData({uid: uid, value: 0})}));
     }
 }
