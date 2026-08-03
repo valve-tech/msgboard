@@ -98,6 +98,8 @@ remappings = [
 # Skip every other foundry test/helper so the viaIR-requiring game suites never
 # reach this non-viaIR compilation. Only ShuffleVerifier52.t.sol compiles here.
 skip = [
+  'test/foundry/*Unit.t.sol',
+  'test/foundry/CoinFlipTablesInvariant.t.sol',
   'test/foundry/CoinFlip.t.sol',
   'test/foundry/CardCascadePayouts.t.sol',
   'test/foundry/FlipBookX.t.sol',
@@ -186,6 +188,8 @@ no_match_contract = '^ZkTable$'
 # Compile ONLY the M2 tests in this profile. Skipping every other foundry test
 # keeps the (large, slow) verifier compile isolated to the M2 run.
 skip = [
+  'test/foundry/*Unit.t.sol',
+  'test/foundry/CoinFlipTablesInvariant.t.sol',
   'test/foundry/CoinFlip.t.sol',
   'test/foundry/CardCascadePayouts.t.sol',
   'test/foundry/FlipBookX.t.sol',
@@ -264,6 +268,8 @@ no_match_contract = '^ZkTable$'
 # Compile ONLY the integration test here. DiceSettleVerifier.t.sol is skipped so the verifier
 # source is NOT pulled into this viaIR unit (it would fail viaIR); its artifact is read from out.
 skip = [
+  'test/foundry/*Unit.t.sol',
+  'test/foundry/CoinFlipTablesInvariant.t.sol',
   'test/foundry/CoinFlip.t.sol',
   'test/foundry/CardCascadePayouts.t.sol',
   'test/foundry/FlipBookX.t.sol',
@@ -337,6 +343,8 @@ no_match_contract = '^ZkTable$'
 # The M2 verifier tests need the zkverify/zkm2 profiles (0.8.27 viaIR:false / prebuilt artifact),
 # so exclude them from this viaIR:true unit.
 skip = [
+  'test/foundry/*Unit.t.sol',
+  'test/foundry/CoinFlipTablesInvariant.t.sol',
   'test/foundry/ShuffleVerifier52.t.sol',
   'test/foundry/ShuffleVerifier52Positive.t.sol',
   'test/foundry/RevealVerifierBabyJubJub.t.sol',
@@ -378,6 +386,8 @@ fs_permissions = [
 no_match_contract = '^ZkTable$'
 # Compile ONLY the resolver suite + its imports in this 0.8.27 unit.
 skip = [
+  'test/foundry/*Unit.t.sol',
+  'test/foundry/CoinFlipTablesInvariant.t.sol',
   'test/foundry/CardCascadePayouts.t.sol',
   'test/foundry/Chips.t.sol',
   'test/foundry/CoinFlip.t.sol',
