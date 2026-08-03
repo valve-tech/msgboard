@@ -2,43 +2,25 @@
 pragma solidity ^0.8.24;
 
 import {EIP712} from "solady/src/utils/EIP712.sol";
-import {ECDSA} from "solady/src/utils/ECDSA.sol";
 import {SafeTransferLib} from "solady/src/utils/SafeTransferLib.sol";
 import {ChannelState, ChannelStateLib} from "./ChannelState.sol";
 import {IGameRules} from "./IGameRules.sol";
+import {ChannelTableBase} from "./ChannelTableBase.sol";
 
 /// @notice Two-party state-channel card table. Stakes escrow at create/join, play is
 /// off-chain co-signed states, the chain is touched again only to settle, top up, or
 /// dispute. Tables are independent structs keyed by id — nothing reads another table,
 /// so sessions pipeline (spec: 2026-06-11-zk-card-games-design.md, msgboard repo).
-contract ZkTable is EIP712 {
+///
+/// Shared errors/Status/dispute-clock constants/co-sign helpers live in ChannelTableBase,
+/// alongside its HoldemTableN counterpart (2026-08 DRY pass) — see that file's header for
+/// what's shared vs. why the escrow/state shape stays separate.
+contract ZkTable is EIP712, ChannelTableBase {
     using SafeTransferLib for address;
     using ChannelStateLib for ChannelState;
 
-    error WrongValue();
-    error BadClock();
-    error BadStatus();
-    error NotPlayer();
-    error WrongTable();
-    error BadSig();
-    error NotFinal();
-    error PotNotZero();
-    error ConservationViolated();
-    error StaleNonce();
-    error BadRules();
-    error ClockNotExpired();
-    error NotYourDispute();
-    error NotDemanded();
-    error NotYourTurn();
-    error BadGameState();
-    error BadDeck();
+    // ZkTable-only error: BadSig/BadGameState/etc are inherited from ChannelTableBase.
     error BadProof();
-    error BadDemand();
-
-    uint8 internal constant DEMAND_MOVE = 1;
-    uint8 internal constant DEMAND_SHARE = 2;
-
-    enum Status { None, Created, Live, Disputed, Settled, Cancelled }
 
     struct Table {
         address playerA;
@@ -60,9 +42,6 @@ contract ZkTable is EIP712 {
         uint32 demandSlot;
         ChannelState disputeState;
     }
-
-    uint64 public constant MIN_CLOCK_BLOCKS = 30;     // ~5 min at 10s blocks
-    uint64 public constant MAX_CLOCK_BLOCKS = 60480;  // ~1 week
 
     uint256 internal _counter;
     mapping(bytes32 => Table) public tables;
@@ -97,8 +76,8 @@ contract ZkTable is EIP712 {
         returns (bytes32 tableId)
     {
         if (msg.value == 0) revert WrongValue();
-        if (clockBlocks < MIN_CLOCK_BLOCKS || clockBlocks > MAX_CLOCK_BLOCKS) revert BadClock();
-        if (address(rules).code.length == 0) revert BadRules(); // a dead rules address would brick settle for both escrows
+        _validateClock(clockBlocks);
+        _validateRulesCode(address(rules));
         tableId = keccak256(abi.encode(block.chainid, address(this), ++_counter));
         Table storage t = tables[tableId];
         t.playerA = msg.sender;
@@ -178,15 +157,12 @@ contract ZkTable is EIP712 {
     /// so dispute timeouts (next task) can always pay out exactly escrowA+escrowB,
     /// and a pre-top-up state becomes unsubmittable once the top-up lands.
     function _checkCoSigned(Table storage t, bytes32 tableId, ChannelState calldata state, bytes calldata sigA, bytes calldata sigB) internal view {
-        if (state.tableId != tableId) revert WrongTable();
-        if (state.balanceA + state.balanceB + state.pot != t.escrowA + t.escrowB) revert ConservationViolated();
+        _validateTableId(state.tableId, tableId);
+        _validateConservation(state.balanceA + state.balanceB + state.pot, t.escrowA + t.escrowB);
         // hot path: hash the calldata struct directly (no calldata->memory copy)
         bytes32 digest = _hashTypedData(state.structHash());
-        // Solady ECDSA does not enforce low-s; sigs are never used as identifiers here (replay
-        // safety = status + tableId pin + nonce checkpoint), so malleability is benign — do not
-        // use sig bytes as dedup keys off-chain.
-        if (ECDSA.recoverCalldata(digest, sigA) != t.keyA) revert BadSig();
-        if (ECDSA.recoverCalldata(digest, sigB) != t.keyB) revert BadSig();
+        _validateSig(digest, sigA, t.keyA);
+        _validateSig(digest, sigB, t.keyB);
     }
 
     function _seatOf(Table storage t, address who) internal view returns (uint8) {
@@ -231,7 +207,7 @@ contract ZkTable is EIP712 {
         _checkCoSigned(t, tableId, state, sigA, sigB);
         if (t.hasCheckpoint && state.nonce < t.checkpointNonce) revert StaleNonce();
         if (t.rules.hashGameState(gameState) != state.gameStateHash) revert BadGameState();
-        if (demandKind != DEMAND_MOVE && demandKind != DEMAND_SHARE) revert BadDemand();
+        _validateDemandKind(demandKind);
         uint8 counterparty = seat == 1 ? 2 : 1;
         if (t.rules.whoseTurn(gameState) & counterparty == 0) revert NotYourTurn();
         t.status = Status.Disputed;
@@ -320,7 +296,7 @@ contract ZkTable is EIP712 {
     function resolveTimeout(bytes32 tableId) external {
         Table storage t = tables[tableId];
         if (t.status != Status.Disputed) revert BadStatus();
-        if (uint64(block.number) <= t.disputeDeadline) revert ClockNotExpired();
+        _validateClockExpired(t.disputeDeadline);
         if (t.demandKind == 0) {
             emit SetupDisputeRefunded(tableId);
             _payout(t, tableId, t.escrowA, t.escrowB);

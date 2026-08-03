@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {HoldemTableN} from "../../contracts/zk/HoldemTableN.sol";
+import {ChannelTableBase} from "../../contracts/zk/ChannelTableBase.sol";
 import {ChannelStateN, SidePot as ChannelSidePot} from "../../contracts/zk/ChannelStateN.sol";
 import {IGameRulesN} from "../../contracts/zk/IGameRulesN.sol";
 import {HoldemRules} from "../../contracts/zk/HoldemRules.sol";
@@ -136,7 +137,7 @@ contract HoldemTableNShowdownTest is Test {
         assertEq(zkBefore - address(zk).balance, total, "exactly Sigma escrow left the contract");
         assertEq(treasury.balance - treBefore, settled.rakeAccrued, "treasury got the rake");
         assertEq(address(zk).balance, 0, "no residue");
-        assertEq(uint8(zk.status(tableId)), uint8(HoldemTableN.Status.Settled), "settled");
+        assertEq(uint8(zk.status(tableId)), uint8(ChannelTableBase.Status.Settled), "settled");
     }
 
     function test_settle_showdown_rakeZero() public { _settleFromShowdown(0, 0); }

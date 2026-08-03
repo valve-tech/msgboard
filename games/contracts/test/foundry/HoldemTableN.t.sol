@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {HoldemTableN} from "../../contracts/zk/HoldemTableN.sol";
+import {ChannelTableBase} from "../../contracts/zk/ChannelTableBase.sol";
 import {ChannelStateN, SidePot} from "../../contracts/zk/ChannelStateN.sol";
 import {IGameRulesN} from "../../contracts/zk/IGameRulesN.sol";
 import {MockGameRulesN} from "../../contracts/test/MockGameRulesN.sol";
@@ -84,7 +85,7 @@ contract HoldemTableNTest is Test {
 
         assertEq(vm.addr(_pk(0)).balance - before0, total, "seat 0 paid the whole pot");
         assertEq(zkBefore - address(zk).balance, total, "exactly Sigma escrow left the contract");
-        assertEq(uint8(zk.status(tableId)), uint8(HoldemTableN.Status.Settled), "settled");
+        assertEq(uint8(zk.status(tableId)), uint8(ChannelTableBase.Status.Settled), "settled");
         assertEq(address(zk).balance, 0, "no residue");
     }
 
@@ -143,7 +144,7 @@ contract HoldemTableNTest is Test {
         bytes[] memory sigs = _coSign(n, s);
 
         vm.prank(vm.addr(_pk(0)));
-        vm.expectRevert(HoldemTableN.ConservationViolated.selector);
+        vm.expectRevert(ChannelTableBase.ConservationViolated.selector);
         zk.settle(tableId, s, sigs);
         assertEq(address(zk).balance, total, "no funds moved");
     }
@@ -182,13 +183,13 @@ contract HoldemTableNTest is Test {
         // openDispute accepts it (conservation passes with side-pots + rake counted)
         vm.prank(a0);
         zk.openDispute(tableId, s, sigs, "gs", 2, 1, 0);
-        assertEq(uint8(zk.status(tableId)), uint8(HoldemTableN.Status.Disputed), "dispute opened");
+        assertEq(uint8(zk.status(tableId)), uint8(ChannelTableBase.Status.Disputed), "dispute opened");
 
         // now break conservation: bump rake by 1 -> sums to 301 -> rejected
         s.rakeAccrued = 31;
         bytes[] memory sigs2 = _coSign(n, s);
         vm.prank(a0);
-        vm.expectRevert(HoldemTableN.ConservationViolated.selector);
+        vm.expectRevert(ChannelTableBase.ConservationViolated.selector);
         zk.respondWithState(tableId, s, sigs2); // nonce equal, but conservation checked first
     }
 
@@ -229,14 +230,14 @@ contract HoldemTableNTest is Test {
         vm.prank(a0);
         vm.expectRevert(HoldemTableN.RakeTooHigh.selector);
         zk.openDispute(tableId, s, sigs, "gs", 2, 1, 0);
-        assertEq(uint8(zk.status(tableId)), uint8(HoldemTableN.Status.Live), "dispute not opened");
+        assertEq(uint8(zk.status(tableId)), uint8(ChannelTableBase.Status.Live), "dispute not opened");
 
         // Sanity: at/under the cap (rake 20, pot 90) the same shape is accepted.
         s.pot = 90; s.rakeAccrued = 20;
         bytes[] memory sigs2 = _coSign(n, s);
         vm.prank(a0);
         zk.openDispute(tableId, s, sigs2, "gs", 2, 1, 0);
-        assertEq(uint8(zk.status(tableId)), uint8(HoldemTableN.Status.Disputed), "at-cap dispute opens");
+        assertEq(uint8(zk.status(tableId)), uint8(ChannelTableBase.Status.Disputed), "at-cap dispute opens");
     }
 
     // ── per-seat dispute + forced fold ──────────────────────────────────────────
@@ -280,7 +281,7 @@ contract HoldemTableNTest is Test {
         for (uint256 i = 0; i < n; i++) paid += vm.addr(_pk(i)).balance - before[i];
         assertEq(paid, total, "Sigma escrow distributed");
         assertEq(address(zk).balance, 0, "no residue");
-        assertEq(uint8(zk.status(tableId)), uint8(HoldemTableN.Status.Settled), "settled");
+        assertEq(uint8(zk.status(tableId)), uint8(ChannelTableBase.Status.Settled), "settled");
     }
 
     /// The staller can never GAIN by stalling: its forced-fold payout (balance only) is <=
@@ -316,7 +317,7 @@ contract HoldemTableNTest is Test {
         uint256[] memory deck = new uint256[](0);
         uint256[2] memory share;
         uint256[5] memory proof;
-        vm.expectRevert(HoldemTableN.BadStatus.selector);
+        vm.expectRevert(ChannelTableBase.BadStatus.selector);
         zk.respondWithShare(tableId, deck, share, proof);
     }
 
@@ -348,7 +349,7 @@ contract HoldemTableNTest is Test {
         vm.prank(a0);
         zk.start(tableId);
         vm.prank(a0);
-        vm.expectRevert(HoldemTableN.BadStatus.selector);
+        vm.expectRevert(ChannelTableBase.BadStatus.selector);
         zk.registerDeckKey(tableId, [
             0x79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798,
             0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8
@@ -379,7 +380,7 @@ contract HoldemTableNTest is Test {
         bytes[] memory sigs2 = _coSign(n, s2);
         vm.prank(vm.addr(_pk(2)));
         zk.respondWithState(tableId, s2, sigs2);
-        assertEq(uint8(zk.status(tableId)), uint8(HoldemTableN.Status.Live), "back to live");
+        assertEq(uint8(zk.status(tableId)), uint8(ChannelTableBase.Status.Live), "back to live");
     }
 
     /// A stale/forged state is rejected: a state with a non-seat key signature fails.
@@ -398,7 +399,7 @@ contract HoldemTableNTest is Test {
         (uint8 v, bytes32 r, bytes32 ss) = vm.sign(0xDEAD, digest);
         sigs[1] = abi.encodePacked(r, ss, v);
         vm.prank(vm.addr(_pk(0)));
-        vm.expectRevert(HoldemTableN.BadSig.selector);
+        vm.expectRevert(ChannelTableBase.BadSig.selector);
         zk.settle(tableId, s, sigs);
     }
 
@@ -414,7 +415,7 @@ contract HoldemTableNTest is Test {
         s.gameStateHash = keccak256("g");
         bytes[] memory sigs = _coSign(n, s);
         vm.prank(vm.addr(_pk(0)));
-        vm.expectRevert(HoldemTableN.NotYourTurn.selector);
+        vm.expectRevert(ChannelTableBase.NotYourTurn.selector);
         zk.openDispute(tableId, s, sigs, "g", 2, 1, 0); // seat 2 does not owe
     }
 }

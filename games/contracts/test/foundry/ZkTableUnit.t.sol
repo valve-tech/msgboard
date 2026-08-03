@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {ZkTable} from "../../contracts/zk/ZkTable.sol";
+import {ChannelTableBase} from "../../contracts/zk/ChannelTableBase.sol";
 import {ChannelState} from "../../contracts/zk/ChannelState.sol";
 import {IGameRules} from "../../contracts/zk/IGameRules.sol";
 import {MockGameRules} from "../../contracts/test/MockGameRules.sol";
@@ -112,7 +113,7 @@ contract ZkTableUnitTest is Test {
     // — into a single function alongside other locals hits solc's Yul "stack too deep"
     // under this profile's viaIR + optimizer-runs:1000, so each helper below pulls out
     // only the couple of fields a given test needs.)
-    function _status(bytes32 id) internal view returns (ZkTable.Status status) {
+    function _status(bytes32 id) internal view returns (ChannelTableBase.Status status) {
         (, , , , , , , , , status, , , , , , , ) = zk.tables(id);
     }
 
@@ -174,13 +175,13 @@ contract ZkTableUnitTest is Test {
 
     function test_create_revertsWrongValue_zero() public {
         vm.prank(a);
-        vm.expectRevert(ZkTable.WrongValue.selector);
+        vm.expectRevert(ChannelTableBase.WrongValue.selector);
         zk.create{value: 0}(IGameRules(address(rules)), 1 ether, CLOCK, address(0), ZERO_DECK);
     }
 
     function test_create_revertsBadRules_noCode() public {
         vm.prank(a);
-        vm.expectRevert(ZkTable.BadRules.selector);
+        vm.expectRevert(ChannelTableBase.BadRules.selector);
         zk.create{value: 1 ether}(IGameRules(stranger), 1 ether, CLOCK, address(0), ZERO_DECK);
     }
 
@@ -212,7 +213,7 @@ contract ZkTableUnitTest is Test {
     function test_join_revertsBadStatus_notCreated() public {
         bytes32 id = _createJoin(1 ether, 1 ether); // already Live
         vm.prank(stranger);
-        vm.expectRevert(ZkTable.BadStatus.selector);
+        vm.expectRevert(ChannelTableBase.BadStatus.selector);
         zk.join{value: 1 ether}(id, address(0), ZERO_DECK);
     }
 
@@ -220,7 +221,7 @@ contract ZkTableUnitTest is Test {
         vm.prank(a);
         bytes32 id = zk.create{value: 1 ether}(IGameRules(address(rules)), 1 ether, CLOCK, address(0), ZERO_DECK);
         vm.prank(a);
-        vm.expectRevert(ZkTable.NotPlayer.selector);
+        vm.expectRevert(ChannelTableBase.NotPlayer.selector);
         zk.join{value: 1 ether}(id, address(0), ZERO_DECK);
     }
 
@@ -228,7 +229,7 @@ contract ZkTableUnitTest is Test {
         vm.prank(a);
         bytes32 id = zk.create{value: 1 ether}(IGameRules(address(rules)), 1 ether, CLOCK, address(0), ZERO_DECK);
         vm.prank(b);
-        vm.expectRevert(ZkTable.WrongValue.selector);
+        vm.expectRevert(ChannelTableBase.WrongValue.selector);
         zk.join{value: 0.5 ether}(id, address(0), ZERO_DECK);
     }
 
@@ -236,7 +237,7 @@ contract ZkTableUnitTest is Test {
         vm.prank(a);
         bytes32 id = zk.create{value: 1 ether}(IGameRules(address(rules)), 1 ether, CLOCK, address(0), ZERO_DECK);
         vm.prank(b);
-        vm.expectRevert(ZkTable.NotPlayer.selector);
+        vm.expectRevert(ChannelTableBase.NotPlayer.selector);
         zk.join{value: 1 ether}(id, a, ZERO_DECK); // channelKey == playerA
     }
 
@@ -244,7 +245,7 @@ contract ZkTableUnitTest is Test {
         vm.prank(a);
         bytes32 id = zk.create{value: 1 ether}(IGameRules(address(rules)), 1 ether, CLOCK, keyA, ZERO_DECK);
         vm.prank(b);
-        vm.expectRevert(ZkTable.NotPlayer.selector);
+        vm.expectRevert(ChannelTableBase.NotPlayer.selector);
         zk.join{value: 1 ether}(id, keyA, ZERO_DECK); // channelKey == t.keyA (!= playerA)
     }
 
@@ -263,7 +264,7 @@ contract ZkTableUnitTest is Test {
         zk.join{value: 1 ether}(id, keyB, ZERO_DECK);
         (, address kB) = _keys(id);
         assertEq(kB, keyB, "custom channelKey honored");
-        assertEq(uint8(_status(id)), uint8(ZkTable.Status.Live));
+        assertEq(uint8(_status(id)), uint8(ChannelTableBase.Status.Live));
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -281,13 +282,13 @@ contract ZkTableUnitTest is Test {
         assertEq(a.balance - before, 3 ether, "full escrow refunded");
         (uint256 escA, ) = _escrows(id);
         assertEq(escA, 0, "escrowA zeroed");
-        assertEq(uint8(_status(id)), uint8(ZkTable.Status.Cancelled));
+        assertEq(uint8(_status(id)), uint8(ChannelTableBase.Status.Cancelled));
     }
 
     function test_cancel_revertsBadStatus_live() public {
         bytes32 id = _createJoin(1 ether, 1 ether);
         vm.prank(a);
-        vm.expectRevert(ZkTable.BadStatus.selector);
+        vm.expectRevert(ChannelTableBase.BadStatus.selector);
         zk.cancel(id);
     }
 
@@ -295,7 +296,7 @@ contract ZkTableUnitTest is Test {
         vm.prank(a);
         bytes32 id = zk.create{value: 1 ether}(IGameRules(address(rules)), 1 ether, CLOCK, address(0), ZERO_DECK);
         vm.prank(b);
-        vm.expectRevert(ZkTable.NotPlayer.selector);
+        vm.expectRevert(ChannelTableBase.NotPlayer.selector);
         zk.cancel(id);
     }
 
@@ -307,21 +308,21 @@ contract ZkTableUnitTest is Test {
         vm.prank(a);
         bytes32 id = zk.create{value: 1 ether}(IGameRules(address(rules)), 1 ether, CLOCK, address(0), ZERO_DECK);
         vm.prank(a);
-        vm.expectRevert(ZkTable.BadStatus.selector);
+        vm.expectRevert(ChannelTableBase.BadStatus.selector);
         zk.topUp{value: 1 ether}(id);
     }
 
     function test_topUp_revertsWrongValue_zero() public {
         bytes32 id = _createJoin(1 ether, 1 ether);
         vm.prank(a);
-        vm.expectRevert(ZkTable.WrongValue.selector);
+        vm.expectRevert(ChannelTableBase.WrongValue.selector);
         zk.topUp{value: 0}(id);
     }
 
     function test_topUp_revertsNotPlayer() public {
         bytes32 id = _createJoin(1 ether, 1 ether);
         vm.prank(stranger);
-        vm.expectRevert(ZkTable.NotPlayer.selector);
+        vm.expectRevert(ChannelTableBase.NotPlayer.selector);
         zk.topUp{value: 1 ether}(id);
     }
 
@@ -365,7 +366,7 @@ contract ZkTableUnitTest is Test {
         s.phase = 1;
         (bytes memory sigA, bytes memory sigB) = _coSign(s);
         vm.prank(a);
-        vm.expectRevert(ZkTable.BadStatus.selector);
+        vm.expectRevert(ChannelTableBase.BadStatus.selector);
         zk.settle(id, s, sigA, sigB);
     }
 
@@ -377,7 +378,7 @@ contract ZkTableUnitTest is Test {
         s.phase = 1;
         (bytes memory sigA, bytes memory sigB) = _coSign(s);
         vm.prank(stranger);
-        vm.expectRevert(ZkTable.NotPlayer.selector);
+        vm.expectRevert(ChannelTableBase.NotPlayer.selector);
         zk.settle(id, s, sigA, sigB);
     }
 
@@ -389,7 +390,7 @@ contract ZkTableUnitTest is Test {
         s.phase = 1;
         (bytes memory sigA, bytes memory sigB) = _coSign(s);
         vm.prank(a);
-        vm.expectRevert(ZkTable.WrongTable.selector);
+        vm.expectRevert(ChannelTableBase.WrongTable.selector);
         zk.settle(id, s, sigA, sigB);
     }
 
@@ -402,7 +403,7 @@ contract ZkTableUnitTest is Test {
         // sigA signed with the WRONG key; sigB correct.
         (bytes memory badSigA, bytes memory sigB) = _coSignWith(PK_B, PK_B, s);
         vm.prank(a);
-        vm.expectRevert(ZkTable.BadSig.selector);
+        vm.expectRevert(ChannelTableBase.BadSig.selector);
         zk.settle(id, s, badSigA, sigB);
     }
 
@@ -415,7 +416,7 @@ contract ZkTableUnitTest is Test {
         // sigA correct; sigB signed with the WRONG key.
         (bytes memory sigA, bytes memory badSigB) = _coSignWith(PK_A, PK_A, s);
         vm.prank(a);
-        vm.expectRevert(ZkTable.BadSig.selector);
+        vm.expectRevert(ChannelTableBase.BadSig.selector);
         zk.settle(id, s, sigA, badSigB);
     }
 
@@ -428,7 +429,7 @@ contract ZkTableUnitTest is Test {
         s.phase = 1;
         (bytes memory sigA, bytes memory sigB) = _coSign(s);
         vm.prank(a);
-        vm.expectRevert(ZkTable.NotFinal.selector);
+        vm.expectRevert(ChannelTableBase.NotFinal.selector);
         zk.settle(id, s, sigA, sigB);
     }
 
@@ -441,7 +442,7 @@ contract ZkTableUnitTest is Test {
         s.phase = 1;
         (bytes memory sigA, bytes memory sigB) = _coSign(s);
         vm.prank(a);
-        vm.expectRevert(ZkTable.PotNotZero.selector);
+        vm.expectRevert(ChannelTableBase.PotNotZero.selector);
         zk.settle(id, s, sigA, sigB);
     }
 
@@ -471,7 +472,7 @@ contract ZkTableUnitTest is Test {
         stale.phase = 1;
         (bytes memory sSigA, bytes memory sSigB) = _coSign(stale);
         vm.prank(a);
-        vm.expectRevert(ZkTable.StaleNonce.selector);
+        vm.expectRevert(ChannelTableBase.StaleNonce.selector);
         zk.settle(id, stale, sSigA, sSigB);
 
         // fresh: nonce > 20 succeeds.
@@ -482,7 +483,7 @@ contract ZkTableUnitTest is Test {
         (bytes memory fSigA, bytes memory fSigB) = _coSign(fresh);
         vm.prank(a);
         zk.settle(id, fresh, fSigA, fSigB);
-        assertEq(uint8(_status(id)), uint8(ZkTable.Status.Settled));
+        assertEq(uint8(_status(id)), uint8(ChannelTableBase.Status.Settled));
     }
 
     function test_settle_payoutAllToB() public {
@@ -529,7 +530,7 @@ contract ZkTableUnitTest is Test {
         (bytes memory sigA, bytes memory sigB) = _coSignWith(PK_KEYA, PK_KEYB, s);
         vm.prank(keyB);
         zk.settle(id, s, sigA, sigB);
-        assertEq(uint8(_status(id)), uint8(ZkTable.Status.Settled));
+        assertEq(uint8(_status(id)), uint8(ChannelTableBase.Status.Settled));
     }
 
     function test_stateDigest_isDeterministic() public view {
@@ -548,14 +549,14 @@ contract ZkTableUnitTest is Test {
         vm.prank(a);
         bytes32 id = zk.create{value: 1 ether}(IGameRules(address(rules)), 1 ether, CLOCK, address(0), ZERO_DECK);
         vm.prank(a);
-        vm.expectRevert(ZkTable.BadStatus.selector);
+        vm.expectRevert(ChannelTableBase.BadStatus.selector);
         zk.disputeSetup(id);
     }
 
     function test_disputeSetup_revertsNotPlayer() public {
         bytes32 id = _createJoin(1 ether, 1 ether);
         vm.prank(stranger);
-        vm.expectRevert(ZkTable.NotPlayer.selector);
+        vm.expectRevert(ChannelTableBase.NotPlayer.selector);
         zk.disputeSetup(id);
     }
 
@@ -566,7 +567,7 @@ contract ZkTableUnitTest is Test {
         vm.prank(a);
         zk.disputeSetup(id);
         (uint8 disputant, uint8 demandKind, ) = _disputeMeta(id);
-        assertEq(uint8(_status(id)), uint8(ZkTable.Status.Disputed));
+        assertEq(uint8(_status(id)), uint8(ChannelTableBase.Status.Disputed));
         assertEq(disputant, 1);
         assertEq(demandKind, 0);
     }
@@ -588,7 +589,7 @@ contract ZkTableUnitTest is Test {
         zk.respondWithState(id, resp, rSigA, rSigB); // back to Live, hasCheckpoint stays true
 
         vm.prank(a);
-        vm.expectRevert(ZkTable.BadDemand.selector);
+        vm.expectRevert(ChannelTableBase.BadDemand.selector);
         zk.disputeSetup(id);
     }
 
@@ -608,7 +609,7 @@ contract ZkTableUnitTest is Test {
         zk.resolveTimeout(id);
         assertEq(a.balance - beforeA, 1 ether, "A refunded its own escrow");
         assertEq(b.balance - beforeB, 3 ether, "B refunded its own escrow");
-        assertEq(uint8(_status(id)), uint8(ZkTable.Status.Settled));
+        assertEq(uint8(_status(id)), uint8(ChannelTableBase.Status.Settled));
     }
 
     /// Setup dispute (demandKind==0): ANY co-signed state, even one whose nonce isn't
@@ -624,7 +625,7 @@ contract ZkTableUnitTest is Test {
         (bytes memory sigA, bytes memory sigB) = _coSign(s);
         vm.prank(b);
         zk.respondWithState(id, s, sigA, sigB);
-        assertEq(uint8(_status(id)), uint8(ZkTable.Status.Live));
+        assertEq(uint8(_status(id)), uint8(ChannelTableBase.Status.Live));
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -637,7 +638,7 @@ contract ZkTableUnitTest is Test {
         ChannelState memory s = _emptyState(id);
         (bytes memory sigA, bytes memory sigB) = _coSign(s);
         vm.prank(a);
-        vm.expectRevert(ZkTable.BadStatus.selector);
+        vm.expectRevert(ChannelTableBase.BadStatus.selector);
         zk.openDispute(id, s, sigA, sigB, "", 1, 0);
     }
 
@@ -646,7 +647,7 @@ contract ZkTableUnitTest is Test {
         ChannelState memory s = _emptyState(id);
         (bytes memory sigA, bytes memory sigB) = _coSign(s);
         vm.prank(stranger);
-        vm.expectRevert(ZkTable.NotPlayer.selector);
+        vm.expectRevert(ChannelTableBase.NotPlayer.selector);
         zk.openDispute(id, s, sigA, sigB, "", 1, 0);
     }
 
@@ -656,7 +657,7 @@ contract ZkTableUnitTest is Test {
         s.gameStateHash = keccak256("committed");
         (bytes memory sigA, bytes memory sigB) = _coSign(s);
         vm.prank(a);
-        vm.expectRevert(ZkTable.BadGameState.selector);
+        vm.expectRevert(ChannelTableBase.BadGameState.selector);
         zk.openDispute(id, s, sigA, sigB, "different-preimage", 1, 0);
     }
 
@@ -667,7 +668,7 @@ contract ZkTableUnitTest is Test {
         s.gameStateHash = keccak256(gameState);
         (bytes memory sigA, bytes memory sigB) = _coSign(s);
         vm.prank(a);
-        vm.expectRevert(ZkTable.BadDemand.selector);
+        vm.expectRevert(ChannelTableBase.BadDemand.selector);
         zk.openDispute(id, s, sigA, sigB, gameState, 3, 0); // neither MOVE(1) nor SHARE(2)
     }
 
@@ -680,7 +681,7 @@ contract ZkTableUnitTest is Test {
         (bytes memory sigA, bytes memory sigB) = _coSign(s);
         // A opens against counterparty B (bit 2), but turnMask==1 => B doesn't owe.
         vm.prank(a);
-        vm.expectRevert(ZkTable.NotYourTurn.selector);
+        vm.expectRevert(ChannelTableBase.NotYourTurn.selector);
         zk.openDispute(id, s, sigA, sigB, gameState, 1, 0);
     }
 
@@ -708,7 +709,7 @@ contract ZkTableUnitTest is Test {
         stale.gameStateHash = gsHash;
         (bytes memory s1, bytes memory s2) = _coSign(stale);
         vm.prank(a);
-        vm.expectRevert(ZkTable.StaleNonce.selector);
+        vm.expectRevert(ChannelTableBase.StaleNonce.selector);
         zk.openDispute(id, stale, s1, s2, gameState, 1, 0);
 
         // at checkpoint: nonce(20) is NOT < checkpoint(20) => succeeds.
@@ -718,7 +719,7 @@ contract ZkTableUnitTest is Test {
         (bytes memory a1, bytes memory a2) = _coSign(atCp);
         vm.prank(a);
         zk.openDispute(id, atCp, a1, a2, gameState, 1, 0);
-        assertEq(uint8(_status(id)), uint8(ZkTable.Status.Disputed));
+        assertEq(uint8(_status(id)), uint8(ChannelTableBase.Status.Disputed));
     }
 
     function test_openDispute_disputantSeatB() public {
@@ -768,7 +769,7 @@ contract ZkTableUnitTest is Test {
         s.nonce = 1;
         (bytes memory sigA, bytes memory sigB) = _coSign(s);
         vm.prank(a);
-        vm.expectRevert(ZkTable.BadStatus.selector);
+        vm.expectRevert(ChannelTableBase.BadStatus.selector);
         zk.respondWithState(id, s, sigA, sigB);
     }
 
@@ -779,7 +780,7 @@ contract ZkTableUnitTest is Test {
         s.nonce = 2;
         (bytes memory sigA, bytes memory sigB) = _coSign(s);
         vm.prank(stranger);
-        vm.expectRevert(ZkTable.NotPlayer.selector);
+        vm.expectRevert(ChannelTableBase.NotPlayer.selector);
         zk.respondWithState(id, s, sigA, sigB);
     }
 
@@ -790,7 +791,7 @@ contract ZkTableUnitTest is Test {
         s.nonce = 5; // not strictly newer than the contested nonce(5)
         (bytes memory sigA, bytes memory sigB) = _coSign(s);
         vm.prank(b);
-        vm.expectRevert(ZkTable.StaleNonce.selector);
+        vm.expectRevert(ChannelTableBase.StaleNonce.selector);
         zk.respondWithState(id, s, sigA, sigB);
     }
 
@@ -806,7 +807,7 @@ contract ZkTableUnitTest is Test {
         zk.respondWithState(id, s, sigA, sigB);
         (uint64 checkpointNonce, bool hasCheckpoint) = _checkpointMeta(id);
         (uint8 disputant, uint8 demandKind, ) = _disputeMeta(id);
-        assertEq(uint8(_status(id)), uint8(ZkTable.Status.Live));
+        assertEq(uint8(_status(id)), uint8(ChannelTableBase.Status.Live));
         assertEq(checkpointNonce, 6);
         assertTrue(hasCheckpoint);
         assertEq(disputant, 0);
@@ -820,7 +821,7 @@ contract ZkTableUnitTest is Test {
     function test_respondWithMove_revertsBadStatus_notDisputed() public {
         bytes32 id = _createJoin(1 ether, 1 ether);
         vm.prank(b);
-        vm.expectRevert(ZkTable.BadStatus.selector);
+        vm.expectRevert(ChannelTableBase.BadStatus.selector);
         zk.respondWithMove(id, "", "");
     }
 
@@ -833,7 +834,7 @@ contract ZkTableUnitTest is Test {
         vm.prank(a);
         zk.openDispute(id, s, sigA, sigB, gameState, 2, 0); // SHARE demand, not MOVE
         vm.prank(b);
-        vm.expectRevert(ZkTable.NotDemanded.selector);
+        vm.expectRevert(ChannelTableBase.NotDemanded.selector);
         zk.respondWithMove(id, gameState, "");
     }
 
@@ -841,7 +842,7 @@ contract ZkTableUnitTest is Test {
         bytes32 id = _createJoin(1 ether, 1 ether);
         bytes memory gameState = _openMoveDispute(id, 1); // disputant == A
         vm.prank(a); // the disputant itself may not answer its own demand
-        vm.expectRevert(ZkTable.NotYourDispute.selector);
+        vm.expectRevert(ChannelTableBase.NotYourDispute.selector);
         zk.respondWithMove(id, gameState, "");
     }
 
@@ -849,7 +850,7 @@ contract ZkTableUnitTest is Test {
         bytes32 id = _createJoin(1 ether, 1 ether);
         _openMoveDispute(id, 1);
         vm.prank(b);
-        vm.expectRevert(ZkTable.BadGameState.selector);
+        vm.expectRevert(ChannelTableBase.BadGameState.selector);
         zk.respondWithMove(id, "wrong-preimage", "");
     }
 
@@ -871,7 +872,7 @@ contract ZkTableUnitTest is Test {
         emit DisputeAnsweredWithMove(id, "some-move", keccak256(nextState));
         vm.prank(b);
         zk.respondWithMove(id, gameState, "some-move");
-        assertEq(uint8(_status(id)), uint8(ZkTable.Status.Live));
+        assertEq(uint8(_status(id)), uint8(ChannelTableBase.Status.Live));
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -898,7 +899,7 @@ contract ZkTableUnitTest is Test {
         uint256[2] memory reveal;
         uint256[8] memory proof;
         vm.prank(b);
-        vm.expectRevert(ZkTable.BadStatus.selector);
+        vm.expectRevert(ChannelTableBase.BadStatus.selector);
         zk.respondWithShare(id, deck, reveal, proof);
     }
 
@@ -909,7 +910,7 @@ contract ZkTableUnitTest is Test {
         uint256[2] memory reveal;
         uint256[8] memory proof;
         vm.prank(b);
-        vm.expectRevert(ZkTable.NotDemanded.selector);
+        vm.expectRevert(ChannelTableBase.NotDemanded.selector);
         zk.respondWithShare(id, deck, reveal, proof);
     }
 
@@ -920,7 +921,7 @@ contract ZkTableUnitTest is Test {
         uint256[2] memory reveal;
         uint256[8] memory proof;
         vm.prank(a); // disputant itself
-        vm.expectRevert(ZkTable.NotYourDispute.selector);
+        vm.expectRevert(ChannelTableBase.NotYourDispute.selector);
         zk.respondWithShare(id, deck, reveal, proof);
     }
 
@@ -931,7 +932,7 @@ contract ZkTableUnitTest is Test {
         uint256[2] memory reveal;
         uint256[8] memory proof;
         vm.prank(b);
-        vm.expectRevert(ZkTable.BadDeck.selector);
+        vm.expectRevert(ChannelTableBase.BadDeck.selector);
         zk.respondWithShare(id, shortDeck, reveal, proof);
     }
 
@@ -943,7 +944,7 @@ contract ZkTableUnitTest is Test {
         uint256[2] memory reveal;
         uint256[8] memory proof;
         vm.prank(b);
-        vm.expectRevert(ZkTable.BadDeck.selector);
+        vm.expectRevert(ChannelTableBase.BadDeck.selector);
         zk.respondWithShare(id, wrongDeck, reveal, proof);
     }
 
@@ -953,7 +954,7 @@ contract ZkTableUnitTest is Test {
         uint256[2] memory reveal;
         uint256[8] memory proof;
         vm.prank(b);
-        vm.expectRevert(ZkTable.BadDeck.selector);
+        vm.expectRevert(ChannelTableBase.BadDeck.selector);
         zk.respondWithShare(id, deck, reveal, proof);
     }
 
@@ -1005,7 +1006,7 @@ contract ZkTableUnitTest is Test {
         emit DisputeAnsweredWithShare(id, 3, 11, 22);
         vm.prank(b);
         zk.respondWithShare(id, deck, reveal, proof);
-        assertEq(uint8(_status(id)), uint8(ZkTable.Status.Live));
+        assertEq(uint8(_status(id)), uint8(ChannelTableBase.Status.Live));
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -1014,14 +1015,14 @@ contract ZkTableUnitTest is Test {
 
     function test_resolveTimeout_revertsBadStatus_notDisputed() public {
         bytes32 id = _createJoin(1 ether, 1 ether);
-        vm.expectRevert(ZkTable.BadStatus.selector);
+        vm.expectRevert(ChannelTableBase.BadStatus.selector);
         zk.resolveTimeout(id);
     }
 
     function test_resolveTimeout_revertsClockNotExpired() public {
         bytes32 id = _createJoin(1 ether, 1 ether);
         _openMoveDispute(id, 1);
-        vm.expectRevert(ZkTable.ClockNotExpired.selector);
+        vm.expectRevert(ChannelTableBase.ClockNotExpired.selector);
         zk.resolveTimeout(id); // still within the window
     }
 
@@ -1048,6 +1049,6 @@ contract ZkTableUnitTest is Test {
         zk.resolveTimeout(id);
         assertEq(a.balance - beforeA, 1 ether, "A gets only its balance");
         assertEq(b.balance - beforeB, 3 ether, "B (disputant) gets balance + pot");
-        assertEq(uint8(_status(id)), uint8(ZkTable.Status.Settled));
+        assertEq(uint8(_status(id)), uint8(ChannelTableBase.Status.Settled));
     }
 }

@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {ZkTable} from "../../contracts/zk/ZkTable.sol";
+import {ChannelTableBase} from "../../contracts/zk/ChannelTableBase.sol";
 import {ChannelState} from "../../contracts/zk/ChannelState.sol";
 import {IGameRules} from "../../contracts/zk/IGameRules.sol";
 import {MockGameRules} from "../../contracts/test/MockGameRules.sol";
@@ -51,7 +52,7 @@ contract ZkTableFuzzTest is Test {
         sigB = abi.encodePacked(r2, ss2, v2);
     }
 
-    function _seatState(bytes32 tableId) internal view returns (uint256 escA, uint256 escB, ZkTable.Status status) {
+    function _seatState(bytes32 tableId) internal view returns (uint256 escA, uint256 escB, ChannelTableBase.Status status) {
         (, , , , escA, escB, , , , status, , , , , , , ) = zk.tables(tableId);
     }
 
@@ -107,8 +108,8 @@ contract ZkTableFuzzTest is Test {
         assertEq(b.balance - beforeB, toB, "B paid its balance");
         assertEq(zkBefore - address(zk).balance, total, "exactly the table escrow left the contract");
 
-        (uint256 escA, uint256 escB, ZkTable.Status status) = _seatState(tableId);
-        assertEq(uint8(status), uint8(ZkTable.Status.Settled), "terminal");
+        (uint256 escA, uint256 escB, ChannelTableBase.Status status) = _seatState(tableId);
+        assertEq(uint8(status), uint8(ChannelTableBase.Status.Settled), "terminal");
         assertEq(escA, 0, "escrowA zeroed");
         assertEq(escB, 0, "escrowB zeroed");
     }
@@ -132,7 +133,7 @@ contract ZkTableFuzzTest is Test {
         (bytes memory sigA, bytes memory sigB) = _coSign(s);
 
         vm.prank(a);
-        vm.expectRevert(ZkTable.ConservationViolated.selector);
+        vm.expectRevert(ChannelTableBase.ConservationViolated.selector);
         zk.settle(tableId, s, sigA, sigB);
 
         assertEq(address(zk).balance, total, "no funds moved");
@@ -177,8 +178,8 @@ contract ZkTableFuzzTest is Test {
         assertEq(b.balance - beforeB, balB, "counterparty B gets its balance");
         assertEq(address(zk).balance, 0, "no dust");
 
-        (uint256 escA, uint256 escB, ZkTable.Status status) = _seatState(tableId);
-        assertEq(uint8(status), uint8(ZkTable.Status.Settled), "terminal");
+        (uint256 escA, uint256 escB, ChannelTableBase.Status status) = _seatState(tableId);
+        assertEq(uint8(status), uint8(ChannelTableBase.Status.Settled), "terminal");
         assertEq(escA, 0, "escrowA zeroed");
         assertEq(escB, 0, "escrowB zeroed");
     }
@@ -190,14 +191,14 @@ contract ZkTableFuzzTest is Test {
         vm.deal(a, 10 ether);
         if (blocks < minC || blocks > maxC) {
             vm.prank(a);
-            vm.expectRevert(ZkTable.BadClock.selector);
+            vm.expectRevert(ChannelTableBase.BadClock.selector);
             zk.create{value: 1 ether}(IGameRules(address(rules)), 1 ether, blocks, a, ZERO_DECK);
         } else {
             vm.prank(a);
             bytes32 tableId = zk.create{value: 1 ether}(IGameRules(address(rules)), 1 ether, blocks, a, ZERO_DECK);
-            (uint256 escA, , ZkTable.Status status) = _seatState(tableId);
+            (uint256 escA, , ChannelTableBase.Status status) = _seatState(tableId);
             assertEq(escA, 1 ether, "escrow recorded");
-            assertEq(uint8(status), uint8(ZkTable.Status.Created), "created");
+            assertEq(uint8(status), uint8(ChannelTableBase.Status.Created), "created");
         }
     }
 }
