@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {FlipBookX} from "../../contracts/games/FlipBookX.sol";
+import {FlipBookBase} from "../../contracts/games/FlipBookBase.sol";
 import {MockX402} from "../../contracts/test/MockX402.sol";
 
 /// COVERAGE-ONLY companion to FlipBookX.t.sol / FlipBookXFork.t.sol: no contract changes, just the
@@ -109,7 +110,7 @@ contract FlipBookXUnitTest is Test {
     function test_take_revertsOnZeroStake() public {
         FlipBookX.Offer memory o = _offer(true);
         o.stake = 0;
-        vm.expectRevert(FlipBookX.ZeroStake.selector);
+        vm.expectRevert(FlipBookBase.ZeroStake.selector);
         book.take(o, "", taker, bytes32(0), "");
     }
 
@@ -117,28 +118,28 @@ contract FlipBookXUnitTest is Test {
         // The existing suite only zeroes takerBond; this hits the OTHER `||` operand.
         FlipBookX.Offer memory o = _offer(true);
         o.makerBond = 0;
-        vm.expectRevert(FlipBookX.ZeroBond.selector);
+        vm.expectRevert(FlipBookBase.ZeroBond.selector);
         book.take(o, "", taker, bytes32(0), "");
     }
 
     function test_take_revertsOnMakerWindowTooBig() public {
         FlipBookX.Offer memory o = _offer(true);
         o.makerRevealWindow = book.MAX_REVEAL_WINDOW() + 1;
-        vm.expectRevert(FlipBookX.BadWindow.selector);
+        vm.expectRevert(FlipBookBase.BadWindow.selector);
         book.take(o, "", taker, bytes32(0), "");
     }
 
     function test_take_revertsOnTakerWindowTooSmall() public {
         FlipBookX.Offer memory o = _offer(true);
         o.takerRevealWindow = book.MIN_REVEAL_WINDOW() - 1;
-        vm.expectRevert(FlipBookX.BadWindow.selector);
+        vm.expectRevert(FlipBookBase.BadWindow.selector);
         book.take(o, "", taker, bytes32(0), "");
     }
 
     function test_take_revertsOnTakerWindowTooBig() public {
         FlipBookX.Offer memory o = _offer(true);
         o.takerRevealWindow = book.MAX_REVEAL_WINDOW() + 1;
-        vm.expectRevert(FlipBookX.BadWindow.selector);
+        vm.expectRevert(FlipBookBase.BadWindow.selector);
         book.take(o, "", taker, bytes32(0), "");
     }
 
@@ -152,7 +153,7 @@ contract FlipBookXUnitTest is Test {
         bytes memory ts = _takerSig(o, id);
         book.take(o, makerSig, taker, gc, ts);
 
-        vm.expectRevert(FlipBookX.AlreadyTaken.selector);
+        vm.expectRevert(FlipBookBase.AlreadyTaken.selector);
         book.take(o, makerSig, taker, gc, ts);
     }
 

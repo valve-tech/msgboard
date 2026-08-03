@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.24;
 
+import {FlipBookBase} from "./FlipBookBase.sol";
+
 /// A P2P coin flip as a two-sided GUESSING game (matching pennies) — no validators, no house,
 /// no joint entropy. See examples/games/P2P_COINFLIP_DESIGN.md (variant A: escrowed offers).
 ///
@@ -23,7 +25,7 @@ pragma solidity ^0.8.24;
 ///
 /// Settlement pushes native value with a pull fallback (`owed`/`withdraw`), so a
 /// revert-on-receive winner can never block settlement.
-contract FlipBook {
+contract FlipBook is FlipBookBase {
     struct Offer {
         address maker;
         bytes32 commit; // keccak256(abi.encode(maker, choice, salt)) — maker-bound, salt-blinded
@@ -36,30 +38,16 @@ contract FlipBook {
         bool guess; // taker's public move
     }
 
-    /// Reveal-window bounds: enough time for an honest maker to come online, short enough that
-    /// a taker is never parked for long. The taker sees the window before taking and accepts it.
-    uint32 public constant MIN_REVEAL_WINDOW = 5 minutes;
-    uint32 public constant MAX_REVEAL_WINDOW = 7 days;
-
     uint256 public nextOfferId = 1;
     mapping(uint256 offerId => Offer) public offers;
     /// Pull-fallback balances for payees whose push payment reverted.
     mapping(address payee => uint256) public owed;
 
-    error ZeroStake(); // msg.value must exceed the bond so the flip has a stake
-    error ZeroBond(); // bond == 0 makes bailing on a loss free (even-money indifference)
     error BadDeadline(); // takeDeadline not in the future
-    error BadWindow(); // revealWindow outside [MIN_REVEAL_WINDOW, MAX_REVEAL_WINDOW]
     error UnknownOffer(); // no such offer (never existed, cancelled, or already settled)
     error NotMaker(); // cancel by someone other than the maker
-    error AlreadyTaken(); // take/cancel on an offer that is already locked to a taker
     error NotTaken(); // reveal/claim on an offer with no taker
-    error SelfTake(); // maker taking their own offer (wash flip)
-    error OfferExpired(); // take after takeDeadline
     error WrongValue(); // take's msg.value != the offer's stake
-    error BadReveal(); // (choice, salt) does not hash to the commit
-    error RevealWindowOver(); // reveal after the window — the forfeit path owns the offer now
-    error RevealWindowOpen(); // claim before the window has lapsed
     error NothingOwed(); // withdraw with a zero balance
 
     event OfferPosted(
@@ -91,7 +79,7 @@ contract FlipBook {
         if (bond_ == 0) revert ZeroBond();
         if (msg.value <= bond_) revert ZeroStake();
         if (takeDeadline <= block.timestamp) revert BadDeadline();
-        if (revealWindow < MIN_REVEAL_WINDOW || revealWindow > MAX_REVEAL_WINDOW) revert BadWindow();
+        _checkWindow(revealWindow);
 
         offerId = nextOfferId++;
         offers[offerId] = Offer({
@@ -128,8 +116,8 @@ contract FlipBook {
         Offer storage o = offers[offerId];
         if (o.maker == address(0)) revert UnknownOffer();
         if (o.taker != address(0)) revert AlreadyTaken();
-        if (msg.sender == o.maker) revert SelfTake();
-        if (block.timestamp > o.takeDeadline) revert OfferExpired();
+        _checkNotSelf(msg.sender, o.maker);
+        _checkNotExpired(o.takeDeadline);
         if (msg.value != o.stake) revert WrongValue();
 
         o.taker = msg.sender;
@@ -145,8 +133,8 @@ contract FlipBook {
         Offer memory o = offers[offerId];
         if (o.maker == address(0)) revert UnknownOffer();
         if (o.taker == address(0)) revert NotTaken();
-        if (block.timestamp > uint256(o.takenAt) + o.revealWindow) revert RevealWindowOver();
-        if (keccak256(abi.encode(o.maker, choice, salt)) != o.commit) revert BadReveal();
+        _checkWithinWindow(o.takenAt, o.revealWindow);
+        _checkCommit(o.maker, choice, salt, o.commit);
 
         delete offers[offerId];
         address winner = (o.guess == choice) ? o.taker : o.maker;
@@ -168,7 +156,7 @@ contract FlipBook {
         Offer memory o = offers[offerId];
         if (o.maker == address(0)) revert UnknownOffer();
         if (o.taker == address(0)) revert NotTaken();
-        if (block.timestamp <= uint256(o.takenAt) + o.revealWindow) revert RevealWindowOpen();
+        _checkWindowElapsed(o.takenAt, o.revealWindow);
 
         delete offers[offerId];
         uint256 amount = o.stake * 2 + o.bond;
