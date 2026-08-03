@@ -3,9 +3,9 @@ pragma solidity ^0.8.24;
 
 import {ECDSA} from "solady/src/utils/ECDSA.sol";
 import {SafeTransferLib} from "solady/src/utils/SafeTransferLib.sol";
-import {Ownable} from "solady/src/auth/Ownable.sol";
 import {SessionState, SessionStateLib, SessionClose, SessionCloseLib, SessionStateEIP712} from "./SessionState.sol";
 import {GamePayouts} from "./GamePayouts.sol";
+import {HousePoolBase} from "./HousePoolBase.sol";
 
 /// On-chain UltraHonk verifier interface (mode-2 ZK settle). The generated
 /// `HonkVerifier` (contracts/zk/generated/DiceSettleHonkVerifier.sol) implements
@@ -55,7 +55,7 @@ library OpenTermsLib {
 
 /// Escrowed settlement backend (spec 6.2): per-table escrow, cooperative settle, chess-clock
 /// dispute/forfeit. The ZkTable channel pattern minus deck/pot/rules. Chips (ERC20) escrow.
-contract HouseChannel is SessionStateEIP712, Ownable {
+contract HouseChannel is SessionStateEIP712, HousePoolBase {
     using SafeTransferLib for address;
     using SessionStateLib for SessionState;
     using SessionCloseLib for SessionClose;
@@ -71,7 +71,6 @@ contract HouseChannel is SessionStateEIP712, Ownable {
     error NotPlayer();
     error ConservationViolated();
     error StaleNonce();
-    error InsufficientPool();
     error ClockNotExpired();
     error BadReveal();
     error BadParams();
@@ -105,9 +104,7 @@ contract HouseChannel is SessionStateEIP712, Ownable {
     uint64 public constant MIN_CLOCK_BLOCKS = 30;     // ~5 min at 10s blocks
     uint64 public constant MAX_CLOCK_BLOCKS = 60480;  // ~1 week
 
-    address public immutable chips;
     address public houseKey;
-    uint256 public housePool;
     mapping(bytes32 tableId => Table) public tables;
 
     /// ZK mode-2 verifier per gameId (1 dice, 2 limbo). Set by the owner after the
@@ -116,8 +113,6 @@ contract HouseChannel is SessionStateEIP712, Ownable {
     /// blocks the co-sign (mode 0) / recompute (mode 1) paths.
     mapping(uint8 gameId => address) public proofVerifier;
 
-    event HouseFunded(uint256 amount);
-    event HouseWithdrawn(uint256 amount);
     event HouseKeySet(address indexed key);
     event Opened(bytes32 indexed tableId, address indexed player, address playerKey, uint8 gameId, uint256 escrowPlayer, uint256 escrowHouse);
     event Settled(bytes32 indexed tableId, uint256 payoutPlayer, uint256 payoutHouse);
@@ -128,8 +123,7 @@ contract HouseChannel is SessionStateEIP712, Ownable {
     event DisputeForfeited(bytes32 indexed tableId, uint256 payoutPlayer, uint256 payoutHouse);
     event ForfeitClaimed(bytes32 indexed tableId, uint256 playerEscrowAtStake, uint64 deadline);
 
-    constructor(address chips_) {
-        chips = chips_;
+    constructor(address chips_) HousePoolBase(chips_) {
         _initializeOwner(msg.sender);
     }
 
@@ -142,19 +136,6 @@ contract HouseChannel is SessionStateEIP712, Ownable {
     function setProofVerifier(uint8 gameId, address verifier) external onlyOwner {
         proofVerifier[gameId] = verifier;
         emit ProofVerifierSet(gameId, verifier);
-    }
-
-    function fundHouse(uint256 amount) external onlyOwner {
-        housePool += amount;
-        chips.safeTransferFrom(msg.sender, address(this), amount);
-        emit HouseFunded(amount);
-    }
-
-    function withdrawHouse(uint256 amount) external onlyOwner {
-        if (housePool < amount) revert InsufficientPool();
-        housePool -= amount;
-        chips.safeTransfer(msg.sender, amount);
-        emit HouseWithdrawn(amount);
     }
 
     /// Public for off-chain parity + house signing.

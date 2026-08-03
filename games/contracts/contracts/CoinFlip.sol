@@ -2,7 +2,6 @@
 pragma solidity ^0.8.24;
 
 import {GameBase} from "./GameBase.sol";
-import {IRandom} from "./implementations/IRandom.sol";
 import {PreimageLocation} from "./PreimageLocation.sol";
 
 /// @notice Two-person coin flip on validator-only entropy. Players escrow a stake and a side and
@@ -127,9 +126,8 @@ contract CoinFlip is GameBase {
     function refundStale(bytes32 flipId) external {
         Flip storage flip = flips[flipId];
         if (flip.status != Status.Pending) revert AlreadyResolved();
-        bool seedMissing = IRandom(random).randomness(flip.key).seed == bytes32(0);
-        if (!seedMissing) revert TooEarly();
-        if (!choppedInstance[flipId] && !_isStale(flip.pairedAtBlock)) revert TooEarly();
+        if (_seed(flip.key) != bytes32(0)) revert TooEarly();
+        if (!_refundableNow(flipId, flip.pairedAtBlock)) revert TooEarly();
         flip.status = Status.Refunded;
         _refund(flip.heads, flip.stake);
         _refund(flip.tails, flip.stake);
@@ -182,7 +180,7 @@ contract CoinFlip is GameBase {
     function claim(bytes32 flipId) external {
         Flip storage flip = flips[flipId];
         if (flip.status != Status.Pending) revert AlreadyResolved();
-        bytes32 seed = IRandom(random).randomness(flip.key).seed;
+        bytes32 seed = _seed(flip.key);
         if (seed == bytes32(0)) revert TooEarly();
         _settle(flipId, seed);
     }
