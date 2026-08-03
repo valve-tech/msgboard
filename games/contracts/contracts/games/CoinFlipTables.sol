@@ -3,8 +3,8 @@ pragma solidity ^0.8.24;
 
 import {SafeTransferLib} from "solady/src/utils/SafeTransferLib.sol";
 import {GameBase} from "../GameBase.sol";
-import {IRandom} from "../implementations/IRandom.sol";
 import {PreimageLocation} from "../PreimageLocation.sol";
+import {BankrollLib} from "./BankrollLib.sol";
 
 /// @notice Permissionless coin flip against an operator-run Chips bankroll. Anyone opens a table and
 /// funds a two-tier (hot/cold) bankroll; players bet a side and a stake; a validator subset's seed
@@ -12,6 +12,7 @@ import {PreimageLocation} from "../PreimageLocation.sol";
 /// This is CoinFlip.sol with the matched opposite player replaced by the table's pooled Chips.
 contract CoinFlipTables is GameBase {
     using SafeTransferLib for address;
+    using BankrollLib for BankrollLib.Table;
 
     error NotOperator();
     error BadMultiplier();
@@ -61,20 +62,8 @@ contract CoinFlipTables is GameBase {
         uint256 openedAtBlock
     );
 
-    struct Table {
-        address operator;
-        uint256 hot;              // armed — the only balance a new round can escrow against
-        uint256 cold;             // reserve — never at risk until promoted
-        uint256 escrowed;         // full payout locked by live rounds
-        uint256 stake;            // ranking signal, never touched by settlement
-        uint16  maxMultiplierX100;
-        uint256 maxStake;
-        uint256 hotTarget;
-        bool    open;
-    }
-
     address public immutable chips;
-    mapping(bytes32 tableId => Table) public tables;
+    mapping(bytes32 tableId => BankrollLib.Table) public tables;
     uint256 internal _tableNonce;
 
     constructor(address random_, address chips_) GameBase(random_) {
@@ -96,7 +85,7 @@ contract CoinFlipTables is GameBase {
     {
         _requireMultiplier(maxMultiplierX100);
         tableId = keccak256(abi.encode(address(this), msg.sender, ++_tableNonce));
-        Table storage t = tables[tableId];
+        BankrollLib.Table storage t = tables[tableId];
         t.operator = msg.sender;
         t.maxMultiplierX100 = maxMultiplierX100;
         t.maxStake = maxStake;
@@ -110,7 +99,7 @@ contract CoinFlipTables is GameBase {
         onlyOperator(tableId)
     {
         _requireMultiplier(maxMultiplierX100);
-        Table storage t = tables[tableId];
+        BankrollLib.Table storage t = tables[tableId];
         t.maxMultiplierX100 = maxMultiplierX100;
         t.maxStake = maxStake;
         t.hotTarget = hotTarget;
@@ -145,48 +134,36 @@ contract CoinFlipTables is GameBase {
     event Demoted(bytes32 indexed tableId, uint256 amount);
 
     function fundHot(bytes32 tableId, uint256 amount) external {
-        if (tables[tableId].operator == address(0)) revert NoTable();
-        tables[tableId].hot += amount;
+        tables[tableId].fundHot(amount);
         chips.safeTransferFrom(msg.sender, address(this), amount);
         emit HotFunded(tableId, amount);
     }
 
     function fundCold(bytes32 tableId, uint256 amount) external {
-        if (tables[tableId].operator == address(0)) revert NoTable();
-        tables[tableId].cold += amount;
+        tables[tableId].fundCold(amount);
         chips.safeTransferFrom(msg.sender, address(this), amount);
         emit ColdFunded(tableId, amount);
     }
 
     function withdrawHot(bytes32 tableId, uint256 amount) external onlyOperator(tableId) {
-        Table storage t = tables[tableId];
-        if (t.hot < amount) revert InsufficientHot();
-        t.hot -= amount;
+        tables[tableId].withdrawHot(amount);
         chips.safeTransfer(msg.sender, amount);
         emit HotWithdrawn(tableId, amount);
     }
 
     function withdrawCold(bytes32 tableId, uint256 amount) external onlyOperator(tableId) {
-        Table storage t = tables[tableId];
-        if (t.cold < amount) revert InsufficientCold();
-        t.cold -= amount;
+        tables[tableId].withdrawCold(amount);
         chips.safeTransfer(msg.sender, amount);
         emit ColdWithdrawn(tableId, amount);
     }
 
     function promote(bytes32 tableId, uint256 amount) external onlyOperator(tableId) {
-        Table storage t = tables[tableId];
-        if (t.cold < amount) revert InsufficientCold();
-        t.cold -= amount;
-        t.hot += amount;
+        tables[tableId].promote(amount);
         emit Promoted(tableId, amount);
     }
 
     function demote(bytes32 tableId, uint256 amount) external onlyOperator(tableId) {
-        Table storage t = tables[tableId];
-        if (t.hot < amount) revert InsufficientHot();
-        t.hot -= amount;
-        t.cold += amount;
+        tables[tableId].demote(amount);
         emit Demoted(tableId, amount);
     }
 
@@ -197,15 +174,8 @@ contract CoinFlipTables is GameBase {
     /// @notice Permissionless top-up of hot from cold, capped at hotTarget. Anyone may call this —
     /// it moves no tokens (pure internal cold->hot accounting) so there is nothing to gate.
     function refillHot(bytes32 tableId) external {
-        Table storage t = tables[tableId];
-        if (t.operator == address(0)) revert NoTable();
-        if (t.hot >= t.hotTarget) revert NothingToRefill();
-        uint256 need = t.hotTarget - t.hot;
-        uint256 move = need < t.cold ? need : t.cold;
-        if (move == 0) revert NothingToRefill();
-        t.cold -= move;
-        t.hot += move;
-        emit Refilled(tableId, move);
+        uint256 moved = tables[tableId].refillHot();
+        emit Refilled(tableId, moved);
     }
 
     error InsufficientStake();
@@ -214,15 +184,13 @@ contract CoinFlipTables is GameBase {
     event Unstaked(bytes32 indexed tableId, uint256 amount);
 
     function stakeForRank(bytes32 tableId, uint256 amount) external onlyOperator(tableId) {
-        tables[tableId].stake += amount;
+        tables[tableId].stakeForRank(amount);
         chips.safeTransferFrom(msg.sender, address(this), amount);
         emit Staked(tableId, amount);
     }
 
     function unstake(bytes32 tableId, uint256 amount) external onlyOperator(tableId) {
-        Table storage t = tables[tableId];
-        if (t.stake < amount) revert InsufficientStake();
-        t.stake -= amount;
+        tables[tableId].unstake(amount);
         chips.safeTransfer(msg.sender, amount);
         emit Unstaked(tableId, amount);
     }
@@ -239,7 +207,7 @@ contract CoinFlipTables is GameBase {
         address[] calldata validatorSubset,
         PreimageLocation.Info[] calldata validatorLocations
     ) external returns (bytes32 roundId) {
-        Table storage t = tables[tableId];
+        BankrollLib.Table storage t = tables[tableId];
         if (t.operator == address(0)) revert NoTable();
         if (!t.open) revert TableClosed();
         if (side > TAILS) revert WrongSide();
@@ -254,8 +222,7 @@ contract CoinFlipTables is GameBase {
         // Pull the player's stake into the contract, then lock the full payout: exposure leaves hot,
         // the player's own stake is now held as the remainder of the escrow.
         chips.safeTransferFrom(msg.sender, address(this), stake);
-        t.hot -= exposure;
-        t.escrowed += payout;
+        t.reserve(exposure, payout);
 
         bytes32 key = _heatBound(validatorSubset, validatorLocations);
         roundId = keccak256(abi.encode(address(this), ++_roundNonce, tableId, msg.sender));
@@ -295,16 +262,15 @@ contract CoinFlipTables is GameBase {
         if (r.status != Status.Pending) revert AlreadyResolved();
         r.status = Status.Settled;
 
-        Table storage t = tables[r.tableId];
-        t.escrowed -= r.payout; // release reservation either way
-
+        BankrollLib.Table storage t = tables[r.tableId];
         bool won = uint8(uint256(seed) & 1) == r.side;
         if (won) {
             // exposure already left hot at open; pay the player the full payout from escrow
+            t.releaseWin(r.payout);
             chips.safeTransfer(r.player, r.payout);
         } else {
             // whole reservation (operator exposure + player's forfeited stake) returns to armed balance
-            t.hot += r.payout;
+            t.releaseLoss(r.payout);
         }
         emit RoundSettled(roundId, r.tableId, r.player, won, r.payout, seed, block.number);
     }
@@ -313,7 +279,7 @@ contract CoinFlipTables is GameBase {
     function claim(bytes32 roundId) external {
         Round storage r = rounds[roundId];
         if (r.status != Status.Pending) revert AlreadyResolved();
-        bytes32 seed = IRandom(random).randomness(r.key).seed;
+        bytes32 seed = _seed(r.key);
         if (seed == bytes32(0)) revert TooEarly();
         _settle(roundId, seed);
     }
@@ -332,15 +298,13 @@ contract CoinFlipTables is GameBase {
     function refundStale(bytes32 roundId) external {
         Round storage r = rounds[roundId];
         if (r.status != Status.Pending) revert AlreadyResolved();
-        bool seedMissing = IRandom(random).randomness(r.key).seed == bytes32(0);
-        if (!seedMissing) revert TooEarly();
-        if (!choppedInstance[roundId] && !_isStale(r.openedAtBlock)) revert TooEarly();
+        if (_seed(r.key) != bytes32(0)) revert TooEarly();
+        if (!_refundableNow(roundId, r.openedAtBlock)) revert TooEarly();
         r.status = Status.Refunded;
 
-        Table storage t = tables[r.tableId];
+        BankrollLib.Table storage t = tables[r.tableId];
         uint256 exposure = r.payout - r.stake;
-        t.escrowed -= r.payout;
-        t.hot += exposure;                     // operator's at-risk portion returns to armed balance
+        t.releaseRefund(r.payout, exposure);   // operator's at-risk portion returns to armed balance
         chips.safeTransfer(r.player, r.stake); // player reclaims their own stake
         // Mirror RoundSettled so the off-chain index can release the escrow/exposure and surface the
         // refunded state (without this event a refunded round is indistinguishable from a still-pending

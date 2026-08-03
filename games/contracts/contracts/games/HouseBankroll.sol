@@ -3,13 +3,13 @@ pragma solidity ^0.8.24;
 
 import {ECDSA} from "solady/src/utils/ECDSA.sol";
 import {SafeTransferLib} from "solady/src/utils/SafeTransferLib.sol";
-import {Ownable} from "solady/src/auth/Ownable.sol";
 import {SessionState, SessionStateLib, SessionStateEIP712} from "./SessionState.sol";
+import {HousePoolBase} from "./HousePoolBase.sol";
 
 /// Optimistic settlement backend (spec 6.1). Players hold a shared deposit (keyed by their
 /// session signing key); the house funds a mintable-backed pool. settle() pays only the net
 /// delta of a session, proven by the open + final co-signed states.
-contract HouseBankroll is SessionStateEIP712, Ownable {
+contract HouseBankroll is SessionStateEIP712, HousePoolBase {
     using SafeTransferLib for address;
     using SessionStateLib for SessionState;
 
@@ -20,25 +20,19 @@ contract HouseBankroll is SessionStateEIP712, Ownable {
     error ConservationViolated();
     error BadSig();
     error NotPlayer();
-    error InsufficientPool();
     error InsufficientDeposit();
 
-    address public immutable chips;
     address public houseKey;             // the house's session signing key
-    uint256 public housePool;            // house-funded, mintable-backed
     mapping(address signer => uint256) public deposits;          // player deposit by session key
     mapping(bytes32 tableId => uint64) public settledNonce;      // highest-nonce-wins
     mapping(bytes32 tableId => uint256) public settledBalancePlayer; // last-settled player balance (incremental baseline)
 
     event Deposited(address indexed signer, uint256 amount);
     event Withdrawn(address indexed signer, uint256 amount);
-    event HouseFunded(uint256 amount);
-    event HouseWithdrawn(uint256 amount);
     event HouseKeySet(address indexed key);
     event Settled(bytes32 indexed tableId, address indexed player, uint64 nonce, int256 playerDelta);
 
-    constructor(address chips_) {
-        chips = chips_;
+    constructor(address chips_) HousePoolBase(chips_) {
         _initializeOwner(msg.sender);
     }
 
@@ -60,19 +54,6 @@ contract HouseBankroll is SessionStateEIP712, Ownable {
         deposits[msg.sender] -= amount;
         chips.safeTransfer(msg.sender, amount);
         emit Withdrawn(msg.sender, amount);
-    }
-
-    function fundHouse(uint256 amount) external onlyOwner {
-        housePool += amount;
-        chips.safeTransferFrom(msg.sender, address(this), amount);
-        emit HouseFunded(amount);
-    }
-
-    function withdrawHouse(uint256 amount) external onlyOwner {
-        if (housePool < amount) revert InsufficientPool();
-        housePool -= amount;
-        chips.safeTransfer(msg.sender, amount);
-        emit HouseWithdrawn(amount);
     }
 
     // -- settlement --

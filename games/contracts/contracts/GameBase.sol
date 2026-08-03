@@ -186,4 +186,20 @@ abstract contract GameBase is ConsumerReceiver {
     function _isStale(uint256 armedAtBlock) internal view returns (bool) {
         return block.number >= armedAtBlock + STALE_BLOCKS;
     }
+
+    // --- shared game guards ---
+
+    /// @notice The seed finalized for a Random request key, or bytes32(0) if it hasn't finalized
+    /// yet. Shared by every game's claim() pull-fallback and refundStale() seed-missing check.
+    function _seed(bytes32 key) internal view returns (bytes32) {
+        return IRandom(random).randomness(key).seed;
+    }
+
+    /// @notice True once a game instance may be refunded: its draw was chopped at expiry (a
+    /// liveness failure) or the liveness timeout has elapsed since it was armed. Callers must
+    /// additionally confirm the seed is still missing before refunding — an instance whose seed HAS
+    /// finalized is value-decided and must resolve via claim/onCast, never refundStale.
+    function _refundableNow(bytes32 instanceId, uint256 armedAtBlock) internal view returns (bool) {
+        return choppedInstance[instanceId] || _isStale(armedAtBlock);
+    }
 }

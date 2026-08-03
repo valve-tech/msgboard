@@ -3,8 +3,8 @@ pragma solidity ^0.8.24;
 
 import {ECDSA} from "solady/src/utils/ECDSA.sol";
 import {SafeTransferLib} from "solady/src/utils/SafeTransferLib.sol";
-import {Ownable} from "solady/src/auth/Ownable.sol";
 import {SkillPayouts} from "./SkillPayouts.sol";
+import {HousePoolBase} from "./HousePoolBase.sol";
 
 /// PLONK proof for the ZK-skill circuits (contracts/zk/generated/*PlonkVerifier.sol shape): 24 field
 /// elements, in snarkjs `plonk.exportSolidityCallData` order. The WordleRules wrapper exposes the typed
@@ -40,7 +40,7 @@ interface IWordleRules {
 ///     residual; the word+salt reveal/penalty flow is documented as the remaining M3 item.)
 ///
 /// Chips (ERC20) escrow, house-signed open terms, per-table escrow reservation — mirrors HouseChannel.
-contract SkillSettle is Ownable {
+contract SkillSettle is HousePoolBase {
     using SafeTransferLib for address;
 
     error BadStatus();
@@ -48,7 +48,6 @@ contract SkillSettle is Ownable {
     error BadSig();
     error NotPlayer();
     error Expired();
-    error InsufficientPool();
     error EscrowTooSmall();
     error BadProof();
     error BadGuesses();
@@ -85,28 +84,23 @@ contract SkillSettle is Ownable {
     uint64 public constant MIN_CLOCK_BLOCKS = 30;      // ~5 min at 10s blocks
     uint64 public constant MAX_CLOCK_BLOCKS = 60480;   // ~1 week
 
-    address public immutable chips;
     address public immutable wordleRules;
     bytes32 public immutable domainSeparator;
 
     address public houseKey;
-    uint256 public housePool;
     /// Merkle root of the committed Wordle dictionary (Poseidon(2) nodes, leaf = base-26 packed word).
     /// A wordle_solve proof must be against THIS root — so the house's answer (== the winning guess) is
     /// a real word. Global + owner-settable (the dictionary is public and the same for every round).
     uint256 public wordleDictRoot;
     mapping(bytes32 tableId => Table) public tables;
 
-    event HouseFunded(uint256 amount);
-    event HouseWithdrawn(uint256 amount);
     event HouseKeySet(address indexed key);
     event WordleDictRootSet(uint256 root);
     event Opened(bytes32 indexed tableId, address indexed player, uint8 gameId, uint256 escrowPlayer, uint256 escrowHouse);
     event Settled(bytes32 indexed tableId, uint256 payoutPlayer, uint256 payoutHouse);
     event Reclaimed(bytes32 indexed tableId, uint256 toHouse);
 
-    constructor(address chips_, address wordleRules_) {
-        chips = chips_;
+    constructor(address chips_, address wordleRules_) HousePoolBase(chips_) {
         wordleRules = wordleRules_;
         _initializeOwner(msg.sender);
         domainSeparator = keccak256(abi.encode(keccak256("SkillSettle(v1)"), block.chainid, address(this)));
@@ -122,19 +116,6 @@ contract SkillSettle is Ownable {
     function setWordleDictRoot(uint256 root) external onlyOwner {
         wordleDictRoot = root;
         emit WordleDictRootSet(root);
-    }
-
-    function fundHouse(uint256 amount) external onlyOwner {
-        housePool += amount;
-        chips.safeTransferFrom(msg.sender, address(this), amount);
-        emit HouseFunded(amount);
-    }
-
-    function withdrawHouse(uint256 amount) external onlyOwner {
-        if (housePool < amount) revert InsufficientPool();
-        housePool -= amount;
-        chips.safeTransfer(msg.sender, amount);
-        emit HouseWithdrawn(amount);
     }
 
     // ---- open ------------------------------------------------------------------------------------
