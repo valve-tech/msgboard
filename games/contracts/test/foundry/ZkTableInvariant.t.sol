@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {StdInvariant} from "forge-std/StdInvariant.sol";
 import {ZkTable} from "../../contracts/zk/ZkTable.sol";
+import {ChannelTableBase} from "../../contracts/zk/ChannelTableBase.sol";
 import {ChannelState} from "../../contracts/zk/ChannelState.sol";
 import {IGameRules} from "../../contracts/zk/IGameRules.sol";
 import {MockGameRules} from "../../contracts/test/MockGameRules.sol";
@@ -74,7 +75,7 @@ contract ZkTableHandler is Test {
         for (uint256 i = 0; i < POOL; i++) sum += addrs[i].balance;
     }
 
-    function _seatState(bytes32 id) internal view returns (uint256 escA, uint256 escB, ZkTable.Status status) {
+    function _seatState(bytes32 id) internal view returns (uint256 escA, uint256 escB, ChannelTableBase.Status status) {
         (, , , , escA, escB, , , , status, , , , , , , ) = zk.tables(id);
     }
 
@@ -135,8 +136,8 @@ contract ZkTableHandler is Test {
         if (allTableIds.length == 0) return;
         bytes32 id = allTableIds[bound(idxSeed, 0, allTableIds.length - 1)];
         TableRec storage r = recs[id];
-        (, , ZkTable.Status status) = _seatState(id);
-        if (status != ZkTable.Status.Created) return;
+        (, , ChannelTableBase.Status status) = _seatState(id);
+        if (status != ChannelTableBase.Status.Created) return;
         (, , , , , , uint256 stake, , , , , , , , , , ) = zk.tables(id);
         // pick a seat distinct from A
         uint256 ib = bound(seatSeed, 0, POOL - 1);
@@ -155,8 +156,8 @@ contract ZkTableHandler is Test {
         if (allTableIds.length == 0) return;
         bytes32 id = allTableIds[bound(idxSeed, 0, allTableIds.length - 1)];
         TableRec storage r = recs[id];
-        (, , ZkTable.Status status) = _seatState(id);
-        if (status != ZkTable.Status.Live) return;
+        (, , ChannelTableBase.Status status) = _seatState(id);
+        if (status != ChannelTableBase.Status.Live) return;
         uint256 amt = bound(uint256(amount), 1, 10_000 ether);
         address who = seatA ? r.A.who : r.B.who;
         if (who == address(0)) return;
@@ -172,8 +173,8 @@ contract ZkTableHandler is Test {
         if (allTableIds.length == 0) return;
         bytes32 id = allTableIds[bound(idxSeed, 0, allTableIds.length - 1)];
         TableRec storage r = recs[id];
-        (, , ZkTable.Status status) = _seatState(id);
-        if (status != ZkTable.Status.Live) return;
+        (, , ChannelTableBase.Status status) = _seatState(id);
+        if (status != ChannelTableBase.Status.Live) return;
         uint64 n = r.nonce + 1;
         ChannelState memory s = _stateFor(id, n, uint256(cutA), 0, 1, bytes32(0)); // pot 0, phase final
         (bytes memory sigA, bytes memory sigB) = _coSign(r.A.pk, r.B.pk, s);
@@ -192,8 +193,8 @@ contract ZkTableHandler is Test {
         if (allTableIds.length == 0) return;
         bytes32 id = allTableIds[bound(idxSeed, 0, allTableIds.length - 1)];
         TableRec storage r = recs[id];
-        (, , ZkTable.Status status) = _seatState(id);
-        if (status != ZkTable.Status.Live) return;
+        (, , ChannelTableBase.Status status) = _seatState(id);
+        if (status != ChannelTableBase.Status.Live) return;
         bytes memory gameState = abi.encode("gs", id, r.nonce);
         bytes32 gsHash = keccak256(gameState);
         uint64 n = r.nonce + 1;
@@ -214,8 +215,8 @@ contract ZkTableHandler is Test {
         if (allTableIds.length == 0) return;
         bytes32 id = allTableIds[bound(idxSeed, 0, allTableIds.length - 1)];
         TableRec storage r = recs[id];
-        (, , ZkTable.Status status) = _seatState(id);
-        if (status != ZkTable.Status.Disputed) return;
+        (, , ChannelTableBase.Status status) = _seatState(id);
+        if (status != ChannelTableBase.Status.Disputed) return;
         uint64 n = r.nonce + 1;
         ChannelState memory s = _stateFor(id, n, uint256(cutA), 0, 1, bytes32(0));
         (bytes memory sigA, bytes memory sigB) = _coSign(r.A.pk, r.B.pk, s);
@@ -233,8 +234,8 @@ contract ZkTableHandler is Test {
     function timeoutTable(uint256 idxSeed) public {
         if (allTableIds.length == 0) return;
         bytes32 id = allTableIds[bound(idxSeed, 0, allTableIds.length - 1)];
-        (, , ZkTable.Status status) = _seatState(id);
-        if (status != ZkTable.Status.Disputed) return;
+        (, , ChannelTableBase.Status status) = _seatState(id);
+        if (status != ChannelTableBase.Status.Disputed) return;
         vm.roll(block.number + CLOCK + 1); // CLOCK is global; +CLOCK+1 clears every live deadline
 
         uint256 before = _poolBalance();
@@ -249,8 +250,8 @@ contract ZkTableHandler is Test {
         if (allTableIds.length == 0) return;
         bytes32 id = allTableIds[bound(idxSeed, 0, allTableIds.length - 1)];
         TableRec storage r = recs[id];
-        (, , ZkTable.Status status) = _seatState(id);
-        if (status != ZkTable.Status.Created) return;
+        (, , ChannelTableBase.Status status) = _seatState(id);
+        if (status != ChannelTableBase.Status.Created) return;
         uint256 before = _poolBalance();
         vm.prank(r.A.who);
         try zk.cancel(id) {
@@ -307,9 +308,9 @@ contract ZkTableInvariantTest is StdInvariant, Test {
         uint256 n = handler.terminalIdsLength();
         for (uint256 i = 0; i < n; i++) {
             bytes32 id = handler.terminalIdAt(i);
-            ( , , , , uint256 escA, uint256 escB, , , , ZkTable.Status status, , , , , , , ) = zk.tables(id);
+            ( , , , , uint256 escA, uint256 escB, , , , ChannelTableBase.Status status, , , , , , , ) = zk.tables(id);
             assertTrue(
-                status == ZkTable.Status.Settled || status == ZkTable.Status.Cancelled,
+                status == ChannelTableBase.Status.Settled || status == ChannelTableBase.Status.Cancelled,
                 "terminal status"
             );
             assertEq(escA, 0, "terminal escrowA == 0");

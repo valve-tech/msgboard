@@ -2,13 +2,13 @@
 pragma solidity ^0.8.24;
 
 import {EIP712} from "solady/src/utils/EIP712.sol";
-import {ECDSA} from "solady/src/utils/ECDSA.sol";
 import {SafeTransferLib} from "solady/src/utils/SafeTransferLib.sol";
 import {LibString} from "solady/src/utils/LibString.sol";
 import {ChannelStateN, ChannelStateNLib, SidePot} from "./ChannelStateN.sol";
 import {IGameRulesN} from "./IGameRulesN.sol";
 import {RevealShareDLEQ} from "./lib/RevealShareDLEQ.sol";
 import {EllipticCurve} from "./lib/EllipticCurve.sol";
+import {ChannelTableBase} from "./ChannelTableBase.sol";
 
 /// @notice N-party state-channel card table (3–9 seats; supports N=2). Generalizes ZkTable:
 /// seats escrow buy-ins, play is off-chain N-of-N co-signed ChannelStateN, and the chain is
@@ -28,28 +28,18 @@ import {EllipticCurve} from "./lib/EllipticCurve.sol";
 /// share + proof and can never be force-folded on the clock; a forged share reverts.
 /// Seats register their deck pubkey via registerDeckKey() while Forming (the same pubkeys
 /// that form the off-chain joint encryption key).
-contract HoldemTableN is EIP712 {
+///
+/// Shared errors/Status/dispute-clock constants/co-sign helpers live in ChannelTableBase,
+/// alongside its ZkTable counterpart (2026-08 DRY pass) — see that file's header for what's
+/// shared vs. why the escrow/state shape stays separate. (Status.Created is this contract's
+/// "Forming" — the enum keeps ZkTable's original member name; see ChannelTableBase.)
+contract HoldemTableN is EIP712, ChannelTableBase {
     using SafeTransferLib for address;
     using ChannelStateNLib for ChannelStateN;
     using RevealShareDLEQ for RevealShareDLEQ.Statement;
 
-    error WrongValue();
-    error BadClock();
-    error BadStatus();
-    error NotPlayer();
-    error WrongTable();
-    error BadSig();
-    error NotFinal();
-    error PotNotZero();
-    error ConservationViolated();
-    error StaleNonce();
-    error BadRules();
-    error ClockNotExpired();
-    error NotYourDispute();
-    error NotDemanded();
-    error NotYourTurn();
-    error BadGameState();
-    error BadDemand();
+    // HoldemTableN-only errors: the shared 18 (WrongValue..BadDeck) are inherited from
+    // ChannelTableBase.
     error BadSeatCount();
     error DuplicateKey();
     error TooManySeats();
@@ -59,18 +49,10 @@ contract HoldemTableN is EIP712 {
     error SeatRange();
     error BadDeckKey();
     error DeckKeyNotSet();
-    error BadDeck();
     error BadShareProof();
-
-    uint8 internal constant DEMAND_MOVE = 1;
-    uint8 internal constant DEMAND_SHARE = 2;
 
     uint256 public constant MAX_SEATS = 9;
     uint256 public constant MAX_RAKE_BPS = 250; // 2.5%
-    uint64 public constant MIN_CLOCK_BLOCKS = 30;     // ~5 min at 10s blocks
-    uint64 public constant MAX_CLOCK_BLOCKS = 60480;  // ~1 week
-
-    enum Status { None, Forming, Live, Disputed, Settled, Cancelled }
 
     struct Table {
         IGameRulesN rules;
@@ -137,8 +119,8 @@ contract HoldemTableN is EIP712 {
         address channelKey
     ) external payable returns (bytes32 tableId) {
         if (buyIn == 0 || msg.value != buyIn) revert WrongValue();
-        if (clockBlocks < MIN_CLOCK_BLOCKS || clockBlocks > MAX_CLOCK_BLOCKS) revert BadClock();
-        if (address(rules).code.length == 0) revert BadRules();
+        _validateClock(clockBlocks);
+        _validateRulesCode(address(rules));
         if (maxSeats < 2 || maxSeats > MAX_SEATS) revert BadSeatCount();
         if (rakeBps > MAX_RAKE_BPS) revert RakeTooHigh();
         tableId = keccak256(abi.encode(block.chainid, address(this), ++_counter));
@@ -149,7 +131,7 @@ contract HoldemTableN is EIP712 {
         t.rakeBps = rakeBps;
         t.rakeCap = rakeCap;
         t.clockBlocks = clockBlocks;
-        t.status = Status.Forming;
+        t.status = Status.Created;
         address key = channelKey == address(0) ? msg.sender : channelKey;
         t.seats.push(msg.sender);
         t.channelKeys.push(key);
@@ -160,7 +142,7 @@ contract HoldemTableN is EIP712 {
 
     function join(bytes32 tableId, address channelKey) external payable {
         Table storage t = _tables[tableId];
-        if (t.status != Status.Forming) revert BadStatus();
+        if (t.status != Status.Created) revert BadStatus();
         if (msg.value != t.buyIn) revert WrongValue();
         if (t.seats.length >= t.maxSeats) revert TooManySeats();
         address key = channelKey == address(0) ? msg.sender : channelKey;
@@ -178,7 +160,7 @@ contract HoldemTableN is EIP712 {
     /// Forming → Live once at least 2 seats have joined.
     function start(bytes32 tableId) external {
         Table storage t = _tables[tableId];
-        if (t.status != Status.Forming) revert BadStatus();
+        if (t.status != Status.Created) revert BadStatus();
         _seatOf(t, msg.sender);
         if (t.seats.length < 2) revert NotEnoughSeats();
         t.status = Status.Live;
@@ -191,7 +173,7 @@ contract HoldemTableN is EIP712 {
     /// NOTE: register after the roster is final; leaveBeforeStart re-indexes seats.
     function registerDeckKey(bytes32 tableId, uint256[2] calldata pk) external {
         Table storage t = _tables[tableId];
-        if (t.status != Status.Forming) revert BadStatus();
+        if (t.status != Status.Created) revert BadStatus();
         uint8 seat = _seatOf(t, msg.sender);
         if (!EllipticCurve.isOnCurve(pk[0], pk[1])) revert BadDeckKey();
         _deckKey[tableId][seat] = pk;
@@ -203,7 +185,7 @@ contract HoldemTableN is EIP712 {
     /// while Forming, before any co-signed state pins seat order.)
     function leaveBeforeStart(bytes32 tableId) external {
         Table storage t = _tables[tableId];
-        if (t.status != Status.Forming) revert BadStatus();
+        if (t.status != Status.Created) revert BadStatus();
         uint8 seat = _seatOf(t, msg.sender);
         uint256 refund = t.escrow[seat];
         // compact arrays (swap-and-pop)
@@ -225,7 +207,7 @@ contract HoldemTableN is EIP712 {
     /// Creator cancels a Forming table that only they occupy; refunds all current escrow.
     function cancel(bytes32 tableId) external {
         Table storage t = _tables[tableId];
-        if (t.status != Status.Forming) revert BadStatus();
+        if (t.status != Status.Created) revert BadStatus();
         if (t.seats.length != 1 || t.seats[0] != msg.sender) revert NotPlayer();
         t.status = Status.Cancelled;
         uint256 refund = t.escrow[0];
@@ -282,9 +264,24 @@ contract HoldemTableN is EIP712 {
         // non-zero pot). Without this an over-cap rakeAccrued could be paid out via timeout.
         if (state.rakeAccrued > t.rakeCap) revert RakeTooHigh();
         if (t.rules.hashGameState(gameState) != state.gameStateHash) revert BadGameState();
-        if (demandKind != DEMAND_MOVE && demandKind != DEMAND_SHARE) revert BadDemand();
+        _validateDemandKind(demandKind);
         if (demandSeat >= t.seats.length) revert SeatRange();
         if (t.rules.whoseTurn(gameState) & (uint256(1) << demandSeat) == 0) revert NotYourTurn();
+        // resolveTimeout can only ever force-fold `demandSeat` (never any other seat), so a
+        // non-empty side-pot whose eligibleMask names ONLY demandSeat would be left with zero
+        // eligible claimants the instant that seat forfeits. A real side-pot always has >=2
+        // contestants when it is created (one player short-all-in, at least one caller covering
+        // more) — if only demandSeat remains eligible, that pot should already have been awarded
+        // off-chain before reaching a dispute. Nothing but the Σ-conservation check constrains
+        // eligibleMask, so reject the malformed state here — before it becomes disputeState —
+        // rather than let resolveTimeout's _distribute discover an orphaned pot with nowhere
+        // correct to go.
+        uint256 demandBit = uint256(1) << demandSeat;
+        for (uint256 i = 0; i < state.sidePots.length; i++) {
+            if (state.sidePots[i].amount != 0 && state.sidePots[i].eligibleMask & ~demandBit == 0) {
+                revert BadDemand();
+            }
+        }
         t.status = Status.Disputed;
         t.demandSeat = demandSeat;
         t.demandKind = demandKind;
@@ -406,7 +403,7 @@ contract HoldemTableN is EIP712 {
     function resolveTimeout(bytes32 tableId) external {
         Table storage t = _tables[tableId];
         if (t.status != Status.Disputed) revert BadStatus();
-        if (uint64(block.number) <= t.disputeDeadline) revert ClockNotExpired();
+        _validateClockExpired(t.disputeDeadline);
         uint256 n = t.seats.length;
         uint8 forfeit = t.demandSeat;
 
@@ -430,17 +427,18 @@ contract HoldemTableN is EIP712 {
 
     /// Split `amount` equally among the seats whose bit is set in `mask`, adding to `payouts`.
     /// The remainder (amount % count) goes to the lowest-index eligible seat — deterministic.
-    /// If no seat is eligible (mask empty), the amount is added to the lowest-index seat overall
-    /// as a last-resort sink so conservation never leaks (cannot happen with ≥2 honest seats).
+    /// `mask` is genuinely never empty here: the main pot's mask excludes only `forfeit` out of
+    /// >=2 seats (a table cannot go Live with fewer), and openDispute already rejects any
+    /// side-pot whose eligibleMask would go empty once `demandSeat` (== `forfeit`, the only seat
+    /// resolveTimeout ever forfeits) is removed. Revert instead of silently sinking to an
+    /// arbitrary seat if that invariant is ever violated — a wrong-but-quiet payout is worse
+    /// than a stuck call here, since misdirected funds cannot be recovered after the fact.
     function _distribute(uint256[] memory payouts, uint256 amount, uint256 mask) internal pure {
         if (amount == 0) return;
         uint256 n = payouts.length;
         uint256 count;
         for (uint256 i = 0; i < n; i++) if (mask & (uint256(1) << i) != 0) count++;
-        if (count == 0) {
-            payouts[0] += amount; // unreachable with an honest majority; conservation sink
-            return;
-        }
+        if (count == 0) revert BadDemand(); // guarded unreachable — see openDispute's side-pot check
         uint256 share = amount / count;
         uint256 rem = amount - share * count;
         bool remGiven = false;
@@ -464,7 +462,7 @@ contract HoldemTableN is EIP712 {
     /// Every accepted state must conserve the CURRENT escrow total and carry N valid sigs
     /// (one per seat, recovering each seat's channel key).
     function _checkCoSigned(Table storage t, bytes32 tableId, ChannelStateN calldata state, bytes[] calldata sigs) internal view {
-        if (state.tableId != tableId) revert WrongTable();
+        _validateTableId(state.tableId, tableId);
         uint256 n = t.seats.length;
         if (state.balances.length != n) revert BadSeatCount();
         if (sigs.length != n) revert WrongSigCount();
@@ -472,10 +470,10 @@ contract HoldemTableN is EIP712 {
         uint256 locked = state.totalLockedCalldata();
         uint256 escrowSum;
         for (uint256 i = 0; i < n; i++) escrowSum += t.escrow[i];
-        if (locked != escrowSum) revert ConservationViolated();
+        _validateConservation(locked, escrowSum);
         bytes32 digest = _hashTypedData(state.structHash());
         for (uint256 i = 0; i < n; i++) {
-            if (ECDSA.recoverCalldata(digest, sigs[i]) != t.channelKeys[i]) revert BadSig();
+            _validateSig(digest, sigs[i], t.channelKeys[i]);
         }
     }
 

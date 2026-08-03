@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {StdInvariant} from "forge-std/StdInvariant.sol";
 import {HoldemTableN} from "../../contracts/zk/HoldemTableN.sol";
+import {ChannelTableBase} from "../../contracts/zk/ChannelTableBase.sol";
 import {ChannelStateN, SidePot} from "../../contracts/zk/ChannelStateN.sol";
 import {IGameRulesN} from "../../contracts/zk/IGameRulesN.sol";
 import {MockGameRulesN} from "../../contracts/test/MockGameRulesN.sol";
@@ -282,9 +283,9 @@ contract HoldemTableNInvariantTest is StdInvariant, Test {
         uint256 n = handler.terminalIdsLength();
         for (uint256 i = 0; i < n; i++) {
             bytes32 id = handler.terminalIdAt(i);
-            HoldemTableN.Status st = zk.status(id);
+            ChannelTableBase.Status st = zk.status(id);
             assertTrue(
-                st == HoldemTableN.Status.Settled || st == HoldemTableN.Status.Cancelled,
+                st == ChannelTableBase.Status.Settled || st == ChannelTableBase.Status.Cancelled,
                 "terminal status"
             );
             assertEq(zk.totalEscrow(id), 0, "terminal escrow == 0");

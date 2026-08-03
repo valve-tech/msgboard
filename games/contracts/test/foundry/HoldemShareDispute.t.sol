@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {HoldemTableN} from "../../contracts/zk/HoldemTableN.sol";
+import {ChannelTableBase} from "../../contracts/zk/ChannelTableBase.sol";
 import {ChannelStateN, SidePot} from "../../contracts/zk/ChannelStateN.sol";
 import {IGameRulesN} from "../../contracts/zk/IGameRulesN.sol";
 import {MockGameRulesN} from "../../contracts/test/MockGameRulesN.sol";
@@ -101,7 +102,7 @@ contract HoldemShareDisputeTest is Test {
 
         vm.prank(a0);
         zk.openDispute(tableId, s, sigs, "gs", DEMAND_SEAT, DEMAND_SHARE, SLOT);
-        assertEq(uint8(zk.status(tableId)), uint8(HoldemTableN.Status.Disputed), "disputed");
+        assertEq(uint8(zk.status(tableId)), uint8(ChannelTableBase.Status.Disputed), "disputed");
     }
 
     /// A correct share + DLEQ proof resolves the dispute on-chain → back to Live. The honest
@@ -112,11 +113,11 @@ contract HoldemShareDisputeTest is Test {
         vm.prank(vm.addr(_pk(DEMAND_SEAT)));
         zk.respondWithShare(tableId, g.deck, g.share, g.proof);
 
-        assertEq(uint8(zk.status(tableId)), uint8(HoldemTableN.Status.Live), "dispute cleared to Live");
+        assertEq(uint8(zk.status(tableId)), uint8(ChannelTableBase.Status.Live), "dispute cleared to Live");
 
         // the clock can no longer strand the honest seat: resolveTimeout now reverts (no dispute)
         vm.roll(block.number + CLOCK + 1);
-        vm.expectRevert(HoldemTableN.BadStatus.selector);
+        vm.expectRevert(ChannelTableBase.BadStatus.selector);
         zk.resolveTimeout(tableId);
     }
 
@@ -128,7 +129,7 @@ contract HoldemShareDisputeTest is Test {
         vm.prank(vm.addr(_pk(DEMAND_SEAT)));
         vm.expectRevert(HoldemTableN.BadShareProof.selector);
         zk.respondWithShare(tableId, g.deck, g.share, g.proof);
-        assertEq(uint8(zk.status(tableId)), uint8(HoldemTableN.Status.Disputed), "still disputed");
+        assertEq(uint8(zk.status(tableId)), uint8(ChannelTableBase.Status.Disputed), "still disputed");
     }
 
     /// A share for a different (valid) point fails the DLEQ → rejected.
@@ -149,7 +150,7 @@ contract HoldemShareDisputeTest is Test {
         g.deck[0] ^= 1; // break the commitment binding
 
         vm.prank(vm.addr(_pk(DEMAND_SEAT)));
-        vm.expectRevert(HoldemTableN.BadDeck.selector);
+        vm.expectRevert(ChannelTableBase.BadDeck.selector);
         zk.respondWithShare(tableId, g.deck, g.share, g.proof);
     }
 
@@ -157,7 +158,7 @@ contract HoldemShareDisputeTest is Test {
     function test_onlyDemandSeatMayAnswer() public {
         (bytes32 tableId, Gen memory g) = _setupDisputed(4 ether);
         vm.prank(vm.addr(_pk(0))); // not the demand seat
-        vm.expectRevert(HoldemTableN.NotYourDispute.selector);
+        vm.expectRevert(ChannelTableBase.NotYourDispute.selector);
         zk.respondWithShare(tableId, g.deck, g.share, g.proof);
     }
 }

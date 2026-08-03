@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {HoldemTableN} from "../../contracts/zk/HoldemTableN.sol";
+import {ChannelTableBase} from "../../contracts/zk/ChannelTableBase.sol";
 import {ChannelStateN, SidePot} from "../../contracts/zk/ChannelStateN.sol";
 import {IGameRulesN} from "../../contracts/zk/IGameRulesN.sol";
 import {MockGameRulesN} from "../../contracts/test/MockGameRulesN.sol";
@@ -144,13 +145,13 @@ contract HoldemTableNUnitTest is Test {
     // ══════════════════════════════════════════════════════════════════════════════════
 
     function test_createRevertsZeroBuyIn() public {
-        vm.expectRevert(HoldemTableN.WrongValue.selector);
+        vm.expectRevert(ChannelTableBase.WrongValue.selector);
         zk.create{value: 0}(IGameRulesN(address(rules)), 0, 2, 0, 0, CLOCK, address(0));
     }
 
     function test_createRevertsValueMismatch() public {
         vm.deal(address(this), 2 ether);
-        vm.expectRevert(HoldemTableN.WrongValue.selector);
+        vm.expectRevert(ChannelTableBase.WrongValue.selector);
         zk.create{value: 2 ether}(IGameRulesN(address(rules)), 1 ether, 2, 0, 0, CLOCK, address(0));
     }
 
@@ -159,20 +160,20 @@ contract HoldemTableNUnitTest is Test {
         // NOTE: compute the bound BEFORE arming expectRevert — a view call made while
         // evaluating the create() arguments would otherwise consume the armed expectation.
         uint64 tooLow = zk.MIN_CLOCK_BLOCKS() - 1;
-        vm.expectRevert(HoldemTableN.BadClock.selector);
+        vm.expectRevert(ChannelTableBase.BadClock.selector);
         zk.create{value: 1 ether}(IGameRulesN(address(rules)), 1 ether, 2, 0, 0, tooLow, address(0));
     }
 
     function test_createRevertsClockTooHigh() public {
         vm.deal(address(this), 1 ether);
         uint64 tooHigh = zk.MAX_CLOCK_BLOCKS() + 1;
-        vm.expectRevert(HoldemTableN.BadClock.selector);
+        vm.expectRevert(ChannelTableBase.BadClock.selector);
         zk.create{value: 1 ether}(IGameRulesN(address(rules)), 1 ether, 2, 0, 0, tooHigh, address(0));
     }
 
     function test_createRevertsBadRules() public {
         vm.deal(address(this), 1 ether);
-        vm.expectRevert(HoldemTableN.BadRules.selector);
+        vm.expectRevert(ChannelTableBase.BadRules.selector);
         // address(0x9999) has no code
         zk.create{value: 1 ether}(IGameRulesN(address(0x9999)), 1 ether, 2, 0, 0, CLOCK, address(0));
     }
@@ -216,7 +217,7 @@ contract HoldemTableNUnitTest is Test {
         address stranger = vm.addr(_pk(9));
         vm.deal(stranger, 1 ether);
         vm.prank(stranger);
-        vm.expectRevert(HoldemTableN.BadStatus.selector);
+        vm.expectRevert(ChannelTableBase.BadStatus.selector);
         zk.join{value: 1 ether}(tableId, stranger);
     }
 
@@ -225,7 +226,7 @@ contract HoldemTableNUnitTest is Test {
         address a1 = vm.addr(_pk(1));
         vm.deal(a1, 2 ether);
         vm.prank(a1);
-        vm.expectRevert(HoldemTableN.WrongValue.selector);
+        vm.expectRevert(ChannelTableBase.WrongValue.selector);
         zk.join{value: 2 ether}(tableId, a1);
     }
 
@@ -243,7 +244,7 @@ contract HoldemTableNUnitTest is Test {
         address a0 = vm.addr(_pk(0));
         vm.deal(a0, 1 ether);
         vm.prank(a0);
-        vm.expectRevert(HoldemTableN.NotPlayer.selector);
+        vm.expectRevert(ChannelTableBase.NotPlayer.selector);
         zk.join{value: 1 ether}(tableId, a0); // already seat 0
     }
 
@@ -268,7 +269,7 @@ contract HoldemTableNUnitTest is Test {
     function test_startRevertsBadStatus() public {
         bytes32 tableId = _table(2, 1 ether); // already Live
         vm.prank(vm.addr(_pk(0)));
-        vm.expectRevert(HoldemTableN.BadStatus.selector);
+        vm.expectRevert(ChannelTableBase.BadStatus.selector);
         zk.start(tableId);
     }
 
@@ -276,7 +277,7 @@ contract HoldemTableNUnitTest is Test {
         bytes32 tableId = _createOnly(1 ether, 2);
         address stranger = vm.addr(_pk(9));
         vm.prank(stranger);
-        vm.expectRevert(HoldemTableN.NotPlayer.selector);
+        vm.expectRevert(ChannelTableBase.NotPlayer.selector);
         zk.start(tableId);
     }
 
@@ -295,7 +296,7 @@ contract HoldemTableNUnitTest is Test {
         bytes32 tableId = _createOnly(1 ether, 2);
         address stranger = vm.addr(_pk(9));
         vm.prank(stranger);
-        vm.expectRevert(HoldemTableN.NotPlayer.selector);
+        vm.expectRevert(ChannelTableBase.NotPlayer.selector);
         zk.registerDeckKey(tableId, [GX, GY]);
     }
 
@@ -306,7 +307,7 @@ contract HoldemTableNUnitTest is Test {
     function test_leaveBeforeStartRevertsBadStatus() public {
         bytes32 tableId = _table(2, 1 ether); // Live
         vm.prank(vm.addr(_pk(0)));
-        vm.expectRevert(HoldemTableN.BadStatus.selector);
+        vm.expectRevert(ChannelTableBase.BadStatus.selector);
         zk.leaveBeforeStart(tableId);
     }
 
@@ -314,7 +315,7 @@ contract HoldemTableNUnitTest is Test {
         bytes32 tableId = _createOnly(1 ether, 2);
         address stranger = vm.addr(_pk(9));
         vm.prank(stranger);
-        vm.expectRevert(HoldemTableN.NotPlayer.selector);
+        vm.expectRevert(ChannelTableBase.NotPlayer.selector);
         zk.leaveBeforeStart(tableId);
     }
 
@@ -333,7 +334,7 @@ contract HoldemTableNUnitTest is Test {
         assertEq(zk.seatCount(tableId), 2, "compacted to 2 seats");
         assertEq(zk.seatAt(tableId, 1), seat2, "former last seat swapped into freed slot");
         assertEq(zk.escrowOf(tableId, 1), buyIn, "escrow moved with the swap");
-        assertEq(uint8(zk.status(tableId)), uint8(HoldemTableN.Status.Forming), "still forming");
+        assertEq(uint8(zk.status(tableId)), uint8(ChannelTableBase.Status.Created), "still forming");
     }
 
     /// The only remaining seat leaves: table auto-cancels and gets its full escrow back.
@@ -350,7 +351,7 @@ contract HoldemTableNUnitTest is Test {
 
         assertEq(a0.balance - before, buyIn, "sole seat refunded");
         assertEq(zk.seatCount(tableId), 0, "no seats left");
-        assertEq(uint8(zk.status(tableId)), uint8(HoldemTableN.Status.Cancelled), "auto-cancelled");
+        assertEq(uint8(zk.status(tableId)), uint8(ChannelTableBase.Status.Cancelled), "auto-cancelled");
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════
@@ -360,14 +361,14 @@ contract HoldemTableNUnitTest is Test {
     function test_cancelRevertsBadStatus() public {
         bytes32 tableId = _table(2, 1 ether); // Live
         vm.prank(vm.addr(_pk(0)));
-        vm.expectRevert(HoldemTableN.BadStatus.selector);
+        vm.expectRevert(ChannelTableBase.BadStatus.selector);
         zk.cancel(tableId);
     }
 
     function test_cancelRevertsNotPlayerTooManySeats() public {
         bytes32 tableId = _createAndJoin(2, 1 ether); // 2 seats joined, still Forming
         vm.prank(vm.addr(_pk(0)));
-        vm.expectRevert(HoldemTableN.NotPlayer.selector);
+        vm.expectRevert(ChannelTableBase.NotPlayer.selector);
         zk.cancel(tableId); // seats.length != 1
     }
 
@@ -375,7 +376,7 @@ contract HoldemTableNUnitTest is Test {
         bytes32 tableId = _createOnly(1 ether, 2);
         address stranger = vm.addr(_pk(9));
         vm.prank(stranger);
-        vm.expectRevert(HoldemTableN.NotPlayer.selector);
+        vm.expectRevert(ChannelTableBase.NotPlayer.selector);
         zk.cancel(tableId);
     }
 
@@ -389,7 +390,7 @@ contract HoldemTableNUnitTest is Test {
         zk.cancel(tableId);
 
         assertEq(a0.balance - before, buyIn, "creator refunded");
-        assertEq(uint8(zk.status(tableId)), uint8(HoldemTableN.Status.Cancelled), "cancelled");
+        assertEq(uint8(zk.status(tableId)), uint8(ChannelTableBase.Status.Cancelled), "cancelled");
         assertEq(zk.escrowOf(tableId, 0), 0, "escrow zeroed");
     }
 
@@ -401,7 +402,7 @@ contract HoldemTableNUnitTest is Test {
         bytes32 tableId = _createOnly(1 ether, 2); // Forming, not Live
         ChannelStateN memory s = _emptyState(tableId, 1);
         bytes[] memory sigs = new bytes[](1);
-        vm.expectRevert(HoldemTableN.BadStatus.selector);
+        vm.expectRevert(ChannelTableBase.BadStatus.selector);
         zk.settle(tableId, s, sigs);
     }
 
@@ -411,7 +412,7 @@ contract HoldemTableNUnitTest is Test {
         bytes[] memory sigs = new bytes[](2);
         address stranger = vm.addr(_pk(9));
         vm.prank(stranger);
-        vm.expectRevert(HoldemTableN.NotPlayer.selector);
+        vm.expectRevert(ChannelTableBase.NotPlayer.selector);
         zk.settle(tableId, s, sigs);
     }
 
@@ -430,7 +431,7 @@ contract HoldemTableNUnitTest is Test {
         s.phase = 11;
         bytes[] memory sigs = _coSign(n, s);
         vm.prank(vm.addr(_pk(0)));
-        vm.expectRevert(HoldemTableN.WrongTable.selector);
+        vm.expectRevert(ChannelTableBase.WrongTable.selector);
         zk.settle(tableId, s, sigs);
     }
 
@@ -472,7 +473,7 @@ contract HoldemTableNUnitTest is Test {
         s.phase = 11;
         bytes[] memory sigs = _coSign(n, s);
         vm.prank(vm.addr(_pk(0)));
-        vm.expectRevert(HoldemTableN.NotFinal.selector);
+        vm.expectRevert(ChannelTableBase.NotFinal.selector);
         zk.settle(tableId, s, sigs);
     }
 
@@ -487,7 +488,7 @@ contract HoldemTableNUnitTest is Test {
         s.phase = 11;
         bytes[] memory sigs = _coSign(n, s);
         vm.prank(vm.addr(_pk(0)));
-        vm.expectRevert(HoldemTableN.PotNotZero.selector);
+        vm.expectRevert(ChannelTableBase.PotNotZero.selector);
         zk.settle(tableId, s, sigs);
     }
 
@@ -503,7 +504,7 @@ contract HoldemTableNUnitTest is Test {
         s.phase = 11;
         bytes[] memory sigs = _coSign(n, s);
         vm.prank(vm.addr(_pk(0)));
-        vm.expectRevert(HoldemTableN.PotNotZero.selector);
+        vm.expectRevert(ChannelTableBase.PotNotZero.selector);
         zk.settle(tableId, s, sigs);
     }
 
@@ -531,7 +532,7 @@ contract HoldemTableNUnitTest is Test {
         bytes[] memory respSigs = _coSign(n, resp);
         vm.prank(vm.addr(_pk(0)));
         zk.respondWithState(tableId, resp, respSigs);
-        assertEq(uint8(zk.status(tableId)), uint8(HoldemTableN.Status.Live), "back to live");
+        assertEq(uint8(zk.status(tableId)), uint8(ChannelTableBase.Status.Live), "back to live");
 
         // settle at nonce == checkpointNonce (6) -> StaleNonce
         ChannelStateN memory s = _emptyState(tableId, n);
@@ -540,7 +541,7 @@ contract HoldemTableNUnitTest is Test {
         s.phase = 11;
         bytes[] memory sigs = _coSign(n, s);
         vm.prank(vm.addr(_pk(0)));
-        vm.expectRevert(HoldemTableN.StaleNonce.selector);
+        vm.expectRevert(ChannelTableBase.StaleNonce.selector);
         zk.settle(tableId, s, sigs);
     }
 
@@ -613,7 +614,7 @@ contract HoldemTableNUnitTest is Test {
         bytes32 tableId = _createOnly(1 ether, 2); // Forming
         ChannelStateN memory s = _emptyState(tableId, 1);
         bytes[] memory sigs = new bytes[](1);
-        vm.expectRevert(HoldemTableN.BadStatus.selector);
+        vm.expectRevert(ChannelTableBase.BadStatus.selector);
         zk.openDispute(tableId, s, sigs, "", 0, DEMAND_MOVE, 0);
     }
 
@@ -623,7 +624,7 @@ contract HoldemTableNUnitTest is Test {
         bytes[] memory sigs = new bytes[](2);
         address stranger = vm.addr(_pk(9));
         vm.prank(stranger);
-        vm.expectRevert(HoldemTableN.NotPlayer.selector);
+        vm.expectRevert(ChannelTableBase.NotPlayer.selector);
         zk.openDispute(tableId, s, sigs, "", 0, DEMAND_MOVE, 0);
     }
 
@@ -660,7 +661,7 @@ contract HoldemTableNUnitTest is Test {
         s2.gameStateHash = keccak256("g2");
         bytes[] memory sigs2 = _coSign(n, s2);
         vm.prank(vm.addr(_pk(0)));
-        vm.expectRevert(HoldemTableN.StaleNonce.selector);
+        vm.expectRevert(ChannelTableBase.StaleNonce.selector);
         zk.openDispute(tableId, s2, sigs2, "g2", 0, DEMAND_MOVE, 0);
     }
 
@@ -675,7 +676,7 @@ contract HoldemTableNUnitTest is Test {
         s.gameStateHash = keccak256("real");
         bytes[] memory sigs = _coSign(n, s);
         vm.prank(vm.addr(_pk(0)));
-        vm.expectRevert(HoldemTableN.BadGameState.selector);
+        vm.expectRevert(ChannelTableBase.BadGameState.selector);
         zk.openDispute(tableId, s, sigs, "fake", 0, DEMAND_MOVE, 0); // hash("fake") != hash("real")
     }
 
@@ -690,7 +691,7 @@ contract HoldemTableNUnitTest is Test {
         s.gameStateHash = keccak256("g");
         bytes[] memory sigs = _coSign(n, s);
         vm.prank(vm.addr(_pk(0)));
-        vm.expectRevert(HoldemTableN.BadDemand.selector);
+        vm.expectRevert(ChannelTableBase.BadDemand.selector);
         zk.openDispute(tableId, s, sigs, "g", 0, 3, 0); // demandKind neither MOVE nor SHARE
     }
 
@@ -717,7 +718,7 @@ contract HoldemTableNUnitTest is Test {
         bytes32 tableId = _table(2, 1 ether); // Live, not Disputed
         ChannelStateN memory s = _emptyState(tableId, 2);
         bytes[] memory sigs = new bytes[](2);
-        vm.expectRevert(HoldemTableN.BadStatus.selector);
+        vm.expectRevert(ChannelTableBase.BadStatus.selector);
         zk.respondWithState(tableId, s, sigs);
     }
 
@@ -729,7 +730,7 @@ contract HoldemTableNUnitTest is Test {
         bytes[] memory sigs = new bytes[](n);
         address stranger = vm.addr(_pk(9));
         vm.prank(stranger);
-        vm.expectRevert(HoldemTableN.NotPlayer.selector);
+        vm.expectRevert(ChannelTableBase.NotPlayer.selector);
         zk.respondWithState(tableId, s, sigs);
     }
 
@@ -745,7 +746,7 @@ contract HoldemTableNUnitTest is Test {
         s.phase = 4;
         bytes[] memory sigs = _coSign(n, s);
         vm.prank(vm.addr(_pk(0)));
-        vm.expectRevert(HoldemTableN.StaleNonce.selector);
+        vm.expectRevert(ChannelTableBase.StaleNonce.selector);
         zk.respondWithState(tableId, s, sigs);
     }
 
@@ -768,7 +769,7 @@ contract HoldemTableNUnitTest is Test {
 
     function test_respondWithMoveRevertsBadStatus() public {
         bytes32 tableId = _table(2, 100); // Live, not Disputed
-        vm.expectRevert(HoldemTableN.BadStatus.selector);
+        vm.expectRevert(ChannelTableBase.BadStatus.selector);
         zk.respondWithMove(tableId, "g", "move");
     }
 
@@ -786,7 +787,7 @@ contract HoldemTableNUnitTest is Test {
         zk.openDispute(tableId, s, sigs, "g", 0, DEMAND_SHARE, 0);
 
         vm.prank(vm.addr(_pk(0)));
-        vm.expectRevert(HoldemTableN.NotDemanded.selector);
+        vm.expectRevert(ChannelTableBase.NotDemanded.selector);
         zk.respondWithMove(tableId, "g", "move");
     }
 
@@ -795,7 +796,7 @@ contract HoldemTableNUnitTest is Test {
         bytes32 tableId = _table(n, 100);
         _openMoveDisputeSimple(tableId, n, 1, 0); // demand seat 0
         vm.prank(vm.addr(_pk(1))); // seat 1, not the demanded seat
-        vm.expectRevert(HoldemTableN.NotYourDispute.selector);
+        vm.expectRevert(ChannelTableBase.NotYourDispute.selector);
         zk.respondWithMove(tableId, "g", "move");
     }
 
@@ -804,7 +805,7 @@ contract HoldemTableNUnitTest is Test {
         bytes32 tableId = _table(n, 100);
         _openMoveDisputeSimple(tableId, n, 1, 0);
         vm.prank(vm.addr(_pk(0)));
-        vm.expectRevert(HoldemTableN.BadGameState.selector);
+        vm.expectRevert(ChannelTableBase.BadGameState.selector);
         zk.respondWithMove(tableId, "wrong-preimage", "move");
     }
 
@@ -829,7 +830,7 @@ contract HoldemTableNUnitTest is Test {
         vm.prank(vm.addr(_pk(0)));
         zk.respondWithMove(tableId, "g", "move");
 
-        assertEq(uint8(zk.status(tableId)), uint8(HoldemTableN.Status.Live), "dispute cleared");
+        assertEq(uint8(zk.status(tableId)), uint8(ChannelTableBase.Status.Live), "dispute cleared");
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════
@@ -854,7 +855,7 @@ contract HoldemTableNUnitTest is Test {
         uint256[2] memory share;
         uint256[5] memory proof;
         vm.prank(vm.addr(_pk(0)));
-        vm.expectRevert(HoldemTableN.NotDemanded.selector);
+        vm.expectRevert(ChannelTableBase.NotDemanded.selector);
         zk.respondWithShare(tableId, deck, share, proof);
     }
 
@@ -874,7 +875,7 @@ contract HoldemTableNUnitTest is Test {
         uint256[2] memory share;
         uint256[5] memory proof;
         vm.prank(vm.addr(_pk(1))); // wrong seat
-        vm.expectRevert(HoldemTableN.NotYourDispute.selector);
+        vm.expectRevert(ChannelTableBase.NotYourDispute.selector);
         zk.respondWithShare(tableId, deck, share, proof);
     }
 
@@ -896,7 +897,7 @@ contract HoldemTableNUnitTest is Test {
         uint256[2] memory share;
         uint256[5] memory proof;
         vm.prank(vm.addr(_pk(0)));
-        vm.expectRevert(HoldemTableN.BadDeck.selector);
+        vm.expectRevert(ChannelTableBase.BadDeck.selector);
         zk.respondWithShare(tableId, deck, share, proof);
     }
 
@@ -920,7 +921,7 @@ contract HoldemTableNUnitTest is Test {
         uint256[2] memory share;
         uint256[5] memory proof;
         vm.prank(vm.addr(_pk(0)));
-        vm.expectRevert(HoldemTableN.BadDeck.selector);
+        vm.expectRevert(ChannelTableBase.BadDeck.selector);
         zk.respondWithShare(tableId, deck, share, proof);
     }
 
@@ -946,7 +947,7 @@ contract HoldemTableNUnitTest is Test {
         uint256[2] memory share;
         uint256[5] memory proof;
         vm.prank(vm.addr(_pk(0)));
-        vm.expectRevert(HoldemTableN.BadDemand.selector);
+        vm.expectRevert(ChannelTableBase.BadDemand.selector);
         zk.respondWithShare(tableId, deck, share, proof);
     }
 
@@ -1011,7 +1012,7 @@ contract HoldemTableNUnitTest is Test {
 
     function test_resolveTimeoutRevertsBadStatus() public {
         bytes32 tableId = _table(2, 100); // Live, not Disputed
-        vm.expectRevert(HoldemTableN.BadStatus.selector);
+        vm.expectRevert(ChannelTableBase.BadStatus.selector);
         zk.resolveTimeout(tableId);
     }
 
@@ -1019,19 +1020,21 @@ contract HoldemTableNUnitTest is Test {
         uint256 n = 2;
         bytes32 tableId = _table(n, 100);
         _openMoveDisputeSimple(tableId, n, 1, 0);
-        vm.expectRevert(HoldemTableN.ClockNotExpired.selector);
+        vm.expectRevert(ChannelTableBase.ClockNotExpired.selector);
         zk.resolveTimeout(tableId); // clock not rolled forward
     }
 
-    /// `_distribute`'s `count == 0` branch is documented as "unreachable with an honest
-    /// majority" — but nothing on-chain enforces that a side-pot's `eligibleMask` actually
-    /// reflects real game eligibility (it only needs Sigma-conserving co-signed sigs). A side
-    /// pot whose ONLY eligible seat is the one being forced-folded drives the mask to empty
-    /// after `& ~(1<<forfeit)`, hitting the "no seat eligible" sink: the amount is added to
-    /// payouts[0] (lowest index overall) — which here IS the forfeiting seat itself. This test
-    /// documents that this branch is reachable (not dead code) and what it actually does; it is
-    /// not asserting this is a protocol bug, just exercising the line for coverage.
-    function test_resolveTimeoutSidePotEmptyMaskSinksToLowestSeat() public {
+    /// BUG FIX (was: `_distribute`'s `count == 0` branch, formerly documented as "unreachable
+    /// with an honest majority"). Nothing on-chain enforced that a side-pot's `eligibleMask`
+    /// actually reflected real game eligibility (it only needed Sigma-conserving co-signed
+    /// sigs). A side pot whose ONLY eligible seat was the one later forced-folded drove the
+    /// mask to empty after `& ~(1<<forfeit)` in resolveTimeout, and the old code silently
+    /// sank the orphaned amount into payouts[0] — misdirecting funds to seat 0 even when seat 0
+    /// was never eligible for that pot. A real side-pot always has >=2 contestants when created,
+    /// so a co-signed dispute state naming only the about-to-forfeit seat as eligible is
+    /// ill-formed; openDispute now rejects it outright (BadDemand) before it can ever become
+    /// disputeState, so resolveTimeout can never reach that orphaned-pot situation.
+    function test_openDisputeRevertsWhenSidePotWouldOrphanOnForfeit() public {
         uint256 n = 2;
         uint256 buyIn = 100;
         uint256 total = n * buyIn; // 200
@@ -1047,17 +1050,47 @@ contract HoldemTableNUnitTest is Test {
         s.phase = 4;
         s.gameStateHash = keccak256("g");
         bytes[] memory sigs = _coSign(n, s);
+
+        // demanding of seat 0 — the side pot's sole eligible seat — would orphan it on forfeit.
         vm.prank(vm.addr(_pk(0)));
-        zk.openDispute(tableId, s, sigs, "g", 0, DEMAND_MOVE, 0); // forfeit seat 0 (the sole eligible seat)
+        vm.expectRevert(ChannelTableBase.BadDemand.selector);
+        zk.openDispute(tableId, s, sigs, "g", 0, DEMAND_MOVE, 0);
+
+        // the table is untouched: still Live, no dispute state pinned.
+        assertEq(uint8(zk.status(tableId)), uint8(ChannelTableBase.Status.Live), "rejected dispute must not open");
+    }
+
+    /// Companion positive case: a side pot naming a DIFFERENT seat as eligible (in addition to
+    /// the forfeiting seat) survives the openDispute guard and resolveTimeout still splits it
+    /// correctly among the remaining eligible seats — the fix does not reject legitimate states.
+    function test_resolveTimeoutDistributesSidePotAmongSurvivingEligibleSeats() public {
+        uint256 n = 3;
+        uint256 buyIn = 100;
+        uint256 total = n * buyIn; // 300
+        bytes32 tableId = _table(n, buyIn);
+
+        ChannelStateN memory s = _emptyState(tableId, n);
+        s.nonce = 1;
+        s.pot = 0;
+        s.sidePots = new SidePot[](1);
+        // seats 1 and 2 eligible; seat 0 (the one about to be demanded-of/forfeited) is not.
+        s.sidePots[0] = SidePot({amount: total, eligibleMask: (1 << 1) | (1 << 2)});
+        s.phase = 4;
+        s.gameStateHash = keccak256("g");
+        bytes[] memory sigs = _coSign(n, s);
+        vm.prank(vm.addr(_pk(0)));
+        zk.openDispute(tableId, s, sigs, "g", 0, DEMAND_MOVE, 0); // forfeit seat 0
 
         vm.roll(block.number + CLOCK + 1);
         uint256 before0 = vm.addr(_pk(0)).balance;
         uint256 before1 = vm.addr(_pk(1)).balance;
+        uint256 before2 = vm.addr(_pk(2)).balance;
         zk.resolveTimeout(tableId);
 
-        // mask for the side pot becomes empty (0x1 & ~0x1 == 0) -> sink pays payouts[0].
-        assertEq(vm.addr(_pk(0)).balance - before0, total, "sink paid the forfeiting seat via payouts[0]");
-        assertEq(vm.addr(_pk(1)).balance - before1, 0, "seat 1 got nothing from the orphaned side pot");
+        // removing seat 0 from the mask leaves seats 1 and 2 -> split evenly (300/2 = 150 each).
+        assertEq(vm.addr(_pk(0)).balance - before0, 0, "forfeiting seat gets nothing from the side pot");
+        assertEq(vm.addr(_pk(1)).balance - before1, 150, "seat 1 share");
+        assertEq(vm.addr(_pk(2)).balance - before2, 150, "seat 2 share");
         assertEq(address(zk).balance, 0, "no residue");
     }
 }
