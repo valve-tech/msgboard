@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.24;
 
+import {FixedPointMathLib} from "solady/src/utils/FixedPointMathLib.sol";
+
 /// Pure on-chain dispute-replay mirror of the STATEFUL game MINES (gameId 5).
 ///
 /// Unlike the single-draw games in GamePayouts — whose outcome is a pure function of the round random
@@ -80,9 +82,44 @@ library MinesRules {
     // fixed-point multiplier — mirror fairMultiplierX100 / applyMinesEdgeX100 / multiplierX100At
     // ---------------------------------------------------------------------------
 
+    /// C(n, k) — the binomial coefficient — via the standard incremental recursion
+    /// C(n,i) = C(n,i-1) * (n-i+1) / i. That division is ALWAYS exact (remainder zero): the
+    /// identity C(n,i-1)*(n-i+1) == i*C(n,i) is a classical combinatorial fact, so no rounding is
+    /// ever introduced by dividing at each step rather than once at the end. `fullMulDiv` is used
+    /// only because the *intermediate* product C(n,i-1)*(n-i+1) can momentarily need more than 256
+    /// bits even though every C(n,i) this function returns (for the n<=MAX_TILES=256 boards this
+    /// library supports) fits comfortably in a uint256 (the largest, C(256,128), is ~5.8e75, well
+    /// under 2**256 ~= 1.16e77).
+    function _binom(uint256 n, uint256 k) private pure returns (uint256 c) {
+        c = 1;
+        for (uint256 i = 1; i <= k; i++) {
+            c = FixedPointMathLib.fullMulDiv(c, n - i + 1, i);
+        }
+    }
+
     /// Fair multiplier (hundredths, BEFORE edge) after revealing `safeRevealed` safe tiles of an
-    /// (N tiles, M mines) board: fair = Π (N-i)/(S-i), S = N-M, as one rational bigint division to avoid
-    /// compounding rounding. IDENTICAL operation order to fairMultiplierX100 in mines.ts.
+    /// (N tiles, M mines) board.
+    ///
+    /// fair = Π (N-i)/(S-i), S = N-M, i.e. algebraically fair = [N!/(N-k)!] / [S!/(S-k)!] =
+    /// C(N,k)/C(S,k) (the falling-factorial numerator and denominator share the same k! factor).
+    /// The original implementation computed the LHS directly as one big product-then-divide, which
+    /// is exact but overflows uint256 for thin, large boards (e.g. tiles=58, mines=1, safeRevealed=57:
+    /// the unreduced numerator alone needs 261 bits). This computes the RHS instead — the same exact
+    /// rational number, just via its already-reduced form — so no intermediate ever needs to hold
+    /// the full unreduced falling factorial. `_binom` cannot introduce rounding error (see above), so
+    /// the only truncating division in this function is the final `fullMulDiv`, exactly mirroring
+    /// the ONE division the original formula performed — i.e. for every input where the original
+    /// formula did not already overflow, this returns the byte-identical result (see
+    /// `testFuzz_fairMultiplier_matchesOldFormula_belowOverflowThreshold` in MinesRulesUnit.t.sol,
+    /// which fuzzes both implementations side by side and asserts equality).
+    ///
+    /// A residual: for boards near the binomial peak (many mines, deep into a full reveal — e.g.
+    /// tiles=256, mines~128, safeRevealed=128) the fair value ITSELF (times 100) no longer fits in a
+    /// uint256 (C(256,128) is ~5.8e75; *100 need ~259 bits) — not an artifact of this algorithm, but
+    /// because no uint256-based x100 fixed point can hold that value. `fullMulDiv` reverts
+    /// deterministically (`FullMulDivFailed`) in that case, which is the well-defined behavior for
+    /// boards genuinely outside what this fixed-point representation supports; such boards were
+    /// already unplayable in practice (no house escrow realistically covers a >1e75x multiplier).
     function fairMultiplierX100(uint256 tiles, uint256 mines, uint256 safeRevealed)
         internal
         pure
@@ -90,13 +127,9 @@ library MinesRules {
     {
         uint256 safe = tiles - mines;
         require(safeRevealed <= safe, "mines: safeRevealed out of range");
-        uint256 num = 1;
-        uint256 den = 1;
-        for (uint256 i = 0; i < safeRevealed; i++) {
-            num *= (tiles - i);
-            den *= (safe - i);
-        }
-        return (num * HUNDREDTHS) / den;
+        uint256 numC = _binom(tiles, safeRevealed);
+        uint256 denC = _binom(safe, safeRevealed);
+        return FixedPointMathLib.fullMulDiv(numC, HUNDREDTHS, denC);
     }
 
     /// Running edged multiplier (hundredths) after `safeRevealed` safe reveals. 100 (1.00x) at k=0.
@@ -105,7 +138,10 @@ library MinesRules {
         pure
         returns (uint256)
     {
-        return (fairMultiplierX100(tiles, mines, safeRevealed) * ONE_MINUS_EDGE_X100) / HUNDREDTHS;
+        // fullMulDiv (not native `* 99 / 100`) so a large-but-representable fair multiplier can't
+        // overflow the intermediate product: identical floor result for every non-overflowing input,
+        // and a clean revert (never a 0x11 panic) on the pathological tail, mirroring fairMultiplierX100.
+        return FixedPointMathLib.fullMulDiv(fairMultiplierX100(tiles, mines, safeRevealed), ONE_MINUS_EDGE_X100, HUNDREDTHS);
     }
 
     // ---------------------------------------------------------------------------
