@@ -99,6 +99,7 @@ remappings = [
 # reach this non-viaIR compilation. Only ShuffleVerifier52.t.sol compiles here.
 skip = [
   'test/foundry/*Unit.t.sol',
+  'test/foundry/*Cov.t.sol',
   'test/foundry/CoinFlipTablesInvariant.t.sol',
   'test/foundry/CoinFlip.t.sol',
   'test/foundry/CardCascadePayouts.t.sol',
@@ -189,6 +190,7 @@ no_match_contract = '^ZkTable$'
 # keeps the (large, slow) verifier compile isolated to the M2 run.
 skip = [
   'test/foundry/*Unit.t.sol',
+  'test/foundry/*Cov.t.sol',
   'test/foundry/CoinFlipTablesInvariant.t.sol',
   'test/foundry/CoinFlip.t.sol',
   'test/foundry/CardCascadePayouts.t.sol',
@@ -269,6 +271,7 @@ no_match_contract = '^ZkTable$'
 # source is NOT pulled into this viaIR unit (it would fail viaIR); its artifact is read from out.
 skip = [
   'test/foundry/*Unit.t.sol',
+  'test/foundry/*Cov.t.sol',
   'test/foundry/CoinFlipTablesInvariant.t.sol',
   'test/foundry/CoinFlip.t.sol',
   'test/foundry/CardCascadePayouts.t.sol',
@@ -344,6 +347,7 @@ no_match_contract = '^ZkTable$'
 # so exclude them from this viaIR:true unit.
 skip = [
   'test/foundry/*Unit.t.sol',
+  'test/foundry/*Cov.t.sol',
   'test/foundry/CoinFlipTablesInvariant.t.sol',
   'test/foundry/ShuffleVerifier52.t.sol',
   'test/foundry/ShuffleVerifier52Positive.t.sol',
@@ -387,6 +391,7 @@ no_match_contract = '^ZkTable$'
 # Compile ONLY the resolver suite + its imports in this 0.8.27 unit.
 skip = [
   'test/foundry/*Unit.t.sol',
+  'test/foundry/*Cov.t.sol',
   'test/foundry/CoinFlipTablesInvariant.t.sol',
   'test/foundry/CardCascadePayouts.t.sol',
   'test/foundry/Chips.t.sol',
