@@ -194,7 +194,7 @@ library MinesRules {
         // 2) replay the reveal sequence through the pure transition.
         uint256 safe = uint256(claim.tiles) - claim.mines;
         uint256 revealedCount = 0;
-        bool busted = false;
+        bool busted;
         uint256 multX100 = HUNDREDTHS; // 1.00x at k=0
         uint16[] memory reveals = claim.reveals;
         for (uint256 i = 0; i < reveals.length; i++) {

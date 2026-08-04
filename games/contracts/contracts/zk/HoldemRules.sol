@@ -544,7 +544,7 @@ contract HoldemRules is IGameRulesN, HoldemHandEval {
             uint256 v = s.totalContributed[i];
             if (v == 0) continue;
             // insert if new
-            bool seen = false;
+            bool seen;
             for (uint256 j = 0; j < lc; j++) if (levels[j] == v) { seen = true; break; }
             if (!seen) { levels[lc++] = v; }
         }
