@@ -308,12 +308,11 @@ contract HoldemRules is IGameRulesN, HoldemHandEval {
             _closeStreet(s);
             return s;
         }
-        uint8 next = _nextToAct(s, from);
-        if (next == NONE) {
-            _closeStreet(s);
-            return s;
-        }
-        s.toAct = next;
+        // Reaching here means _roundClosed(s) was false. _roundClosed returns true whenever
+        // _actableCount(s) == 0, and _actableCount counts exactly the seats _nextToAct scans for
+        // (!folded && !allIn) — so _actableCount(s) > 0 here and _nextToAct always returns a real
+        // seat, never NONE. No no-next-actor guard is needed (it would be unreachable dead code).
+        s.toAct = _nextToAct(s, from);
         return s;
     }
 
