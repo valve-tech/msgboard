@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {CoinFlipTables} from "../../contracts/games/CoinFlipTables.sol";
+import {BankrollLib} from "../../contracts/games/BankrollLib.sol";
 import {GameBase} from "../../contracts/GameBase.sol";
 import {Chips} from "../../contracts/games/Chips.sol";
 import {PreimageLocation} from "../../contracts/PreimageLocation.sol";
@@ -213,7 +214,7 @@ contract CoinFlipTablesUnitTest is Test {
     }
 
     function test_fundHot_noTable() public {
-        vm.expectRevert(CoinFlipTables.NoTable.selector);
+        vm.expectRevert(BankrollLib.NoTable.selector);
         tables.fundHot(bytes32(uint256(0xDEAD)), 1 ether);
     }
 
@@ -233,7 +234,7 @@ contract CoinFlipTablesUnitTest is Test {
     }
 
     function test_fundCold_noTable() public {
-        vm.expectRevert(CoinFlipTables.NoTable.selector);
+        vm.expectRevert(BankrollLib.NoTable.selector);
         tables.fundCold(bytes32(uint256(0xDEAD)), 1 ether);
     }
 
@@ -261,7 +262,7 @@ contract CoinFlipTablesUnitTest is Test {
 
     function test_withdrawHot_insufficientHot() public {
         bytes32 tableId = _tableWithHot(MULT, 1 ether, 1 ether);
-        vm.expectRevert(CoinFlipTables.InsufficientHot.selector);
+        vm.expectRevert(BankrollLib.InsufficientHot.selector);
         tables.withdrawHot(tableId, 2 ether);
     }
 
@@ -293,7 +294,7 @@ contract CoinFlipTablesUnitTest is Test {
         bytes32 tableId = tables.createTable(MULT, 1 ether, 0);
         chips.mint(address(this), 1 ether);
         tables.fundCold(tableId, 1 ether);
-        vm.expectRevert(CoinFlipTables.InsufficientCold.selector);
+        vm.expectRevert(BankrollLib.InsufficientCold.selector);
         tables.withdrawCold(tableId, 2 ether);
     }
 
@@ -326,7 +327,7 @@ contract CoinFlipTablesUnitTest is Test {
         bytes32 tableId = tables.createTable(MULT, 1 ether, 0);
         chips.mint(address(this), 1 ether);
         tables.fundCold(tableId, 1 ether);
-        vm.expectRevert(CoinFlipTables.InsufficientCold.selector);
+        vm.expectRevert(BankrollLib.InsufficientCold.selector);
         tables.promote(tableId, 2 ether);
     }
 
@@ -351,7 +352,7 @@ contract CoinFlipTablesUnitTest is Test {
 
     function test_demote_insufficientHot() public {
         bytes32 tableId = _tableWithHot(MULT, 1 ether, 1 ether);
-        vm.expectRevert(CoinFlipTables.InsufficientHot.selector);
+        vm.expectRevert(BankrollLib.InsufficientHot.selector);
         tables.demote(tableId, 2 ether);
     }
 
@@ -392,19 +393,19 @@ contract CoinFlipTablesUnitTest is Test {
         bytes32 tableId = tables.createTable(MULT, 1 ether, 50 ether);
         chips.mint(address(this), 50 ether);
         tables.fundHot(tableId, 50 ether); // hot == hotTarget already
-        vm.expectRevert(CoinFlipTables.NothingToRefill.selector);
+        vm.expectRevert(BankrollLib.NothingToRefill.selector);
         tables.refillHot(tableId);
     }
 
     function test_refillHot_nothingToRefill_moveZero() public {
         // hotTarget=100, hot=0, cold=0 -> need=100, move=min(need,cold)=0.
         bytes32 tableId = tables.createTable(MULT, 1 ether, 100 ether);
-        vm.expectRevert(CoinFlipTables.NothingToRefill.selector);
+        vm.expectRevert(BankrollLib.NothingToRefill.selector);
         tables.refillHot(tableId);
     }
 
     function test_refillHot_noTable() public {
-        vm.expectRevert(CoinFlipTables.NoTable.selector);
+        vm.expectRevert(BankrollLib.NoTable.selector);
         tables.refillHot(bytes32(uint256(0xDEAD)));
     }
 
@@ -471,7 +472,7 @@ contract CoinFlipTablesUnitTest is Test {
         bytes32 tableId = tables.createTable(MULT, 1 ether, 0);
         chips.mint(address(this), 1 ether);
         tables.stakeForRank(tableId, 1 ether);
-        vm.expectRevert(CoinFlipTables.InsufficientStake.selector);
+        vm.expectRevert(BankrollLib.InsufficientStake.selector);
         tables.unstake(tableId, 2 ether);
     }
 
@@ -524,7 +525,7 @@ contract CoinFlipTablesUnitTest is Test {
 
     function test_open_noTable() public {
         vm.prank(player);
-        vm.expectRevert(CoinFlipTables.NoTable.selector);
+        vm.expectRevert(BankrollLib.NoTable.selector);
         tables.open(bytes32(uint256(0xDEAD)), 0, 1 ether, subset, locs);
     }
 

@@ -26,7 +26,6 @@ contract Raffle is GameBase {
     error AlreadyRevealed();
     error GuessOutOfRange();
     error TooEarly();
-    error NothingToRefund();
     error BadFee();
 
     event RoundOpened(bytes32 indexed roundId, uint256 stake, uint256 threshold, uint256 period, bytes32 subsetHash);
