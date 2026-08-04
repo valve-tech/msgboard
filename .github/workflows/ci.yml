@@ -83,6 +83,8 @@ jobs:
     # decryption-share proofs) that adjudicates HoldemTableN/ZkTable SHARE disputes on-chain —
     # it shells out via vm.ffi to `tsx ../zk-core/scripts/gen-share-dispute.mts`, so it needs
     # npm ci (provides tsx + viem + @noble/curves; the script imports zk-core src directly, no build).
+    # The zk/zkverify/zkm2/eas steps additionally cover the ZK verifier + EAS-resolver sub-graphs,
+    # each of which needs its own compiler settings and so runs as a separate single-target profile.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -101,3 +103,20 @@ jobs:
       - name: forge test — ffi profile (real zk-core DLEQ prover via tsx)
         working-directory: games/contracts
         run: FOUNDRY_PROFILE=ffi forge test -vv
+      # Specialized single-target profiles: each isolates a sub-graph that CANNOT share the default
+      # compilation unit because it needs incompatible compiler settings (solc 0.8.25 vs 0.8.27, or
+      # viaIR on vs off — see the per-profile comments in games/contracts/foundry.toml). Ordering
+      # matters: zkm2 deploys (via vm.deployCode) the UltraHonk verifier artifact that zkverify
+      # builds into the shared forge-out-zkverify dir, so zkm2 MUST run after zkverify.
+      - name: forge test — zk profile (vendored uzkge shuffle/reveal verifier, viaIR-off)
+        working-directory: games/contracts
+        run: FOUNDRY_PROFILE=zk forge test -vv
+      - name: forge test — zkverify profile (generated UltraHonk verifier, solc 0.8.27 viaIR-off)
+        working-directory: games/contracts
+        run: FOUNDRY_PROFILE=zkverify forge test -vv
+      - name: forge test — zkm2 profile (settleWithProof; deploys zkverify's verifier artifact)
+        working-directory: games/contracts
+        run: FOUNDRY_PROFILE=zkm2 forge test -vv
+      - name: forge test — eas profile (EAS SolveResolvers, solc 0.8.27)
+        working-directory: games/contracts
+        run: FOUNDRY_PROFILE=eas forge test -vv
