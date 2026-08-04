@@ -224,7 +224,7 @@ library GamePayouts {
 
         if (pt < 8 && bt < 8) {
             // not a natural — apply the fixed draw rules
-            bool playerDrew = false;
+            bool playerDrew;
             uint256 playerThirdPip = 0;
             if (pt <= 5) {
                 playerThirdPip = _bacVal(deck[ptr++]);
