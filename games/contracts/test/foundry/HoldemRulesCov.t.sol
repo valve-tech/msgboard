@@ -26,6 +26,7 @@ contract HoldemRulesCovTest is Test {
     uint8 internal constant SETTLED = 11;
     uint8 internal constant NONE = 0xff;
 
+    uint8 internal constant MOVE_CHECK = 1;
     uint8 internal constant MOVE_CALL = 2;
     uint8 internal constant MOVE_BET = 4;
     uint8 internal constant MOVE_RAISE = 5;
@@ -309,5 +310,42 @@ contract HoldemRulesCovTest is Test {
         uint8[5] memory board;
         vm.expectRevert(bytes("showdown: holes"));
         _applyRaw(s, _mShowdown(holes, board));
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════
+    // _recomputePots: dead-money carry when the TOP contribution level is all-folded
+    // ════════════════════════════════════════════════════════════════════════════
+
+    /// `_recomputePots` accumulates `deadCarry` at any betting level whose only contributors
+    /// are folded seats (no live seat is eligible for it). The post-loop `if (deadCarry > 0)`
+    /// tail (HoldemRules.sol:590) folds that leftover into the last real pot; it fires when the
+    /// STRICT-MAX contribution level itself is all-folded, so the carry survives to loop end.
+    /// The BODY of that tail (lines 592/593) is already exercised incidentally by the fuzz/
+    /// invariant suites, but no test PINS the dead-money math with a deterministic conservation
+    /// assertion — that is this test's purpose (a named regression). (The `if` line itself,
+    /// 590, is a phantom-zero under `forge coverage --ir-minimum` and can't be moved: the body
+    /// counts 592/593 stay nonzero while the condition line reads 0.) Constructed directly per
+    /// HoldemRules' documented "trusts structural validity of its input" convention: seat 0 has
+    /// folded while holding the strict-max cumulative contribution (reachable across streets),
+    /// with two live seats below it. A check by a live seat runs `_advance` -> `_recomputePots`.
+    function test_recomputePots_deadMoneyFromFoldedTopContributor_isCarriedIntoMainPot() public {
+        HoldemRules.Holdem memory s = _base(3);
+        s.phase = BET_FLOP;         // post-flop street: currentBet/committed reset to 0, check is legal
+        s.currentBet = 0;
+        s.toAct = 1;                // a live seat to act
+        s.totalContributed[0] = 300; // folded, yet the strict-max cumulative contributor
+        s.totalContributed[1] = 100; // live
+        s.totalContributed[2] = 100; // live
+        s.folded[0] = true;
+        // actedSinceAggression all false so the round stays OPEN after seat 1 checks (seat 2
+        // still owes action) — keeps _advance on its normal path, isolating _recomputePots.
+
+        HoldemRules.Holdem memory out = _apply(s, _mSeat(MOVE_CHECK, 1));
+
+        // Level 100 pot = 100*3 = 300 (eligible: seats 1,2). Level 300 = 200*1 but elig==0
+        // (only the folded seat 0) => deadCarry 200, carried into the main pot at line 590.
+        assertEq(out.pot, 500, "all 300+100+100 conserved: 300 base + 200 dead-money carry");
+        assertEq(out.sidePots.length, 0, "single eligibility class -> no side pots");
+        assertEq(out.toAct, 2, "round still open: action passes to the other live seat");
     }
 }
