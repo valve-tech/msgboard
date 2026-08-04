@@ -16,7 +16,9 @@ contract CoinFlipTables is GameBase {
 
     error NotOperator();
     error BadMultiplier();
-    error NoTable();
+    // NoTable / InsufficientHot / InsufficientCold / InsufficientStake / NothingToRefill
+    // are declared (and reverted) in BankrollLib, whose internal fns are inlined here;
+    // reference them as BankrollLib.<Name> to avoid duplicate ABI/error definitions.
 
     event TableCreated(bytes32 indexed tableId, address indexed operator, uint16 maxMultiplierX100, uint256 maxStake, uint256 hotTarget);
     event ParamsSet(bytes32 indexed tableId, uint16 maxMultiplierX100, uint256 maxStake, uint256 hotTarget);
@@ -123,9 +125,6 @@ contract CoinFlipTables is GameBase {
         emit TableNamed(tableId, name);
     }
 
-    error InsufficientHot();
-    error InsufficientCold();
-
     event HotFunded(bytes32 indexed tableId, uint256 amount);
     event ColdFunded(bytes32 indexed tableId, uint256 amount);
     event HotWithdrawn(bytes32 indexed tableId, uint256 amount);
@@ -167,8 +166,6 @@ contract CoinFlipTables is GameBase {
         emit Demoted(tableId, amount);
     }
 
-    error NothingToRefill();
-
     event Refilled(bytes32 indexed tableId, uint256 amount);
 
     /// @notice Permissionless top-up of hot from cold, capped at hotTarget. Anyone may call this —
@@ -177,8 +174,6 @@ contract CoinFlipTables is GameBase {
         uint256 moved = tables[tableId].refillHot();
         emit Refilled(tableId, moved);
     }
-
-    error InsufficientStake();
 
     event Staked(bytes32 indexed tableId, uint256 amount);
     event Unstaked(bytes32 indexed tableId, uint256 amount);
@@ -208,7 +203,7 @@ contract CoinFlipTables is GameBase {
         PreimageLocation.Info[] calldata validatorLocations
     ) external returns (bytes32 roundId) {
         BankrollLib.Table storage t = tables[tableId];
-        if (t.operator == address(0)) revert NoTable();
+        if (t.operator == address(0)) revert BankrollLib.NoTable();
         if (!t.open) revert TableClosed();
         if (side > TAILS) revert WrongSide();
         if (stake == 0) revert ZeroStake();
