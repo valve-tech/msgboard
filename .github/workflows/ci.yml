@@ -77,6 +77,10 @@ jobs:
     # The games contracts' fuzz + invariant suite (HouseChannel/GamePayouts/… — incl. the
     # settle() nonce-0 free-roll regression). Default profile remaps forge-std -> repo-root lib
     # and solady -> node_modules, so it needs both npm ci and forge-std at the root.
+    # The ffi step additionally exercises the REAL zk-core secp256k1 DLEQ prover (Chaum–Pedersen
+    # decryption-share proofs) that adjudicates HoldemTableN/ZkTable SHARE disputes on-chain —
+    # it shells out via vm.ffi to `tsx ../zk-core/scripts/gen-share-dispute.mts`, so it needs
+    # npm ci (provides tsx + viem + @noble/curves; the script imports zk-core src directly, no build).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -92,3 +96,6 @@ jobs:
         run: |
           forge build
           forge test -vv
+      - name: forge test — ffi profile (real zk-core DLEQ prover via tsx)
+        working-directory: games/contracts
+        run: FOUNDRY_PROFILE=ffi forge test -vv
