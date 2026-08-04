@@ -18,6 +18,8 @@ jobs:
       - run: npm run build --workspace @msgboard/sdk
       # history imports @msgboard/cosign, so cosign's dist/ must exist before it typechecks
       - run: npm run build --workspace @msgboard/cosign
+      # history also imports @msgboard/petition (src/petition/*), so its dist/ must exist too
+      - run: npm run build --workspace @msgboard/petition
       - run: npm run build --workspace @msgboard/history
       - run: (cd packages/hardhat && npx tsc)
       # deterministic SDK unit tests (the OpenRPC spec + reference renderer)
