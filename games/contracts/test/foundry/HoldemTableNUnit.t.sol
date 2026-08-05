@@ -337,6 +337,33 @@ contract HoldemTableNUnitTest is Test {
         assertEq(uint8(zk.status(tableId)), uint8(ChannelTableBase.Status.Created), "still forming");
     }
 
+    /// HARDENING (regression): _deckKey is indexed by seat, so leaveBeforeStart's swap-and-pop must
+    /// move it with the swapped-down seat. Otherwise the seat now occupying the freed slot reads the
+    /// DEPARTED seat's pubkey and can never answer a SHARE dispute (its honest proof fails verify ->
+    /// force-folded on timeout) — a single-caller+sybil pot-theft primitive. Uses two distinct
+    /// on-curve keys (G and 2G) so the move is observable via deckKeyOf.
+    function test_leaveBeforeStartMovesDeckKeyWithSwappedSeat() public {
+        uint256 g2x = 0xc6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5; // 2*G.x
+        uint256 g2y = 0x1ae168fea63dc339a3c58419466ceaeef7f632653266d0e1236431a950cfe52a; // 2*G.y
+        bytes32 tableId = _createAndJoin(2, 1 ether); // seats 0,1 = _pk(0),_pk(1); Created
+        vm.prank(vm.addr(_pk(0)));
+        zk.registerDeckKey(tableId, [GX, GY]);
+        vm.prank(vm.addr(_pk(1)));
+        zk.registerDeckKey(tableId, [g2x, g2y]);
+        assertEq(zk.deckKeyOf(tableId, 0)[0], GX, "seat 0 key = G");
+        assertEq(zk.deckKeyOf(tableId, 1)[0], g2x, "seat 1 key = 2G");
+
+        // seat 0 leaves -> last seat (1) swap-and-popped down into index 0.
+        vm.prank(vm.addr(_pk(0)));
+        zk.leaveBeforeStart(tableId);
+
+        assertEq(zk.seatAt(tableId, 0), vm.addr(_pk(1)), "former last seat now at index 0");
+        assertEq(zk.deckKeyOf(tableId, 0)[0], g2x, "swapped seat's deck key moved down with it");
+        assertEq(zk.deckKeyOf(tableId, 0)[1], g2y, "and its y-coord");
+        assertEq(zk.deckKeyOf(tableId, 1)[0], 0, "vacated tail deck key cleared");
+        assertEq(zk.deckKeyOf(tableId, 1)[1], 0, "and its y-coord");
+    }
+
     /// The only remaining seat leaves: table auto-cancels and gets its full escrow back.
     function test_leaveBeforeStartLastSeatCancelsTable() public {
         uint256 buyIn = 1 ether;
@@ -782,6 +809,7 @@ contract HoldemTableNUnitTest is Test {
         s.balances[0] = n * 100;
         s.phase = 4;
         s.gameStateHash = keccak256("g");
+        s.deckCommitment = keccak256("deck"); // a SHARE dispute is over a committed deck
         bytes[] memory sigs = _coSign(n, s);
         vm.prank(vm.addr(_pk(0)));
         zk.openDispute(tableId, s, sigs, "g", 0, DEMAND_SHARE, 0);
@@ -867,6 +895,7 @@ contract HoldemTableNUnitTest is Test {
         s.balances[0] = n * 100;
         s.phase = 4;
         s.gameStateHash = keccak256("g");
+        s.deckCommitment = keccak256("deck"); // a SHARE dispute is over a committed deck
         bytes[] memory sigs = _coSign(n, s);
         vm.prank(vm.addr(_pk(0)));
         zk.openDispute(tableId, s, sigs, "g", 0, DEMAND_SHARE, 0); // demand seat 0
@@ -1104,7 +1133,12 @@ contract HoldemTableNUnitTest is Test {
     /// co-signed state (every seat signs a mask naming a non-existent seat), so it is a
     /// collusion/broken-client path — but it is reachable, and the guard reverts cleanly instead
     /// of dividing by zero. This pins that behavior.
-    function test_resolveTimeoutRevertsWhenSidePotMaskIsOutOfSeatRange() public {
+    /// HARDENING (input validation): a side pot whose eligibleMask names a seat OUTSIDE [0, n) is
+    /// now rejected at the trust boundary in _checkCoSigned (covers openDispute AND respondWithState),
+    /// so it can never become disputeState. Previously it survived openDispute's orphan check and
+    /// either fund-locked resolveTimeout (all-out-of-range -> _distribute count==0) or silently paid
+    /// the wrong seats (partially out-of-range). Here bit 5 is outside seats {0,1}.
+    function test_openDisputeRejectsSidePotMaskOutOfSeatRange() public {
         uint256 n = 2;
         uint256 buyIn = 100;
         uint256 total = n * buyIn; // 200
@@ -1114,17 +1148,59 @@ contract HoldemTableNUnitTest is Test {
         s.nonce = 1;
         s.pot = 0;
         s.sidePots = new SidePot[](1);
-        // bit 5 is outside seats {0,1}; it survives openDispute's `& ~(1<<0)` orphan check but
-        // popcounts to 0 over the 2 real seats in _distribute.
-        s.sidePots[0] = SidePot({amount: total, eligibleMask: (1 << 5)});
+        s.sidePots[0] = SidePot({amount: total, eligibleMask: (1 << 5)}); // bit 5 ∉ {0,1}
         s.phase = 4;
         s.gameStateHash = keccak256("g");
         bytes[] memory sigs = _coSign(n, s);
-        vm.prank(vm.addr(_pk(0)));
-        zk.openDispute(tableId, s, sigs, "g", 0, DEMAND_MOVE, 0); // forfeit seat 0; out-of-range mask survives
 
-        vm.roll(block.number + CLOCK + 1);
+        vm.prank(vm.addr(_pk(0)));
         vm.expectRevert(ChannelTableBase.BadDemand.selector);
-        zk.resolveTimeout(tableId);
+        zk.openDispute(tableId, s, sigs, "g", 0, DEMAND_MOVE, 0);
+        assertEq(uint8(zk.status(tableId)), uint8(ChannelTableBase.Status.Live), "malformed mask must not open a dispute");
+    }
+
+    /// HARDENING (input validation): a SHARE demand naming an out-of-range deck slot is unanswerable
+    /// by construction (respondWithShare reads t.demandSlot, not a caller arg), so left unbounded a
+    /// single seat could open a dispute no honest counterparty can clear and take the pot on timeout.
+    /// openDispute now rejects demandSlot > 51 up front.
+    function test_openDisputeRejectsShareDemandSlotOutOfRange() public {
+        uint256 n = 2;
+        uint256 buyIn = 100;
+        bytes32 tableId = _table(n, buyIn);
+
+        ChannelStateN memory s = _emptyState(tableId, n);
+        s.nonce = 1;
+        s.pot = uint256(n) * buyIn; // conserved
+        s.deckCommitment = keccak256("deck"); // non-zero so we isolate the slot bound
+        s.phase = 4;
+        s.gameStateHash = keccak256("g");
+        bytes[] memory sigs = _coSign(n, s);
+
+        vm.prank(vm.addr(_pk(0)));
+        vm.expectRevert(ChannelTableBase.BadDemand.selector);
+        zk.openDispute(tableId, s, sigs, "g", 1, DEMAND_SHARE, 52); // slot 52 > 51
+        assertEq(uint8(zk.status(tableId)), uint8(ChannelTableBase.Status.Live), "out-of-range SHARE slot must not open a dispute");
+    }
+
+    /// HARDENING (input validation): a SHARE demand against a state with NO committed deck
+    /// (deckCommitment == 0) is likewise unanswerable (_deckHash of any deck is never 0), so it is
+    /// rejected up front.
+    function test_openDisputeRejectsShareDemandWithoutDeckCommitment() public {
+        uint256 n = 2;
+        uint256 buyIn = 100;
+        bytes32 tableId = _table(n, buyIn);
+
+        ChannelStateN memory s = _emptyState(tableId, n);
+        s.nonce = 1;
+        s.pot = uint256(n) * buyIn; // conserved
+        s.deckCommitment = bytes32(0); // no committed deck
+        s.phase = 4;
+        s.gameStateHash = keccak256("g");
+        bytes[] memory sigs = _coSign(n, s);
+
+        vm.prank(vm.addr(_pk(0)));
+        vm.expectRevert(ChannelTableBase.BadDemand.selector);
+        zk.openDispute(tableId, s, sigs, "g", 1, DEMAND_SHARE, 0); // valid slot, but no deck committed
+        assertEq(uint8(zk.status(tableId)), uint8(ChannelTableBase.Status.Live), "SHARE demand w/o deck must not open a dispute");
     }
 }

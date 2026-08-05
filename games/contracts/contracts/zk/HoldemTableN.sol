@@ -193,6 +193,11 @@ contract HoldemTableN is EIP712, ChannelTableBase {
         t.seats[seat] = t.seats[last];
         t.channelKeys[seat] = t.channelKeys[last];
         t.escrow[seat] = t.escrow[last];
+        // _deckKey is indexed by seat, so it must move with the swapped-down seat too — otherwise
+        // the seat now at `seat` reads the departed seat's pubkey and can never answer a SHARE
+        // dispute (its honest proof fails verify -> force-folded on timeout). Move it, clear the tail.
+        _deckKey[tableId][seat] = _deckKey[tableId][last];
+        delete _deckKey[tableId][last];
         t.seats.pop();
         t.channelKeys.pop();
         t.escrow.pop();
@@ -265,6 +270,16 @@ contract HoldemTableN is EIP712, ChannelTableBase {
         if (state.rakeAccrued > t.rakeCap) revert RakeTooHigh();
         if (t.rules.hashGameState(gameState) != state.gameStateHash) revert BadGameState();
         _validateDemandKind(demandKind);
+        // A SHARE demand names a deck slot the target must reveal via respondWithShare, which
+        // reads t.demandSlot / disputeState.deckCommitment (NOT caller args) — so an out-of-range
+        // slot, or a state with no committed deck, is unanswerable by construction. Left unbounded,
+        // a single seat could open a dispute no honest counterparty can clear and take the pot on
+        // timeout. Bound both at the trust boundary (the deep guards in respondWithShare then become
+        // asserts). 52-card deck => valid slots are [0, 51].
+        if (demandKind == DEMAND_SHARE) {
+            if (demandSlot > 51) revert BadDemand();
+            if (state.deckCommitment == bytes32(0)) revert BadDemand();
+        }
         if (demandSeat >= t.seats.length) revert SeatRange();
         if (t.rules.whoseTurn(gameState) & (uint256(1) << demandSeat) == 0) revert NotYourTurn();
         // resolveTimeout can only ever force-fold `demandSeat` (never any other seat), so a
@@ -438,7 +453,7 @@ contract HoldemTableN is EIP712, ChannelTableBase {
         uint256 n = payouts.length;
         uint256 count;
         for (uint256 i = 0; i < n; i++) if (mask & (uint256(1) << i) != 0) count++;
-        if (count == 0) revert BadDemand(); // guarded unreachable — see openDispute's side-pot check
+        if (count == 0) revert BadDemand(); // assert: eligibleMask is seat-range-checked in _checkCoSigned
         uint256 share = amount / count;
         uint256 rem = amount - share * count;
         bool remGiven = false;
@@ -466,6 +481,17 @@ contract HoldemTableN is EIP712, ChannelTableBase {
         uint256 n = t.seats.length;
         if (state.balances.length != n) revert BadSeatCount();
         if (sigs.length != n) revert WrongSigCount();
+        // Every side pot's eligibleMask must name only real seats [0, n). Nothing else enforces
+        // this: an out-of-range bit survives openDispute's orphan check yet popcounts to 0 in
+        // _distribute (permanent fund-lock), and a PARTIALLY out-of-range mask (e.g. off-by-one
+        // 1-indexed bits from a buggy shared signer) would silently pay the wrong seats. Reject at
+        // the boundary — this runs for openDispute AND respondWithState, so disputeState is clean.
+        {
+            uint256 seatMask = (uint256(1) << n) - 1;
+            for (uint256 i = 0; i < state.sidePots.length; i++) {
+                if (state.sidePots[i].eligibleMask & ~seatMask != 0) revert BadDemand();
+            }
+        }
         // conservation: Σ balances + pot + Σ sidePots + rake == Σ escrow
         uint256 locked = state.totalLockedCalldata();
         uint256 escrowSum;

@@ -208,6 +208,16 @@ contract ZkTable is EIP712, ChannelTableBase {
         if (t.hasCheckpoint && state.nonce < t.checkpointNonce) revert StaleNonce();
         if (t.rules.hashGameState(gameState) != state.gameStateHash) revert BadGameState();
         _validateDemandKind(demandKind);
+        // A SHARE demand names a deck slot the counterparty must reveal via respondWithShare, which
+        // reads t.demandSlot / disputeState.deckCommitment (NOT caller args). An out-of-range slot,
+        // or a state with no committed deck, is unanswerable by construction — left unbounded a
+        // single party could open a dispute the counterparty cannot clear and take the pot on
+        // timeout. Bound both here at the trust boundary (respondWithShare's slot>51 guard becomes
+        // an assert). 52-card deck => valid slots are [0, 51].
+        if (demandKind == DEMAND_SHARE) {
+            if (demandSlot > 51) revert BadDemand();
+            if (state.deckCommitment == bytes32(0)) revert BadDemand();
+        }
         uint8 counterparty = seat == 1 ? 2 : 1;
         if (t.rules.whoseTurn(gameState) & counterparty == 0) revert NotYourTurn();
         t.status = Status.Disputed;

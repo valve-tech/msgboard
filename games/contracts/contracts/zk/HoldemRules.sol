@@ -415,7 +415,7 @@ contract HoldemRules is IGameRulesN, HoldemHandEval {
             return;
         }
 
-        require(board.length == 5, "showdown: board");
+        // (board is uint8[5] memory — its length is a compile-time constant 5, no runtime check needed)
         require(holes.length == s.nSeats, "showdown: holes");
 
         uint8 n = s.nSeats;
