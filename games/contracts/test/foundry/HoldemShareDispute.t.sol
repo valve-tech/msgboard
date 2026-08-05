@@ -29,6 +29,11 @@ contract HoldemShareDisputeTest is Test {
 
     function _pk(uint256 i) internal pure returns (uint256) { return 0xA11CE + i * 0x1000 + 1; }
 
+    // secp256k1 generator — an on-curve key for the non-demand seats (start() requires every seat
+    // to register; only the demandSeat needs its REAL pubkey, for the DLEQ proof).
+    uint256 internal constant GX = 0x79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798;
+    uint256 internal constant GY = 0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8;
+
     function setUp() public {
         zk = new HoldemTableN(treasury);
         rules = new MockGameRulesN();
@@ -79,9 +84,14 @@ contract HoldemShareDisputeTest is Test {
             zk.join{value: buyIn}(tableId, ai);
         }
         g = _gen(tableId);
-        // the demandSeat registers its real deck pubkey
-        vm.prank(vm.addr(_pk(DEMAND_SEAT)));
-        zk.registerDeckKey(tableId, g.pk);
+        // start() requires every seat to have registered a deck key. The demandSeat registers its
+        // REAL deck pubkey (needed for the DLEQ proof it must produce); the others register the
+        // generator (they never have to answer a share here).
+        for (uint256 i = 0; i < N; i++) {
+            vm.prank(vm.addr(_pk(i)));
+            if (i == DEMAND_SEAT) zk.registerDeckKey(tableId, g.pk);
+            else zk.registerDeckKey(tableId, [GX, GY]);
+        }
         vm.prank(a0);
         zk.start(tableId);
 

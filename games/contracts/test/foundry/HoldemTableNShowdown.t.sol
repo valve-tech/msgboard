@@ -23,6 +23,16 @@ contract HoldemTableNShowdownTest is Test {
     uint8 internal constant MOVE_SHOWDOWN = 7;
 
     function _pk(uint256 i) internal pure returns (uint256) { return 0xA11CE + i * 0x1000 + 1; }
+
+    // secp256k1 generator — an on-curve deck key. start() now requires every seat to register one.
+    uint256 internal constant GX = 0x79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798;
+    uint256 internal constant GY = 0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8;
+    function _regKeys(bytes32 tableId, uint256 n) internal {
+        for (uint256 i = 0; i < n; i++) {
+            vm.prank(vm.addr(_pk(i)));
+            zk.registerDeckKey(tableId, [GX, GY]);
+        }
+    }
     function _card(uint8 rank, uint8 suit) internal pure returns (uint8) { return (rank - 2) * 4 + suit; }
 
     function setUp() public {
@@ -87,6 +97,7 @@ contract HoldemTableNShowdownTest is Test {
             vm.prank(ai);
             zk.join{value: buyIn}(tableId, ai);
         }
+        _regKeys(tableId, n);
         vm.prank(a0);
         zk.start(tableId);
 

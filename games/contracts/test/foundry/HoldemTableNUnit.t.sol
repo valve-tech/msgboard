@@ -91,6 +91,12 @@ contract HoldemTableNUnitTest is Test {
     /// Create + (n-1) joins + start. Each seat's channel key IS its wallet.
     function _table(uint256 n, uint256 buyIn) internal returns (bytes32 tableId) {
         tableId = _createAndJoin(n, buyIn);
+        // start() now requires every seat to have registered a deck key; register the generator
+        // (on-curve) for each — these suites don't verify real shares, they just need the gate met.
+        for (uint256 i = 0; i < n; i++) {
+            vm.prank(vm.addr(_pk(i)));
+            zk.registerDeckKey(tableId, [GX, GY]);
+        }
         vm.prank(vm.addr(_pk(0)));
         zk.start(tableId);
     }
@@ -591,6 +597,10 @@ contract HoldemTableNUnitTest is Test {
         vm.prank(a1);
         zk.join{value: buyIn}(tableId, a1);
         vm.prank(a0);
+        zk.registerDeckKey(tableId, [GX, GY]); // deck-key gate: both seats must register before start
+        vm.prank(a1);
+        zk.registerDeckKey(tableId, [GX, GY]);
+        vm.prank(a0);
         zk.start(tableId);
 
         ChannelStateN memory s = _emptyState(tableId, n);
@@ -617,6 +627,10 @@ contract HoldemTableNUnitTest is Test {
         vm.deal(a1, buyIn);
         vm.prank(a1);
         zk.join{value: buyIn}(tableId, a1);
+        vm.prank(a0);
+        zk.registerDeckKey(tableId, [GX, GY]); // deck-key gate: both seats must register before start
+        vm.prank(a1);
+        zk.registerDeckKey(tableId, [GX, GY]);
         vm.prank(a0);
         zk.start(tableId);
 
@@ -869,8 +883,11 @@ contract HoldemTableNUnitTest is Test {
     /// Forming-only), then start the table.
     function _tableWithDeckKey(uint256 n, uint256 buyIn) internal returns (bytes32 tableId) {
         tableId = _createAndJoin(n, buyIn);
-        vm.prank(vm.addr(_pk(0)));
-        zk.registerDeckKey(tableId, [GX, GY]);
+        // start() requires every seat registered; register the generator (on-curve) for each.
+        for (uint256 i = 0; i < n; i++) {
+            vm.prank(vm.addr(_pk(i)));
+            zk.registerDeckKey(tableId, [GX, GY]);
+        }
         vm.prank(vm.addr(_pk(0)));
         zk.start(tableId);
     }
@@ -980,29 +997,21 @@ contract HoldemTableNUnitTest is Test {
         zk.respondWithShare(tableId, deck, share, proof);
     }
 
-    function test_respondWithShareRevertsDeckKeyNotSet() public {
+    /// HARDENING: start() now requires EVERY seat to have registered a deck key. This closes the
+    /// "never-registered seat is force-foldable" single-caller theft path (an attacker SHARE-disputes
+    /// an unregistered victim, who can never answer -> force-folded on timeout) and makes
+    /// respondWithShare's DeckKeyNotSet an unreachable assert. A table with any unregistered seat
+    /// simply cannot go Live. (Formerly test_respondWithShareRevertsDeckKeyNotSet, whose scenario —
+    /// a Live table with an unregistered seat — is now unreachable by construction.)
+    function test_startRevertsWhenASeatHasNoDeckKey() public {
         uint256 n = 2;
-        // NOTE: seat 1 (the demand seat below) never registers a deck key.
-        bytes32 tableId = _tableWithDeckKey(n, 100); // only seat 0 registers a key
-        uint256[] memory deck = new uint256[](4);
-        deck[0] = 11; deck[1] = 22; deck[2] = 33; deck[3] = 44;
-        bytes32 commitment = _mirrorDeckHash(deck);
-
-        ChannelStateN memory s = _emptyState(tableId, n);
-        s.nonce = 1;
-        s.balances[0] = n * 100;
-        s.phase = 4;
-        s.gameStateHash = keccak256("g");
-        s.deckCommitment = commitment;
-        bytes[] memory sigs = _coSign(n, s);
+        bytes32 tableId = _createAndJoin(n, 100);
         vm.prank(vm.addr(_pk(0)));
-        zk.openDispute(tableId, s, sigs, "g", 1, DEMAND_SHARE, 0); // demand seat 1 (no key)
-
-        uint256[2] memory share;
-        uint256[5] memory proof;
-        vm.prank(vm.addr(_pk(1)));
+        zk.registerDeckKey(tableId, [GX, GY]); // only seat 0 registers; seat 1 never does
+        vm.prank(vm.addr(_pk(0)));
         vm.expectRevert(HoldemTableN.DeckKeyNotSet.selector);
-        zk.respondWithShare(tableId, deck, share, proof);
+        zk.start(tableId);
+        assertEq(uint8(zk.status(tableId)), uint8(ChannelTableBase.Status.Created), "unregistered seat blocks start");
     }
 
     /// A garbage (off-curve / all-zero) proof fails `RevealShareDLEQ.verify` — which returns
