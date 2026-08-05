@@ -741,6 +741,7 @@ contract ZkTableUnitTest is Test {
         bytes memory gameState = abi.encode("gs");
         ChannelState memory s = _conservingState(id);
         s.gameStateHash = keccak256(gameState);
+        s.deckCommitment = keccak256("deck"); // a SHARE dispute is over a committed deck
         (bytes memory sigA, bytes memory sigB) = _coSign(s);
         vm.prank(a);
         zk.openDispute(id, s, sigA, sigB, gameState, 2, 5);
@@ -830,6 +831,7 @@ contract ZkTableUnitTest is Test {
         bytes memory gameState = abi.encode("gs");
         ChannelState memory s = _conservingState(id);
         s.gameStateHash = keccak256(gameState);
+        s.deckCommitment = keccak256("deck"); // a SHARE dispute is over a committed deck
         (bytes memory sigA, bytes memory sigB) = _coSign(s);
         vm.prank(a);
         zk.openDispute(id, s, sigA, sigB, gameState, 2, 0); // SHARE demand, not MOVE
@@ -948,14 +950,20 @@ contract ZkTableUnitTest is Test {
         zk.respondWithShare(id, wrongDeck, reveal, proof);
     }
 
-    function test_respondWithShare_revertsBadDeck_slotTooHigh() public {
+    /// After the openDispute hardening, an out-of-range SHARE demandSlot is rejected at the trust
+    /// boundary (openDispute), so it can never reach respondWithShare — the deep `slot > 51` guard
+    /// there is now an unreachable assert. This pins the boundary rejection instead.
+    function test_openDispute_rejectsShareSlotTooHigh() public {
         bytes32 id = _createJoin(1 ether, 1 ether);
-        uint256[] memory deck = _openShareDispute(id, 52); // demandSlot is trusted as-supplied
-        uint256[2] memory reveal;
-        uint256[8] memory proof;
-        vm.prank(b);
-        vm.expectRevert(ChannelTableBase.BadDeck.selector);
-        zk.respondWithShare(id, deck, reveal, proof);
+        uint256[] memory deck = _deck208();
+        bytes memory gameState = abi.encode("gs");
+        ChannelState memory s = _conservingState(id);
+        s.gameStateHash = keccak256(gameState);
+        s.deckCommitment = keccak256(abi.encodePacked(deck));
+        (bytes memory sigA, bytes memory sigB) = _coSign(s);
+        vm.prank(a);
+        vm.expectRevert(ChannelTableBase.BadDemand.selector);
+        zk.openDispute(id, s, sigA, sigB, gameState, 2, 52); // slot 52 > 51
     }
 
     function test_respondWithShare_revertsBadProof_callFails() public {
