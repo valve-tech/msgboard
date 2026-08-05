@@ -115,13 +115,15 @@ contract HoldemRules is IGameRulesN, HoldemHandEval {
         (uint8 kind, bytes memory payload) = abi.decode(move, (uint8, bytes));
 
         if (kind == MOVE_DEAL_DONE) {
-            return abi.encode(_dealDone(s));
+            _dealDone(s);
+            return abi.encode(s);
         }
 
         if (kind == MOVE_SHOWDOWN) {
             if (s.phase != SHOWDOWN) revert WrongPhase();
             (uint8[2][] memory holes, uint8[5] memory board) = abi.decode(payload, (uint8[2][], uint8[5]));
-            return abi.encode(_showdown(s, holes, board));
+            _showdown(s, holes, board);
+            return abi.encode(s);
         }
 
         if (s.phase != BET_PREFLOP && s.phase != BET_FLOP && s.phase != BET_TURN && s.phase != BET_RIVER) {
@@ -133,7 +135,8 @@ contract HoldemRules is IGameRulesN, HoldemHandEval {
 
         if (kind == MOVE_POST_BLIND) {
             (, uint256 amount) = abi.decode(payload, (uint8, uint256));
-            return abi.encode(_postBlind(s, seat, amount));
+            _postBlind(s, seat, amount);
+            return abi.encode(s);
         }
 
         // Real betting action: in turn, seat able to act. PRE-FLOP additionally requires both
@@ -148,30 +151,34 @@ contract HoldemRules is IGameRulesN, HoldemHandEval {
         if (kind == MOVE_FOLD) {
             s.folded[seat] = true;
             s.actedSinceAggression[seat] = true;
-            return abi.encode(_advance(s, seat));
+            _advance(s, seat);
+            return abi.encode(s);
         }
         if (kind == MOVE_CHECK) {
             if (toCall != 0) revert CannotCheck();
             s.actedSinceAggression[seat] = true;
-            return abi.encode(_advance(s, seat));
+            _advance(s, seat);
+            return abi.encode(s);
         }
         if (kind == MOVE_CALL) {
             if (toCall == 0) revert NothingToCall();
             uint256 pay = toCall < s.stacks[seat] ? toCall : s.stacks[seat];
             _putIn(s, seat, pay);
             s.actedSinceAggression[seat] = true;
-            return abi.encode(_advance(s, seat));
+            _advance(s, seat);
+            return abi.encode(s);
         }
         if (kind == MOVE_BET || kind == MOVE_RAISE) {
             (, uint256 to) = abi.decode(payload, (uint8, uint256));
-            return abi.encode(_betRaise(s, seat, to));
+            _betRaise(s, seat, to);
+            return abi.encode(s);
         }
         revert IllegalMove();
     }
 
     // ----- transitions (mirror rules.ts) -----
 
-    function _dealDone(Holdem memory s) internal pure returns (Holdem memory) {
+    function _dealDone(Holdem memory s) internal pure {
         if (s.phase != DEAL_HOLE && s.phase != DEAL_FLOP && s.phase != DEAL_TURN && s.phase != DEAL_RIVER) {
             revert WrongPhase();
         }
@@ -181,10 +188,9 @@ contract HoldemRules is IGameRulesN, HoldemHandEval {
         // Run-out: no betting on a street where <=1 seat can voluntarily act and all are
         // matched — close it through to the next deal phase / showdown.
         if (_actableCount(s) <= 1 && _allMatchedOrAllIn(s)) _closeStreet(s);
-        return s;
     }
 
-    function _postBlind(Holdem memory s, uint8 seat, uint256 amount) internal pure returns (Holdem memory) {
+    function _postBlind(Holdem memory s, uint8 seat, uint256 amount) internal pure {
         if (s.phase != BET_PREFLOP) revert WrongPhase();
         if (seat != s.toAct) revert NotYourTurn();
         bool expectSb = _allZero(s.committed);
@@ -203,10 +209,9 @@ contract HoldemRules is IGameRulesN, HoldemHandEval {
         } else {
             s.toAct = _nextToAct(s, seat);
         }
-        return s;
     }
 
-    function _betRaise(Holdem memory s, uint8 seat, uint256 to) internal pure returns (Holdem memory) {
+    function _betRaise(Holdem memory s, uint8 seat, uint256 to) internal pure {
         // incomplete-raise reopen guard
         if (s.actedSinceAggression[seat] && s.currentBet > s.committed[seat]) revert CannotReopen();
         uint256 already = s.committed[seat];
@@ -232,7 +237,7 @@ contract HoldemRules is IGameRulesN, HoldemHandEval {
             for (uint256 i = 0; i < s.nSeats; i++) s.actedSinceAggression[i] = false;
         }
         s.actedSinceAggression[seat] = true;
-        return _advance(s, seat);
+        _advance(s, seat);
     }
 
     // ----- helpers (mirror rules.ts) -----
@@ -302,18 +307,17 @@ contract HoldemRules is IGameRulesN, HoldemHandEval {
         return true;
     }
 
-    function _advance(Holdem memory s, uint8 from) internal pure returns (Holdem memory) {
+    function _advance(Holdem memory s, uint8 from) internal pure {
         _recomputePots(s);
         if (_roundClosed(s)) {
             _closeStreet(s);
-            return s;
+            return;
         }
         // Reaching here means _roundClosed(s) was false. _roundClosed returns true whenever
         // _actableCount(s) == 0, and _actableCount counts exactly the seats _nextToAct scans for
         // (!folded && !allIn) — so _actableCount(s) > 0 here and _nextToAct always returns a real
         // seat, never NONE. No no-next-actor guard is needed (it would be unreachable dead code).
         s.toAct = _nextToAct(s, from);
-        return s;
     }
 
     function _closeStreet(Holdem memory s) internal pure {
@@ -396,7 +400,6 @@ contract HoldemRules is IGameRulesN, HoldemHandEval {
     function _showdown(Holdem memory s, uint8[2][] memory holes, uint8[5] memory board)
         internal
         pure
-        returns (Holdem memory)
     {
         if (s.stubWinner != NONE) {
             // Uncontested: rake on the whole collected pot (== Σ totalContributed; uncalled
@@ -409,7 +412,7 @@ contract HoldemRules is IGameRulesN, HoldemHandEval {
             s.rakeAccrued = rakeU;
             s.phase = SETTLED;
             s.toAct = NONE;
-            return s;
+            return;
         }
 
         require(board.length == 5, "showdown: board");
@@ -499,7 +502,6 @@ contract HoldemRules is IGameRulesN, HoldemHandEval {
         s.sidePots = new SidePot[](0);
         s.phase = SETTLED;
         s.toAct = NONE;
-        return s;
     }
 
     /// Split `amount` among the seats in `winMask`, odd chips to the earliest seat clockwise
