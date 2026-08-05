@@ -163,6 +163,17 @@ contract HoldemTableN is EIP712, ChannelTableBase {
         if (t.status != Status.Created) revert BadStatus();
         _seatOf(t, msg.sender);
         if (t.seats.length < 2) revert NotEnoughSeats();
+        // Every seat must have registered its deck key before the table goes Live. A seat that
+        // never registered can never answer a SHARE dispute (respondWithShare -> DeckKeyNotSet)
+        // and would be force-foldable on timeout by a single attacker; the joint deck key is also
+        // ill-formed without every contribution. Gating here makes DeckKeyNotSet in
+        // respondWithShare an unreachable assert. (isOnCurve rejects (0,0) at registration, so a
+        // zero pair reliably means "unregistered".)
+        uint256 n = t.seats.length;
+        for (uint256 i = 0; i < n; i++) {
+            uint256[2] storage k = _deckKey[tableId][i];
+            if (k[0] == 0 && k[1] == 0) revert DeckKeyNotSet();
+        }
         t.status = Status.Live;
         emit TableStarted(tableId, t.seats.length);
     }
@@ -364,7 +375,7 @@ contract HoldemTableN is EIP712, ChannelTableBase {
         if (base + 4 > deck.length) revert BadDemand();
 
         uint256[2] storage pk = _deckKey[tableId][seat];
-        if (pk[0] == 0 && pk[1] == 0) revert DeckKeyNotSet();
+        if (pk[0] == 0 && pk[1] == 0) revert DeckKeyNotSet(); // assert: start() requires every seat registered
 
         RevealShareDLEQ.Statement memory s = RevealShareDLEQ.Statement({
             pkX: pk[0], pkY: pk[1],

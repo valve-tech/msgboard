@@ -22,6 +22,17 @@ contract HoldemTableNTest is Test {
     // a deterministic pool of seat private keys (index => pk)
     function _pk(uint256 i) internal pure returns (uint256) { return 0xA11CE + i * 0x1000 + 1; }
 
+    // secp256k1 generator — a convenient on-curve deck key. start() now requires every seat to have
+    // registered one before the table can go Live; these suites don't verify real shares.
+    uint256 internal constant GX = 0x79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798;
+    uint256 internal constant GY = 0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8;
+    function _regKeys(bytes32 tableId, uint256 n) internal {
+        for (uint256 i = 0; i < n; i++) {
+            vm.prank(vm.addr(_pk(i)));
+            zk.registerDeckKey(tableId, [GX, GY]);
+        }
+    }
+
     function setUp() public {
         zk = new HoldemTableN(treasury);
         rules = new MockGameRulesN();
@@ -60,6 +71,7 @@ contract HoldemTableNTest is Test {
             vm.prank(ai);
             zk.join{value: buyIn}(tableId, ai);
         }
+        _regKeys(tableId, n);
         vm.prank(a0);
         zk.start(tableId);
     }
@@ -166,6 +178,7 @@ contract HoldemTableNTest is Test {
             vm.prank(ai);
             zk.join{value: buyIn}(tableId, ai);
         }
+        _regKeys(tableId, n);
         vm.prank(a0);
         zk.start(tableId);
 
@@ -213,6 +226,7 @@ contract HoldemTableNTest is Test {
             vm.prank(ai);
             zk.join{value: buyIn}(tableId, ai);
         }
+        _regKeys(tableId, n);
         vm.prank(a0);
         zk.start(tableId);
 
@@ -346,6 +360,8 @@ contract HoldemTableNTest is Test {
         vm.deal(a1, buyIn);
         vm.prank(a1);
         zk.join{value: buyIn}(tableId, a1);
+        vm.prank(a1); // seat 1 must also register before start() (the deck-key gate)
+        zk.registerDeckKey(tableId, [GX, GY]);
         vm.prank(a0);
         zk.start(tableId);
         vm.prank(a0);
