@@ -1093,4 +1093,38 @@ contract HoldemTableNUnitTest is Test {
         assertEq(vm.addr(_pk(2)).balance - before2, 150, "seat 2 share");
         assertEq(address(zk).balance, 0, "no residue");
     }
+
+    /// Covers `_distribute`'s `count == 0 -> BadDemand` guard, which the openDispute orphan-check
+    /// (test_openDisputeRevertsWhenSidePotWouldOrphanOnForfeit) does NOT catch. That check only
+    /// rejects an IN-RANGE mask emptied by the forfeit (`eligibleMask & ~demandBit == 0`). But
+    /// nothing validates that a side pot's `eligibleMask` bits fall inside the seat range [0, n):
+    /// a co-signed side pot whose only set bit is OUT OF RANGE (here bit 5 with n = 2) survives
+    /// openDispute (`(1<<5) & ~(1<<0) != 0`), yet `_distribute`'s popcount over `payouts.length`
+    /// seats yields count == 0 -> the guard fires. Reaching it needs an ill-formed N-of-N
+    /// co-signed state (every seat signs a mask naming a non-existent seat), so it is a
+    /// collusion/broken-client path — but it is reachable, and the guard reverts cleanly instead
+    /// of dividing by zero. This pins that behavior.
+    function test_resolveTimeoutRevertsWhenSidePotMaskIsOutOfSeatRange() public {
+        uint256 n = 2;
+        uint256 buyIn = 100;
+        uint256 total = n * buyIn; // 200
+        bytes32 tableId = _table(n, buyIn);
+
+        ChannelStateN memory s = _emptyState(tableId, n);
+        s.nonce = 1;
+        s.pot = 0;
+        s.sidePots = new SidePot[](1);
+        // bit 5 is outside seats {0,1}; it survives openDispute's `& ~(1<<0)` orphan check but
+        // popcounts to 0 over the 2 real seats in _distribute.
+        s.sidePots[0] = SidePot({amount: total, eligibleMask: (1 << 5)});
+        s.phase = 4;
+        s.gameStateHash = keccak256("g");
+        bytes[] memory sigs = _coSign(n, s);
+        vm.prank(vm.addr(_pk(0)));
+        zk.openDispute(tableId, s, sigs, "g", 0, DEMAND_MOVE, 0); // forfeit seat 0; out-of-range mask survives
+
+        vm.roll(block.number + CLOCK + 1);
+        vm.expectRevert(ChannelTableBase.BadDemand.selector);
+        zk.resolveTimeout(tableId);
+    }
 }
