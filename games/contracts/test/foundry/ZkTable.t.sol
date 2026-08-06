@@ -53,7 +53,7 @@ contract ZkTableFuzzTest is Test {
     }
 
     function _seatState(bytes32 tableId) internal view returns (uint256 escA, uint256 escB, ChannelTableBase.Status status) {
-        (, , , , escA, escB, , , , status, , , , , , , ) = zk.tables(tableId);
+        (, , , , escA, escB, , , , status, , , , , , , , , ) = zk.tables(tableId);
     }
 
     /// Create (A) + join (B), returning the table id and the total escrow on the table.

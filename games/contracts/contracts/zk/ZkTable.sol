@@ -19,8 +19,9 @@ contract ZkTable is EIP712, ChannelTableBase {
     using SafeTransferLib for address;
     using ChannelStateLib for ChannelState;
 
-    // ZkTable-only error: BadSig/BadGameState/etc are inherited from ChannelTableBase.
+    // ZkTable-only errors: BadSig/BadGameState/etc are inherited from ChannelTableBase.
     error BadProof();
+    error NothingToReclaim();
 
     struct Table {
         address playerA;
@@ -40,26 +41,39 @@ contract ZkTable is EIP712, ChannelTableBase {
         uint8 disputant;
         uint8 demandKind;
         uint32 demandSlot;
+        bool disputeResultDecided;
+        uint8 disputeResultWinner;   // 1=A, 2=B; meaningful only when decided
         ChannelState disputeState;
+    }
+
+    /// A top-up the counterparty has not yet acknowledged on-chain (see topUp/reclaimTopUp).
+    /// Deliberately a separate mapping, NOT new Table fields: the auto-generated `tables`
+    /// getter's tuple shape (destructured positionally by tests/off-chain readers) stays put.
+    struct PendingTopUp {
+        uint256 amount;   // cumulative un-acknowledged top-up for this seat
+        uint64 deadline;  // block after which the seat may reclaim (refreshed per top-up)
     }
 
     uint256 internal _counter;
     mapping(bytes32 => Table) public tables;
     // EdOnBN254 deck pubkeys for snark-reveal disputes: tableId => seat (1/2) => [x, y]
     mapping(bytes32 => mapping(uint8 => uint256[2])) public deckKeys;
+    // tableId => seat (1/2) => pending (un-acknowledged) top-up
+    mapping(bytes32 => mapping(uint8 => PendingTopUp)) public pendingTopUps;
 
     event TableCreated(bytes32 indexed tableId, address indexed playerA, address rules, uint256 escrow, uint256 joinStake, uint64 clockBlocks);
     event TableJoined(bytes32 indexed tableId, address indexed playerB);
     event TableCancelled(bytes32 indexed tableId);
     event ToppedUp(bytes32 indexed tableId, uint8 seat, uint256 amount);
+    event TopUpReclaimed(bytes32 indexed tableId, uint8 seat, uint256 amount);
     event TableSettled(bytes32 indexed tableId, uint256 payoutA, uint256 payoutB);
     event DisputeOpened(bytes32 indexed tableId, uint8 disputant, uint8 demandKind, uint32 demandSlot, uint64 deadline);
     event SetupDisputeOpened(bytes32 indexed tableId, uint8 disputant, uint64 deadline);
     event DisputeAnsweredWithState(bytes32 indexed tableId, uint64 nonce);
     event DisputeAnsweredWithMove(bytes32 indexed tableId, bytes move, bytes32 newGameStateHash);
     event DisputeAnsweredWithShare(bytes32 indexed tableId, uint32 slot, uint256 revealX, uint256 revealY);
-    // `winner` carries `t.disputant` (the seat that opened the dispute and is awarded the pot on
-    // timeout) — NOT a game winner; indexers must not read it as a game result.
+    // `winner` is the seat awarded the pot on timeout — the recorded game winner when the
+    // contested state was a decided terminal, else the disputant.
     event DisputeForfeited(bytes32 indexed tableId, uint8 winner, uint256 payoutA, uint256 payoutB);
     event SetupDisputeRefunded(bytes32 indexed tableId);
 
@@ -120,8 +134,19 @@ contract ZkTable is EIP712, ChannelTableBase {
         t.playerA.forceSafeTransferETH(amount);
     }
 
-    /// Spec: top-up only at a flip boundary, reflected in the next co-signed state.
-    /// On-chain it just bumps escrow; both clients mirror via Channel.applyTopUp.
+    /// Spec: top-up only at a flip boundary, reflected in the next co-signed state
+    /// (both clients mirror via Channel.applyTopUp). On-chain it bumps escrow AND
+    /// records the amount as a PENDING top-up with a clockBlocks reclaim deadline:
+    /// every accepted co-signed state must conserve the CURRENT escrow total, so a
+    /// top-up the counterparty never countersigns into a newer state would otherwise
+    /// make every existing co-signed state unsubmittable (ConservationViolated) and —
+    /// with disputeSetup closed off once a checkpoint exists — permanently freeze both
+    /// escrows for 1 wei of griefing. The pending record is erased the moment ANY
+    /// co-signed state is accepted on-chain (settle / openDispute / respondWithState):
+    /// acceptance requires conservation of the increased total, so the counterparty's
+    /// signature on that state IS the acknowledgment. If none arrives before the
+    /// deadline, the top-upper can reclaimTopUp() exactly the un-acknowledged amount,
+    /// returning escrow to the previously-conserved total so pre-top-up states work again.
     function topUp(bytes32 tableId) external payable {
         Table storage t = tables[tableId];
         if (t.status != Status.Live) revert BadStatus();
@@ -129,7 +154,51 @@ contract ZkTable is EIP712, ChannelTableBase {
         uint8 seat = _seatOf(t, msg.sender);
         if (seat == 1) t.escrowA += msg.value;
         else t.escrowB += msg.value;
+        PendingTopUp storage p = pendingTopUps[tableId][seat];
+        p.amount += msg.value;
+        // refresh: a later top-up extends the whole pending amount's window (top-upper's
+        // own choice — it only delays their own reclaim, never the counterparty's rights)
+        p.deadline = uint64(block.number) + t.clockBlocks;
         emit ToppedUp(tableId, seat, msg.value);
+    }
+
+    /// Claw back a top-up the counterparty never acknowledged: if no co-signed state
+    /// has been accepted on-chain since the top-up (which would have required — and
+    /// proven — both signatures over the increased total) by the time the reclaim
+    /// clock expires, the top-upper takes back exactly their own pending amount,
+    /// restoring the previously-conserved escrow total. Only while Live: during a
+    /// dispute the pending amount is either already zero (openDispute's acceptance
+    /// cleared it) or, for a setup dispute, exits via resolveTimeout's full per-seat
+    /// refund / respondWithState's acknowledgment. Counterparty defense: anyone
+    /// holding a newer post-top-up co-signed state has the full clock window to
+    /// checkpoint it (settle/openDispute), which cancels the pending claim first.
+    function reclaimTopUp(bytes32 tableId) external {
+        Table storage t = tables[tableId];
+        if (t.status != Status.Live) revert BadStatus();
+        uint8 seat = _seatOf(t, msg.sender);
+        PendingTopUp storage p = pendingTopUps[tableId][seat];
+        uint256 amount = p.amount;
+        if (amount == 0) revert NothingToReclaim();
+        _validateClockExpired(p.deadline);
+        delete pendingTopUps[tableId][seat];
+        // escrow >= pending always: the seat's escrow only ever grows while Live and
+        // includes every wei of its own pending (0.8 checked math would revert anyway).
+        if (seat == 1) t.escrowA -= amount;
+        else t.escrowB -= amount;
+        emit TopUpReclaimed(tableId, seat, amount);
+        // effects fully settled above; forced send so a reverting receiver can't wedge it
+        address to = seat == 1 ? t.playerA : t.playerB;
+        to.forceSafeTransferETH(amount);
+    }
+
+    /// Any accepted co-signed state conserves the CURRENT escrow total and carries both
+    /// signatures — the on-chain proof that all outstanding top-ups were acknowledged.
+    /// Called by every accepting path (settle / openDispute / respondWithState); once
+    /// acknowledged a top-up is part of the conserved total and can never be reclaimed
+    /// (no double-spend: reclaim XOR counted-in-settlement).
+    function _ackTopUps(bytes32 tableId) internal {
+        if (pendingTopUps[tableId][1].amount != 0) delete pendingTopUps[tableId][1];
+        if (pendingTopUps[tableId][2].amount != 0) delete pendingTopUps[tableId][2];
     }
 
     /// Cooperative settle: either party submits the final co-signed state.
@@ -142,6 +211,7 @@ contract ZkTable is EIP712, ChannelTableBase {
         if (!t.rules.isFinal(state.phase)) revert NotFinal();
         if (state.pot != 0) revert PotNotZero();
         if (t.hasCheckpoint && state.nonce <= t.checkpointNonce) revert StaleNonce();
+        _ackTopUps(tableId); // accepted state conserves the current total incl. any top-ups
         _payout(t, tableId, state.balanceA, state.balanceB);
     }
 
@@ -155,7 +225,8 @@ contract ZkTable is EIP712, ChannelTableBase {
 
     /// Every state the contract accepts must conserve the CURRENT escrow total —
     /// so dispute timeouts (next task) can always pay out exactly escrowA+escrowB,
-    /// and a pre-top-up state becomes unsubmittable once the top-up lands.
+    /// and a pre-top-up state becomes unsubmittable once the top-up lands (until/
+    /// unless the un-acknowledged top-up is reclaimed — see topUp/reclaimTopUp).
     function _checkCoSigned(Table storage t, bytes32 tableId, ChannelState calldata state, bytes calldata sigA, bytes calldata sigB) internal view {
         _validateTableId(state.tableId, tableId);
         _validateConservation(state.balanceA + state.balanceB + state.pot, t.escrowA + t.escrowB);
@@ -207,6 +278,13 @@ contract ZkTable is EIP712, ChannelTableBase {
         _checkCoSigned(t, tableId, state, sigA, sigB);
         if (t.hasCheckpoint && state.nonce < t.checkpointNonce) revert StaleNonce();
         if (t.rules.hashGameState(gameState) != state.gameStateHash) revert BadGameState();
+        // A3: record whether the contested state is a decided terminal, and who won, so
+        // resolveTimeout can pay the recorded winner instead of forfeiting to the disputant
+        // (see the resolveTimeout comment for why). winner must be a real seat when decided.
+        (bool decided, uint8 winner) = t.rules.result(gameState);
+        if (decided && winner != 1 && winner != 2) revert BadGameState();
+        t.disputeResultDecided = decided;
+        t.disputeResultWinner = winner;
         _validateDemandKind(demandKind);
         // A SHARE demand names a deck slot the counterparty must reveal via respondWithShare, which
         // reads t.demandSlot / disputeState.deckCommitment (NOT caller args). An out-of-range slot,
@@ -230,6 +308,9 @@ contract ZkTable is EIP712, ChannelTableBase {
         t.checkpointNonce = state.nonce;
         t.hasCheckpoint = true;
         t.disputeDeadline = uint64(block.number) + t.clockBlocks;
+        // accepted contested state conserves the current total incl. any top-ups, so the
+        // pending claims die here — resolveTimeout can then pay out exactly the escrow.
+        _ackTopUps(tableId);
         emit DisputeOpened(tableId, seat, demandKind, demandSlot, t.disputeDeadline);
     }
 
@@ -244,6 +325,7 @@ contract ZkTable is EIP712, ChannelTableBase {
         if (t.demandKind != 0 && state.nonce <= t.disputeState.nonce) revert StaleNonce();
         t.checkpointNonce = state.nonce;
         t.hasCheckpoint = true;
+        _ackTopUps(tableId); // accepted state conserves the current total incl. any top-ups
         _clearDispute(t);
         emit DisputeAnsweredWithState(tableId, state.nonce);
     }
@@ -276,6 +358,26 @@ contract ZkTable is EIP712, ChannelTableBase {
     /// run the chess clock, and can never move funds beyond the staked escrow. Revisit with an
     /// IGameRules.owesShare(gameState, slot, seat) hook if SHARE disputes become adversarially
     /// load-bearing (out of scope for v1 — would ripple into IGameRules/HiLoWarRules).
+    ///
+    /// @dev KNOWN v1 LIMITATION — forced-reveal-then-refuse-to-cosign deadlock. A successful
+    /// respondWithShare only clears the dispute (back to Live, share lives in the event); it does
+    /// NOT advance the on-chain game state (respondWithMove is likewise event-only — the contract
+    /// never persists a post-move state). So a party who is forced to reveal at SHOWDOWN but then
+    /// refuses to co-sign the resulting FLIP_DONE state can, by answering every re-opened dispute
+    /// just before its clock expires, keep the channel oscillating Live<->Disputed indefinitely.
+    /// This is a NON-PROFIT griefing deadlock: funds never move to the wrong party (the griefer's
+    /// own escrow is frozen too, and the instant they miss one clock window resolveTimeout pays the
+    /// honest disputant), and there is no sound minimal fix inside the current dispute vocabulary —
+    /// making respondWithMove's output durable would re-open theft via forged MOVE_SHOWDOWN cards.
+    /// Real closure needs on-chain showdown adjudication (persist forced shares + decode point->card);
+    /// out of scope for v1.
+    ///
+    /// @dev OFF-CHAIN OBLIGATION — deck-key binding. respondWithShare proves a share against the
+    /// key each seat registered at create/join (deckKeys), but NOTHING on-chain ties that key to the
+    /// key actually used to mask the committed deck. A seat that registers a decoy key can answer
+    /// SHARE disputes with snark-valid but useless shares, defeating reveal-forcing. Clients MUST
+    /// verify the deck's aggregate masking key equals the product of the registered deckKeys before
+    /// co-signing any DEAL state.
     function respondWithShare(
         bytes32 tableId,
         uint256[] calldata deck,
@@ -313,14 +415,27 @@ contract ZkTable is EIP712, ChannelTableBase {
             return;
         }
         // Conservation invariant (_checkCoSigned) guarantees the contested state's
-        // balances + pot == escrowA + escrowB, so handing the pot to the disputant
-        // and balances to each seat consumes the full escrow exactly — no excess.
+        // balances + pot == escrowA + escrowB, so handing the pot to the recorded
+        // party and balances to each seat consumes the full escrow exactly — no excess.
         uint256 toA = t.disputeState.balanceA;
         uint256 toB = t.disputeState.balanceB;
-        if (t.disputant == 1) toA += t.disputeState.pot;
-        else toB += t.disputeState.pot;
-        // `winner` here is t.disputant (the seat awarded the pot on timeout), not a game winner.
-        emit DisputeForfeited(tableId, t.disputant, toA, toB);
+        // A3: at a co-signed *decided* terminal state pay the recorded winner, not the
+        // disputant — otherwise the loser could open an unanswerable dispute at FLIP_DONE
+        // and steal the pot on timeout. Undecided states keep forfeit-to-disputant (the
+        // reveal/move-forcing lever). Keyed on decided-ness, NOT demandKind, so it covers
+        // both MOVE and SHARE disputes opened at a decided FLIP_DONE.
+        //
+        // KNOWN v1 LIMITATION — undecided-terminal (tie/"war") carry-pot race. A rank-tie
+        // FLIP_DONE is undecided (resultSet=false, pot carried into warPot), so it takes this
+        // forfeit-to-disputant branch: if a player force-terminates an ongoing war by disputing
+        // the co-signed tie state, whichever of the TWO seated players reaches chain first takes
+        // the carried pot on timeout. Accepted as-is: low-stakes (only a carried pot, at a tie),
+        // symmetric (either player can do it), and both contributed equally. Only the two seats
+        // can dispute (_seatOf) — no outsider path. A fair 50/50 split would need a tri-state
+        // result() hook; deferred.
+        uint8 potTo = t.disputeResultDecided ? t.disputeResultWinner : t.disputant;
+        if (potTo == 1) toA += t.disputeState.pot; else toB += t.disputeState.pot;
+        emit DisputeForfeited(tableId, potTo, toA, toB);
         _payout(t, tableId, toA, toB);
     }
 
@@ -330,6 +445,8 @@ contract ZkTable is EIP712, ChannelTableBase {
         t.demandKind = 0;
         t.demandSlot = 0;
         t.disputeDeadline = 0;
+        t.disputeResultDecided = false;
+        t.disputeResultWinner = 0;
         delete t.disputeState;
     }
 

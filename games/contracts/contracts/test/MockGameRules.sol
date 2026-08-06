@@ -10,15 +10,19 @@ contract MockGameRules is IGameRules {
     bytes public nextState;
     bool public applyReverts;
     address public revealVerifierAddr;
+    bool public resultDecided;
+    uint8 public resultWinner;
 
     function setTurnMask(uint8 m) external { turnMask = m; }
     function setFinalAll(bool f) external { finalAll = f; }
     function setApply(bytes calldata s, bool revert_) external { nextState = s; applyReverts = revert_; }
     function setRevealVerifier(address a) external { revealVerifierAddr = a; }
+    function setResult(bool decided_, uint8 winner_) external { resultDecided = decided_; resultWinner = winner_; }
 
     function gameId() external pure returns (uint16) { return 0; }
     function hashGameState(bytes calldata gameState) external pure returns (bytes32) { return keccak256(gameState); }
     function whoseTurn(bytes calldata) external view returns (uint8) { return turnMask; }
+    function result(bytes calldata) external view returns (bool, uint8) { return (resultDecided, resultWinner); }
     function isFinal(uint8) external view returns (bool) { return finalAll; }
     function applyMove(bytes calldata, bytes calldata) external view returns (bytes memory) {
         require(!applyReverts, "mock: illegal");

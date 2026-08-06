@@ -107,6 +107,16 @@ contract HiLoWarRules is IGameRules {
         }
     }
 
+    /// A3 fix (FLIP_DONE theft): gated on PHASE, not resultSet alone. A tie FLIP_DONE has
+    /// resultSet=false — a war, not a decided result — so it returns undecided and
+    /// ZkTable's timeout falls back to the existing forfeit-to-disputant path. Do NOT rely
+    /// on the off-chain reducer clearing resultSet on a tie; the phase gate is the guard.
+    function result(bytes calldata gameState) external pure returns (bool, uint8) {
+        HiLo memory s = abi.decode(gameState, (HiLo));
+        if (s.phase == PHASE_FLIP_DONE && s.resultSet) return (true, s.resultWinner);
+        return (false, 0);
+    }
+
     function applyMove(bytes calldata gameState, bytes calldata move) external pure returns (bytes memory) {
         HiLo memory s = abi.decode(gameState, (HiLo));
         (uint8 kind, bytes memory payload) = abi.decode(move, (uint8, bytes));
