@@ -24,15 +24,9 @@ contract HoldemTableNShowdownTest is Test {
 
     function _pk(uint256 i) internal pure returns (uint256) { return 0xA11CE + i * 0x1000 + 1; }
 
-    // secp256k1 generator — an on-curve deck key. start() now requires every seat to register one.
+    // secp256k1 generator — an on-curve deck key. create()/join() now require one directly.
     uint256 internal constant GX = 0x79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798;
     uint256 internal constant GY = 0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8;
-    function _regKeys(bytes32 tableId, uint256 n) internal {
-        for (uint256 i = 0; i < n; i++) {
-            vm.prank(vm.addr(_pk(i)));
-            zk.registerDeckKey(tableId, [GX, GY]);
-        }
-    }
     function _card(uint8 rank, uint8 suit) internal pure returns (uint8) { return (rank - 2) * 4 + suit; }
 
     function setUp() public {
@@ -90,14 +84,13 @@ contract HoldemTableNShowdownTest is Test {
         address a0 = vm.addr(_pk(0));
         vm.deal(a0, buyIn);
         vm.prank(a0);
-        bytes32 tableId = zk.create{value: buyIn}(IGameRulesN(address(rules)), buyIn, n, rakeBps, rakeCap, CLOCK, a0);
+        bytes32 tableId = zk.create{value: buyIn}(IGameRulesN(address(rules)), buyIn, n, rakeBps, rakeCap, CLOCK, a0, [GX, GY]);
         for (uint256 i = 1; i < n; i++) {
             address ai = vm.addr(_pk(i));
             vm.deal(ai, buyIn);
             vm.prank(ai);
-            zk.join{value: buyIn}(tableId, ai);
+            zk.join{value: buyIn}(tableId, ai, [GX, GY]);
         }
-        _regKeys(tableId, n);
         vm.prank(a0);
         zk.start(tableId);
 

@@ -69,34 +69,31 @@ contract HoldemTableNUnitTest is Test {
         }
     }
 
-    /// Create only (1 seat, Forming). Each seat's channel key IS its wallet.
+    /// Create only (1 seat, Forming). Each seat's channel key IS its wallet. Seat 0's deck key
+    /// is the generator (on-curve) — create() now requires one directly, no separate registration.
     function _createOnly(uint256 buyIn, uint256 maxSeats) internal returns (bytes32 tableId) {
         address a0 = vm.addr(_pk(0));
         vm.deal(a0, buyIn);
         vm.prank(a0);
-        tableId = zk.create{value: buyIn}(IGameRulesN(address(rules)), buyIn, maxSeats, 0, 0, CLOCK, a0);
+        tableId = zk.create{value: buyIn}(IGameRulesN(address(rules)), buyIn, maxSeats, 0, 0, CLOCK, a0, [GX, GY]);
     }
 
-    /// Create + (n-1) joins, WITHOUT starting (still Forming, exactly n seats).
+    /// Create + (n-1) joins, WITHOUT starting (still Forming, exactly n seats). Every seat's
+    /// deck key is the generator (on-curve) — join() now requires one directly.
     function _createAndJoin(uint256 n, uint256 buyIn) internal returns (bytes32 tableId) {
         tableId = _createOnly(buyIn, n);
         for (uint256 i = 1; i < n; i++) {
             address ai = vm.addr(_pk(i));
             vm.deal(ai, buyIn);
             vm.prank(ai);
-            zk.join{value: buyIn}(tableId, ai);
+            zk.join{value: buyIn}(tableId, ai, [GX, GY]);
         }
     }
 
-    /// Create + (n-1) joins + start. Each seat's channel key IS its wallet.
+    /// Create + (n-1) joins + start. Each seat's channel key IS its wallet. Every seat already
+    /// has an on-curve deck key from create()/join() — no separate registration needed.
     function _table(uint256 n, uint256 buyIn) internal returns (bytes32 tableId) {
         tableId = _createAndJoin(n, buyIn);
-        // start() now requires every seat to have registered a deck key; register the generator
-        // (on-curve) for each — these suites don't verify real shares, they just need the gate met.
-        for (uint256 i = 0; i < n; i++) {
-            vm.prank(vm.addr(_pk(i)));
-            zk.registerDeckKey(tableId, [GX, GY]);
-        }
         vm.prank(vm.addr(_pk(0)));
         zk.start(tableId);
     }
@@ -152,13 +149,13 @@ contract HoldemTableNUnitTest is Test {
 
     function test_createRevertsZeroBuyIn() public {
         vm.expectRevert(ChannelTableBase.WrongValue.selector);
-        zk.create{value: 0}(IGameRulesN(address(rules)), 0, 2, 0, 0, CLOCK, address(0));
+        zk.create{value: 0}(IGameRulesN(address(rules)), 0, 2, 0, 0, CLOCK, address(0), [GX, GY]);
     }
 
     function test_createRevertsValueMismatch() public {
         vm.deal(address(this), 2 ether);
         vm.expectRevert(ChannelTableBase.WrongValue.selector);
-        zk.create{value: 2 ether}(IGameRulesN(address(rules)), 1 ether, 2, 0, 0, CLOCK, address(0));
+        zk.create{value: 2 ether}(IGameRulesN(address(rules)), 1 ether, 2, 0, 0, CLOCK, address(0), [GX, GY]);
     }
 
     function test_createRevertsClockTooLow() public {
@@ -167,34 +164,34 @@ contract HoldemTableNUnitTest is Test {
         // evaluating the create() arguments would otherwise consume the armed expectation.
         uint64 tooLow = zk.MIN_CLOCK_BLOCKS() - 1;
         vm.expectRevert(ChannelTableBase.BadClock.selector);
-        zk.create{value: 1 ether}(IGameRulesN(address(rules)), 1 ether, 2, 0, 0, tooLow, address(0));
+        zk.create{value: 1 ether}(IGameRulesN(address(rules)), 1 ether, 2, 0, 0, tooLow, address(0), [GX, GY]);
     }
 
     function test_createRevertsClockTooHigh() public {
         vm.deal(address(this), 1 ether);
         uint64 tooHigh = zk.MAX_CLOCK_BLOCKS() + 1;
         vm.expectRevert(ChannelTableBase.BadClock.selector);
-        zk.create{value: 1 ether}(IGameRulesN(address(rules)), 1 ether, 2, 0, 0, tooHigh, address(0));
+        zk.create{value: 1 ether}(IGameRulesN(address(rules)), 1 ether, 2, 0, 0, tooHigh, address(0), [GX, GY]);
     }
 
     function test_createRevertsBadRules() public {
         vm.deal(address(this), 1 ether);
         vm.expectRevert(ChannelTableBase.BadRules.selector);
         // address(0x9999) has no code
-        zk.create{value: 1 ether}(IGameRulesN(address(0x9999)), 1 ether, 2, 0, 0, CLOCK, address(0));
+        zk.create{value: 1 ether}(IGameRulesN(address(0x9999)), 1 ether, 2, 0, 0, CLOCK, address(0), [GX, GY]);
     }
 
     function test_createRevertsSeatCountTooLow() public {
         vm.deal(address(this), 1 ether);
         vm.expectRevert(HoldemTableN.BadSeatCount.selector);
-        zk.create{value: 1 ether}(IGameRulesN(address(rules)), 1 ether, 1, 0, 0, CLOCK, address(0));
+        zk.create{value: 1 ether}(IGameRulesN(address(rules)), 1 ether, 1, 0, 0, CLOCK, address(0), [GX, GY]);
     }
 
     function test_createRevertsSeatCountTooHigh() public {
         vm.deal(address(this), 1 ether);
         uint256 tooManySeats = zk.MAX_SEATS() + 1;
         vm.expectRevert(HoldemTableN.BadSeatCount.selector);
-        zk.create{value: 1 ether}(IGameRulesN(address(rules)), 1 ether, tooManySeats, 0, 0, CLOCK, address(0));
+        zk.create{value: 1 ether}(IGameRulesN(address(rules)), 1 ether, tooManySeats, 0, 0, CLOCK, address(0), [GX, GY]);
     }
 
     function test_createRevertsRakeTooHigh() public {
@@ -202,16 +199,28 @@ contract HoldemTableNUnitTest is Test {
         uint16 tooMuchRake = uint16(zk.MAX_RAKE_BPS() + 1);
         vm.expectRevert(HoldemTableN.RakeTooHigh.selector);
         zk.create{value: 1 ether}(
-            IGameRulesN(address(rules)), 1 ether, 2, tooMuchRake, 0, CLOCK, address(0)
+            IGameRulesN(address(rules)), 1 ether, 2, tooMuchRake, 0, CLOCK, address(0), [GX, GY]
         );
+    }
+
+    /// HARDENING (Option B): a seat cannot come into existence without a valid on-curve deck
+    /// key — create() now takes the key directly and rejects an off-curve point up front, before
+    /// any seat is pushed. (Formerly this invariant was enforced only later, at start(), via a
+    /// separate registerDeckKey() call gated by a start-time loop — see
+    /// test_joinRevertsBadDeckKey below for the join() side of the same guarantee.)
+    function test_createRevertsBadDeckKey() public {
+        vm.deal(address(this), 1 ether);
+        vm.expectRevert(HoldemTableN.BadDeckKey.selector);
+        zk.create{value: 1 ether}(IGameRulesN(address(rules)), 1 ether, 2, 0, 0, CLOCK, address(0), [uint256(1), uint256(1)]);
     }
 
     function test_createChannelKeyDefaultsToSender() public {
         vm.deal(address(this), 1 ether);
-        bytes32 tableId = zk.create{value: 1 ether}(IGameRulesN(address(rules)), 1 ether, 2, 0, 0, CLOCK, address(0));
+        bytes32 tableId = zk.create{value: 1 ether}(IGameRulesN(address(rules)), 1 ether, 2, 0, 0, CLOCK, address(0), [GX, GY]);
         assertEq(zk.seatAt(tableId, 0), address(this), "seat 0 is creator");
         assertEq(zk.escrowOf(tableId, 0), 1 ether, "escrow recorded");
         assertEq(zk.totalEscrow(tableId), 1 ether, "totalEscrow matches");
+        assertEq(zk.deckKeyOf(tableId, 0)[0], GX, "deck key set directly by create()");
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════
@@ -224,7 +233,7 @@ contract HoldemTableNUnitTest is Test {
         vm.deal(stranger, 1 ether);
         vm.prank(stranger);
         vm.expectRevert(ChannelTableBase.BadStatus.selector);
-        zk.join{value: 1 ether}(tableId, stranger);
+        zk.join{value: 1 ether}(tableId, stranger, [GX, GY]);
     }
 
     function test_joinRevertsWrongValue() public {
@@ -233,7 +242,7 @@ contract HoldemTableNUnitTest is Test {
         vm.deal(a1, 2 ether);
         vm.prank(a1);
         vm.expectRevert(ChannelTableBase.WrongValue.selector);
-        zk.join{value: 2 ether}(tableId, a1);
+        zk.join{value: 2 ether}(tableId, a1, [GX, GY]);
     }
 
     function test_joinRevertsTooManySeats() public {
@@ -242,7 +251,7 @@ contract HoldemTableNUnitTest is Test {
         vm.deal(a2, 1 ether);
         vm.prank(a2);
         vm.expectRevert(HoldemTableN.TooManySeats.selector);
-        zk.join{value: 1 ether}(tableId, a2);
+        zk.join{value: 1 ether}(tableId, a2, [GX, GY]);
     }
 
     function test_joinRevertsNotPlayerSelfCollision() public {
@@ -251,7 +260,7 @@ contract HoldemTableNUnitTest is Test {
         vm.deal(a0, 1 ether);
         vm.prank(a0);
         vm.expectRevert(ChannelTableBase.NotPlayer.selector);
-        zk.join{value: 1 ether}(tableId, a0); // already seat 0
+        zk.join{value: 1 ether}(tableId, a0, [GX, GY]); // already seat 0
     }
 
     function test_joinRevertsDuplicateKey() public {
@@ -259,13 +268,24 @@ contract HoldemTableNUnitTest is Test {
         address keyA = address(0xABCD);
         vm.deal(a0, 1 ether);
         vm.prank(a0);
-        bytes32 tableId = zk.create{value: 1 ether}(IGameRulesN(address(rules)), 1 ether, 3, 0, 0, CLOCK, keyA);
+        bytes32 tableId = zk.create{value: 1 ether}(IGameRulesN(address(rules)), 1 ether, 3, 0, 0, CLOCK, keyA, [GX, GY]);
 
         address a1 = vm.addr(_pk(1)); // a brand new wallet, not colliding with a0/keyA
         vm.deal(a1, 1 ether);
         vm.prank(a1);
         vm.expectRevert(HoldemTableN.DuplicateKey.selector);
-        zk.join{value: 1 ether}(tableId, keyA); // channelKey collides with seat 0's channel key
+        zk.join{value: 1 ether}(tableId, keyA, [GX, GY]); // channelKey collides with seat 0's channel key
+    }
+
+    /// HARDENING (Option B): the join() side of "a seat cannot exist without a valid on-curve
+    /// deck key" — see test_createRevertsBadDeckKey for the create() side of the same guarantee.
+    function test_joinRevertsBadDeckKey() public {
+        bytes32 tableId = _createOnly(1 ether, 2);
+        address a1 = vm.addr(_pk(1));
+        vm.deal(a1, 1 ether);
+        vm.prank(a1);
+        vm.expectRevert(HoldemTableN.BadDeckKey.selector);
+        zk.join{value: 1 ether}(tableId, a1, [uint256(1), uint256(1)]);
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════
@@ -351,11 +371,16 @@ contract HoldemTableNUnitTest is Test {
     function test_leaveBeforeStartMovesDeckKeyWithSwappedSeat() public {
         uint256 g2x = 0xc6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5; // 2*G.x
         uint256 g2y = 0x1ae168fea63dc339a3c58419466ceaeef7f632653266d0e1236431a950cfe52a; // 2*G.y
-        bytes32 tableId = _createAndJoin(2, 1 ether); // seats 0,1 = _pk(0),_pk(1); Created
-        vm.prank(vm.addr(_pk(0)));
-        zk.registerDeckKey(tableId, [GX, GY]);
-        vm.prank(vm.addr(_pk(1)));
-        zk.registerDeckKey(tableId, [g2x, g2y]);
+        // seat 0 gets G directly from create(), seat 1 gets 2G directly from join() — no
+        // separate registerDeckKey() calls needed now that both are set at seating time.
+        address a0 = vm.addr(_pk(0));
+        vm.deal(a0, 1 ether);
+        vm.prank(a0);
+        bytes32 tableId = zk.create{value: 1 ether}(IGameRulesN(address(rules)), 1 ether, 2, 0, 0, CLOCK, a0, [GX, GY]);
+        address a1 = vm.addr(_pk(1));
+        vm.deal(a1, 1 ether);
+        vm.prank(a1);
+        zk.join{value: 1 ether}(tableId, a1, [g2x, g2y]);
         assertEq(zk.deckKeyOf(tableId, 0)[0], GX, "seat 0 key = G");
         assertEq(zk.deckKeyOf(tableId, 1)[0], g2x, "seat 1 key = 2G");
 
@@ -591,15 +616,11 @@ contract HoldemTableNUnitTest is Test {
         address a0 = vm.addr(_pk(0));
         vm.deal(a0, buyIn);
         vm.prank(a0);
-        bytes32 tableId = zk.create{value: buyIn}(IGameRulesN(address(rules)), buyIn, n, 250, rakeCap, CLOCK, a0);
+        bytes32 tableId = zk.create{value: buyIn}(IGameRulesN(address(rules)), buyIn, n, 250, rakeCap, CLOCK, a0, [GX, GY]);
         address a1 = vm.addr(_pk(1));
         vm.deal(a1, buyIn);
         vm.prank(a1);
-        zk.join{value: buyIn}(tableId, a1);
-        vm.prank(a0);
-        zk.registerDeckKey(tableId, [GX, GY]); // deck-key gate: both seats must register before start
-        vm.prank(a1);
-        zk.registerDeckKey(tableId, [GX, GY]);
+        zk.join{value: buyIn}(tableId, a1, [GX, GY]);
         vm.prank(a0);
         zk.start(tableId);
 
@@ -622,15 +643,11 @@ contract HoldemTableNUnitTest is Test {
         vm.deal(a0, buyIn);
         vm.prank(a0);
         // rakeBps 0.5% (50), rakeCap loose (1000) so the cap never binds — only the ratio does.
-        bytes32 tableId = zk.create{value: buyIn}(IGameRulesN(address(rules)), buyIn, n, 50, 1000, CLOCK, a0);
+        bytes32 tableId = zk.create{value: buyIn}(IGameRulesN(address(rules)), buyIn, n, 50, 1000, CLOCK, a0, [GX, GY]);
         address a1 = vm.addr(_pk(1));
         vm.deal(a1, buyIn);
         vm.prank(a1);
-        zk.join{value: buyIn}(tableId, a1);
-        vm.prank(a0);
-        zk.registerDeckKey(tableId, [GX, GY]); // deck-key gate: both seats must register before start
-        vm.prank(a1);
-        zk.registerDeckKey(tableId, [GX, GY]);
+        zk.join{value: buyIn}(tableId, a1, [GX, GY]);
         vm.prank(a0);
         zk.start(tableId);
 
@@ -879,19 +896,6 @@ contract HoldemTableNUnitTest is Test {
     // respondWithShare() — branches reachable WITHOUT a valid DLEQ proof (no ffi needed)
     // ══════════════════════════════════════════════════════════════════════════════════
 
-    /// Register a real on-curve deck key for seat 0 before starting (registerDeckKey is
-    /// Forming-only), then start the table.
-    function _tableWithDeckKey(uint256 n, uint256 buyIn) internal returns (bytes32 tableId) {
-        tableId = _createAndJoin(n, buyIn);
-        // start() requires every seat registered; register the generator (on-curve) for each.
-        for (uint256 i = 0; i < n; i++) {
-            vm.prank(vm.addr(_pk(i)));
-            zk.registerDeckKey(tableId, [GX, GY]);
-        }
-        vm.prank(vm.addr(_pk(0)));
-        zk.start(tableId);
-    }
-
     function test_respondWithShareRevertsNotDemanded() public {
         uint256 n = 2;
         bytes32 tableId = _table(n, 100);
@@ -927,7 +931,7 @@ contract HoldemTableNUnitTest is Test {
 
     function test_respondWithShareRevertsBadDeck() public {
         uint256 n = 2;
-        bytes32 tableId = _tableWithDeckKey(n, 100);
+        bytes32 tableId = _table(n, 100);
         ChannelStateN memory s = _emptyState(tableId, n);
         s.nonce = 1;
         s.balances[0] = n * 100;
@@ -952,7 +956,7 @@ contract HoldemTableNUnitTest is Test {
     /// whose length isn't a multiple of 4 (not a whole number of (c1,c2) card tuples).
     function test_respondWithShareRevertsBadDeckMisalignedLength() public {
         uint256 n = 2;
-        bytes32 tableId = _tableWithDeckKey(n, 100);
+        bytes32 tableId = _table(n, 100);
         ChannelStateN memory s = _emptyState(tableId, n);
         s.nonce = 1;
         s.balances[0] = n * 100;
@@ -975,7 +979,7 @@ contract HoldemTableNUnitTest is Test {
     /// the supplied deck array) — a different code path from openDispute's demandKind BadDemand.
     function test_respondWithShareRevertsBadDemandSlotOutOfRange() public {
         uint256 n = 2;
-        bytes32 tableId = _tableWithDeckKey(n, 100);
+        bytes32 tableId = _table(n, 100);
         uint256[] memory deck = new uint256[](4); // 1 slot only (slot 0)
         deck[0] = 11; deck[1] = 22; deck[2] = 33; deck[3] = 44;
         bytes32 commitment = _mirrorDeckHash(deck);
@@ -997,22 +1001,13 @@ contract HoldemTableNUnitTest is Test {
         zk.respondWithShare(tableId, deck, share, proof);
     }
 
-    /// HARDENING: start() now requires EVERY seat to have registered a deck key. This closes the
-    /// "never-registered seat is force-foldable" single-caller theft path (an attacker SHARE-disputes
-    /// an unregistered victim, who can never answer -> force-folded on timeout) and makes
-    /// respondWithShare's DeckKeyNotSet an unreachable assert. A table with any unregistered seat
-    /// simply cannot go Live. (Formerly test_respondWithShareRevertsDeckKeyNotSet, whose scenario —
-    /// a Live table with an unregistered seat — is now unreachable by construction.)
-    function test_startRevertsWhenASeatHasNoDeckKey() public {
-        uint256 n = 2;
-        bytes32 tableId = _createAndJoin(n, 100);
-        vm.prank(vm.addr(_pk(0)));
-        zk.registerDeckKey(tableId, [GX, GY]); // only seat 0 registers; seat 1 never does
-        vm.prank(vm.addr(_pk(0)));
-        vm.expectRevert(HoldemTableN.DeckKeyNotSet.selector);
-        zk.start(tableId);
-        assertEq(uint8(zk.status(tableId)), uint8(ChannelTableBase.Status.Created), "unregistered seat blocks start");
-    }
+    /// HARDENING (Option B): a seat cannot come into existence without a valid on-curve deck key
+    /// — create()/join() require and validate one directly (see test_createRevertsBadDeckKey /
+    /// test_joinRevertsBadDeckKey), so a table can never reach Live with an unregistered seat and
+    /// start() no longer needs (or has) a key-completeness gate. This makes respondWithShare's
+    /// DeckKeyNotSet an unreachable assert. (Formerly this coverage lived here as
+    /// test_startRevertsWhenASeatHasNoDeckKey / test_respondWithShareRevertsDeckKeyNotSet, both
+    /// scenarios that are now unreachable by construction — moved to the new enforcement point.)
 
     /// A garbage (off-curve / all-zero) proof fails `RevealShareDLEQ.verify` — which returns
     /// `false` rather than reverting on malformed input — so this reaches BadShareProof without
@@ -1022,7 +1017,7 @@ contract HoldemTableNUnitTest is Test {
     /// a proof that satisfies both DLEQ equations against the off-chain prover's exact encoding.
     function test_respondWithShareRevertsBadShareProofGarbage() public {
         uint256 n = 2;
-        bytes32 tableId = _tableWithDeckKey(n, 100); // seat 0 has a real on-curve key
+        bytes32 tableId = _table(n, 100); // seat 0 has a real on-curve key
         uint256[] memory deck = new uint256[](4);
         deck[0] = 11; deck[1] = 22; deck[2] = 33; deck[3] = 44;
         bytes32 commitment = _mirrorDeckHash(deck);

@@ -26,8 +26,9 @@ import {ChannelTableBase} from "./ChannelTableBase.sol";
 /// ChaumPedersenDL verifier is EdOnBN254, the wrong curve, so it cannot check our live
 /// shares). An honest seat can therefore ALWAYS satisfy a SHARE demand with its correct
 /// share + proof and can never be force-folded on the clock; a forged share reverts.
-/// Seats register their deck pubkey via registerDeckKey() while Forming (the same pubkeys
-/// that form the off-chain joint encryption key).
+/// Every seat registers its deck pubkey (the same pubkeys that form the off-chain joint
+/// encryption key) as a parameter of create()/join() — a seat cannot exist without one —
+/// and may rotate it via registerDeckKey() while still Forming.
 ///
 /// Shared errors/Status/dispute-clock constants/co-sign helpers live in ChannelTableBase,
 /// alongside its ZkTable counterpart (2026-08 DRY pass) — see that file's header for what's
@@ -116,13 +117,15 @@ contract HoldemTableN is EIP712, ChannelTableBase {
         uint16 rakeBps,
         uint256 rakeCap,
         uint64 clockBlocks,
-        address channelKey
+        address channelKey,
+        uint256[2] calldata deckKey
     ) external payable returns (bytes32 tableId) {
         if (buyIn == 0 || msg.value != buyIn) revert WrongValue();
         _validateClock(clockBlocks);
         _validateRulesCode(address(rules));
         if (maxSeats < 2 || maxSeats > MAX_SEATS) revert BadSeatCount();
         if (rakeBps > MAX_RAKE_BPS) revert RakeTooHigh();
+        if (!EllipticCurve.isOnCurve(deckKey[0], deckKey[1])) revert BadDeckKey();
         tableId = keccak256(abi.encode(block.chainid, address(this), ++_counter));
         Table storage t = _tables[tableId];
         t.rules = rules;
@@ -136,11 +139,12 @@ contract HoldemTableN is EIP712, ChannelTableBase {
         t.seats.push(msg.sender);
         t.channelKeys.push(key);
         t.escrow.push(msg.value);
+        _deckKey[tableId][0] = deckKey;
         emit TableCreated(tableId, msg.sender, address(rules), buyIn, maxSeats, rakeBps, rakeCap, clockBlocks);
         emit TableJoined(tableId, msg.sender, 0);
     }
 
-    function join(bytes32 tableId, address channelKey) external payable {
+    function join(bytes32 tableId, address channelKey, uint256[2] calldata deckKey) external payable {
         Table storage t = _tables[tableId];
         if (t.status != Status.Created) revert BadStatus();
         if (msg.value != t.buyIn) revert WrongValue();
@@ -151,37 +155,32 @@ contract HoldemTableN is EIP712, ChannelTableBase {
             if (t.seats[i] == msg.sender || t.channelKeys[i] == msg.sender) revert NotPlayer();
             if (t.seats[i] == key || t.channelKeys[i] == key) revert DuplicateKey();
         }
+        if (!EllipticCurve.isOnCurve(deckKey[0], deckKey[1])) revert BadDeckKey();
         t.seats.push(msg.sender);
         t.channelKeys.push(key);
         t.escrow.push(msg.value);
-        emit TableJoined(tableId, msg.sender, t.seats.length - 1);
+        uint256 seat = t.seats.length - 1;
+        _deckKey[tableId][seat] = deckKey;
+        emit TableJoined(tableId, msg.sender, seat);
     }
 
-    /// Forming → Live once at least 2 seats have joined.
+    /// Forming → Live once at least 2 seats have joined. Every seat already has a registered
+    /// deck key by construction (create()/join() require one), so there is no key-completeness
+    /// gate here anymore.
     function start(bytes32 tableId) external {
         Table storage t = _tables[tableId];
         if (t.status != Status.Created) revert BadStatus();
         _seatOf(t, msg.sender);
         if (t.seats.length < 2) revert NotEnoughSeats();
-        // Every seat must have registered its deck key before the table goes Live. A seat that
-        // never registered can never answer a SHARE dispute (respondWithShare -> DeckKeyNotSet)
-        // and would be force-foldable on timeout by a single attacker; the joint deck key is also
-        // ill-formed without every contribution. Gating here makes DeckKeyNotSet in
-        // respondWithShare an unreachable assert. (isOnCurve rejects (0,0) at registration, so a
-        // zero pair reliably means "unregistered".)
-        uint256 n = t.seats.length;
-        for (uint256 i = 0; i < n; i++) {
-            uint256[2] storage k = _deckKey[tableId][i];
-            if (k[0] == 0 && k[1] == 0) revert DeckKeyNotSet();
-        }
         t.status = Status.Live;
         emit TableStarted(tableId, t.seats.length);
     }
 
-    /// Register the caller's secp256k1 deck pubkey (the key it contributes to the off-chain
-    /// joint deck key). Only while Forming — so it is immutable across live play — and only
-    /// by a seat, for its OWN seat. Required to answer a SHARE dispute (respondWithShare).
-    /// NOTE: register after the roster is final; leaveBeforeStart re-indexes seats.
+    /// Rotate the caller's secp256k1 deck pubkey (the key it contributes to the off-chain
+    /// joint deck key). create()/join() already set an initial on-curve key for every seat;
+    /// this only overwrites it, and only while Forming (so it is immutable across live play)
+    /// and only by a seat, for its OWN seat. NOTE: leaveBeforeStart re-indexes seats, so a
+    /// rotation must target the caller's CURRENT seat index, which _seatOf always resolves.
     function registerDeckKey(bytes32 tableId, uint256[2] calldata pk) external {
         Table storage t = _tables[tableId];
         if (t.status != Status.Created) revert BadStatus();
@@ -375,7 +374,7 @@ contract HoldemTableN is EIP712, ChannelTableBase {
         if (base + 4 > deck.length) revert BadDemand();
 
         uint256[2] storage pk = _deckKey[tableId][seat];
-        if (pk[0] == 0 && pk[1] == 0) revert DeckKeyNotSet(); // assert: start() requires every seat registered
+        if (pk[0] == 0 && pk[1] == 0) revert DeckKeyNotSet(); // assert: create()/join() guarantee every seat has a registered key
 
         RevealShareDLEQ.Statement memory s = RevealShareDLEQ.Statement({
             pkX: pk[0], pkY: pk[1],

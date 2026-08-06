@@ -3,7 +3,7 @@ import { expect } from 'chai'
 import hre from 'hardhat'
 import * as helpers from '@nomicfoundation/hardhat-toolbox-viem/network-helpers'
 import { privateKeyToAccount, generatePrivateKey } from 'viem/accounts'
-import { AttestedElGamalDeck } from '@msgboard/zk-cards-core'
+import { AttestedElGamalDeck, deserializePoint } from '@msgboard/zk-cards-core'
 import {
   runHand,
   makeDomainN,
@@ -89,19 +89,25 @@ describe('Holdem on-chain settle E2E (HoldemTableN.settle accepts the co-signed 
     zk: any,
     rules: any,
     seats: Awaited<ReturnType<typeof makeSeats>>,
-    tableId: viem.Hex,
+    _tableId: viem.Hex, // legacy positional arg; the real id is read from the TableCreated log below
     buyIn: bigint,
     rakeBps: number,
     rakeCap: bigint,
   ) {
     const n = seats.length
     const CLOCK = 30n
-    // seat 0 creates (escrows buyIn), declaring its channel key.
+    // Each seat's on-chain deck pubkey (secp256k1 affine [x,y]) is now a create/join
+    // parameter — a seat can never be occupied without one (no separate registerDeckKey step).
+    const deckKeyOf = (seat: (typeof seats)[number]): readonly [bigint, bigint] => {
+      const a = deserializePoint(seat.pub).toAffine()
+      return [a.x, a.y]
+    }
+    // seat 0 creates (escrows buyIn), declaring its channel key + deck key.
     await seats[0].walletClient.writeContract({
       address: zk.address,
       abi: zk.abi,
       functionName: 'create',
-      args: [rules.address, buyIn, BigInt(n), rakeBps, rakeCap, CLOCK, seats[0].channel.address],
+      args: [rules.address, buyIn, BigInt(n), rakeBps, rakeCap, CLOCK, seats[0].channel.address, deckKeyOf(seats[0])],
       value: buyIn,
     })
     // resolve the tableId the contract derived: it emits TableCreated(tableId,...). Recompute it
@@ -120,7 +126,7 @@ describe('Holdem on-chain settle E2E (HoldemTableN.settle accepts the co-signed 
         address: zk.address,
         abi: zk.abi,
         functionName: 'join',
-        args: [realTableId, seats[i].channel.address],
+        args: [realTableId, seats[i].channel.address, deckKeyOf(seats[i])],
         value: buyIn,
       })
     }
