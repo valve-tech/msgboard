@@ -8,6 +8,8 @@ import {ChannelState} from "../../contracts/zk/ChannelState.sol";
 import {IGameRules} from "../../contracts/zk/IGameRules.sol";
 import {MockGameRules} from "../../contracts/test/MockGameRules.sol";
 import {MockRevealVerifier} from "../../contracts/test/MockRevealVerifier.sol";
+import {HiLoWarRules} from "../../contracts/zk/HiLoWarRules.sol";
+import {HiLo, HiLoCodec} from "./HiLoWarRules.t.sol";
 
 /// A revealVerifier stand-in whose fallback unconditionally reverts, so
 /// respondWithShare's `staticcall` sees `callOk == false`.
@@ -70,6 +72,7 @@ contract ZkTableUnitTest is Test {
     event DisputeAnsweredWithShare(bytes32 indexed tableId, uint32 slot, uint256 revealX, uint256 revealY);
     event DisputeForfeited(bytes32 indexed tableId, uint8 winner, uint256 payoutA, uint256 payoutB);
     event SetupDisputeRefunded(bytes32 indexed tableId);
+    event TopUpReclaimed(bytes32 indexed tableId, uint8 seat, uint256 amount);
 
     function setUp() public {
         zk = new ZkTable();
@@ -114,23 +117,28 @@ contract ZkTableUnitTest is Test {
     // under this profile's viaIR + optimizer-runs:1000, so each helper below pulls out
     // only the couple of fields a given test needs.)
     function _status(bytes32 id) internal view returns (ChannelTableBase.Status status) {
-        (, , , , , , , , , status, , , , , , , ) = zk.tables(id);
+        (, , , , , , , , , status, , , , , , , , , ) = zk.tables(id);
     }
 
     function _escrows(bytes32 id) internal view returns (uint256 escA, uint256 escB) {
-        (, , , , escA, escB, , , , , , , , , , , ) = zk.tables(id);
+        (, , , , escA, escB, , , , , , , , , , , , , ) = zk.tables(id);
     }
 
     function _keys(bytes32 id) internal view returns (address kA, address kB) {
-        (, , kA, kB, , , , , , , , , , , , , ) = zk.tables(id);
+        (, , kA, kB, , , , , , , , , , , , , , , ) = zk.tables(id);
     }
 
     function _disputeMeta(bytes32 id) internal view returns (uint8 disputant, uint8 demandKind, uint32 demandSlot) {
-        (, , , , , , , , , , , , , disputant, demandKind, demandSlot, ) = zk.tables(id);
+        (, , , , , , , , , , , , , disputant, demandKind, demandSlot, , , ) = zk.tables(id);
     }
 
     function _checkpointMeta(bytes32 id) internal view returns (uint64 checkpointNonce, bool hasCheckpoint) {
-        (, , , , , , , , , , checkpointNonce, hasCheckpoint, , , , , ) = zk.tables(id);
+        (, , , , , , , , , , checkpointNonce, hasCheckpoint, , , , , , , ) = zk.tables(id);
+    }
+
+    /// A3: the recorded decided-ness/winner captured by openDispute, consumed by resolveTimeout.
+    function _disputeResult(bytes32 id) internal view returns (bool decided, uint8 winner) {
+        (, , , , , , , , , , , , , , , , decided, winner, ) = zk.tables(id);
     }
 
     function _totalEscrow(bytes32 id) internal view returns (uint256 total) {
@@ -1058,5 +1066,415 @@ contract ZkTableUnitTest is Test {
         assertEq(a.balance - beforeA, 1 ether, "A gets only its balance");
         assertEq(b.balance - beforeB, 3 ether, "B (disputant) gets balance + pot");
         assertEq(uint8(_status(id)), uint8(ChannelTableBase.Status.Settled));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // A3 fix: FLIP_DONE theft — resolveTimeout must pay the recorded winner at a
+    // decided terminal state, not whichever seat happened to open the dispute.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// THE regression test. At a decided state (winner = seat A), the LOSER (seat B)
+    /// opens a MOVE dispute the winner cannot answer (mirrors HiLoWarRules.applyMove
+    /// reverting on every move at FLIP_DONE) and lets the clock expire. Pre-fix,
+    /// resolveTimeout paid the pot to `t.disputant` (B) — the loser stealing the pot.
+    /// Post-fix it must pay the recorded winner (A) instead. Confirmed to FAIL before
+    /// the resolveTimeout fix (temporarily reverting it flips this to B receiving the
+    /// pot and the assertions below fail).
+    function test_resolveTimeout_awardsWinner_notDisputant_whenDecided_MOVE() public {
+        rules.setResult(true, 1); // decided: seat A (1) won
+        bytes32 id = _createJoin(1 ether, 1 ether); // total escrow = 2 ether
+        bytes memory gameState = abi.encode("decided-flip-done");
+        ChannelState memory s = _emptyState(id);
+        s.balanceA = 0.5 ether;
+        s.balanceB = 0.5 ether;
+        s.pot = 1 ether; // conserves: 0.5+0.5+1 == 2
+        s.gameStateHash = keccak256(gameState);
+        (bytes memory sigA, bytes memory sigB) = _coSign(s);
+
+        // B is the LOSER of the decided hand, yet opens the dispute — the attack.
+        vm.prank(b);
+        zk.openDispute(id, s, sigA, sigB, gameState, 1, 0); // DEMAND_MOVE
+
+        (bool decided, uint8 winner) = _disputeResult(id);
+        assertTrue(decided, "dispute recorded the state as decided");
+        assertEq(winner, 1, "recorded winner is seat A");
+
+        vm.roll(block.number + CLOCK + 1);
+
+        uint256 beforeA = a.balance;
+        uint256 beforeB = b.balance;
+        vm.expectEmit(true, false, false, true);
+        emit DisputeForfeited(id, 1, 1.5 ether, 0.5 ether);
+        zk.resolveTimeout(id);
+        assertEq(a.balance - beforeA, 1.5 ether, "recorded winner A gets balance + pot");
+        assertEq(b.balance - beforeB, 0.5 ether, "loser/disputant B gets only its own balance");
+    }
+
+    /// Same decided-state theft, but the loser opens a SHARE demand instead of MOVE.
+    /// Proves the payout is keyed on decided-ness, not demandKind.
+    function test_resolveTimeout_awardsWinner_whenDecided_SHARE() public {
+        rules.setResult(true, 1); // decided: seat A (1) won
+        bytes32 id = _createJoin(1 ether, 1 ether); // total escrow = 2 ether
+        bytes memory gameState = abi.encode("decided-flip-done-share");
+        ChannelState memory s = _emptyState(id);
+        s.balanceA = 0.5 ether;
+        s.balanceB = 0.5 ether;
+        s.pot = 1 ether;
+        s.gameStateHash = keccak256(gameState);
+        s.deckCommitment = keccak256("deck"); // required for a SHARE demand
+        (bytes memory sigA, bytes memory sigB) = _coSign(s);
+
+        vm.prank(b); // loser opens a SHARE demand this time
+        zk.openDispute(id, s, sigA, sigB, gameState, 2, 0); // DEMAND_SHARE
+
+        vm.roll(block.number + CLOCK + 1);
+
+        uint256 beforeA = a.balance;
+        uint256 beforeB = b.balance;
+        vm.expectEmit(true, false, false, true);
+        emit DisputeForfeited(id, 1, 1.5 ether, 0.5 ether);
+        zk.resolveTimeout(id);
+        assertEq(a.balance - beforeA, 1.5 ether, "recorded winner A gets balance + pot even under a SHARE demand");
+        assertEq(b.balance - beforeB, 0.5 ether, "loser/disputant B gets only its own balance");
+    }
+
+    /// An UNDECIDED contested state (e.g. a war/tie FLIP_DONE, or any non-terminal
+    /// phase) preserves the original forfeit-to-disputant behavior — the lever that
+    /// forces a reveal/move stays intact when there is no recorded winner to pay.
+    function test_resolveTimeout_forfeitsToDisputant_whenUndecided() public {
+        rules.setResult(false, 0); // explicit: undecided
+        bytes32 id = _createJoin(1 ether, 1 ether); // total escrow = 2 ether
+        bytes memory gameState = abi.encode("undecided-state");
+        ChannelState memory s = _emptyState(id);
+        s.balanceA = 0.5 ether;
+        s.balanceB = 0.5 ether;
+        s.pot = 1 ether;
+        s.gameStateHash = keccak256(gameState);
+        (bytes memory sigA, bytes memory sigB) = _coSign(s);
+
+        vm.prank(a); // A opens (and will be forfeited the pot, undecided path)
+        zk.openDispute(id, s, sigA, sigB, gameState, 1, 0);
+
+        (bool decided, ) = _disputeResult(id);
+        assertFalse(decided, "undecided state recorded as such");
+
+        vm.roll(block.number + CLOCK + 1);
+
+        uint256 beforeA = a.balance;
+        uint256 beforeB = b.balance;
+        vm.expectEmit(true, false, false, true);
+        emit DisputeForfeited(id, 1, 1.5 ether, 0.5 ether);
+        zk.resolveTimeout(id);
+        assertEq(a.balance - beforeA, 1.5 ether, "disputant A forfeits the pot to itself (undecided)");
+        assertEq(b.balance - beforeB, 0.5 ether, "B gets only its own balance");
+    }
+
+    /// A rules contract that reports decided=true with a winner outside {1,2} is a
+    /// broken/malicious IGameRules implementation; openDispute must reject it rather
+    /// than let resolveTimeout later pay a nonsensical seat.
+    function test_openDispute_revertsBadWinnerRange() public {
+        rules.setResult(true, 3); // decided, but winner not in {1, 2}
+        bytes32 id = _createJoin(1 ether, 1 ether);
+        bytes memory gameState = abi.encode("gs");
+        ChannelState memory s = _conservingState(id);
+        s.gameStateHash = keccak256(gameState);
+        (bytes memory sigA, bytes memory sigB) = _coSign(s);
+        vm.prank(a);
+        vm.expectRevert(ChannelTableBase.BadGameState.selector);
+        zk.openDispute(id, s, sigA, sigB, gameState, 1, 0);
+    }
+
+    /// End-to-end with the REAL HiLoWarRules contract (not the mock): drive an actual
+    /// hand to a decided FLIP_DONE via a genuine MOVE_FOLD (raiser A, non-raiser B
+    /// folds -> A wins), have the LOSER (B) open the dispute HiLoWarRules.applyMove
+    /// can never answer at FLIP_DONE, let the clock expire, and confirm the pot goes
+    /// to the recorded winner (A), not the disputing loser (B).
+    function test_resolveTimeout_realHiLoWar_paysWinner_notLoserDisputant() public {
+        HiLoWarRules hiloRules = new HiLoWarRules(address(0xBEEF), address(0xCAFE));
+        vm.prank(a);
+        bytes32 id = zk.create{value: 1 ether}(IGameRules(address(hiloRules)), 1 ether, CLOCK, address(0), ZERO_DECK);
+        vm.prank(b);
+        zk.join{value: 1 ether}(id, address(0), ZERO_DECK);
+
+        // A real hand at CALL_OR_FOLD: A raised, B (non-raiser) folds -> A wins the pot.
+        HiLo memory hs;
+        hs.phase = HiLoCodec.PHASE_CALL_OR_FOLD;
+        hs.raiser = HiLoCodec.SEAT_A;
+        bytes memory finalGameState = hiloRules.applyMove(abi.encode(hs), HiLoCodec.fold(HiLoCodec.SEAT_B));
+        HiLo memory fin = abi.decode(finalGameState, (HiLo));
+        assertEq(fin.phase, HiLoCodec.PHASE_FLIP_DONE, "fold reaches FLIP_DONE");
+        assertTrue(fin.resultSet, "fold decides the hand");
+        assertEq(fin.resultWinner, HiLoCodec.SEAT_A, "raiser A wins on the non-raiser's fold");
+
+        ChannelState memory s = _emptyState(id);
+        s.phase = HiLoCodec.PHASE_FLIP_DONE;
+        s.balanceA = 0.5 ether;
+        s.balanceB = 0.5 ether;
+        s.pot = 1 ether; // conserves 0.5+0.5+1 == escrowA+escrowB (2 ether)
+        s.gameStateHash = hiloRules.hashGameState(finalGameState);
+        (bytes memory sigA, bytes memory sigB) = _coSign(s);
+
+        // B is the loser; it opens a MOVE demand that HiLoWarRules.applyMove can never
+        // satisfy at FLIP_DONE (it reverts WrongPhase for every move there) — the theft.
+        vm.prank(b);
+        zk.openDispute(id, s, sigA, sigB, finalGameState, 1, 0);
+
+        vm.roll(block.number + CLOCK + 1);
+
+        uint256 beforeA = a.balance;
+        uint256 beforeB = b.balance;
+        zk.resolveTimeout(id);
+        assertEq(a.balance - beforeA, 1.5 ether, "real winner A gets balance + pot");
+        assertEq(b.balance - beforeB, 0.5 ether, "loser/disputant B gets only its own balance, pot denied");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Top-up freeze fix: an un-acknowledged unilateral top-up must never
+    // permanently lock the escrows. topUp records a pending claim with a
+    // clockBlocks deadline; acceptance of ANY co-signed state (which must
+    // conserve the increased total) acknowledges and cancels it; otherwise the
+    // top-upper reclaims exactly their own pending amount after the deadline.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// THE freeze-regression test. Reproduces the exact fund-lock: a Live table with a
+    /// checkpoint (so disputeSetup is closed), a co-signed latest state conserving the
+    /// old total, then a unilateral top-up the counterparty never countersigns. Pre-fix:
+    /// settle/openDispute revert ConservationViolated, disputeSetup reverts BadDemand —
+    /// both escrows frozen forever. Post-fix: after the reclaim clock, the top-upper
+    /// claws back exactly the un-acknowledged top-up, the old co-signed state conserves
+    /// again, and BOTH seats exit with their exact funds; zero wei left in the contract.
+    /// Confirmed to FAIL pre-fix (with reclaimTopUp stubbed to a revert, the recovery
+    /// half of this test dies at the reclaim call — the table is unrecoverable).
+    function test_topUp_thenCounterpartyStonewalls_fundsRecoverable() public {
+        bytes32 id = _createJoin(1 ether, 1 ether); // total = 2 ether
+        bytes memory gameState = abi.encode("gs");
+
+        // Run one dispute cycle so hasCheckpoint == true (disputeSetup is then BadDemand).
+        ChannelState memory d = _conservingState(id);
+        d.nonce = 10;
+        d.gameStateHash = keccak256(gameState);
+        (bytes memory dA, bytes memory dB) = _coSign(d);
+        vm.prank(a);
+        zk.openDispute(id, d, dA, dB, gameState, 1, 0);
+        ChannelState memory r = _conservingState(id);
+        r.nonce = 20;
+        (bytes memory rA, bytes memory rB) = _coSign(r);
+        vm.prank(b);
+        zk.respondWithState(id, r, rA, rB); // Live again, checkpointNonce = 20
+
+        // The parties' co-signed LATEST state, conserving the 2-ether total.
+        ChannelState memory latest = _emptyState(id);
+        latest.nonce = 21;
+        latest.balanceA = 0.8 ether;
+        latest.balanceB = 1.2 ether;
+        latest.phase = 1; // final under MockGameRules
+        latest.gameStateHash = keccak256(gameState);
+        (bytes memory lA, bytes memory lB) = _coSign(latest);
+
+        // The griefing top-up: A unilaterally adds 0.5 ether; B countersigns nothing new.
+        vm.prank(a);
+        zk.topUp{value: 0.5 ether}(id);
+        (uint256 pend, uint64 deadline) = zk.pendingTopUps(id, 1);
+        assertEq(pend, 0.5 ether, "pending top-up recorded");
+        assertEq(deadline, uint64(block.number) + CLOCK, "reclaim deadline = now + clockBlocks");
+
+        // ── the freeze, exactly as pre-fix: every door is shut ──
+        vm.prank(a);
+        vm.expectRevert(ChannelTableBase.ConservationViolated.selector);
+        zk.settle(id, latest, lA, lB);
+        vm.prank(b);
+        vm.expectRevert(ChannelTableBase.ConservationViolated.selector);
+        zk.openDispute(id, latest, lA, lB, gameState, 1, 0);
+        vm.prank(b);
+        vm.expectRevert(ChannelTableBase.BadDemand.selector);
+        zk.disputeSetup(id);
+        // and the reclaim clock has not run yet:
+        vm.prank(a);
+        vm.expectRevert(ChannelTableBase.ClockNotExpired.selector);
+        zk.reclaimTopUp(id);
+
+        // ── the recovery path (does not exist pre-fix) ──
+        vm.roll(block.number + CLOCK + 1);
+        uint256 beforeA = a.balance;
+        vm.expectEmit(true, false, false, true);
+        emit TopUpReclaimed(id, 1, 0.5 ether);
+        vm.prank(a);
+        zk.reclaimTopUp(id);
+        assertEq(a.balance - beforeA, 0.5 ether, "A reclaims exactly the un-acknowledged top-up");
+        (uint256 escA, uint256 escB) = _escrows(id);
+        assertEq(escA, 1 ether, "escrowA back to the conserved base");
+        assertEq(escB, 1 ether, "escrowB untouched");
+
+        // The old co-signed state conserves again: either seat settles unilaterally.
+        beforeA = a.balance;
+        uint256 beforeB = b.balance;
+        vm.prank(b); // even the stonewalled counterparty can drive the exit
+        zk.settle(id, latest, lA, lB);
+        assertEq(a.balance - beforeA, 0.8 ether, "A exits with its co-signed balance");
+        assertEq(b.balance - beforeB, 1.2 ether, "B exits with its co-signed balance");
+        assertEq(address(zk).balance, 0, "zero residue: every escrowed wei paid out");
+    }
+
+    /// Cooperative path unchanged: a top-up reflected in a newer co-signed state settles
+    /// exactly as before the fix — full increased total paid out, pending claim cancelled
+    /// by the settle itself, zero residue.
+    function test_topUp_acknowledged_settlesNormally() public {
+        bytes32 id = _createJoin(1 ether, 1 ether); // base total = 2 ether
+        vm.prank(a);
+        zk.topUp{value: 0.5 ether}(id); // total = 2.5 ether
+
+        ChannelState memory s = _emptyState(id);
+        s.nonce = 1;
+        s.balanceA = 1.7 ether;
+        s.balanceB = 0.8 ether; // conserves 2.5
+        s.phase = 1;
+        (bytes memory sigA, bytes memory sigB) = _coSign(s);
+
+        uint256 beforeA = a.balance;
+        uint256 beforeB = b.balance;
+        vm.prank(a);
+        zk.settle(id, s, sigA, sigB);
+        assertEq(a.balance - beforeA, 1.7 ether, "A paid from the increased total");
+        assertEq(b.balance - beforeB, 0.8 ether, "B paid from the increased total");
+        assertEq(address(zk).balance, 0, "full 2.5 ether left the contract");
+        (uint256 pend, ) = zk.pendingTopUps(id, 1);
+        assertEq(pend, 0, "no leftover pending claim after an acknowledging settle");
+    }
+
+    /// No double-spend: once ANY co-signed state conserving the increased total is
+    /// accepted on-chain (here via openDispute + respondWithState), the top-up is part
+    /// of the conserved pot and can NEVER also be reclaimed — even after the deadline.
+    /// The final settle then pays out the full increased total exactly once.
+    function test_reclaim_deniedAfterAcknowledgment_noDoubleSpend() public {
+        bytes32 id = _createJoin(1 ether, 1 ether);
+        vm.prank(a);
+        zk.topUp{value: 0.5 ether}(id); // total = 2.5, pending(A) = 0.5
+        bytes memory gameState = abi.encode("gs");
+
+        // B countersigns a post-top-up state; A checkpoints it via openDispute.
+        ChannelState memory s = _conservingState(id); // conserves 2.5 (current escrow)
+        s.nonce = 1;
+        s.gameStateHash = keccak256(gameState);
+        (bytes memory sigA, bytes memory sigB) = _coSign(s);
+        vm.prank(a);
+        zk.openDispute(id, s, sigA, sigB, gameState, 1, 0);
+        (uint256 pend, ) = zk.pendingTopUps(id, 1);
+        assertEq(pend, 0, "acceptance of a conserving co-signed state acknowledges the top-up");
+
+        // Clear the dispute and let the reclaim clock run out anyway.
+        ChannelState memory resp = _conservingState(id);
+        resp.nonce = 2;
+        (bytes memory rA, bytes memory rB) = _coSign(resp);
+        vm.prank(b);
+        zk.respondWithState(id, resp, rA, rB);
+        vm.roll(block.number + CLOCK + 100);
+
+        vm.prank(a);
+        vm.expectRevert(ZkTable.NothingToReclaim.selector);
+        zk.reclaimTopUp(id); // the acknowledged top-up is unreclaimable forever
+
+        // The acknowledged total settles exactly once, in full.
+        ChannelState memory fin = _emptyState(id);
+        fin.nonce = 3;
+        fin.balanceA = 1.25 ether;
+        fin.balanceB = 1.25 ether;
+        fin.phase = 1;
+        (bytes memory fA, bytes memory fB) = _coSign(fin);
+        uint256 beforeA = a.balance;
+        uint256 beforeB = b.balance;
+        vm.prank(a);
+        zk.settle(id, fin, fA, fB);
+        assertEq(a.balance - beforeA, 1.25 ether);
+        assertEq(b.balance - beforeB, 1.25 ether);
+        assertEq(address(zk).balance, 0, "top-up paid out exactly once (settled, not reclaimed)");
+    }
+
+    /// Reclaim pays each seat exactly its OWN pending amount and nothing more: a second
+    /// reclaim finds nothing, a seat with no pending gets NothingToReclaim (B cannot
+    /// touch A's pending), and a stranger is NotPlayer.
+    function test_reclaim_cannotExceedOwnPending() public {
+        bytes32 id = _createJoin(1 ether, 1 ether);
+        vm.prank(a);
+        zk.topUp{value: 0.3 ether}(id);
+        vm.prank(b);
+        zk.topUp{value: 0.7 ether}(id); // escrow = (1.3, 1.7)
+        vm.roll(block.number + CLOCK + 1);
+
+        vm.prank(stranger);
+        vm.expectRevert(ChannelTableBase.NotPlayer.selector);
+        zk.reclaimTopUp(id);
+
+        uint256 beforeA = a.balance;
+        uint256 beforeB = b.balance;
+        vm.prank(a);
+        zk.reclaimTopUp(id);
+        assertEq(a.balance - beforeA, 0.3 ether, "A gets exactly its own pending, not B's");
+        vm.prank(a);
+        vm.expectRevert(ZkTable.NothingToReclaim.selector);
+        zk.reclaimTopUp(id); // nothing left to take on a second call
+        vm.prank(b);
+        zk.reclaimTopUp(id);
+        assertEq(b.balance - beforeB, 0.7 ether, "B gets exactly its own pending");
+        (uint256 escA, uint256 escB) = _escrows(id);
+        assertEq(escA, 1 ether, "base escrow untouchable via reclaim");
+        assertEq(escB, 1 ether, "base escrow untouchable via reclaim");
+    }
+
+    /// Deadline boundary: at block == deadline reclaim still reverts (mirrors the
+    /// dispute clock's `<=` semantics); the first reclaimable block is deadline + 1.
+    /// A later top-up accumulates the pending amount and refreshes the shared deadline.
+    function test_reclaim_deadlineBoundary_andAccumulation() public {
+        bytes32 id = _createJoin(1 ether, 1 ether);
+        vm.prank(a);
+        zk.topUp{value: 0.3 ether}(id);
+        (, uint64 dl1) = zk.pendingTopUps(id, 1);
+
+        vm.roll(uint256(dl1)); // exactly AT the deadline: not yet
+        vm.prank(a);
+        vm.expectRevert(ChannelTableBase.ClockNotExpired.selector);
+        zk.reclaimTopUp(id);
+
+        // second top-up: amount accumulates, deadline refreshes forward
+        vm.prank(a);
+        zk.topUp{value: 0.2 ether}(id);
+        (uint256 pend, uint64 dl2) = zk.pendingTopUps(id, 1);
+        assertEq(pend, 0.5 ether, "pending accumulates across top-ups");
+        assertEq(dl2, uint64(block.number) + CLOCK, "deadline refreshed by the later top-up");
+        assertGt(dl2, dl1, "refreshed deadline is strictly later");
+
+        vm.roll(uint256(dl1) + 1); // past the OLD deadline but not the refreshed one
+        vm.prank(a);
+        vm.expectRevert(ChannelTableBase.ClockNotExpired.selector);
+        zk.reclaimTopUp(id);
+
+        vm.roll(uint256(dl2) + 1); // first reclaimable block
+        uint256 beforeA = a.balance;
+        vm.prank(a);
+        zk.reclaimTopUp(id);
+        assertEq(a.balance - beforeA, 0.5 ether, "full accumulated pending reclaimed at once");
+    }
+
+    /// Pending top-up + setup dispute (the only way to be Disputed with a live pending
+    /// claim, since openDispute's acceptance clears it): reclaim is blocked while
+    /// Disputed, but the setup-timeout refund returns every wei — including the pending
+    /// top-up — to its own seat. No state where the pending amount is stuck or stolen.
+    function test_reclaim_blockedWhileDisputed_setupTimeoutRefundsTopUp() public {
+        bytes32 id = _createJoin(1 ether, 1 ether);
+        vm.prank(a);
+        zk.topUp{value: 0.5 ether}(id); // escrow = (1.5, 1)
+        vm.prank(b);
+        zk.disputeSetup(id); // no checkpoint exists -> allowed; table now Disputed
+
+        vm.roll(block.number + CLOCK + 1); // past BOTH the reclaim and dispute clocks
+        vm.prank(a);
+        vm.expectRevert(ChannelTableBase.BadStatus.selector);
+        zk.reclaimTopUp(id); // reclaim never fires while Disputed
+
+        uint256 beforeA = a.balance;
+        uint256 beforeB = b.balance;
+        zk.resolveTimeout(id); // setup-dispute timeout: full per-seat refund
+        assertEq(a.balance - beforeA, 1.5 ether, "A refunded base escrow + its pending top-up");
+        assertEq(b.balance - beforeB, 1 ether, "B refunded its base escrow");
+        assertEq(address(zk).balance, 0, "conservation: nothing created or destroyed");
     }
 }

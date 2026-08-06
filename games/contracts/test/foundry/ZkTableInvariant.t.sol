@@ -76,7 +76,7 @@ contract ZkTableHandler is Test {
     }
 
     function _seatState(bytes32 id) internal view returns (uint256 escA, uint256 escB, ChannelTableBase.Status status) {
-        (, , , , escA, escB, , , , status, , , , , , , ) = zk.tables(id);
+        (, , , , escA, escB, , , , status, , , , , , , , , ) = zk.tables(id);
     }
 
     function _coSign(uint256 pkA, uint256 pkB, ChannelState memory s)
@@ -138,7 +138,7 @@ contract ZkTableHandler is Test {
         TableRec storage r = recs[id];
         (, , ChannelTableBase.Status status) = _seatState(id);
         if (status != ChannelTableBase.Status.Created) return;
-        (, , , , , , uint256 stake, , , , , , , , , , ) = zk.tables(id);
+        (, , , , , , uint256 stake, , , , , , , , , , , , ) = zk.tables(id);
         // pick a seat distinct from A
         uint256 ib = bound(seatSeed, 0, POOL - 1);
         if (addrs[ib] == r.A.who) ib = (ib + 1) % POOL;
@@ -308,7 +308,7 @@ contract ZkTableInvariantTest is StdInvariant, Test {
         uint256 n = handler.terminalIdsLength();
         for (uint256 i = 0; i < n; i++) {
             bytes32 id = handler.terminalIdAt(i);
-            ( , , , , uint256 escA, uint256 escB, , , , ChannelTableBase.Status status, , , , , , , ) = zk.tables(id);
+            ( , , , , uint256 escA, uint256 escB, , , , ChannelTableBase.Status status, , , , , , , , , ) = zk.tables(id);
             assertTrue(
                 status == ChannelTableBase.Status.Settled || status == ChannelTableBase.Status.Cancelled,
                 "terminal status"
