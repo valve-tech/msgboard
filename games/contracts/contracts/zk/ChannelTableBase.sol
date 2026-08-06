@@ -57,6 +57,11 @@ abstract contract ChannelTableBase {
     // ── shared dispute-machine constants ─────────────────────────────────────────────────────
     uint8 internal constant DEMAND_MOVE = 1;
     uint8 internal constant DEMAND_SHARE = 2;
+    /// ZkTable-only (2-party) demand: a binding on-chain card-reveal showdown settlement — see
+    /// ZkTable's showdown machinery (postShowdownReveals + finalizeShowdown, with the answer-aware
+    /// resolveTimeout branch). Not accepted by `_validateDemandKind` (HoldemTableN has no showdown
+    /// adjudication yet); ZkTable.openDispute validates it separately.
+    uint8 internal constant DEMAND_SHOWDOWN = 3;
     uint64 public constant MIN_CLOCK_BLOCKS = 30;     // ~5 min at 10s blocks
     uint64 public constant MAX_CLOCK_BLOCKS = 60480;  // ~1 week
 

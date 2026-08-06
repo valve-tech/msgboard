@@ -21,4 +21,12 @@ interface IGameRules {
     function applyMove(bytes calldata gameState, bytes calldata move) external view returns (bytes memory);
     /// Address of the Groth16 snark-reveal verifier used for share disputes.
     function revealVerifier() external view returns (address);
+    /// Is this game state a showdown eligible for on-chain card-reveal settlement, and if so
+    /// which two deck slots hold the contested cards? MUST be total (non-reverting) on any
+    /// co-signed canonical encoding, like whoseTurn/result. slotA/slotB are meaningless when
+    /// eligible=false.
+    function showdownSlots(bytes calldata gameState) external view returns (bool eligible, uint32 slotA, uint32 slotB);
+    /// Given the two showdown cards decoded from the revealed deck slots, who wins the pot?
+    /// 1 = seat A, 2 = seat B, 0 = tie. Only ever called after showdownSlots reported eligible.
+    function showdownResult(bytes calldata gameState, uint8 cardA, uint8 cardB) external view returns (uint8 winner);
 }
