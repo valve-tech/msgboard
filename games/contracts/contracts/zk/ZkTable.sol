@@ -6,6 +6,7 @@ import {SafeTransferLib} from "solady/src/utils/SafeTransferLib.sol";
 import {ChannelState, ChannelStateLib} from "./ChannelState.sol";
 import {IGameRules} from "./IGameRules.sol";
 import {ChannelTableBase} from "./ChannelTableBase.sol";
+import {ShowdownDecodeLib} from "../vendor/uzkge/ShowdownDecodeLib.sol";
 
 /// @notice Two-party state-channel card table. Stakes escrow at create/join, play is
 /// off-chain co-signed states, the chain is touched again only to settle, top up, or
@@ -22,6 +23,18 @@ contract ZkTable is EIP712, ChannelTableBase {
     // ZkTable-only errors: BadSig/BadGameState/etc are inherited from ChannelTableBase.
     error BadProof();
     error NothingToReclaim();
+    /// A showdown demand is answered again for a (slot, seat) pair already stored.
+    error AlreadyRevealed();
+    /// finalizeShowdown called before all 4 showdown reveals (2 slots x 2 seats) are on-chain.
+    error RevealsIncomplete();
+    /// resolveTimeout called on a DEMAND_SHOWDOWN dispute where both seats already fully
+    /// revealed (haveMask == 0x0F) — must settle via the permissionless, deadline-free
+    /// finalizeShowdown instead (see resolveTimeout's header for why).
+    error MustFinalize();
+    // An undecodable card is NOT an error path: CardTable52.decode returns (bool ok, uint8)
+    // rather than reverting, so finalizeShowdown routes a bad-decode or duplicate-card deck to the
+    // pot-split fallback (see _showdownOutcome) instead of bricking — this is what keeps a
+    // fully-revealed showdown always settleable (no freeze) even on a malformed deck.
 
     struct Table {
         address playerA;
@@ -54,12 +67,33 @@ contract ZkTable is EIP712, ChannelTableBase {
         uint64 deadline;  // block after which the seat may reclaim (refreshed per top-up)
     }
 
+    /// Accumulates the (up to) 4 snark-verified decryption shares — {A,B} seats x {slotA,slotB}
+    /// — for an open DEMAND_SHOWDOWN dispute. Deliberately a SEPARATE mapping, not new Table
+    /// fields: same rationale as PendingTopUp — the auto-generated `tables` getter's tuple shape
+    /// stays put. reveal[slotIdx][seatIdx] = (x, y) of that seat's decryption share point for
+    /// that slot; slotIdx 0/1 <=> slotA/slotB, seatIdx 0/1 <=> seat A/B. haveMask bit
+    /// (slotIdx*2 + seatIdx) records which of the 4 cells are filled; finalizeShowdown requires
+    /// haveMask == 0x0F (all 4).
+    struct ShowdownDispute {
+        uint32 slotA;
+        uint32 slotB;
+        uint256[2][2][2] reveal; // [slotIdx][seatIdx] = (x, y)
+        uint8 haveMask;
+    }
+
     uint256 internal _counter;
     mapping(bytes32 => Table) public tables;
     // EdOnBN254 deck pubkeys for snark-reveal disputes: tableId => seat (1/2) => [x, y]
     mapping(bytes32 => mapping(uint8 => uint256[2])) public deckKeys;
     // tableId => seat (1/2) => pending (un-acknowledged) top-up
     mapping(bytes32 => mapping(uint8 => PendingTopUp)) public pendingTopUps;
+    // tableId => open DEMAND_SHOWDOWN dispute's accumulated reveals (see ShowdownDispute above).
+    mapping(bytes32 => ShowdownDispute) internal showdowns;
+
+    /// finalizeShowdown's `winner` value meaning "the pot was split" (a decode failure or a
+    /// duplicate-card deck, NOT an on-chain rank tie — that's `winner == 0`). Distinct from 0/1/2
+    /// so an off-chain listener can tell the two "nobody clearly won" outcomes apart.
+    uint8 internal constant SHOWDOWN_SPLIT = 3;
 
     event TableCreated(bytes32 indexed tableId, address indexed playerA, address rules, uint256 escrow, uint256 joinStake, uint64 clockBlocks);
     event TableJoined(bytes32 indexed tableId, address indexed playerB);
@@ -72,10 +106,19 @@ contract ZkTable is EIP712, ChannelTableBase {
     event DisputeAnsweredWithState(bytes32 indexed tableId, uint64 nonce);
     event DisputeAnsweredWithMove(bytes32 indexed tableId, bytes move, bytes32 newGameStateHash);
     event DisputeAnsweredWithShare(bytes32 indexed tableId, uint32 slot, uint256 revealX, uint256 revealY);
-    // `winner` is the seat awarded the pot on timeout — the recorded game winner when the
-    // contested state was a decided terminal, else the disputant.
+    // `winner` is the seat awarded the pot on timeout. For MOVE/SHARE disputes: the recorded
+    // game winner when the contested state was a decided terminal, else the disputant (always a
+    // real seat, 1 or 2 — see resolveTimeout's A3 branch). For a DEMAND_SHOWDOWN dispute
+    // (resolveTimeout's answer-aware branch): 1/2 = whichever seat actually revealed, or 0 =
+    // SPLIT (neither, or both, revealed — see resolveTimeout's header truth table).
     event DisputeForfeited(bytes32 indexed tableId, uint8 winner, uint256 payoutA, uint256 payoutB);
     event SetupDisputeRefunded(bytes32 indexed tableId);
+    /// One (slot, seat) cell of a DEMAND_SHOWDOWN dispute's reveal accumulator was filled by a
+    /// snark-verified share (postShowdownReveals).
+    event ShowdownRevealStored(bytes32 indexed tableId, uint32 slot, uint8 seat, uint256 x, uint256 y);
+    /// A DEMAND_SHOWDOWN dispute was finalized: both cards decoded and the pot routed per
+    /// `winner` (1=A, 2=B, 0=tie — see finalizeShowdown for the tie/forfeit rule).
+    event ShowdownFinalized(bytes32 indexed tableId, uint8 cardA, uint8 cardB, uint8 winner);
 
     /// Matches makeDomain() in zk-cards-core: { name: 'ZkTable', version: '1' }.
     /// (Solady EIP712 rather than OZ: OZ 5.6's Strings->Bytes dependency uses MCOPY
@@ -263,6 +306,16 @@ contract ZkTable is EIP712, ChannelTableBase {
     /// gameState must be the preimage of state.gameStateHash; the demand must
     /// target a seat that actually owes per the rules (ForceMove-style guard:
     /// you cannot demand from someone whose turn it is not).
+    ///
+    /// @dev DEMAND_SHOWDOWN betting-bypass semantic: for HiLoWarRules, `rules.showdownSlots`
+    /// is eligible exactly at PHASE_BET_COMMIT — i.e. the instant the two showdown cards are
+    /// dealt, before either seat has committed a bet. A DEMAND_SHOWDOWN dispute therefore only
+    /// ever resolves the co-signed state's pot AT THAT PHASE (the ante-only 2x-ante pot from
+    /// MOVE_DEAL_DONE) — it can never target a later, larger raised pot, because the contested
+    /// `gameState` (and therefore its phase) is fixed at the moment this dispute opens, and
+    /// showdownSlots re-derives eligibility from that exact frozen state. This is intentional,
+    /// not a gap: it is the earliest point both showdown cards are committed on-chain, so it is
+    /// also the earliest point a forced-reveal deadlock could otherwise occur.
     function openDispute(
         bytes32 tableId,
         ChannelState calldata state,
@@ -285,7 +338,12 @@ contract ZkTable is EIP712, ChannelTableBase {
         if (decided && winner != 1 && winner != 2) revert BadGameState();
         t.disputeResultDecided = decided;
         t.disputeResultWinner = winner;
-        _validateDemandKind(demandKind);
+        // Inlined rather than the shared ChannelTableBase._validateDemandKind: DEMAND_SHOWDOWN is
+        // a ZkTable-only (2-party) demand kind — HoldemTableN has no showdown adjudication yet —
+        // so extending the SHARED helper would let HoldemTableN's openDispute silently accept a
+        // demand kind it has no respond/finalize path for. Keeping the tri-state check local here
+        // scopes the extension to exactly the contract that implements it.
+        if (demandKind != DEMAND_MOVE && demandKind != DEMAND_SHARE && demandKind != DEMAND_SHOWDOWN) revert BadDemand();
         // A SHARE demand names a deck slot the counterparty must reveal via respondWithShare, which
         // reads t.demandSlot / disputeState.deckCommitment (NOT caller args). An out-of-range slot,
         // or a state with no committed deck, is unanswerable by construction — left unbounded a
@@ -295,6 +353,16 @@ contract ZkTable is EIP712, ChannelTableBase {
         if (demandKind == DEMAND_SHARE) {
             if (demandSlot > 51) revert BadDemand();
             if (state.deckCommitment == bytes32(0)) revert BadDemand();
+        } else if (demandKind == DEMAND_SHOWDOWN) {
+            // Same unanswerable-by-construction concern as SHARE, plus: the two showdown slots
+            // come from the RULES contract (not caller args), so a malformed/ineligible gameState
+            // is rejected here rather than silently opening an unfinalizable dispute.
+            if (state.deckCommitment == bytes32(0)) revert BadDemand();
+            (bool eligible, uint32 sA, uint32 sB) = t.rules.showdownSlots(gameState);
+            if (!eligible || sA > 51 || sB > 51 || sA == sB) revert BadDemand();
+            delete showdowns[tableId]; // defensive: wipe any stale reveals from a prior cycle
+            showdowns[tableId].slotA = sA;
+            showdowns[tableId].slotB = sB;
         }
         uint8 counterparty = seat == 1 ? 2 : 1;
         if (t.rules.whoseTurn(gameState) & counterparty == 0) revert NotYourTurn();
@@ -326,7 +394,7 @@ contract ZkTable is EIP712, ChannelTableBase {
         t.checkpointNonce = state.nonce;
         t.hasCheckpoint = true;
         _ackTopUps(tableId); // accepted state conserves the current total incl. any top-ups
-        _clearDispute(t);
+        _clearDispute(tableId, t);
         emit DisputeAnsweredWithState(tableId, state.nonce);
     }
 
@@ -340,7 +408,7 @@ contract ZkTable is EIP712, ChannelTableBase {
         if (seat == t.disputant) revert NotYourDispute();
         if (t.rules.hashGameState(gameState) != t.disputeState.gameStateHash) revert BadGameState();
         bytes memory newState = t.rules.applyMove(gameState, move);
-        _clearDispute(t);
+        _clearDispute(tableId, t);
         emit DisputeAnsweredWithMove(tableId, move, t.rules.hashGameState(newState));
     }
 
@@ -359,23 +427,33 @@ contract ZkTable is EIP712, ChannelTableBase {
     /// IGameRules.owesShare(gameState, slot, seat) hook if SHARE disputes become adversarially
     /// load-bearing (out of scope for v1 — would ripple into IGameRules/HiLoWarRules).
     ///
-    /// @dev KNOWN v1 LIMITATION — forced-reveal-then-refuse-to-cosign deadlock. A successful
-    /// respondWithShare only clears the dispute (back to Live, share lives in the event); it does
-    /// NOT advance the on-chain game state (respondWithMove is likewise event-only — the contract
-    /// never persists a post-move state). So a party who is forced to reveal at SHOWDOWN but then
-    /// refuses to co-sign the resulting FLIP_DONE state can, by answering every re-opened dispute
-    /// just before its clock expires, keep the channel oscillating Live<->Disputed indefinitely.
-    /// This is a NON-PROFIT griefing deadlock: funds never move to the wrong party (the griefer's
-    /// own escrow is frozen too, and the instant they miss one clock window resolveTimeout pays the
-    /// honest disputant), and there is no sound minimal fix inside the current dispute vocabulary —
-    /// making respondWithMove's output durable would re-open theft via forged MOVE_SHOWDOWN cards.
-    /// Real closure needs on-chain showdown adjudication (persist forced shares + decode point->card);
-    /// out of scope for v1.
+    /// @dev CLOSED — forced-reveal-then-refuse-to-cosign deadlock. This function's answer is
+    /// still deliberately event-only/non-settling (unforgeable per-slot proof, but no on-chain
+    /// game-state advance) — that has NOT changed, and never settles funds by itself. What
+    /// changed: a party stuck at SHOWDOWN who cannot get a FLIP_DONE co-sign is no longer stuck
+    /// oscillating Live<->Disputed forever. They instead open a DEMAND_SHOWDOWN dispute (see
+    /// postShowdownReveals / finalizeShowdown / resolveTimeout below), which accumulates BOTH
+    /// seats' snark-verified reveals for the two showdown slots on-chain, decodes the cards via
+    /// the vendored CardTable52, asks the rules contract for the winner, and pays out —
+    /// converting the exposed truth into a real settlement instead of an inert event. The safety
+    /// invariant is unchanged: only snark-verified reveals ever feed a payout; respondWithMove's
+    /// (unverified) MOVE_SHOWDOWN cards still settle nothing (see finalizeShowdown / A3).
+    /// resolveTimeout is ANSWER-AWARE for a showdown dispute (tracks which seat actually posted
+    /// its 2 reveals), so a disputant who posts nothing and lets the honest counterparty reveal
+    /// can no longer free-roll the pot by timeout — see resolveTimeout's header for the full
+    /// truth table.
     ///
-    /// @dev OFF-CHAIN OBLIGATION — deck-key binding. respondWithShare proves a share against the
-    /// key each seat registered at create/join (deckKeys), but NOTHING on-chain ties that key to the
-    /// key actually used to mask the committed deck. A seat that registers a decoy key can answer
-    /// SHARE disputes with snark-valid but useless shares, defeating reveal-forcing. Clients MUST
+    /// @dev OFF-CHAIN OBLIGATION — deck-key binding. respondWithShare (and postShowdownReveals)
+    /// prove a share against the key each seat registered at create/join (deckKeys), but NOTHING
+    /// on-chain ties that key to the key actually used to mask the committed deck. A seat that
+    /// registers a decoy key can answer with snark-valid but useless shares. For a SHARE dispute
+    /// this only defeats reveal-forcing (forfeit-only, per the note above). For a SHOWDOWN
+    /// dispute it can make its own slot decrypt to a point outside the fixed 52-card table —
+    /// finalizeShowdown detects that (CardTable52.decode reports ok=false) and falls back to
+    /// SPLITTING the pot rather than reverting or forfeiting the whole pot to either side, so a
+    /// decoy key can at most cost its registrant half the pot, never steal the other half. Full
+    /// closure — on-chain enforcement that each registered deckKey actually multiplies into the
+    /// state's committed joint masking key — is a follow-up, out of scope here. Clients MUST
     /// verify the deck's aggregate masking key equals the product of the registered deckKeys before
     /// co-signing any DEAL state.
     function respondWithShare(
@@ -398,13 +476,184 @@ contract ZkTable is EIP712, ChannelTableBase {
         (bool callOk, bytes memory ret) = t.rules.revealVerifier()
             .staticcall(abi.encodeWithSignature("verifyRevealWithSnark(uint256[6],uint256[8])", pi, zkproof));
         if (!callOk || ret.length < 32 || !abi.decode(ret, (bool))) revert BadProof();
-        _clearDispute(t);
+        _clearDispute(tableId, t);
         emit DisputeAnsweredWithShare(tableId, slot, reveal[0], reveal[1]);
     }
 
-    /// Clock expired unanswered: forfeit the disputed pot to the disputant and
-    /// settle balances from the contested co-signed state. Setup disputes refund
-    /// both escrows in full (no pot exists yet — spec edge case).
+    // ── Showdown dispute (binding on-chain card-reveal settlement) ───────────
+
+    /// Shared verification + accumulation for `postShowdownReveals`: checks the deck matches the
+    /// contested state's commitment, verifies the Groth16 snark proof that `reveal = seat's
+    /// registered deckKey * e1` for `slot`, and — ONLY if that proof passes — stores the share
+    /// in the showdown accumulator. This is the sole write path into `showdowns[tableId]`, so
+    /// every stored reveal is behind a passing snark proof by construction; nothing else can
+    /// populate the accumulator finalizeShowdown / resolveTimeout read from.
+    function _verifyAndStoreReveal(
+        bytes32 tableId,
+        Table storage t,
+        uint8 seat,
+        uint256[] calldata deck,
+        uint32 slot,
+        uint256[2] calldata reveal,
+        uint256[8] calldata zkproof
+    ) internal {
+        ShowdownDispute storage sd = showdowns[tableId];
+        uint8 slotIdx;
+        if (slot == sd.slotA) slotIdx = 0;
+        else if (slot == sd.slotB) slotIdx = 1;
+        else revert BadDeck(); // not one of the two slots this showdown dispute demands
+
+        if (deck.length != 208) revert BadDeck();
+        if (keccak256(abi.encodePacked(deck)) != t.disputeState.deckCommitment) revert BadDeck();
+
+        uint256[2] memory pk = deckKeys[tableId][seat];
+        uint256[6] memory pi = [deck[4 * slot], deck[4 * slot + 1], reveal[0], reveal[1], pk[0], pk[1]];
+        (bool callOk, bytes memory ret) = t.rules.revealVerifier()
+            .staticcall(abi.encodeWithSignature("verifyRevealWithSnark(uint256[6],uint256[8])", pi, zkproof));
+        if (!callOk || ret.length < 32 || !abi.decode(ret, (bool))) revert BadProof();
+
+        uint8 seatIdx = seat - 1; // seat is always 1 or 2 (from _seatOf)
+        uint8 bit = uint8(1 << (slotIdx * 2 + seatIdx));
+        if (sd.haveMask & bit != 0) revert AlreadyRevealed();
+        sd.reveal[slotIdx][seatIdx][0] = reveal[0];
+        sd.reveal[slotIdx][seatIdx][1] = reveal[1];
+        sd.haveMask |= bit;
+        emit ShowdownRevealStored(tableId, slot, seat, reveal[0], reveal[1]);
+    }
+
+    /// Either seat posts BOTH of its own showdown reveals (for slotA and slotB, in either order)
+    /// in one call. There is no "forced" vs "own" distinction anymore — the demand is implicit:
+    /// resolveTimeout is answer-aware and punishes whichever seat did NOT fully reveal (see its
+    /// header). `_seatOf` pins the seat to the caller, so this can never write a reveal under the
+    /// other seat's identity, and `_verifyAndStoreReveal`'s first-write-wins guard means calling
+    /// this twice for the same slot reverts AlreadyRevealed rather than overwriting.
+    ///
+    /// Extends the dispute clock by a full `clockBlocks` window after a successful post — a
+    /// seat that reveals right before the original deadline must not have its answer race a
+    /// clock that was sized for a MOVE/SHARE answer, not two Groth16 verifications plus calldata.
+    /// Bounded: at most 4 reveals total ever get stored (first-write-wins), so this cannot be
+    /// used to extend the dispute indefinitely.
+    function postShowdownReveals(
+        bytes32 tableId,
+        uint256[] calldata deck,
+        uint32[2] calldata slots,
+        uint256[2][2] calldata reveals,
+        uint256[8][2] calldata proofs
+    ) external {
+        Table storage t = tables[tableId];
+        if (t.status != Status.Disputed) revert BadStatus();
+        if (t.demandKind != DEMAND_SHOWDOWN) revert NotDemanded();
+        uint8 seat = _seatOf(t, msg.sender);
+        _verifyAndStoreReveal(tableId, t, seat, deck, slots[0], reveals[0], proofs[0]);
+        _verifyAndStoreReveal(tableId, t, seat, deck, slots[1], reveals[1], proofs[1]);
+        t.disputeDeadline = uint64(block.number) + t.clockBlocks;
+    }
+
+    /// Finalize a DEMAND_SHOWDOWN dispute once BOTH seats' reveals for BOTH contested slots are
+    /// on-chain (haveMask == 0x0F, i.e. all 4 of {A,B} x {slotA,slotB}). This is the ONLY
+    /// terminal for a fully-revealed showdown — there is no deadline requirement and no caller
+    /// restriction (anyone may call it, since it can only ever pay the two seated players the
+    /// deterministic outcome; see resolveTimeout's header for why a fully-revealed showdown must
+    /// NOT be timeout-resolvable). ONLY reveals that passed `_verifyAndStoreReveal`'s snark check
+    /// ever reach this function; respondWithMove's MOVE_SHOWDOWN cards are never consulted here
+    /// (or anywhere else) — see the A3 safety note on respondWithShare above.
+    function finalizeShowdown(bytes32 tableId, uint256[] calldata deck, bytes calldata gameState) external {
+        Table storage t = tables[tableId];
+        if (t.status != Status.Disputed) revert BadStatus();
+        if (t.demandKind != DEMAND_SHOWDOWN) revert NotDemanded();
+        _finalizeShowdown(tableId, t, deck, gameState);
+    }
+
+    /// Split out of `finalizeShowdown` (kept as a thin entrypoint that only checks status/kind)
+    /// purely to keep each function's local-variable count small: the combined body hit solc's
+    /// Yul stack-too-deep under this profile's viaIR/optimizer-runs:1000 (a whole-contract
+    /// budget, not a defect in the logic itself — splitting the same code across two internal
+    /// calls resolves it without changing behavior).
+    function _finalizeShowdown(bytes32 tableId, Table storage t, uint256[] calldata deck, bytes calldata gameState) internal {
+        ShowdownDispute storage sd = showdowns[tableId];
+        if (sd.haveMask != 0x0F) revert RevealsIncomplete();
+        if (deck.length != 208) revert BadDeck();
+        if (keccak256(abi.encodePacked(deck)) != t.disputeState.deckCommitment) revert BadDeck();
+        if (t.rules.hashGameState(gameState) != t.disputeState.gameStateHash) revert BadGameState();
+
+        // Decoding lives in ShowdownDecodeLib, an EXTERNAL (separately-deployed) library — see
+        // that file's header for why: CardTable52.decode's 52-branch body, inlined internally,
+        // tipped ZkTable's viaIR build over solc's Yul stack-too-deep in an unrelated function.
+        uint256[8] memory revealsFlat = [
+            sd.reveal[0][0][0], sd.reveal[0][0][1], sd.reveal[0][1][0], sd.reveal[0][1][1],
+            sd.reveal[1][0][0], sd.reveal[1][0][1], sd.reveal[1][1][0], sd.reveal[1][1][1]
+        ];
+        (bool okA, uint8 cardA, bool okB, uint8 cardB) = ShowdownDecodeLib.decodeBothCards(deck, sd.slotA, sd.slotB, revealsFlat);
+
+        // Conservation invariant (_checkCoSigned, enforced when this state was co-signed and
+        // accepted at openDispute) guarantees balanceA + balanceB + pot == escrowA + escrowB,
+        // so routing the pot below consumes the full escrow exactly — same accounting shape as
+        // resolveTimeout.
+        (uint256 toA, uint256 toB, uint8 winner) = _showdownOutcome(t, okA, cardA, okB, cardB, gameState);
+
+        // Effects before the forced sends (CEI, matching _payout's own discipline): emit, wipe
+        // the reveal accumulator + dispute fields, THEN transfer.
+        emit ShowdownFinalized(tableId, cardA, cardB, winner);
+        _clearDispute(tableId, t);
+        _payout(t, tableId, toA, toB);
+    }
+
+    /// Both cards must have decoded to real, DISTINCT table entries to have a real winner;
+    /// otherwise (a decode failure from a decoy/garbage deck key, or a stacked/duplicated deck
+    /// producing cardA==cardB) this SPLITS the pot instead of forfeiting it to either side — see
+    /// the off-chain-obligation note on respondWithShare for why this is the correct fallback
+    /// (a decoy key can cost its registrant at most half the pot, never hand the other seat's
+    /// half to it, and never revert the whole settlement). `winner` returned is 1/2 (a real
+    /// winner), 0 (an on-chain rank tie — forfeit-to-disputant, matching resolveTimeout's
+    /// undecided-terminal policy), or SHOWDOWN_SPLIT (this fallback), purely for the
+    /// ShowdownFinalized event; the tie and split cases are accounting-distinct even though
+    /// both can withhold the "whole pot to one side" outcome.
+    function _showdownOutcome(Table storage t, bool okA, uint8 cardA, bool okB, uint8 cardB, bytes calldata gameState)
+        internal
+        view
+        returns (uint256 toA, uint256 toB, uint8 winner)
+    {
+        toA = t.disputeState.balanceA;
+        toB = t.disputeState.balanceB;
+        uint256 pot = t.disputeState.pot;
+        if (okA && okB && cardA != cardB) {
+            winner = t.rules.showdownResult(gameState, cardA, cardB);
+            if (winner > 2) revert BadGameState();
+            uint8 potTo = winner == 0 ? t.disputant : winner;
+            if (potTo == 1) toA += pot; else toB += pot;
+        } else {
+            winner = SHOWDOWN_SPLIT;
+            uint256 half = pot / 2;
+            toA += half + (pot - half * 2); // odd wei stays with A
+            toB += half;
+        }
+    }
+
+    /// Clock expired unanswered. Setup disputes (demandKind 0) refund both escrows in full (no
+    /// pot exists yet — spec edge case). MOVE/SHARE disputes keep the original A3 forfeit logic
+    /// verbatim (pay the recorded decided-terminal winner, else forfeit-to-disputant).
+    ///
+    /// DEMAND_SHOWDOWN is ANSWER-AWARE — this is the fix for the disputant free-roll: a
+    /// disputant who posts nothing, lets the honest counterparty reveal its 2 shares, and then
+    /// simply never calls finalizeShowdown (because it can decrypt off-chain from the exposed
+    /// shares and only wants to finalize when IT wins) used to still collect the whole pot via
+    /// the old demand-kind-agnostic forfeit-to-disputant timeout. Truth table (dispSeat = the
+    /// seat that opened the dispute; cpSeat = the other seat; "answered" = posted BOTH of that
+    /// seat's 2 reveals via postShowdownReveals):
+    ///   haveMask == 0x0F (both fully answered)      -> revert MustFinalize(); anyone can (and
+    ///                                                   must) call the permissionless, deadline-
+    ///                                                   free finalizeShowdown instead. This
+    ///                                                   closes the free-roll: a decode that
+    ///                                                   actually works is never timeout-gameable.
+    ///   dispSeat answered, cpSeat did not            -> pot to dispSeat (cp refused to reveal).
+    ///   cpSeat answered, dispSeat did not             -> pot to cpSeat (disp refused — the
+    ///                                                   free-roll path, now closed).
+    ///   neither fully answered                        -> SPLIT the pot (mutual no-show; a
+    ///                                                   rational eventual winner would have
+    ///                                                   revealed to claim it, so splitting
+    ///                                                   denies either side a griefing edge).
+    /// Balances are always refunded to their respective seats in every branch; only the pot's
+    /// destination differs.
     function resolveTimeout(bytes32 tableId) external {
         Table storage t = tables[tableId];
         if (t.status != Status.Disputed) revert BadStatus();
@@ -412,6 +661,10 @@ contract ZkTable is EIP712, ChannelTableBase {
         if (t.demandKind == 0) {
             emit SetupDisputeRefunded(tableId);
             _payout(t, tableId, t.escrowA, t.escrowB);
+            return;
+        }
+        if (t.demandKind == DEMAND_SHOWDOWN) {
+            _resolveShowdownTimeout(tableId, t);
             return;
         }
         // Conservation invariant (_checkCoSigned) guarantees the contested state's
@@ -439,7 +692,57 @@ contract ZkTable is EIP712, ChannelTableBase {
         _payout(t, tableId, toA, toB);
     }
 
-    function _clearDispute(Table storage t) internal {
+    /// See resolveTimeout's header for the full truth table. `winner` in the emitted
+    /// DisputeForfeited event is 1/2 for a real forfeit destination, or 0 to mean SPLIT here
+    /// specifically (distinct from the MOVE/SHARE branch above, where potTo is always a real
+    /// seat — t.disputant is never 0).
+    function _resolveShowdownTimeout(bytes32 tableId, Table storage t) internal {
+        ShowdownDispute storage sd = showdowns[tableId];
+        uint8 haveMask = sd.haveMask;
+        if (haveMask == 0x0F) revert MustFinalize();
+
+        uint8 dispSeat = t.disputant;
+        uint8 cpSeat = dispSeat == 1 ? 2 : 1;
+        // seat 1's two reveal bits are {bit0, bit2} = 0x05; seat 2's are {bit1, bit3} = 0x0A
+        // (bit = 1 << (slotIdx*2 + seatIdx), seatIdx = seat-1 — see ShowdownDispute/haveMask).
+        uint8 dispMask = dispSeat == 1 ? 0x05 : 0x0A;
+        uint8 cpMask = cpSeat == 1 ? 0x05 : 0x0A;
+        bool dispAnswered = (haveMask & dispMask) == dispMask;
+        bool cpAnswered = (haveMask & cpMask) == cpMask;
+
+        uint256 toA = t.disputeState.balanceA;
+        uint256 toB = t.disputeState.balanceB;
+        uint256 pot = t.disputeState.pot;
+        uint8 potTo; // 1/2 = real forfeit destination, 0 = split
+        if (dispAnswered && !cpAnswered) {
+            potTo = dispSeat;
+        } else if (cpAnswered && !dispAnswered) {
+            potTo = cpSeat;
+        } else {
+            potTo = 0; // neither fully answered (both-0x0F already handled above)
+        }
+
+        if (potTo == 1) {
+            toA += pot;
+        } else if (potTo == 2) {
+            toB += pot;
+        } else {
+            uint256 half = pot / 2;
+            toA += half + (pot - half * 2); // odd wei stays with A
+            toB += half;
+        }
+
+        delete showdowns[tableId];
+        emit DisputeForfeited(tableId, potTo, toA, toB);
+        _payout(t, tableId, toA, toB);
+    }
+
+    /// Clears a table's dispute fields back to Live AND wipes any showdown reveal accumulator —
+    /// so a newer co-signed state (respondWithState) always resets showdown progress rather than
+    /// letting stale reveals from an abandoned dispute leak into a later one. Deleting
+    /// `showdowns[tableId]` here is a no-op for MOVE/SHARE disputes (the mapping is only ever
+    /// written by DEMAND_SHOWDOWN's reveal path) — cheap, and correct regardless of demand kind.
+    function _clearDispute(bytes32 tableId, Table storage t) internal {
         t.status = Status.Live;
         t.disputant = 0;
         t.demandKind = 0;
@@ -448,6 +751,7 @@ contract ZkTable is EIP712, ChannelTableBase {
         t.disputeResultDecided = false;
         t.disputeResultWinner = 0;
         delete t.disputeState;
+        delete showdowns[tableId];
     }
 
     function _payout(Table storage t, bytes32 tableId, uint256 toA, uint256 toB) internal {

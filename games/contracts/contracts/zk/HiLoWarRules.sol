@@ -117,6 +117,29 @@ contract HiLoWarRules is IGameRules {
         return (false, 0);
     }
 
+    /// A HiLoWar showdown is exactly the two adjacent deck slots {deckIndex, deckIndex+1} dealt
+    /// for this hand. Eligible at PHASE_BET_COMMIT — BEFORE any betting move applies — per the
+    /// documented v1 betting-bypass semantic (see ZkTable.openDispute's header): a DEMAND_SHOWDOWN
+    /// dispute opened this early resolves only the ante-sized pot already locked in by
+    /// MOVE_DEAL_DONE, never a raised pot (raises only exist from PHASE_BET_OPEN onward, by which
+    /// point the cards are already committed on-chain via this same pair of slots — a later-phase
+    /// showdown dispute is just as answerable with the same two revealed cards).
+    function showdownSlots(bytes calldata gameState) external pure returns (bool eligible, uint32 slotA, uint32 slotB) {
+        HiLo memory s = abi.decode(gameState, (HiLo));
+        if (s.phase != PHASE_BET_COMMIT) return (false, 0, 0);
+        return (true, s.deckIndex, s.deckIndex + 1);
+    }
+
+    /// Mirrors MOVE_SHOWDOWN's rank comparison exactly (see applyMove's `kind == MOVE_SHOWDOWN`
+    /// branch): rank = card / CARDS_PER_RANK; equal ranks is a tie (war), else higher rank wins.
+    function showdownResult(bytes calldata, uint8 cardA, uint8 cardB) external pure returns (uint8 winner) {
+        if (cardA > MAX_CARD || cardB > MAX_CARD || cardA == cardB) revert BadCard();
+        uint8 rankA = cardA / CARDS_PER_RANK;
+        uint8 rankB = cardB / CARDS_PER_RANK;
+        if (rankA == rankB) return 0;
+        return rankA > rankB ? SEAT_A : SEAT_B;
+    }
+
     function applyMove(bytes calldata gameState, bytes calldata move) external pure returns (bytes memory) {
         HiLo memory s = abi.decode(gameState, (HiLo));
         (uint8 kind, bytes memory payload) = abi.decode(move, (uint8, bytes));
