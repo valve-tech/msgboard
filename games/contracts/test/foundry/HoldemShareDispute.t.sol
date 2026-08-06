@@ -70,27 +70,23 @@ contract HoldemShareDisputeTest is Test {
         }
     }
 
-    /// create + joins (Forming), register the demandSeat deck key, then start. Returns the
-    /// generated real-crypto bundle.
+    /// create + joins (Forming), then start. DEMAND_SEAT's REAL deck pubkey (needed for the DLEQ
+    /// proof it must produce) is set directly at join() time; the others get the generator (they
+    /// never have to answer a share here). Returns the generated real-crypto bundle.
     function _setupDisputed(uint256 buyIn) internal returns (bytes32 tableId, Gen memory g) {
         address a0 = vm.addr(_pk(0));
         vm.deal(a0, buyIn);
         vm.prank(a0);
-        tableId = zk.create{value: buyIn}(IGameRulesN(address(rules)), buyIn, N, 0, 0, CLOCK, a0);
+        // seat 0 (the creator) is never DEMAND_SEAT (== 2) in this suite, so the generator is fine.
+        tableId = zk.create{value: buyIn}(IGameRulesN(address(rules)), buyIn, N, 0, 0, CLOCK, a0, [GX, GY]);
+        // _gen only needs tableId (for the ctx binding), so it can run before the remaining joins.
+        g = _gen(tableId);
         for (uint256 i = 1; i < N; i++) {
             address ai = vm.addr(_pk(i));
             vm.deal(ai, buyIn);
             vm.prank(ai);
-            zk.join{value: buyIn}(tableId, ai);
-        }
-        g = _gen(tableId);
-        // start() requires every seat to have registered a deck key. The demandSeat registers its
-        // REAL deck pubkey (needed for the DLEQ proof it must produce); the others register the
-        // generator (they never have to answer a share here).
-        for (uint256 i = 0; i < N; i++) {
-            vm.prank(vm.addr(_pk(i)));
-            if (i == DEMAND_SEAT) zk.registerDeckKey(tableId, g.pk);
-            else zk.registerDeckKey(tableId, [GX, GY]);
+            if (i == DEMAND_SEAT) zk.join{value: buyIn}(tableId, ai, g.pk);
+            else zk.join{value: buyIn}(tableId, ai, [GX, GY]);
         }
         vm.prank(a0);
         zk.start(tableId);

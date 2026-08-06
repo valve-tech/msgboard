@@ -22,16 +22,10 @@ contract HoldemTableNTest is Test {
     // a deterministic pool of seat private keys (index => pk)
     function _pk(uint256 i) internal pure returns (uint256) { return 0xA11CE + i * 0x1000 + 1; }
 
-    // secp256k1 generator — a convenient on-curve deck key. start() now requires every seat to have
-    // registered one before the table can go Live; these suites don't verify real shares.
+    // secp256k1 generator — a convenient on-curve deck key. create()/join() now require one
+    // directly for every seat; these suites don't verify real shares.
     uint256 internal constant GX = 0x79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798;
     uint256 internal constant GY = 0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8;
-    function _regKeys(bytes32 tableId, uint256 n) internal {
-        for (uint256 i = 0; i < n; i++) {
-            vm.prank(vm.addr(_pk(i)));
-            zk.registerDeckKey(tableId, [GX, GY]);
-        }
-    }
 
     function setUp() public {
         zk = new HoldemTableN(treasury);
@@ -59,19 +53,19 @@ contract HoldemTableNTest is Test {
         }
     }
 
-    /// Create + (n-1) joins + start. Each seat's channel key IS its wallet (vm.addr(pk)).
+    /// Create + (n-1) joins + start. Each seat's channel key IS its wallet (vm.addr(pk)); every
+    /// seat's deck key is the generator, set directly at create()/join() time.
     function _table(uint256 n, uint256 buyIn) internal returns (bytes32 tableId) {
         address a0 = vm.addr(_pk(0));
         vm.deal(a0, buyIn);
         vm.prank(a0);
-        tableId = zk.create{value: buyIn}(IGameRulesN(address(rules)), buyIn, n, 0, 0, CLOCK, a0);
+        tableId = zk.create{value: buyIn}(IGameRulesN(address(rules)), buyIn, n, 0, 0, CLOCK, a0, [GX, GY]);
         for (uint256 i = 1; i < n; i++) {
             address ai = vm.addr(_pk(i));
             vm.deal(ai, buyIn);
             vm.prank(ai);
-            zk.join{value: buyIn}(tableId, ai);
+            zk.join{value: buyIn}(tableId, ai, [GX, GY]);
         }
-        _regKeys(tableId, n);
         vm.prank(a0);
         zk.start(tableId);
     }
@@ -171,14 +165,13 @@ contract HoldemTableNTest is Test {
         address a0 = vm.addr(_pk(0));
         vm.deal(a0, buyIn);
         vm.prank(a0);
-        bytes32 tableId = zk.create{value: buyIn}(IGameRulesN(address(rules)), buyIn, n, 250, total, CLOCK, a0);
+        bytes32 tableId = zk.create{value: buyIn}(IGameRulesN(address(rules)), buyIn, n, 250, total, CLOCK, a0, [GX, GY]);
         for (uint256 i = 1; i < n; i++) {
             address ai = vm.addr(_pk(i));
             vm.deal(ai, buyIn);
             vm.prank(ai);
-            zk.join{value: buyIn}(tableId, ai);
+            zk.join{value: buyIn}(tableId, ai, [GX, GY]);
         }
-        _regKeys(tableId, n);
         vm.prank(a0);
         zk.start(tableId);
 
@@ -219,14 +212,13 @@ contract HoldemTableNTest is Test {
         vm.prank(a0);
         // openDispute checks only the rakeCap ceiling (the bps reconstruction is settle-only),
         // so the cap is the binding constraint here. rakeBps at the protocol max (250).
-        bytes32 tableId = zk.create{value: buyIn}(IGameRulesN(address(rules)), buyIn, n, 250, rakeCap, CLOCK, a0);
+        bytes32 tableId = zk.create{value: buyIn}(IGameRulesN(address(rules)), buyIn, n, 250, rakeCap, CLOCK, a0, [GX, GY]);
         for (uint256 i = 1; i < n; i++) {
             address ai = vm.addr(_pk(i));
             vm.deal(ai, buyIn);
             vm.prank(ai);
-            zk.join{value: buyIn}(tableId, ai);
+            zk.join{value: buyIn}(tableId, ai, [GX, GY]);
         }
-        _regKeys(tableId, n);
         vm.prank(a0);
         zk.start(tableId);
 
@@ -335,41 +327,39 @@ contract HoldemTableNTest is Test {
         zk.respondWithShare(tableId, deck, share, proof);
     }
 
-    /// registerDeckKey rejects an off-curve point and is locked once the table is Live.
+    /// registerDeckKey now ROTATES the key create()/join() already set: rejects an off-curve
+    /// point, accepts a new on-curve point that overwrites the initial one, and is locked once
+    /// the table is Live.
     function test_registerDeckKeyGuards() public {
         uint256 n = 2;
         uint256 buyIn = 1 ether;
         address a0 = vm.addr(_pk(0));
         vm.deal(a0, buyIn);
         vm.prank(a0);
-        bytes32 tableId = zk.create{value: buyIn}(IGameRulesN(address(rules)), buyIn, n, 0, 0, CLOCK, a0);
-        // off-curve key rejected
+        // create() already sets seat 0's initial deck key to the generator.
+        bytes32 tableId = zk.create{value: buyIn}(IGameRulesN(address(rules)), buyIn, n, 0, 0, CLOCK, a0, [GX, GY]);
+        assertEq(zk.deckKeyOf(tableId, 0)[0], GX, "initial key set directly by create()");
+        // off-curve key rejected (rotation attempt)
         vm.prank(a0);
         vm.expectRevert(HoldemTableN.BadDeckKey.selector);
         zk.registerDeckKey(tableId, [uint256(1), uint256(1)]);
-        // valid generator point accepted
+        // a DIFFERENT on-curve point (2G) rotates/overwrites the initial one
+        uint256 g2x = 0xc6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5;
+        uint256 g2y = 0x1ae168fea63dc339a3c58419466ceaeef7f632653266d0e1236431a950cfe52a;
         vm.prank(a0);
-        zk.registerDeckKey(tableId, [
-            0x79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798,
-            0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8
-        ]);
+        zk.registerDeckKey(tableId, [g2x, g2y]);
         uint256[2] memory got = zk.deckKeyOf(tableId, 0);
-        assertEq(got[0], 0x79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798, "key x stored");
-        // join a second seat + start, then registration is locked
+        assertEq(got[0], g2x, "rotated key overwrote the initial one");
+        // join a second seat (its own initial key from join()) + start, then rotation is locked
         address a1 = vm.addr(_pk(1));
         vm.deal(a1, buyIn);
         vm.prank(a1);
-        zk.join{value: buyIn}(tableId, a1);
-        vm.prank(a1); // seat 1 must also register before start() (the deck-key gate)
-        zk.registerDeckKey(tableId, [GX, GY]);
+        zk.join{value: buyIn}(tableId, a1, [GX, GY]);
         vm.prank(a0);
         zk.start(tableId);
         vm.prank(a0);
         vm.expectRevert(ChannelTableBase.BadStatus.selector);
-        zk.registerDeckKey(tableId, [
-            0x79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798,
-            0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8
-        ]);
+        zk.registerDeckKey(tableId, [GX, GY]);
     }
 
     // ── dispute resolved by a newer co-signed state ─────────────────────────────

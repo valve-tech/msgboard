@@ -29,7 +29,7 @@ contract HoldemTableNHandler is Test {
     address[POOL] internal addrs;
 
     uint64 internal constant CLOCK = 30;
-    // secp256k1 generator — on-curve deck key; start() now requires every seat to register one.
+    // secp256k1 generator — on-curve deck key; create()/join() now require one directly.
     uint256 internal constant GX = 0x79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798;
     uint256 internal constant GY = 0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8;
 
@@ -110,7 +110,7 @@ contract HoldemTableNHandler is Test {
         uint256 ia = seatSeed % POOL;
         address who = addrs[ia];
         vm.prank(who);
-        try zk.create{value: buyIn}(IGameRulesN(address(rules)), buyIn, n, 0, 0, CLOCK, who) returns (bytes32 id) {
+        try zk.create{value: buyIn}(IGameRulesN(address(rules)), buyIn, n, 0, 0, CLOCK, who, [GX, GY]) returns (bytes32 id) {
             ghostIn += buyIn;
             TableRec storage r = recs[id];
             r.id = id;
@@ -137,7 +137,7 @@ contract HoldemTableNHandler is Test {
             for (uint256 k = 0; k < seated; k++) if (zk.seatAt(id, k) == cand) { used = true; break; }
             if (used) continue;
             vm.prank(cand);
-            try zk.join{value: r.buyIn}(id, cand) {
+            try zk.join{value: r.buyIn}(id, cand, [GX, GY]) {
                 ghostIn += r.buyIn;
                 r.seatPk[seated] = pks[j];
             } catch {}
@@ -151,12 +151,8 @@ contract HoldemTableNHandler is Test {
         TableRec storage r = recs[id];
         if (!r.forming) return;
         if (zk.seatCount(id) < r.n) return; // only start full tables (keeps seatPk complete)
-        // start() now requires every seat to have registered a deck key; register one per seat so
-        // tables still go Live (the invariant is about settlement conservation, not deck crypto).
-        for (uint256 k = 0; k < r.n; k++) {
-            vm.prank(zk.seatAt(id, k));
-            zk.registerDeckKey(id, [GX, GY]);
-        }
+        // Every seat already has an on-curve deck key set directly by create()/join(); no
+        // separate registration is needed before start() anymore.
         vm.prank(zk.seatAt(id, 0));
         try zk.start(id) {
             r.forming = false;
