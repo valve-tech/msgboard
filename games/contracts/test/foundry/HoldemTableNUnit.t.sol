@@ -939,7 +939,17 @@ contract HoldemTableNUnitTest is Test {
         zk.respondWithShare(tableId, deck, share, proof);
     }
 
-    function test_respondWithShareRevertsNotYourDispute() public {
+    /// PERMISSIONLESS (2026-08 signed-intent pass): `respondWithShare` no longer gates on
+    /// `_seatOf(msg.sender)` — the responding seat is read directly off `t.demandSeat` (see the
+    /// contract header's PERMISSIONLESS note), so a caller who is NOT the demand seat (here:
+    /// seat 1, while seat 0 is demanded) hits the EXACT SAME guard the demand seat itself would
+    /// hit for the same (malformed) inputs, proving caller identity is no longer consulted at
+    /// all. `NotYourDispute` is therefore unreachable from this function now (it stays reachable
+    /// from `respondWithMove`, which is still `_seatOf`-gated — see
+    /// `test_respondWithMoveRevertsNotYourDispute`). The stranger-relay HAPPY path (a genuinely
+    /// valid DLEQ proof landing regardless of caller) is covered in HoldemTableNRelay.t.sol
+    /// (pure-Solidity DLEQ construction) and HoldemShareDispute.t.sol (ffi, real off-chain prover).
+    function test_respondWithShareIsPermissionless_wrongCallerHitsSameGuardAsDemandSeat() public {
         uint256 n = 2;
         bytes32 tableId = _table(n, 100);
         ChannelStateN memory s = _emptyState(tableId, n);
@@ -952,11 +962,11 @@ contract HoldemTableNUnitTest is Test {
         vm.prank(vm.addr(_pk(0)));
         zk.openDispute(tableId, s, sigs, "g", 0, DEMAND_SHARE, 0); // demand seat 0
 
-        uint256[] memory deck = new uint256[](0);
+        uint256[] memory deck = new uint256[](0); // empty deck can never match deckCommitment
         uint256[2] memory share;
         uint256[5] memory proof;
-        vm.prank(vm.addr(_pk(1))); // wrong seat
-        vm.expectRevert(ChannelTableBase.NotYourDispute.selector);
+        vm.prank(vm.addr(_pk(1))); // NOT the demand seat — no longer relevant to the outcome
+        vm.expectRevert(ChannelTableBase.BadDeck.selector); // same guard the demand seat itself hits
         zk.respondWithShare(tableId, deck, share, proof);
     }
 
