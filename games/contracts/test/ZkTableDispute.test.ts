@@ -893,8 +893,15 @@ describe('ZkTable dispute machine', () => {
       )
     })
 
-    // gap 10: respondWithShare called BY the disputant → NotYourDispute
-    it('respondWithShare reverts NotYourDispute when the disputant calls', async () => {
+    // gap 10 (SUPERSEDED by the 2026-08 signed-intent pass): respondWithShare dropped its
+    // `_seatOf(msg.sender)` gate — the responder is now the STRUCTURAL counterparty of the
+    // dispute (`3 - t.disputant`), never derived from the caller. This used to assert the
+    // disputant's OWN call reverted `NotYourDispute`; that identity check no longer exists (see
+    // ZkTable.sol's @dev PERMISSIONLESS note on respondWithShare), so it now asserts the
+    // opposite: ANY caller — a total stranger, or even the disputant itself — may relay a share
+    // that verifies against the counterparty's registered deckKey, and it still lands under the
+    // counterparty's seat and clears the dispute exactly as a direct call from that seat would.
+    it('respondWithShare is permissionless: a stranger may relay the counterparty\'s share', async () => {
       const ctx = await liveTable()
       const SLOT = 7
       const deck: bigint[] = new Array(208).fill(1n)
@@ -905,16 +912,44 @@ describe('ZkTable dispute machine', () => {
       const { sigA, sigB } = await cosign(ctx, state)
       await ctx.zk.write.openDispute(
         [ctx.tableId, state, sigA, sigB, GAME_STATE, DEMAND_SHARE, SLOT],
-        { account: ctx.a.account }, // disputant = A
+        { account: ctx.a.account }, // disputant = A; counterparty = B
       )
-      await expectations.revertedWithCustomError(
-        ctx.zk,
+      const stranger = ctx.signers[2]!
+      await expectations.emit(
+        asCtx(ctx),
         ctx.zk.write.respondWithShare(
           [ctx.tableId, deck as unknown as bigint[], [33n, 44n], ZERO_PROOF],
-          { account: ctx.a.account }, // A is the disputant — cannot answer their own demand
+          { account: stranger.account }, // no seat relationship to this table at all
         ),
-        'NotYourDispute',
+        ctx.zk,
+        'DisputeAnsweredWithShare',
+        { tableId: ctx.tableId, slot: SLOT, revealX: 33n, revealY: 44n },
       )
+      const table = await ctx.zk.read.tables([ctx.tableId])
+      expect(table[STATUS]).to.equal(Status.Live)
+    })
+
+    // The disputant's OWN address relaying the call is likewise irrelevant now — the responder
+    // seat is fixed structurally, not by `msg.sender` — so this no longer reverts either.
+    it('respondWithShare no longer reverts when the disputant\'s own address calls', async () => {
+      const ctx = await liveTable()
+      const SLOT = 8
+      const deck: bigint[] = new Array(208).fill(1n)
+      deck[4 * SLOT] = 55n
+      deck[4 * SLOT + 1] = 66n
+      const commitment = viem.keccak256(viem.encodePacked(deck.map(() => 'uint256'), deck))
+      const state = mkState(ctx.tableId, { nonce: 3n, deckCommitment: commitment })
+      const { sigA, sigB } = await cosign(ctx, state)
+      await ctx.zk.write.openDispute(
+        [ctx.tableId, state, sigA, sigB, GAME_STATE, DEMAND_SHARE, SLOT],
+        { account: ctx.a.account }, // disputant = A
+      )
+      await ctx.zk.write.respondWithShare(
+        [ctx.tableId, deck as unknown as bigint[], [77n, 88n], ZERO_PROOF],
+        { account: ctx.a.account }, // A itself relays — no longer gated on caller identity
+      )
+      const table = await ctx.zk.read.tables([ctx.tableId])
+      expect(table[STATUS]).to.equal(Status.Live)
     })
 
     // gap 11: respondWithShare with demandSlot > 51 → BadDeck on the slot check

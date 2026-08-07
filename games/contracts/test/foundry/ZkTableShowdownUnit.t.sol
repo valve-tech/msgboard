@@ -177,9 +177,13 @@ contract ZkTableShowdownUnitTest is Test {
     }
 
     /// Posts BOTH of `who`'s showdown reveals in one call (the new unified entrypoint).
+    /// `seat` is now an explicit argument (permissionless carve-out — see ZkTable.sol's @dev
+    /// PERMISSIONLESS note on postShowdownReveals); `who` still pranks as the caller for realism
+    /// (a real client would use its own key), but the seat it lands under is `seat`, not `who`.
     function _post(bytes32 id, address who, uint256[] memory deck, uint32 s0, uint32 s1, uint256[2] memory r0, uint256[2] memory r1) internal {
+        uint8 seat = who == a ? 1 : 2;
         vm.prank(who);
-        zk.postShowdownReveals(id, deck, [s0, s1], [r0, r1], [ZERO_PROOF, ZERO_PROOF]);
+        zk.postShowdownReveals(id, seat, deck, [s0, s1], [r0, r1], [ZERO_PROOF, ZERO_PROOF]);
     }
 
     /// Opens a DEMAND_SHOWDOWN dispute (disputant A) against HiLoWarRules with a state whose
@@ -321,7 +325,7 @@ contract ZkTableShowdownUnitTest is Test {
         bytes32 id = _createJoin(IGameRules(address(mockRules)), ESCROW, ESCROW);
         vm.prank(a);
         vm.expectRevert(ChannelTableBase.BadStatus.selector);
-        zk.postShowdownReveals(id, _deck208(), [uint32(0), uint32(1)], [[uint256(1), uint256(2)], [uint256(3), uint256(4)]], [ZERO_PROOF, ZERO_PROOF]);
+        zk.postShowdownReveals(id, 1, _deck208(), [uint32(0), uint32(1)], [[uint256(1), uint256(2)], [uint256(3), uint256(4)]], [ZERO_PROOF, ZERO_PROOF]);
     }
 
     function test_postShowdownReveals_revertsNotDemanded_whenMoveDispute() public {
@@ -335,7 +339,7 @@ contract ZkTableShowdownUnitTest is Test {
         zk.openDispute(id, s, sigA, sigB, "gs", DEMAND_MOVE, 0);
         vm.prank(a);
         vm.expectRevert(ChannelTableBase.NotDemanded.selector);
-        zk.postShowdownReveals(id, _deck208(), [uint32(0), uint32(1)], [[uint256(1), uint256(2)], [uint256(3), uint256(4)]], [ZERO_PROOF, ZERO_PROOF]);
+        zk.postShowdownReveals(id, 1, _deck208(), [uint32(0), uint32(1)], [[uint256(1), uint256(2)], [uint256(3), uint256(4)]], [ZERO_PROOF, ZERO_PROOF]);
     }
 
     function test_postShowdownReveals_revertsBadDeck_nonDemandedSlot() public {
@@ -343,7 +347,7 @@ contract ZkTableShowdownUnitTest is Test {
         vm.prank(a);
         vm.expectRevert(ChannelTableBase.BadDeck.selector);
         zk.postShowdownReveals(
-            id, _winDeck(), [uint32(7), uint32(4)],
+            id, 1, _winDeck(), [uint32(7), uint32(4)],
             [[WIN_REVEAL_A_SLOTA_X, WIN_REVEAL_A_SLOTA_Y], [WIN_REVEAL_A_SLOTB_X, WIN_REVEAL_A_SLOTB_Y]],
             [ZERO_PROOF, ZERO_PROOF]
         );
@@ -356,7 +360,7 @@ contract ZkTableShowdownUnitTest is Test {
         vm.prank(a);
         vm.expectRevert(ChannelTableBase.BadDeck.selector);
         zk.postShowdownReveals(
-            id, badDeck, [uint32(3), uint32(4)],
+            id, 1, badDeck, [uint32(3), uint32(4)],
             [[WIN_REVEAL_A_SLOTA_X, WIN_REVEAL_A_SLOTA_Y], [WIN_REVEAL_A_SLOTB_X, WIN_REVEAL_A_SLOTB_Y]],
             [ZERO_PROOF, ZERO_PROOF]
         );
@@ -368,7 +372,41 @@ contract ZkTableShowdownUnitTest is Test {
         vm.prank(a);
         vm.expectRevert(ZkTable.BadProof.selector);
         zk.postShowdownReveals(
-            id, _winDeck(), [uint32(3), uint32(4)],
+            id, 1, _winDeck(), [uint32(3), uint32(4)],
+            [[WIN_REVEAL_A_SLOTA_X, WIN_REVEAL_A_SLOTA_Y], [WIN_REVEAL_A_SLOTB_X, WIN_REVEAL_A_SLOTB_Y]],
+            [ZERO_PROOF, ZERO_PROOF]
+        );
+    }
+
+    /// 2026-08 signed-intent pass: `seat` is now an explicit argument (permissionless carve-out —
+    /// see ZkTable.sol's @dev PERMISSIONLESS note). A stranger with no seat relationship to the
+    /// table at all may submit it — the caller's identity is irrelevant, only the seat argument
+    /// and the snark proof matter (a real seat's own valid proof lands under that seat).
+    function test_postShowdownReveals_strangerMaySubmit_lognsUnderNamedSeat() public {
+        (bytes32 id, ) = _openHiloShowdown(3, _winDeck());
+        address stranger = address(0xC0FFEE);
+        vm.prank(stranger); // no seat relationship to this table whatsoever
+        vm.expectEmit(true, false, false, true);
+        emit ZkTable.ShowdownRevealStored(id, 3, 1, WIN_REVEAL_A_SLOTA_X, WIN_REVEAL_A_SLOTA_Y);
+        zk.postShowdownReveals(
+            id, 1, _winDeck(), [uint32(3), uint32(4)],
+            [[WIN_REVEAL_A_SLOTA_X, WIN_REVEAL_A_SLOTA_Y], [WIN_REVEAL_A_SLOTB_X, WIN_REVEAL_A_SLOTB_Y]],
+            [ZERO_PROOF, ZERO_PROOF]
+        );
+    }
+
+    /// An out-of-range `seat` (not 1 or 2) reverts NotPlayer before any proof verification runs.
+    function test_postShowdownReveals_revertsNotPlayer_seatOutOfRange() public {
+        (bytes32 id, ) = _openHiloShowdown(3, _winDeck());
+        vm.expectRevert(ChannelTableBase.NotPlayer.selector);
+        zk.postShowdownReveals(
+            id, 0, _winDeck(), [uint32(3), uint32(4)],
+            [[WIN_REVEAL_A_SLOTA_X, WIN_REVEAL_A_SLOTA_Y], [WIN_REVEAL_A_SLOTB_X, WIN_REVEAL_A_SLOTB_Y]],
+            [ZERO_PROOF, ZERO_PROOF]
+        );
+        vm.expectRevert(ChannelTableBase.NotPlayer.selector);
+        zk.postShowdownReveals(
+            id, 3, _winDeck(), [uint32(3), uint32(4)],
             [[WIN_REVEAL_A_SLOTA_X, WIN_REVEAL_A_SLOTA_Y], [WIN_REVEAL_A_SLOTB_X, WIN_REVEAL_A_SLOTB_Y]],
             [ZERO_PROOF, ZERO_PROOF]
         );
@@ -381,7 +419,7 @@ contract ZkTableShowdownUnitTest is Test {
         vm.prank(a);
         vm.expectRevert(ZkTable.AlreadyRevealed.selector);
         zk.postShowdownReveals(
-            id, deck, [uint32(3), uint32(4)],
+            id, 1, deck, [uint32(3), uint32(4)],
             [[WIN_REVEAL_A_SLOTA_X, WIN_REVEAL_A_SLOTA_Y], [WIN_REVEAL_A_SLOTB_X, WIN_REVEAL_A_SLOTB_Y]],
             [ZERO_PROOF, ZERO_PROOF]
         );
