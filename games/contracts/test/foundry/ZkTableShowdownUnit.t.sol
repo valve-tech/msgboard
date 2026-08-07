@@ -46,7 +46,7 @@ contract ZkTableShowdownUnitTest is Test {
     uint256 internal constant ESCROW = 2 ether;
     uint8 internal constant DEMAND_MOVE = 1;
     uint8 internal constant DEMAND_SHOWDOWN = 3;
-    uint8 internal constant SHOWDOWN_SPLIT = 3; // ZkTable's internal constant, mirrored for asserts
+    uint8 internal constant DEMAND_DECOY = 4; // ZkTable's internal constant, mirrored for asserts
     uint256[2] internal ZERO_DECK = [uint256(0), uint256(0)];
     uint256[8] internal ZERO_PROOF;
 
@@ -88,7 +88,7 @@ contract ZkTableShowdownUnitTest is Test {
     uint256 constant TIE_REVEAL_B_Y = 0x2e0fb382bc9db60b05a06477d39181c5cae435c227cb6588a2669755813d211f;
 
     function setUp() public {
-        zk = new ZkTable(address(0)); // factory=0 skips the clone-check (unit-test funding via a bare mock)
+        zk = new ZkTable(address(0), address(0)); // factory=0 skips the clone-check (unit-test funding via a bare mock)
         mockRules = new MockGameRules();
         verifier = new MockRevealVerifier();
         hiloRules = new HiLoWarRules(address(verifier), address(0));
@@ -548,11 +548,16 @@ contract ZkTableShowdownUnitTest is Test {
         assertEq(paidA + paidB, escrowA + escrowB, "conservation holds exactly, no dust, odd wei");
     }
 
-    /// ANTI-THEFT FALLBACK: a decoy/garbage deck key at slotA makes that slot decrypt to a point
-    /// outside the fixed 52-card table (CardTable52 reports ok=false). finalizeShowdown must NOT
-    /// revert (that would strand both seats' funds) and must NOT forfeit the whole pot to either
-    /// side — it SPLITS. Odd-wei pot to exercise the split's own conservation exactly.
-    function test_finalizeShowdown_badDecode_splitsPot_conserves() public {
+    /// ANTI-THEFT FALLBACK (Wave-2 rewrite): a decoy/garbage deck key at slotA makes that slot
+    /// decrypt to a point outside the fixed 52-card table (CardTable52 reports ok=false).
+    /// finalizeShowdown must NOT revert (that would strand both seats' funds) and must NOT settle
+    /// immediately at all — per deckkey-binding-spec.md §1 (attribution can only come from the
+    /// masking side, never the already-snark-proven-honest reveal side), it opens the one-shot
+    /// bonded DEMAND_DECOY challenge window instead (DecoyWindowOpened), leaving the table
+    /// Disputed with disputeState/balances/pot untouched and NO payout. `challengeDeck` itself
+    /// (real crypto) is covered by the ffi suite (ZkTableDecoyChallenge.t.sol); this test only
+    /// asserts the STATE-MACHINE transition `_finalizeShowdown` now takes here.
+    function test_finalizeShowdown_badDecode_opensDecoyWindow_noPayout() public {
         uint32 slotA = 10;
         uint32 slotB = 11;
         // garbage e1/e2 at slotA: near-certainly not any of the 52 table points.
@@ -571,22 +576,59 @@ contract ZkTableShowdownUnitTest is Test {
         uint256 beforeA = token.balanceOf(a);
         uint256 beforeB = token.balanceOf(b);
 
-        vm.expectEmit(true, false, false, false); // only check tableId; cardA is meaningless (ok=false)
-        emit ZkTable.ShowdownFinalized(id, 0, 0, SHOWDOWN_SPLIT);
+        vm.expectEmit(true, false, false, false); // only check tableId; cardA/okA are meaningless (ok=false)
+        emit ZkTable.DecoyWindowOpened(id, false, true, 0, 1, 0);
         zk.finalizeShowdown(id, deck, gameState);
 
+        assertEq(uint8(_status(id)), uint8(ChannelTableBase.Status.Disputed), "stays Disputed, not Settled");
+        assertEq(_demandKind(id), DEMAND_DECOY, "transitions to the decoy-challenge demand");
+        assertEq(token.balanceOf(a), beforeA, "no payout to A yet");
+        assertEq(token.balanceOf(b), beforeB, "no payout to B yet");
+        assertGt(_deadline(id), uint64(block.number), "fresh decoy window deadline");
+    }
+
+    /// Companion to the above: if nobody successfully `challengeDeck`s before the decoy window
+    /// lapses, `resolveTimeout` reaches the SAME guaranteed split floor the pre-Wave-2 code paid
+    /// immediately — the invariant "never steal, eventually settleable" is preserved, just one
+    /// extra clock window later.
+    function test_resolveTimeout_decoyWindowLapses_splitsPot_conserves() public {
+        uint32 slotA = 10;
+        uint32 slotB = 11;
+        uint256[4] memory garbage = [uint256(1), uint256(2), uint256(111), uint256(222)];
+        uint256[4] memory tieBlock = [TIE_SLOTA_E1X, TIE_SLOTA_E1Y, TIE_SLOTA_E2X, TIE_SLOTA_E2Y];
+        uint256[] memory deck = _deckWithSlots(slotA, slotB, garbage, tieBlock);
+
+        uint256 pot = 1 ether + 1; // odd wei
+        uint256 balA = 1 ether;
+        uint256 balB = 2 * ESCROW - pot - balA;
+        (bytes32 id, bytes memory gameState) = _openMockShowdown(slotA, slotB, deck, balA, balB, pot);
+        _post(id, a, deck, slotA, slotB, [uint256(5), uint256(6)], [TIE_REVEAL_A_X, TIE_REVEAL_A_Y]);
+        _post(id, b, deck, slotA, slotB, [uint256(7), uint256(8)], [TIE_REVEAL_B_X, TIE_REVEAL_B_Y]);
+        zk.finalizeShowdown(id, deck, gameState); // -> DEMAND_DECOY
+
+        uint64 dl = _deadline(id);
+        vm.roll(uint256(dl) + 1);
+
+        uint256 beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
+        vm.expectEmit(true, false, false, true);
+        emit ZkTable.DisputeForfeited(id, 0, balA + (pot / 2) + 1, balB + (pot / 2));
+        zk.resolveTimeout(id);
+
+        assertEq(uint8(_status(id)), uint8(ChannelTableBase.Status.Settled));
         uint256 half = pot / 2;
         uint256 paidA = token.balanceOf(a) - beforeA;
         uint256 paidB = token.balanceOf(b) - beforeB;
         assertEq(paidA, balA + half + 1, "A gets balance + half pot + odd wei");
         assertEq(paidB, balB + half, "B gets balance + half pot");
         assertLt(paidA, balA + pot, "disputant (A) must NOT get the whole pot from a decoy key");
-        assertEq(paidA + paidB, 2 * ESCROW, "conservation holds exactly on the split fallback, no dust");
+        assertEq(paidA + paidB, 2 * ESCROW, "conservation holds exactly on the eventual split, no dust");
     }
 
     /// A stacked/duplicated deck — both slots decrypt successfully but to the SAME card index —
-    /// is also treated as a malformed showdown and SPLITS, never forfeits to either side.
-    function test_finalizeShowdown_duplicateCard_splitsPot_conserves() public {
+    /// is also treated as a malformed showdown and opens the decoy window (Wave-2), never
+    /// forfeits or splits immediately.
+    function test_finalizeShowdown_duplicateCard_opensDecoyWindow_noPayout() public {
         uint32 slotA = 10;
         uint32 slotB = 11;
         uint256[4] memory winBlock = [WIN_SLOTA_E1X, WIN_SLOTA_E1Y, WIN_SLOTA_E2X, WIN_SLOTA_E2Y];
@@ -605,15 +647,13 @@ contract ZkTableShowdownUnitTest is Test {
         uint256 beforeB = token.balanceOf(b);
 
         vm.expectEmit(true, false, false, true);
-        emit ZkTable.ShowdownFinalized(id, 3, 3, SHOWDOWN_SPLIT); // both decode ok, but cardA==cardB
+        emit ZkTable.DecoyWindowOpened(id, true, true, 3, 3, uint64(block.number) + CLOCK); // both decode ok, but cardA==cardB
         zk.finalizeShowdown(id, deck, gameState);
 
-        uint256 half = pot / 2;
-        uint256 paidA = token.balanceOf(a) - beforeA;
-        uint256 paidB = token.balanceOf(b) - beforeB;
-        assertEq(paidA, balA + half, "A gets balance + half pot (pot is even here)");
-        assertEq(paidB, balB + half, "B gets balance + half pot");
-        assertEq(paidA + paidB, 2 * ESCROW, "conservation holds exactly on the duplicate-card split");
+        assertEq(uint8(_status(id)), uint8(ChannelTableBase.Status.Disputed), "stays Disputed, not Settled");
+        assertEq(_demandKind(id), DEMAND_DECOY);
+        assertEq(token.balanceOf(a), beforeA, "no payout to A yet");
+        assertEq(token.balanceOf(b), beforeB, "no payout to B yet");
     }
 
     /// Exercises MockGameRules.setShowdownWinner directly: two DIFFERENT real cards decode

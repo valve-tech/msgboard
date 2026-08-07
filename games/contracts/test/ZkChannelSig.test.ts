@@ -27,6 +27,8 @@ describe('ZkChannelSig', () => {
       deckCommitment: viem.keccak256(viem.toHex('deck')),
       phase: 3,
       gameStateHash: viem.keccak256(viem.toHex('game-state')),
+      jointKeyCommit: viem.keccak256(viem.toHex('joint-key-commit')),
+      shuffleRoot: viem.keccak256(viem.toHex('shuffle-root')),
     }
     const offChain = hashState(domain, state)
     const onChain = await zk.read.stateDigest([state])
@@ -64,6 +66,8 @@ describe('ZkChannelSig — signed-intent relay typehashes', () => {
       deckCommitment: viem.keccak256(viem.toHex('deck')),
       phase: 2,
       gameStateHash: viem.keccak256(viem.toHex('gs')),
+      jointKeyCommit: ('0x' + '00'.repeat(32)) as viem.Hex,
+      shuffleRoot: ('0x' + '00'.repeat(32)) as viem.Hex,
     }
     const stateHash = channelStateStructHash(state)
     const demandKind = 2

@@ -299,7 +299,7 @@ contract ZkTableInvariantTest is StdInvariant, Test {
 
     function setUp() public {
         token = new MockX402();
-        zk = new ZkTable(address(0)); // factory=0 skips the clone-check (unit-test funding via a bare mock)
+        zk = new ZkTable(address(0), address(0)); // factory=0 skips the clone-check (unit-test funding via a bare mock)
         rules = new MockGameRules();
         handler = new ZkTableHandler(zk, rules, token);
 

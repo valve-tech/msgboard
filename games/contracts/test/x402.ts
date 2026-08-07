@@ -19,17 +19,45 @@ export type X402Domain = {
 
 /// Deploys ZkTable with `factory_` as its x402 wrapper-factory constructor arg (see ZkTable.sol's
 /// IWrapperFactory — pass `viem.zeroAddress` to skip the create()-time clone-check, matching the
-/// Foundry unit suites' factory=address(0) escape hatch).
+/// Foundry unit suites' factory=address(0) escape hatch) and `shuffleVerifier_` as its
+/// deckkey-binding-spec.md Wave-2 verify52 immutable (defaults to `viem.zeroAddress`, which
+/// degrades `challengeDeck` to an outright revert — see ZkTable.sol's `shuffleVerifier` header —
+/// harmless for every hardhat suite that doesn't exercise the decoy-challenge path; pass a real
+/// deployed ShuffleVerifier52 address for suites that do, e.g. ZkTableDecoyChallenge.test.ts).
 ///
-/// ZkTable link-references the EXTERNAL (separately-deployed) ShowdownDecodeLib library — unlike
-/// Foundry, which auto-links external libraries transparently when a test does `new ZkTable(...)`,
-/// `hre.viem.deployContract` requires the library to be deployed and its address passed
-/// explicitly via the `libraries` option, or it throws MissingLibraryAddressError. This deploys
-/// ShowdownDecodeLib once and links it for every ZkTable instance the hardhat suites create.
-export const deployZkTable = async (factory: viem.Hex) => {
+/// ZkTable link-references TWO EXTERNAL (separately-deployed) libraries — ShowdownDecodeLib
+/// (pre-existing) and, since the Wave-2 deckkey-binding pass, DeckChallengeLib (which itself
+/// transitively link-references DeckConstants — see DeckChallengeLib.sol's header; ZkTable no
+/// longer calls DeckConstants directly). Unlike Foundry, which auto-links external libraries
+/// (including transitive ones) transparently when a test does `new ZkTable(...)`,
+/// `hre.viem.deployContract` requires EVERY library — direct or transitive — to be deployed and
+/// its address passed explicitly, or it throws MissingLibraryAddressError /
+/// UnnecessaryLibraryLinkError. `deployDeckChallengeLib` below deploys DeckConstants first, links
+/// it into DeckChallengeLib, and returns the linked DeckChallengeLib address.
+const deployDeckChallengeLib = async () => {
+  const deckConstants = await hre.viem.deployContract('DeckConstants')
+  const deckChallengeLib = await hre.viem.deployContract('DeckChallengeLib', [], {
+    libraries: { DeckConstants: deckConstants.address },
+  })
+  return deckChallengeLib
+}
+
+export const deployZkTable = async (factory: viem.Hex, shuffleVerifier: viem.Hex = viem.zeroAddress) => {
   const showdownDecodeLib = await hre.viem.deployContract('ShowdownDecodeLib')
-  return await hre.viem.deployContract('ZkTable', [factory], {
-    libraries: { ShowdownDecodeLib: showdownDecodeLib.address },
+  const deckChallengeLib = await deployDeckChallengeLib()
+  return await hre.viem.deployContract('ZkTable', [factory, shuffleVerifier], {
+    libraries: { ShowdownDecodeLib: showdownDecodeLib.address, DeckChallengeLib: deckChallengeLib.address },
+  })
+}
+
+/// Same as `deployZkTable`, but deploys `ZkTableDecoyHarness` (a thin ZkTable subclass, TEST-ONLY
+/// — see its Solidity header) instead of bare `ZkTable`, so a suite can jump a table straight into
+/// an open DEMAND_DECOY dispute window without driving the full showdown-reveal pipeline.
+export const deployZkTableDecoyHarness = async (factory: viem.Hex, shuffleVerifier: viem.Hex) => {
+  const showdownDecodeLib = await hre.viem.deployContract('ShowdownDecodeLib')
+  const deckChallengeLib = await deployDeckChallengeLib()
+  return await hre.viem.deployContract('ZkTableDecoyHarness', [factory, shuffleVerifier], {
+    libraries: { ShowdownDecodeLib: showdownDecodeLib.address, DeckChallengeLib: deckChallengeLib.address },
   })
 }
 

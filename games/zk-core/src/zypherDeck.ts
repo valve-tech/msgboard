@@ -45,6 +45,7 @@ interface ZReveal { card: [string, string]; proof: string }
 interface ZypherEngine {
   generate_key(): ZKeyPair
   aggregate_keys(pubs: string[]): string
+  public_uncompress(pk: string): [string, string]
   init_prover_key(num: number): void
   init_reveal_key(): void
   refresh_joint_key(joint: string, num: number): string[]
@@ -83,6 +84,44 @@ function ensureProverKey(z: ZypherEngine) {
     z.init_reveal_key()
     _proverKeyReady = true
   }
+}
+
+// ---- deck-key-binding support (deckkey-binding-spec B1/B3/B4) --------------------------------
+//
+// Two standalone helpers on top of the raw WASM, used by `deckBinding.ts` to build/verify the
+// on-chain-checkable `jointKeyCommit`. Both are exported here (not in deckBinding.ts) because
+// they need the module-private `engine()`/`ensureProverKey()` plumbing above.
+
+/**
+ * Decompresses a packed Zypher pubkey/aggregate (as returned by `generate_key().pk` or
+ * `aggregate_keys(...)`) into its raw EdOnBN254 affine coordinates `(x, y)`.
+ *
+ * Empirically confirmed (see `deckBinding.test.ts`) that
+ * `public_uncompress(aggregate_keys(pubs)) == raw EdOnBN254 point-sum of the individual pubs'
+ * own affine coordinates` — i.e. this matches the on-chain `RevealVerifier.aggregateKeys` /
+ * `DeckConstants` point-sum semantics exactly, byte-for-byte. That equivalence is what lets
+ * `jointKeyCommit` (computed off-chain from this `(aggX, aggY)`) be re-derived on-chain from
+ * `Σ registered deckKeys` without reimplementing any WASM logic in Solidity.
+ */
+export function uncompressPoint(packed: Hex): { x: bigint; y: bigint } {
+  const [x, y] = engine().public_uncompress(packed as unknown as string)
+  return { x: BigInt(x), y: BigInt(y) }
+}
+
+/**
+ * The 24-word on-chain public-key commitment (`pkc`) for joint key `agg` — Zypher's
+ * `refresh_joint_key(agg, 52)`, which is a PURE function of `(agg, DECK_SIZE)` (empirically
+ * confirmed deterministic across repeated calls — see `deckBinding.test.ts`).
+ *
+ * Exposed standalone (not only as `ZypherDeckProvider.lastPkc`, a side effect of `.shuffle()`)
+ * so a validator can recompute `pkc` from an INDEPENDENTLY-derived aggregate (e.g. the
+ * aggregate of the table's REGISTERED deck keys) without trusting any peer-supplied pkc and
+ * without needing to have already run a shuffle.
+ */
+export function computePkc(agg: Hex): bigint[] {
+  const z = engine()
+  ensureProverKey(z)
+  return z.refresh_joint_key(agg as unknown as string, DECK_SIZE).map((h) => BigInt(h))
 }
 
 // ---- point (de)serialization between the seam wire and Zypher 4-tuples ----

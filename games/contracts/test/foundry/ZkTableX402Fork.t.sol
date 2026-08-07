@@ -66,7 +66,7 @@ contract ZkTableX402ForkTest is Test {
         vm.createSelectFork(rpc);
         forked = true;
 
-        zk = new ZkTable(FACTORY);
+        zk = new ZkTable(FACTORY, address(0));
         rules = new MockGameRules();
         maker = vm.addr(makerKey);
         taker = vm.addr(takerKey);

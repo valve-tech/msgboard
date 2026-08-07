@@ -1,8 +1,9 @@
 import { keccak256, concatHex, bytesToHex, type Hex } from 'viem'
 import {
   Channel, Transcript, makeEnvelope, verifyEnvelope, hashState,
+  ZypherDeckProvider, buildDealBinding, ZERO_DEAL_BINDING,
   type ChannelDomain, type ChannelState, type CoSignedState, type Envelope,
-  type MaskedDeckProvider, type Transport, type WireMasked, type WireShare, type WireShuffle,
+  type MaskedDeckProvider, type ShuffleRound, type Transport, type WireMasked, type WireShare, type WireShuffle,
 } from '@msgboard/zk-cards-core'
 import {
   Phase, initialFlipState, applyMove, hashGameState, hashBetCommit,
@@ -309,7 +310,15 @@ export class Player {
     )
 
     // 2/3. double shuffle: A masks + shuffles, B shuffles A's output
-    await this.runShuffles('SHUFFLE_A', 'SHUFFLE_B')
+    const rounds = await this.runShuffles('SHUFFLE_A', 'SHUFFLE_B')
+
+    // deck-key binding (deckkey-binding-spec §B3): only computable/meaningful on the Zypher
+    // (Baby-JubJub/EdOnBN254) provider — that is the ONLY curve ZkTable's on-chain verify52
+    // dispute path understands (spec §C3 struck the secp256k1/AttestedElGamalDeck path). A
+    // session on any other provider has no on-chain attribution available; ZERO is the correct,
+    // documented placeholder there (matches today's split-only fallback).
+    const binding =
+      this.cfg.deck instanceof ZypherDeckProvider ? buildDealBinding(this.agg, rounds) : ZERO_DEAL_BINDING
 
     // 4. genesis co-sign at nonce 0 — the turn was offered when setup began;
     // approximate with now() at the co-sign boundary (setup has no discrete decision)
@@ -323,14 +332,21 @@ export class Player {
       deckCommitment: deckCommitment(this.deckState),
       phase: Phase.SETUP,
       gameStateHash: ZERO32,
+      jointKeyCommit: binding.jointKeyCommit,
+      shuffleRoot: binding.shuffleRoot,
     })
 
     // 5. first flip
     this.flip = initialFlipState({ ante: this.cfg.ante, deckIndex: 0, warPot: 0n })
   }
 
-  /** shared by setup and reshuffles; both sides adopt B's output deck */
-  private async runShuffles(kindA: string, kindB: string): Promise<void> {
+  /**
+   * Shared by setup and reshuffles; both sides adopt B's output deck. Returns the two shuffle
+   * contributions in ZkTable's canonical seat order (1=A, 2=B) — both roles compute the SAME
+   * `ShuffleRound[]` labeling regardless of which one executed this call locally, since each
+   * side observes both SHUFFLE_A/SHUFFLE_B envelope bodies over the wire (§B2's `authorSeat`).
+   */
+  private async runShuffles(kindA: string, kindB: string): Promise<ShuffleRound[]> {
     if (this.cfg.role === 'A') {
       const before = await this.cfg.deck.initialDeck(this.agg)
       const after = await this.cfg.deck.shuffle(this.agg, before, this.cfg.wallet)
@@ -342,6 +358,10 @@ export class Player {
       if (!(await this.cfg.deck.verifyShuffle(this.agg, body.before, body.after, this.cfg.peer)))
         throw new Error('session: bad shuffle proof from B')
       this.deckState = body.after.deck
+      return [
+        { authorSeat: 1, before, after },
+        { authorSeat: 2, before: body.before, after: body.after },
+      ]
     } else {
       const env = await this.waitFor(kindA)
       const body = env.body as { before: WireMasked[]; after: WireShuffle }
@@ -359,11 +379,21 @@ export class Player {
       const mine = await this.cfg.deck.shuffle(this.agg, body.after.deck, this.cfg.wallet)
       await this.post(kindB, { before: body.after.deck, after: mine })
       this.deckState = mine.deck
+      return [
+        { authorSeat: 1, before: body.before, after: body.after },
+        { authorSeat: 2, before: body.after.deck, after: mine },
+      ]
     }
   }
 
   private async reshuffle(): Promise<void> {
     const n = ++this.reshuffleCount
+    // NOTE(deckkey-binding): a reshuffle produces a fresh Step[]/shuffleRoot for the NEW deck,
+    // but ChannelState carries only one `shuffleRoot` slot and this v0 does not re-post it after
+    // a reshuffle (only `deckCommitment` is refreshed by the next `syncFlipState`) — so the
+    // co-signed `shuffleRoot` goes stale relative to `deckCommitment` past the first reshuffle.
+    // `jointKeyCommit` stays valid (the registered keys/agg never change post-setup). Tracked as
+    // an open follow-up; out of this task's scope (genesis-only per the spec).
     await this.runShuffles(`SHUFFLE_A_R${n}`, `SHUFFLE_B_R${n}`)
   }
 

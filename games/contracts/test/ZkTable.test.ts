@@ -89,6 +89,8 @@ const mkState = (tableId: viem.Hex, over: Partial<ChannelState> = {}): ChannelSt
   deckCommitment: viem.keccak256(viem.toHex('deck')),
   phase: 1,
   gameStateHash: viem.keccak256(viem.toHex('game-state')),
+  jointKeyCommit: ('0x' + '00'.repeat(32)) as viem.Hex,
+  shuffleRoot: ('0x' + '00'.repeat(32)) as viem.Hex,
   ...over,
 })
 
