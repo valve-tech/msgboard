@@ -202,7 +202,7 @@ contract ZkTableShowdownDisputeTest is Test {
 
         // disputant A posts its own two shares in one call
         vm.prank(a);
-        zk.postShowdownReveals(tableId, f.deck, [SLOT_A, SLOT_B], [_reveal(f, 0), _reveal(f, 2)], [_proof(f, 0), _proof(f, 2)]);
+        zk.postShowdownReveals(tableId, 1, f.deck, [SLOT_A, SLOT_B], [_reveal(f, 0), _reveal(f, 2)], [_proof(f, 0), _proof(f, 2)]);
         assertEq(uint8(_status(tableId)), uint8(ChannelTableBase.Status.Disputed), "disputed after A's own reveals");
 
         // counterparty B posts its own two real Groth16-verified shares — real on-chain verifier.
@@ -210,7 +210,7 @@ contract ZkTableShowdownDisputeTest is Test {
         // respondWithShare would have flipped straight to Live on the very first matching
         // answer, with no route to a payout at all.)
         vm.prank(b);
-        zk.postShowdownReveals(tableId, f.deck, [SLOT_A, SLOT_B], [_reveal(f, 1), _reveal(f, 3)], [_proof(f, 1), _proof(f, 3)]);
+        zk.postShowdownReveals(tableId, 2, f.deck, [SLOT_A, SLOT_B], [_reveal(f, 1), _reveal(f, 3)], [_proof(f, 1), _proof(f, 3)]);
         assertEq(uint8(_status(tableId)), uint8(ChannelTableBase.Status.Disputed), "still disputed, finalize is a separate step");
 
         uint256 beforeA = token.balanceOf(a);
@@ -235,7 +235,7 @@ contract ZkTableShowdownDisputeTest is Test {
         (bytes32 tableId, ) = _setupDisputed(f);
 
         vm.prank(b);
-        zk.postShowdownReveals(tableId, f.deck, [SLOT_A, SLOT_B], [_reveal(f, 1), _reveal(f, 3)], [_proof(f, 1), _proof(f, 3)]);
+        zk.postShowdownReveals(tableId, 2, f.deck, [SLOT_A, SLOT_B], [_reveal(f, 1), _reveal(f, 3)], [_proof(f, 1), _proof(f, 3)]);
 
         vm.roll(block.number + CLOCK + 1);
         uint256 beforeA = token.balanceOf(a);
@@ -252,7 +252,7 @@ contract ZkTableShowdownDisputeTest is Test {
         (bytes32 tableId, ) = _setupDisputed(f);
 
         vm.prank(a);
-        zk.postShowdownReveals(tableId, f.deck, [SLOT_A, SLOT_B], [_reveal(f, 0), _reveal(f, 2)], [_proof(f, 0), _proof(f, 2)]);
+        zk.postShowdownReveals(tableId, 1, f.deck, [SLOT_A, SLOT_B], [_reveal(f, 0), _reveal(f, 2)], [_proof(f, 0), _proof(f, 2)]);
 
         vm.roll(block.number + CLOCK + 1);
         uint256 beforeA = token.balanceOf(a);
@@ -270,9 +270,9 @@ contract ZkTableShowdownDisputeTest is Test {
         (bytes32 tableId, ) = _setupDisputed(f);
 
         vm.prank(a);
-        zk.postShowdownReveals(tableId, f.deck, [SLOT_A, SLOT_B], [_reveal(f, 0), _reveal(f, 2)], [_proof(f, 0), _proof(f, 2)]);
+        zk.postShowdownReveals(tableId, 1, f.deck, [SLOT_A, SLOT_B], [_reveal(f, 0), _reveal(f, 2)], [_proof(f, 0), _proof(f, 2)]);
         vm.prank(b);
-        zk.postShowdownReveals(tableId, f.deck, [SLOT_A, SLOT_B], [_reveal(f, 1), _reveal(f, 3)], [_proof(f, 1), _proof(f, 3)]);
+        zk.postShowdownReveals(tableId, 2, f.deck, [SLOT_A, SLOT_B], [_reveal(f, 1), _reveal(f, 3)], [_proof(f, 1), _proof(f, 3)]);
 
         vm.roll(block.number + CLOCK + 1);
         vm.expectRevert(ZkTable.MustFinalize.selector);
@@ -290,20 +290,44 @@ contract ZkTableShowdownDisputeTest is Test {
 
         vm.prank(b);
         vm.expectRevert(ZkTable.BadProof.selector);
-        zk.postShowdownReveals(tableId, f.deck, [SLOT_A, SLOT_B], [_reveal(f, 1), _reveal(f, 3)], [tampered, _proof(f, 3)]);
+        zk.postShowdownReveals(tableId, 2, f.deck, [SLOT_A, SLOT_B], [_reveal(f, 1), _reveal(f, 3)], [tampered, _proof(f, 3)]);
     }
 
-    /// A's genuine reveal+proof, submitted by B's seat, fails: the pi fed to the verifier is
-    /// keyed on the CALLER's registered deckKey (deckKeys[tableId][seat]), which for seat B is
-    /// B's real key — not the key the proof actually witnesses (A's). The real Groth16 verifier
-    /// rejects the mismatched public input.
+    /// A's genuine reveal+proof, submitted under the `seat` ARGUMENT for B, fails: the pi fed to
+    /// the verifier is keyed on `deckKeys[tableId][seat]`, which for seat B is B's real key — not
+    /// the key the proof actually witnesses (A's). The real Groth16 verifier rejects the
+    /// mismatched public input. (Permissionless carve-out: the caller's own identity, `b` here,
+    /// is irrelevant — only the explicit `seat` argument and the proof matter.)
     function test_proofUnderWrongSeatKey_revertsBadProof_realVerifier() public {
         Fixture memory f = _gen(DECK_INDEX);
         (bytes32 tableId, ) = _setupDisputed(f);
 
-        vm.prank(b); // B's seat, but A's proof/reveal (index 0/2 were witnessed by A's sk)
+        vm.prank(b); // caller identity is irrelevant now; seat=2 (B) is passed explicitly below
         vm.expectRevert(ZkTable.BadProof.selector);
-        zk.postShowdownReveals(tableId, f.deck, [SLOT_A, SLOT_B], [_reveal(f, 0), _reveal(f, 2)], [_proof(f, 0), _proof(f, 2)]);
+        zk.postShowdownReveals(tableId, 2, f.deck, [SLOT_A, SLOT_B], [_reveal(f, 0), _reveal(f, 2)], [_proof(f, 0), _proof(f, 2)]);
+    }
+
+    /// PERMISSIONLESS carve-out, real crypto: a total stranger (no seat relationship to the table
+    /// at all) relays BOTH seats' genuine reveals; the dispute still closes and finalizes exactly
+    /// as if each seat had submitted directly — the relayer never becomes a payout destination.
+    function test_strangerRelaysBothSeatsReveals_realCrypto_closesAndPays() public {
+        Fixture memory f = _gen(DECK_INDEX);
+        (bytes32 tableId, bytes memory gameState) = _setupDisputed(f);
+        address stranger = address(0xFEED);
+
+        vm.prank(stranger);
+        zk.postShowdownReveals(tableId, 1, f.deck, [SLOT_A, SLOT_B], [_reveal(f, 0), _reveal(f, 2)], [_proof(f, 0), _proof(f, 2)]);
+        vm.prank(stranger);
+        zk.postShowdownReveals(tableId, 2, f.deck, [SLOT_A, SLOT_B], [_reveal(f, 1), _reveal(f, 3)], [_proof(f, 1), _proof(f, 3)]);
+
+        uint256 beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
+        uint256 strangerBefore = token.balanceOf(stranger);
+        zk.finalizeShowdown(tableId, f.deck, gameState);
+
+        assertEq(token.balanceOf(a) - beforeA, 1.5 ether, "A keeps only its balance");
+        assertEq(token.balanceOf(b) - beforeB, 1.5 ether + 1 ether, "B (rank winner) gets balance + pot");
+        assertEq(token.balanceOf(stranger), strangerBefore, "the relaying stranger never becomes a payout destination");
     }
 
     /// A valid proof for a slot the dispute did not demand (neither SLOT_A nor SLOT_B) is
@@ -314,6 +338,6 @@ contract ZkTableShowdownDisputeTest is Test {
 
         vm.prank(a);
         vm.expectRevert(ChannelTableBase.BadDeck.selector);
-        zk.postShowdownReveals(tableId, f.deck, [SLOT_B + 1, SLOT_B], [_reveal(f, 0), _reveal(f, 2)], [_proof(f, 0), _proof(f, 2)]);
+        zk.postShowdownReveals(tableId, 1, f.deck, [SLOT_B + 1, SLOT_B], [_reveal(f, 0), _reveal(f, 2)], [_proof(f, 0), _proof(f, 2)]);
     }
 }

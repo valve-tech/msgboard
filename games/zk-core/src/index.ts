@@ -9,6 +9,7 @@ export * from './attestedDeck'
 // licensing clears — selectable explicitly alongside the secp256k1 path.
 export * from './zypherDeck'
 export * from './stateSig'
+export * from './relayIntents'
 export * from './channel'
 export * from './transcript'
 export * from './transport'

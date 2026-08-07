@@ -6,6 +6,7 @@ import {SafeTransferLib} from "solady/src/utils/SafeTransferLib.sol";
 import {ChannelState, ChannelStateLib} from "./ChannelState.sol";
 import {IGameRules} from "./IGameRules.sol";
 import {ChannelTableBase} from "./ChannelTableBase.sol";
+import {SignedIntentBase} from "./SignedIntentBase.sol";
 import {ShowdownDecodeLib} from "../vendor/uzkge/ShowdownDecodeLib.sol";
 import {IX402Token} from "../games/FlipBookX.sol";
 
@@ -49,9 +50,37 @@ interface IWrapperFactory {
 /// `settle` and `respondWithState` are now fully permissionless (no `_seatOf(msg.sender)` gate):
 /// each is self-authenticating via the two co-signed channel-key signatures, so any relayer/
 /// watchtower can submit them on a player's behalf without ever touching that player's escrow
-/// identity. `cancel`/`reclaimTopUp`/the dispute-open/respond family stay seat-gated on
-/// `msg.sender` exactly as before — those are direct-action paths, not relayable deposits.
-contract ZkTable is EIP712, ChannelTableBase {
+/// identity.
+///
+/// ── SIGNED-INTENT RELAY (2026-08 pass) ───────────────────────────────────────────────────────
+/// Two more mechanisms let a gasless seat's actions be relayed by ANYONE, closing the gap that
+/// used to force a player to hold native gas just to defend or manage its own table:
+///
+/// (1) A permissionless carve-out for the two remaining self-authenticating dispute-response
+/// paths, `respondWithShare` and `postShowdownReveals`: both already prove their own legitimacy
+/// via a passing Groth16 snark against a SPECIFIC seat's registered `deckKeys` entry, so the
+/// `_seatOf(msg.sender)` gate they used to have was redundant with — and strictly weaker than —
+/// the proof itself. `respondWithShare` now derives its seat structurally (`3 - t.disputant`,
+/// i.e. always the dispute's counterparty) instead of from the caller; `postShowdownReveals`
+/// takes an explicit `seat` argument (bounds-checked to 1/2). Either way, a stranger can only
+/// ever land a share/reveal under a seat whose registered key it does NOT hold by finding a snark
+/// proof for someone else's secret — which is exactly the hardness assumption the whole reveal
+/// scheme rests on. See each function's header for the full argument.
+///
+/// (2) `SignedIntentBase`-backed `*For` variants of every remaining seat-gated, choice-bearing
+/// direct-action function (`disputeSetup`/`openDispute`/`respondWithMove`/`reclaimTopUp`/
+/// `cancel`): each `*For` entrypoint recovers an EIP-712-signed intent's signer via
+/// `_consumeIntent` (nonce + deadline + domain-bound signature — see SignedIntentBase.sol) and
+/// resolves the ACTING seat from that RECOVERED signer, through the exact same `_seatOf`
+/// identity check (or, for the two wallet-only functions, `cancel`/`cancelFor`, the exact same
+/// `== t.playerA` check) a direct call would use — never from a caller-supplied seat/address,
+/// and never from `msg.sender`. Every one of these functions is refactored into a thin direct
+/// wrapper, a thin `*For` wrapper, and one shared internal `_x` that both call — so the direct
+/// path's behavior is provably unchanged (same internal function, same checks, same order) and
+/// the ONLY new thing the relayed path adds is "resolve the seat from a verified signature
+/// instead of `msg.sender`". Payout destinations (`t.playerA`/`t.playerB`) and dispute-identity
+/// fields (`t.disputant`) are therefore always keyed to the signing seat, never the relayer.
+contract ZkTable is EIP712, ChannelTableBase, SignedIntentBase {
     using SafeTransferLib for address;
     using ChannelStateLib for ChannelState;
 
@@ -208,6 +237,17 @@ contract ZkTable is EIP712, ChannelTableBase {
         return ("ZkTable", "1");
     }
 
+    /// Resolves the `_hashTypedData` diamond: Solady's `EIP712` provides a full implementation
+    /// (`internal view virtual`); `SignedIntentBase` re-declares the same signature unimplemented
+    /// purely so it can call it without knowing this contract's domain. Solidity requires an
+    /// explicit override listing every base that declares the function once more than one base
+    /// does — this delegates straight to `EIP712`'s implementation, so the nonce/deadline/recover
+    /// logic in `SignedIntentBase._consumeIntent` and the co-signed-state digest in
+    /// `_checkCoSigned`/`stateDigest` both hash against the exact same ("ZkTable","1") domain.
+    function _hashTypedData(bytes32 structHash) internal view override(EIP712, SignedIntentBase) returns (bytes32) {
+        return EIP712._hashTypedData(structHash);
+    }
+
     /// Route to the wrapper's matching authorization overload: exactly-65-byte signatures use the
     /// universal (v,r,s) form (works on every wrapper build, incl. 943's older impl); any other
     /// length is an ERC-1271 payload for the EIP-7598 `bytes` form (Safes / smart accounts).
@@ -358,8 +398,24 @@ contract ZkTable is EIP712, ChannelTableBase {
     /// Creator backs out before anyone joins.
     function cancel(bytes32 tableId) external {
         Table storage t = tables[tableId];
-        if (t.status != Status.Created) revert BadStatus();
         if (msg.sender != t.playerA) revert NotPlayer();
+        _cancel(t, tableId);
+    }
+
+    /// Relayed variant of `cancel`: WALLET-ONLY (see the `CancelIntent` typehash comment) — the
+    /// recovered signer must equal `t.playerA` exactly, the same identity check the direct call
+    /// makes against `msg.sender`. A channel-signing key alone (the `_seatOf` OR-arm) is NOT
+    /// sufficient to cancel a table, by design: cancelling moves the FULL A-side escrow, so it
+    /// stays gated to the wallet that actually owns it, exactly like the direct path.
+    function cancelFor(bytes32 tableId, uint256 nonce, uint64 deadline, bytes calldata sig) external {
+        Table storage t = tables[tableId];
+        address signer = _consumeIntent(_hashCancelIntent(tableId, nonce, deadline), nonce, deadline, sig);
+        if (signer != t.playerA) revert NotPlayer();
+        _cancel(t, tableId);
+    }
+
+    function _cancel(Table storage t, bytes32 tableId) internal {
+        if (t.status != Status.Created) revert BadStatus();
         t.status = Status.Cancelled;
         uint256 amount = t.escrowA;
         t.escrowA = 0;
@@ -420,8 +476,24 @@ contract ZkTable is EIP712, ChannelTableBase {
     /// checkpoint it (settle/openDispute), which cancels the pending claim first.
     function reclaimTopUp(bytes32 tableId) external {
         Table storage t = tables[tableId];
-        if (t.status != Status.Live) revert BadStatus();
         uint8 seat = _seatOf(t, msg.sender);
+        _reclaimTopUp(t, tableId, seat);
+    }
+
+    /// Relayed variant of `reclaimTopUp`: the seat is resolved from `_consumeIntent`'s recovered
+    /// signer through the SAME `_seatOf` identity check the direct call makes against
+    /// `msg.sender` — a gasless seat's channel key (or wallet) authorizes the reclaim, the
+    /// relayer's own address is never consulted, and the refund always lands on `t.playerA`/
+    /// `t.playerB` regardless of who submitted the transaction.
+    function reclaimTopUpFor(bytes32 tableId, uint256 nonce, uint64 deadline, bytes calldata sig) external {
+        Table storage t = tables[tableId];
+        address signer = _consumeIntent(_hashReclaimTopUpIntent(tableId, nonce, deadline), nonce, deadline, sig);
+        uint8 seat = _seatOf(t, signer);
+        _reclaimTopUp(t, tableId, seat);
+    }
+
+    function _reclaimTopUp(Table storage t, bytes32 tableId, uint8 seat) internal {
+        if (t.status != Status.Live) revert BadStatus();
         PendingTopUp storage p = pendingTopUps[tableId][seat];
         uint256 amount = p.amount;
         if (amount == 0) revert NothingToReclaim();
@@ -471,6 +543,101 @@ contract ZkTable is EIP712, ChannelTableBase {
         return _hashTypedData(state.structHashMem());
     }
 
+    // ── Signed-intent typehashes ──────────────────────────────────────────────
+    // One EIP-712 struct per relayable `*For` entrypoint. Each binds `tableId` (so an intent
+    // cannot be replayed against a different table), `nonce`/`deadline` (consumed by
+    // `_consumeIntent` — see SignedIntentBase.sol), and whatever else that specific action's
+    // choice actually commits to (see each typehash's own comment). Domain is the contract's
+    // existing ("ZkTable","1") EIP-712 domain — the SAME one `stateDigest`/`_checkCoSigned` use
+    // (see `_hashTypedData`'s override above), so an intent signed for THIS contract on THIS
+    // chain can never be replayed against another ZkTable deployment or another chain.
+    bytes32 internal constant DISPUTE_SETUP_INTENT_TYPEHASH =
+        keccak256("DisputeSetupIntent(bytes32 tableId,uint256 nonce,uint64 deadline)");
+    /// `stateHash` pins the EXACT contested `ChannelState` (via its existing
+    /// `ChannelStateLib.structHash`) the signer is opening a dispute against — tampering any
+    /// field of the relayer-supplied `state` recomputes a different `stateHash`, which recovers a
+    /// different (garbage) signer and fails `_seatOf`. `demandKind`/`demandSlot` are bound
+    /// directly since they are the signer's own choice, not derived from `state`.
+    bytes32 internal constant OPEN_DISPUTE_INTENT_TYPEHASH = keccak256(
+        "OpenDisputeIntent(bytes32 tableId,bytes32 stateHash,uint8 demandKind,uint32 demandSlot,uint256 nonce,uint64 deadline)"
+    );
+    /// `gameStateHash` is `t.rules.hashGameState(gameState)` computed AT EXECUTION TIME from the
+    /// submitted `gameState` bytes — the exact same value `_respondWithMove` independently checks
+    /// against `t.disputeState.gameStateHash`. Binding it into the intent gives cross-dispute
+    /// replay protection for free: if this intent is replayed against a LATER dispute round on
+    /// the same table (a different contested game state), `_respondWithMove`'s own
+    /// `BadGameState` guard rejects it, because the hash the (unmodified) replayed `gameState`
+    /// bytes recompute to no longer matches the table's CURRENT `disputeState.gameStateHash`.
+    /// `moveHash = keccak256(move)` pins the exact move bytes.
+    bytes32 internal constant RESPOND_MOVE_INTENT_TYPEHASH = keccak256(
+        "RespondMoveIntent(bytes32 tableId,bytes32 gameStateHash,bytes32 moveHash,uint256 nonce,uint64 deadline)"
+    );
+    bytes32 internal constant RECLAIM_TOPUP_INTENT_TYPEHASH =
+        keccak256("ReclaimTopUpIntent(bytes32 tableId,uint256 nonce,uint64 deadline)");
+    /// Wallet-only (see `cancelFor`): the recovered signer must equal `t.playerA` directly, never
+    /// resolved via `_seatOf` (a channel-signing key alone must not be able to cancel a table).
+    bytes32 internal constant CANCEL_INTENT_TYPEHASH =
+        keccak256("CancelIntent(bytes32 tableId,uint256 nonce,uint64 deadline)");
+
+    function _hashDisputeSetupIntent(bytes32 tableId, uint256 nonce, uint64 deadline) internal pure returns (bytes32) {
+        return keccak256(abi.encode(DISPUTE_SETUP_INTENT_TYPEHASH, tableId, nonce, deadline));
+    }
+
+    function _hashOpenDisputeIntent(bytes32 tableId, bytes32 stateHash, uint8 demandKind, uint32 demandSlot, uint256 nonce, uint64 deadline)
+        internal
+        pure
+        returns (bytes32)
+    {
+        return keccak256(abi.encode(OPEN_DISPUTE_INTENT_TYPEHASH, tableId, stateHash, demandKind, demandSlot, nonce, deadline));
+    }
+
+    function _hashRespondMoveIntent(bytes32 tableId, bytes32 gameStateHash, bytes32 moveHash, uint256 nonce, uint64 deadline)
+        internal
+        pure
+        returns (bytes32)
+    {
+        return keccak256(abi.encode(RESPOND_MOVE_INTENT_TYPEHASH, tableId, gameStateHash, moveHash, nonce, deadline));
+    }
+
+    function _hashReclaimTopUpIntent(bytes32 tableId, uint256 nonce, uint64 deadline) internal pure returns (bytes32) {
+        return keccak256(abi.encode(RECLAIM_TOPUP_INTENT_TYPEHASH, tableId, nonce, deadline));
+    }
+
+    function _hashCancelIntent(bytes32 tableId, uint256 nonce, uint64 deadline) internal pure returns (bytes32) {
+        return keccak256(abi.encode(CANCEL_INTENT_TYPEHASH, tableId, nonce, deadline));
+    }
+
+    // Public digest helpers — same rationale as `stateDigest`: let off-chain code (and the
+    // Solidity<->viem parity tests) compute exactly what `_consumeIntent` will recover against,
+    // without duplicating the typehash/encoding on the TS side going stale silently.
+    function disputeSetupIntentDigest(bytes32 tableId, uint256 nonce, uint64 deadline) public view returns (bytes32) {
+        return _hashTypedData(_hashDisputeSetupIntent(tableId, nonce, deadline));
+    }
+
+    function openDisputeIntentDigest(bytes32 tableId, bytes32 stateHash, uint8 demandKind, uint32 demandSlot, uint256 nonce, uint64 deadline)
+        public
+        view
+        returns (bytes32)
+    {
+        return _hashTypedData(_hashOpenDisputeIntent(tableId, stateHash, demandKind, demandSlot, nonce, deadline));
+    }
+
+    function respondWithMoveIntentDigest(bytes32 tableId, bytes32 gameStateHash, bytes32 moveHash, uint256 nonce, uint64 deadline)
+        public
+        view
+        returns (bytes32)
+    {
+        return _hashTypedData(_hashRespondMoveIntent(tableId, gameStateHash, moveHash, nonce, deadline));
+    }
+
+    function reclaimTopUpIntentDigest(bytes32 tableId, uint256 nonce, uint64 deadline) public view returns (bytes32) {
+        return _hashTypedData(_hashReclaimTopUpIntent(tableId, nonce, deadline));
+    }
+
+    function cancelIntentDigest(bytes32 tableId, uint256 nonce, uint64 deadline) public view returns (bytes32) {
+        return _hashTypedData(_hashCancelIntent(tableId, nonce, deadline));
+    }
+
     /// Every state the contract accepts must conserve the CURRENT escrow total —
     /// so dispute timeouts (next task) can always pay out exactly escrowA+escrowB,
     /// and a pre-top-up state becomes unsubmittable once the top-up lands (until/
@@ -497,9 +664,22 @@ contract ZkTable is EIP712, ChannelTableBase {
     /// expires the table goes back to Live; otherwise both escrows refund in full.
     function disputeSetup(bytes32 tableId) external {
         Table storage t = tables[tableId];
+        uint8 seat = _seatOf(t, msg.sender);
+        _disputeSetup(t, tableId, seat);
+    }
+
+    /// Relayed variant of `disputeSetup`: seat resolved from the recovered signer via the same
+    /// `_seatOf` a direct call uses — see the contract header's signed-intent section.
+    function disputeSetupFor(bytes32 tableId, uint256 nonce, uint64 deadline, bytes calldata sig) external {
+        Table storage t = tables[tableId];
+        address signer = _consumeIntent(_hashDisputeSetupIntent(tableId, nonce, deadline), nonce, deadline, sig);
+        uint8 seat = _seatOf(t, signer);
+        _disputeSetup(t, tableId, seat);
+    }
+
+    function _disputeSetup(Table storage t, bytes32 tableId, uint8 seat) internal {
         if (t.status != Status.Live) revert BadStatus();
         if (t.hasCheckpoint) revert BadDemand(); // a state exists: use openDispute
-        uint8 seat = _seatOf(t, msg.sender);
         t.status = Status.Disputed;
         t.disputant = seat;
         t.demandKind = 0;
@@ -531,8 +711,51 @@ contract ZkTable is EIP712, ChannelTableBase {
         uint32 demandSlot
     ) external {
         Table storage t = tables[tableId];
-        if (t.status != Status.Live) revert BadStatus();
         uint8 seat = _seatOf(t, msg.sender);
+        _openDispute(t, tableId, seat, state, sigA, sigB, gameState, demandKind, demandSlot);
+    }
+
+    /// Relayed variant of `openDispute`: `stateHash` (the contested state's own
+    /// `ChannelStateLib.structHash`, recomputed here from the relayer-supplied `state`) is bound
+    /// into the signed intent — see the `OpenDisputeIntent` typehash comment — so a relayer
+    /// cannot swap in a different contested state (or a different demand) than what the signer
+    /// actually authorized; a mismatch recovers a garbage signer and fails `_seatOf` below. The
+    /// counterparty's own `sigA`/`sigB` co-signature over `state` needs no separate binding: it
+    /// is verified against the table's own `keyA`/`keyB` inside `_checkCoSigned` exactly as the
+    /// direct path does.
+    function openDisputeFor(
+        bytes32 tableId,
+        ChannelState calldata state,
+        bytes calldata sigA,
+        bytes calldata sigB,
+        bytes calldata gameState,
+        uint8 demandKind,
+        uint32 demandSlot,
+        uint256 nonce,
+        uint64 deadline,
+        bytes calldata intentSig
+    ) external {
+        Table storage t = tables[tableId];
+        bytes32 stateHash = state.structHash();
+        address signer = _consumeIntent(
+            _hashOpenDisputeIntent(tableId, stateHash, demandKind, demandSlot, nonce, deadline), nonce, deadline, intentSig
+        );
+        uint8 seat = _seatOf(t, signer);
+        _openDispute(t, tableId, seat, state, sigA, sigB, gameState, demandKind, demandSlot);
+    }
+
+    function _openDispute(
+        Table storage t,
+        bytes32 tableId,
+        uint8 seat,
+        ChannelState calldata state,
+        bytes calldata sigA,
+        bytes calldata sigB,
+        bytes calldata gameState,
+        uint8 demandKind,
+        uint32 demandSlot
+    ) internal {
+        if (t.status != Status.Live) revert BadStatus();
         _checkCoSigned(t, tableId, state, sigA, sigB);
         if (t.hasCheckpoint && state.nonce < t.checkpointNonce) revert StaleNonce();
         if (t.rules.hashGameState(gameState) != state.gameStateHash) revert BadGameState();
@@ -608,9 +831,35 @@ contract ZkTable is EIP712, ChannelTableBase {
     /// The rules contract is the judge; an illegal move reverts there.
     function respondWithMove(bytes32 tableId, bytes calldata gameState, bytes calldata move) external {
         Table storage t = tables[tableId];
+        uint8 seat = _seatOf(t, msg.sender);
+        _respondWithMove(t, tableId, seat, gameState, move);
+    }
+
+    /// Relayed variant of `respondWithMove`: `gameStateHash` is `t.rules.hashGameState(gameState)`
+    /// computed HERE, at execution time, from the submitted `gameState` — see the
+    /// `RespondMoveIntent` typehash comment for why this alone gives cross-dispute replay
+    /// protection (no separate check needed: `_respondWithMove`'s own `BadGameState` guard below
+    /// already requires this hash to match the table's CURRENT contested state).
+    function respondWithMoveFor(
+        bytes32 tableId,
+        bytes calldata gameState,
+        bytes calldata move,
+        uint256 nonce,
+        uint64 deadline,
+        bytes calldata sig
+    ) external {
+        Table storage t = tables[tableId];
+        bytes32 gameStateHash = t.rules.hashGameState(gameState);
+        bytes32 moveHash = keccak256(move);
+        address signer =
+            _consumeIntent(_hashRespondMoveIntent(tableId, gameStateHash, moveHash, nonce, deadline), nonce, deadline, sig);
+        uint8 seat = _seatOf(t, signer);
+        _respondWithMove(t, tableId, seat, gameState, move);
+    }
+
+    function _respondWithMove(Table storage t, bytes32 tableId, uint8 seat, bytes calldata gameState, bytes calldata move) internal {
         if (t.status != Status.Disputed) revert BadStatus();
         if (t.demandKind != DEMAND_MOVE) revert NotDemanded();
-        uint8 seat = _seatOf(t, msg.sender);
         if (seat == t.disputant) revert NotYourDispute();
         if (t.rules.hashGameState(gameState) != t.disputeState.gameStateHash) revert BadGameState();
         bytes memory newState = t.rules.applyMove(gameState, move);
@@ -662,6 +911,17 @@ contract ZkTable is EIP712, ChannelTableBase {
     /// state's committed joint masking key — is a follow-up, out of scope here. Clients MUST
     /// verify the deck's aggregate masking key equals the product of the registered deckKeys before
     /// co-signing any DEAL state.
+    ///
+    /// @dev PERMISSIONLESS (2026-08 signed-intent pass) — no `_seatOf(msg.sender)` gate. The
+    /// responder is always the STRUCTURAL counterparty of the dispute (`seat = 3 - t.disputant`
+    /// — a SHARE dispute's disputant is always a real seat, 1 or 2, so this is always the other
+    /// real seat), never derived from the caller. The function is self-authenticating regardless:
+    /// the snark check below verifies the proof against `deckKeys[tableId][seat]`, a specific
+    /// registered secret only that seat's holder can produce a passing witness for — a stranger
+    /// relaying this call can only ever land the TRUE counterparty's own share (which helps that
+    /// seat exactly as if it had submitted directly); it can never fabricate a share, redirect one
+    /// to the wrong seat, or move funds (this function only clears the dispute — see the CLOSED
+    /// note above; it never pays out). An invalid proof reverts `BadProof` and stores nothing.
     function respondWithShare(
         bytes32 tableId,
         uint256[] calldata deck,
@@ -671,8 +931,10 @@ contract ZkTable is EIP712, ChannelTableBase {
         Table storage t = tables[tableId];
         if (t.status != Status.Disputed) revert BadStatus();
         if (t.demandKind != DEMAND_SHARE) revert NotDemanded();
-        uint8 seat = _seatOf(t, msg.sender);
-        if (seat == t.disputant) revert NotYourDispute();
+        // The responder is structurally the dispute's counterparty — SHARE disputes always have
+        // a real seat (1 or 2) as disputant (set by openDispute), so 3-disputant is always the
+        // other real seat. See the @dev PERMISSIONLESS note above for why this is safe.
+        uint8 seat = 3 - t.disputant;
         if (deck.length != 208) revert BadDeck();
         if (keccak256(abi.encodePacked(deck)) != t.disputeState.deckCommitment) revert BadDeck();
         uint32 slot = t.demandSlot;
@@ -730,9 +992,18 @@ contract ZkTable is EIP712, ChannelTableBase {
     /// Either seat posts BOTH of its own showdown reveals (for slotA and slotB, in either order)
     /// in one call. There is no "forced" vs "own" distinction anymore — the demand is implicit:
     /// resolveTimeout is answer-aware and punishes whichever seat did NOT fully reveal (see its
-    /// header). `_seatOf` pins the seat to the caller, so this can never write a reveal under the
-    /// other seat's identity, and `_verifyAndStoreReveal`'s first-write-wins guard means calling
-    /// this twice for the same slot reverts AlreadyRevealed rather than overwriting.
+    /// header). `_verifyAndStoreReveal`'s first-write-wins guard means calling this twice for the
+    /// same slot reverts AlreadyRevealed rather than overwriting.
+    ///
+    /// @dev PERMISSIONLESS (2026-08 signed-intent pass) — no `_seatOf(msg.sender)` gate. `seat`
+    /// (1 or 2, bounds-checked below) is now an EXPLICIT argument rather than derived from the
+    /// caller, so a relayer/watchtower can post a gasless seat's own reveals on its behalf. This
+    /// is safe because the function is self-authenticating regardless of who calls it or what
+    /// `seat` they claim: `_verifyAndStoreReveal` verifies each proof against
+    /// `deckKeys[tableId][seat]` — a specific registered secret only that seat's holder can
+    /// produce a passing witness for — so a proof valid under seat 1's key can only ever land in
+    /// seat 1's reveal cells; a stranger cannot mis-attribute a share to the wrong seat, and an
+    /// invalid/wrong-seat proof reverts `BadProof` before anything is stored.
     ///
     /// Extends the dispute clock by a full `clockBlocks` window after a successful post — a
     /// seat that reveals right before the original deadline must not have its answer race a
@@ -741,6 +1012,7 @@ contract ZkTable is EIP712, ChannelTableBase {
     /// used to extend the dispute indefinitely.
     function postShowdownReveals(
         bytes32 tableId,
+        uint8 seat,
         uint256[] calldata deck,
         uint32[2] calldata slots,
         uint256[2][2] calldata reveals,
@@ -749,7 +1021,7 @@ contract ZkTable is EIP712, ChannelTableBase {
         Table storage t = tables[tableId];
         if (t.status != Status.Disputed) revert BadStatus();
         if (t.demandKind != DEMAND_SHOWDOWN) revert NotDemanded();
-        uint8 seat = _seatOf(t, msg.sender);
+        if (seat != 1 && seat != 2) revert NotPlayer();
         _verifyAndStoreReveal(tableId, t, seat, deck, slots[0], reveals[0], proofs[0]);
         _verifyAndStoreReveal(tableId, t, seat, deck, slots[1], reveals[1], proofs[1]);
         t.disputeDeadline = uint64(block.number) + t.clockBlocks;

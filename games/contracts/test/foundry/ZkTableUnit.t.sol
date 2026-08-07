@@ -987,14 +987,56 @@ contract ZkTableUnitTest is Test {
         zk.respondWithShare(id, deck, reveal, proof);
     }
 
-    function test_respondWithShare_revertsNotYourDispute() public {
+    /// SUPERSEDED by the 2026-08 signed-intent pass: respondWithShare dropped its
+    /// `_seatOf(msg.sender)` gate — the responder is now the STRUCTURAL counterparty of the
+    /// dispute (`3 - t.disputant`), never derived from the caller. This used to assert the
+    /// disputant's own call reverted `NotYourDispute`; that identity check no longer exists (see
+    /// ZkTable.sol's @dev PERMISSIONLESS note on respondWithShare), so it now asserts the
+    /// opposite: the disputant's own address relaying a snark-valid share for the counterparty
+    /// succeeds exactly as a direct call from the counterparty would — the CALLER never gates
+    /// this function; only the proof does.
+    function test_respondWithShare_permissionless_disputantMayRelayCounterpartysShare() public {
+        MockRevealVerifier mv = new MockRevealVerifier(); // ok == true by default
+        rules.setRevealVerifier(address(mv));
         bytes32 id = _createJoin(1 ether, 1 ether);
-        _openShareDispute(id, 0); // disputant == A
-        uint256[] memory deck = _deck208();
+        uint256[] memory deck = _openShareDispute(id, 0); // disputant == A
+        uint256[2] memory reveal = [uint256(11), uint256(22)];
+        uint256[8] memory proof;
+        vm.expectEmit(true, false, false, true);
+        emit DisputeAnsweredWithShare(id, 0, 11, 22);
+        vm.prank(a); // disputant itself relays — no longer gated on caller identity
+        zk.respondWithShare(id, deck, reveal, proof);
+        assertEq(uint8(_status(id)), uint8(ChannelTableBase.Status.Live));
+    }
+
+    /// Same carve-out, from the OTHER side: a total stranger with no seat relationship to the
+    /// table at all may also relay the counterparty's share.
+    function test_respondWithShare_permissionless_strangerMayRelay() public {
+        MockRevealVerifier mv = new MockRevealVerifier();
+        rules.setRevealVerifier(address(mv));
+        bytes32 id = _createJoin(1 ether, 1 ether);
+        uint256[] memory deck = _openShareDispute(id, 0); // disputant == A
+        uint256[2] memory reveal = [uint256(33), uint256(44)];
+        uint256[8] memory proof;
+        vm.expectEmit(true, false, false, true);
+        emit DisputeAnsweredWithShare(id, 0, 33, 44);
+        vm.prank(stranger); // no seat relationship to this table whatsoever
+        zk.respondWithShare(id, deck, reveal, proof);
+        assertEq(uint8(_status(id)), uint8(ChannelTableBase.Status.Live));
+    }
+
+    /// The carve-out is proof-gated, not identity-gated: an invalid proof still reverts BadProof
+    /// regardless of who calls (including the disputant, or a stranger).
+    function test_respondWithShare_wrongProof_stillRevertsBadProof_regardlessOfCaller() public {
+        MockRevealVerifier mv = new MockRevealVerifier();
+        mv.setOk(false); // stand-in for a forged/invalid share
+        rules.setRevealVerifier(address(mv));
+        bytes32 id = _createJoin(1 ether, 1 ether);
+        uint256[] memory deck = _openShareDispute(id, 0);
         uint256[2] memory reveal;
         uint256[8] memory proof;
-        vm.prank(a); // disputant itself
-        vm.expectRevert(ChannelTableBase.NotYourDispute.selector);
+        vm.prank(stranger);
+        vm.expectRevert(ZkTable.BadProof.selector);
         zk.respondWithShare(id, deck, reveal, proof);
     }
 
