@@ -9,6 +9,7 @@ import {IGameRulesN} from "./IGameRulesN.sol";
 import {RevealShareDLEQ} from "./lib/RevealShareDLEQ.sol";
 import {EllipticCurve} from "./lib/EllipticCurve.sol";
 import {ChannelTableBase} from "./ChannelTableBase.sol";
+import {SignedIntentBase} from "./SignedIntentBase.sol";
 import {IX402Token} from "../games/FlipBookX.sol";
 
 /// A wrapper clone's own view of the underlying asset it wraps (ValveWrapperImpl.underlying()).
@@ -82,25 +83,51 @@ interface IWrapperFactory {
 /// `settle` and `respondWithState` are now fully permissionless (no `_seatOf(msg.sender)` gate):
 /// each is self-authenticating via the N co-signed channel-key signatures, so any relayer/
 /// watchtower can submit them on a player's behalf without ever touching that player's escrow
-/// identity. `openDispute`/`respondWithMove`/`respondWithShare`/`registerDeckKey`/`start` stay
-/// seat-gated on `msg.sender` exactly as before — those are direct-action paths (identity
-/// load-bearing, or only meaningful while Forming), not relayable deposits. `leaveBeforeStart`/
-/// `cancel` likewise stay `msg.sender`-gated: they are withdrawal requests by an already-seated
-/// wallet, not something a relayer needs to submit on a signer's behalf.
+/// identity.
 ///
-/// ── GAS PRECONDITION for gasless seating (2026-08, F3) ───────────────────────────────────────
-/// Deposits (`create`/`join`) are gasless/relayable, but EVERY defensive path is NOT: `start`,
-/// `leaveBeforeStart`, `cancel`, `openDispute`, `respondWithMove`, and `respondWithShare` are all
-/// gas-gated on the seat/channelKey actually submitting the transaction as `msg.sender` (see
-/// `_seatOf`). A seat whose escrow was funded entirely by a relayer, but which holds zero native
-/// PLS of its own, cannot defend itself: it cannot `leaveBeforeStart` to exit a Forming table it
-/// no longer wants to be at, and once Live it cannot answer a MOVE or SHARE demand naming it —
-/// `resolveTimeout` then force-folds its stake to the other seats. For an N-seat table this means
-/// N−1 of the N players each need their OWN gas-funded wallet, not just a signed deposit
-/// authorization. This is a HARD client/product precondition for gasless seating as shipped here;
-/// removing it needs a follow-up dispute-relay path (signed-intent MOVE/SHARE/leave responses a
-/// relayer can submit on a gas-less seat's behalf), which is out of scope for this conversion.
-contract HoldemTableN is EIP712, ChannelTableBase {
+/// ── SIGNED-INTENT RELAY (2026-08 pass, closes the F3 gas precondition below) ────────────────
+/// The F3 gap this contract used to document — every defensive path gated on `msg.sender` holding
+/// its OWN native gas — is now closed by the same two mechanisms ZkTable shipped:
+///
+/// (1) A permissionless carve-out for `respondWithShare`: it is self-authenticating regardless of
+/// caller — the DLEQ proof it checks is verified against `_deckKey[tableId][t.demandSeat]`, a
+/// specific registered secret only the demanded seat's holder can produce a passing witness for.
+/// The old `_seatOf(msg.sender)` gate (plus its `seat != t.demandSeat` follow-up check) was
+/// therefore redundant with — and strictly weaker than — the proof itself, so it is dropped: the
+/// responding seat is now read directly off `t.demandSeat` rather than derived from the caller. A
+/// stranger relaying this call can only ever land the TRUE demanded seat's own truthful share
+/// (which clears the dispute exactly as if that seat had submitted directly); it can never forge
+/// a share, redirect one to a different seat, or move any funds (this function only clears the
+/// dispute — it never pays out). An invalid proof reverts `BadShareProof` and stores nothing.
+///
+/// (2) `SignedIntentBase`-backed `*For` variants of every remaining seat-gated, choice-bearing
+/// direct-action function (`start`/`registerDeckKey`/`leaveBeforeStart`/`cancel`/`openDispute`/
+/// `respondWithMove`): each `*For` entrypoint recovers an EIP-712-signed intent's signer via
+/// `_consumeIntent` (nonce + deadline + domain-bound signature — see SignedIntentBase.sol) and
+/// resolves the ACTING seat from that RECOVERED signer through the exact same identity check
+/// (`_seatOf`, or — for the wallet-only `cancel`/`cancelFor` — the exact same `seats.length==1 &&
+/// seats[0]==signer` check) a direct call would use — never from a caller-supplied seat/address,
+/// and never from `msg.sender`. Every one of these functions is refactored into a thin direct
+/// wrapper, a thin `*For` wrapper, and one shared internal `_x` that both call, PRESERVING the
+/// direct wrapper's exact original statement order (so its observable behavior — including which
+/// specific error fires for a doubly-invalid call — is unchanged); the only new thing the relayed
+/// path adds is "resolve the seat from a verified signature instead of `msg.sender`". Payout/
+/// refund destinations stay keyed to the table's own seat wallets (`t.seats[i]`) — most visibly in
+/// `leaveBeforeStartFor`, which refunds `t.seats[seat]` (the WALLET), not the relayer and not the
+/// recovered signer (which may be a channel-signing key, not a wallet) — see that function's own
+/// header for why this is a deliberate, safer deviation from the direct path's `msg.sender` refund.
+///
+/// ── GAS PRECONDITION for gasless seating (2026-08, F3 — CLOSED by the relay above) ───────────
+/// Previously: deposits (`create`/`join`) were gasless/relayable, but EVERY defensive path was
+/// not — `start`, `leaveBeforeStart`, `cancel`, `openDispute`, `respondWithMove`, and
+/// `respondWithShare` were all gas-gated on the seat/channelKey actually submitting the
+/// transaction as `msg.sender`. A seat whose escrow was funded entirely by a relayer, but which
+/// held zero native PLS of its own, could not defend itself. The signed-intent `*For` family plus
+/// the `respondWithShare` carve-out above now let ANY relayer submit each of these on a gasless
+/// seat's behalf, so a fully gas-less seat (funded only via signed deposit + intent
+/// authorizations) can create/join, start, rotate its deck key, leave before start, cancel, open a
+/// dispute, and answer a MOVE or SHARE demand — never needing its own native gas.
+contract HoldemTableN is EIP712, ChannelTableBase, SignedIntentBase {
     using SafeTransferLib for address;
     using ChannelStateNLib for ChannelStateN;
     using RevealShareDLEQ for RevealShareDLEQ.Statement;
@@ -204,6 +231,18 @@ contract HoldemTableN is EIP712, ChannelTableBase {
     /// Matches makeDomainN() in the holdem stateSigN.ts: name 'HoldemTableN', version '1'.
     function _domainNameAndVersion() internal pure override returns (string memory, string memory) {
         return ("HoldemTableN", "1");
+    }
+
+    /// Resolves the `_hashTypedData` diamond: Solady's `EIP712` provides a full implementation
+    /// (`internal view virtual`); `SignedIntentBase` re-declares the same signature unimplemented
+    /// purely so it can call it without knowing this contract's domain. Solidity requires an
+    /// explicit override listing every base that declares the function once more than one base
+    /// does — this delegates straight to `EIP712`'s implementation, so the nonce/deadline/recover
+    /// logic in `SignedIntentBase._consumeIntent` and the co-signed-state digest in
+    /// `_checkCoSigned`/`stateDigest` both hash against the exact same ("HoldemTableN","1") domain.
+    /// Mirrors ZkTable.sol's identical override verbatim.
+    function _hashTypedData(bytes32 s) internal view override(EIP712, SignedIntentBase) returns (bytes32) {
+        return EIP712._hashTypedData(s);
     }
 
     /// Route to the wrapper's matching authorization overload: exactly-65-byte signatures use the
@@ -392,6 +431,21 @@ contract HoldemTableN is EIP712, ChannelTableBase {
         Table storage t = _tables[tableId];
         if (t.status != Status.Created) revert BadStatus();
         _seatOf(t, msg.sender);
+        _start(t, tableId);
+    }
+
+    /// Relayed variant of `start`: seat existence is resolved from `_consumeIntent`'s recovered
+    /// signer through the SAME `_seatOf` identity check the direct call makes against
+    /// `msg.sender` — see the contract header's signed-intent section.
+    function startFor(bytes32 tableId, uint256 nonce, uint64 deadline, bytes calldata sig) external {
+        Table storage t = _tables[tableId];
+        if (t.status != Status.Created) revert BadStatus();
+        address signer = _consumeIntent(_hashStartIntent(tableId, nonce, deadline), nonce, deadline, sig);
+        _seatOf(t, signer);
+        _start(t, tableId);
+    }
+
+    function _start(Table storage t, bytes32 tableId) internal {
         if (t.seats.length < 2) revert NotEnoughSeats();
         t.status = Status.Live;
         emit TableStarted(tableId, t.seats.length);
@@ -406,6 +460,23 @@ contract HoldemTableN is EIP712, ChannelTableBase {
         Table storage t = _tables[tableId];
         if (t.status != Status.Created) revert BadStatus();
         uint8 seat = _seatOf(t, msg.sender);
+        _registerDeckKey(tableId, seat, pk);
+    }
+
+    /// Relayed variant of `registerDeckKey`: the ROTATING seat is resolved from the recovered
+    /// signer via the same `_seatOf` a direct call uses — never a caller-supplied seat index.
+    function registerDeckKeyFor(bytes32 tableId, uint256 pkX, uint256 pkY, uint256 nonce, uint64 deadline, bytes calldata sig)
+        external
+    {
+        Table storage t = _tables[tableId];
+        if (t.status != Status.Created) revert BadStatus();
+        address signer =
+            _consumeIntent(_hashRegisterDeckKeyIntent(tableId, pkX, pkY, nonce, deadline), nonce, deadline, sig);
+        uint8 seat = _seatOf(t, signer);
+        _registerDeckKey(tableId, seat, [pkX, pkY]);
+    }
+
+    function _registerDeckKey(bytes32 tableId, uint8 seat, uint256[2] memory pk) internal {
         if (!EllipticCurve.isOnCurve(pk[0], pk[1])) revert BadDeckKey();
         _deckKey[tableId][seat] = pk;
         emit DeckKeyRegistered(tableId, seat);
@@ -418,6 +489,27 @@ contract HoldemTableN is EIP712, ChannelTableBase {
         Table storage t = _tables[tableId];
         if (t.status != Status.Created) revert BadStatus();
         uint8 seat = _seatOf(t, msg.sender);
+        _leaveBeforeStart(t, tableId, seat, msg.sender);
+    }
+
+    /// Relayed variant of `leaveBeforeStart`: seat resolved from the recovered signer via the same
+    /// `_seatOf` a direct call uses, BUT the refund destination is deliberately NOT the recovered
+    /// signer — it is `t.seats[seat]`, the seat's WALLET, captured BEFORE the swap-and-pop mutates
+    /// the seats array. This is a safer deviation from the direct path (which refunds
+    /// `msg.sender`): the signer recovered here may be a channel-signing key rather than the
+    /// wallet (a valid `_seatOf` identity), and a channel key is not necessarily an address the
+    /// seat's owner can receive funds at in the same sense as its registered wallet — so the
+    /// relayed refund always lands on the wallet, never on the relayer and never on a
+    /// channel-key signer.
+    function leaveBeforeStartFor(bytes32 tableId, uint256 nonce, uint64 deadline, bytes calldata sig) external {
+        Table storage t = _tables[tableId];
+        if (t.status != Status.Created) revert BadStatus();
+        address signer = _consumeIntent(_hashLeaveIntent(tableId, nonce, deadline), nonce, deadline, sig);
+        uint8 seat = _seatOf(t, signer);
+        _leaveBeforeStart(t, tableId, seat, t.seats[seat]);
+    }
+
+    function _leaveBeforeStart(Table storage t, bytes32 tableId, uint8 seat, address refundTo) internal {
         uint256 refund = t.escrow[seat];
         // compact arrays (swap-and-pop)
         uint256 last = t.seats.length - 1;
@@ -437,7 +529,7 @@ contract HoldemTableN is EIP712, ChannelTableBase {
             t.status = Status.Cancelled;
             emit TableCancelled(tableId);
         }
-        if (refund > 0) address(tableToken[tableId]).safeTransfer(msg.sender, refund);
+        if (refund > 0) address(tableToken[tableId]).safeTransfer(refundTo, refund);
     }
 
     /// Creator cancels a Forming table that only they occupy; refunds all current escrow.
@@ -445,11 +537,32 @@ contract HoldemTableN is EIP712, ChannelTableBase {
         Table storage t = _tables[tableId];
         if (t.status != Status.Created) revert BadStatus();
         if (t.seats.length != 1 || t.seats[0] != msg.sender) revert NotPlayer();
+        _cancel(t, tableId);
+    }
+
+    /// Relayed variant of `cancel`: WALLET-ONLY (see the `CancelIntent` typehash comment) — the
+    /// recovered signer must equal `t.seats[0]` exactly, the same identity check the direct call
+    /// makes against `msg.sender`. A channel-signing key alone (the `_seatOf` OR-arm) is NOT
+    /// sufficient to cancel a table, by design: cancelling moves the FULL sole seat's escrow, so
+    /// it stays gated to the wallet that actually owns it, exactly like the direct path.
+    function cancelFor(bytes32 tableId, uint256 nonce, uint64 deadline, bytes calldata sig) external {
+        Table storage t = _tables[tableId];
+        if (t.status != Status.Created) revert BadStatus();
+        address signer = _consumeIntent(_hashCancelIntent(tableId, nonce, deadline), nonce, deadline, sig);
+        if (t.seats.length != 1 || t.seats[0] != signer) revert NotPlayer();
+        _cancel(t, tableId);
+    }
+
+    function _cancel(Table storage t, bytes32 tableId) internal {
         t.status = Status.Cancelled;
         uint256 refund = t.escrow[0];
         t.escrow[0] = 0;
         emit TableCancelled(tableId);
-        if (refund > 0) address(tableToken[tableId]).safeTransfer(msg.sender, refund);
+        // refund to the seat's own wallet (t.seats[0]) — for the direct path this is provably the
+        // same address as msg.sender (the identity check above requires t.seats[0] == msg.sender/
+        // signer before `_cancel` is ever reached), so this is behavior-identical for `cancel` and
+        // correctly wallet-targeted (never the relayer) for `cancelFor`.
+        if (refund > 0) address(tableToken[tableId]).safeTransfer(t.seats[0], refund);
     }
 
     // ── settle ───────────────────────────────────────────────────────────────
@@ -476,6 +589,133 @@ contract HoldemTableN is EIP712, ChannelTableBase {
         return _hashTypedData(state.structHashMem());
     }
 
+    // ── Signed-intent typehashes ──────────────────────────────────────────────
+    // One EIP-712 struct per relayable `*For` entrypoint. Each binds `tableId` (so an intent
+    // cannot be replayed against a different table), `nonce`/`deadline` (consumed by
+    // `_consumeIntent` — see SignedIntentBase.sol), and whatever else that specific action's
+    // choice actually commits to (see each typehash's own comment). Domain is the contract's
+    // existing ("HoldemTableN","1") EIP-712 domain — the SAME one `stateDigest`/`_checkCoSigned`
+    // use (see `_hashTypedData`'s override above), so an intent signed for THIS contract on THIS
+    // chain can never be replayed against another HoldemTableN deployment or another chain. Field
+    // shapes mirror ZkTable's identically-purposed typehashes; the type NAMES intentionally
+    // collide (e.g. both contracts declare a `CancelIntent`) — this is harmless because the
+    // domain separator (which embeds the contract's own name/address) differs, so the two
+    // contracts' final digests never collide even for byte-identical struct contents.
+    bytes32 internal constant START_INTENT_TYPEHASH = keccak256("StartIntent(bytes32 tableId,uint256 nonce,uint64 deadline)");
+    bytes32 internal constant REGISTER_DECK_KEY_INTENT_TYPEHASH = keccak256(
+        "RegisterDeckKeyIntent(bytes32 tableId,uint256 pkX,uint256 pkY,uint256 nonce,uint64 deadline)"
+    );
+    bytes32 internal constant LEAVE_INTENT_TYPEHASH = keccak256("LeaveIntent(bytes32 tableId,uint256 nonce,uint64 deadline)");
+    /// Wallet-only (see `cancelFor`): the recovered signer must equal `t.seats[0]` directly, never
+    /// resolved via `_seatOf` (a channel-signing key alone must not be able to cancel a table).
+    bytes32 internal constant CANCEL_INTENT_TYPEHASH = keccak256("CancelIntent(bytes32 tableId,uint256 nonce,uint64 deadline)");
+    /// `stateHash` pins the EXACT contested `ChannelStateN` (via its existing
+    /// `ChannelStateNLib.structHash`) the signer is opening a dispute against — tampering any
+    /// field of the relayer-supplied `state` recomputes a different `stateHash`, which recovers a
+    /// different (garbage) signer and fails `_seatOf`. `demandSeat`/`demandKind`/`demandSlot` are
+    /// bound directly since they are the signer's own choice, not derived from `state`.
+    /// `demandSeat` in particular pins the FORFEITURE TARGET: a relayer cannot redirect a signed
+    /// dispute to force-fold a different seat than the one the signer actually named.
+    bytes32 internal constant OPEN_DISPUTE_INTENT_TYPEHASH = keccak256(
+        "OpenDisputeIntent(bytes32 tableId,bytes32 stateHash,uint8 demandSeat,uint8 demandKind,uint32 demandSlot,uint256 nonce,uint64 deadline)"
+    );
+    /// `gameStateHash` is `t.rules.hashGameState(gameState)` computed AT EXECUTION TIME from the
+    /// submitted `gameState` bytes — the exact same value `_respondWithMove` independently checks
+    /// against `t.disputeState.gameStateHash`. Binding it into the intent gives cross-dispute
+    /// replay protection for free: if this intent is replayed against a LATER dispute round on
+    /// the same table (a different contested game state), `_respondWithMove`'s own
+    /// `BadGameState` guard rejects it, because the hash the (unmodified) replayed `gameState`
+    /// bytes recompute to no longer matches the table's CURRENT `disputeState.gameStateHash`.
+    /// `moveHash = keccak256(move)` pins the exact move bytes.
+    bytes32 internal constant RESPOND_MOVE_INTENT_TYPEHASH = keccak256(
+        "RespondMoveIntent(bytes32 tableId,bytes32 gameStateHash,bytes32 moveHash,uint256 nonce,uint64 deadline)"
+    );
+
+    function _hashStartIntent(bytes32 tableId, uint256 nonce, uint64 deadline) internal pure returns (bytes32) {
+        return keccak256(abi.encode(START_INTENT_TYPEHASH, tableId, nonce, deadline));
+    }
+
+    function _hashRegisterDeckKeyIntent(bytes32 tableId, uint256 pkX, uint256 pkY, uint256 nonce, uint64 deadline)
+        internal
+        pure
+        returns (bytes32)
+    {
+        return keccak256(abi.encode(REGISTER_DECK_KEY_INTENT_TYPEHASH, tableId, pkX, pkY, nonce, deadline));
+    }
+
+    function _hashLeaveIntent(bytes32 tableId, uint256 nonce, uint64 deadline) internal pure returns (bytes32) {
+        return keccak256(abi.encode(LEAVE_INTENT_TYPEHASH, tableId, nonce, deadline));
+    }
+
+    function _hashCancelIntent(bytes32 tableId, uint256 nonce, uint64 deadline) internal pure returns (bytes32) {
+        return keccak256(abi.encode(CANCEL_INTENT_TYPEHASH, tableId, nonce, deadline));
+    }
+
+    function _hashOpenDisputeIntent(
+        bytes32 tableId,
+        bytes32 stateHash,
+        uint8 demandSeat,
+        uint8 demandKind,
+        uint32 demandSlot,
+        uint256 nonce,
+        uint64 deadline
+    ) internal pure returns (bytes32) {
+        return keccak256(
+            abi.encode(OPEN_DISPUTE_INTENT_TYPEHASH, tableId, stateHash, demandSeat, demandKind, demandSlot, nonce, deadline)
+        );
+    }
+
+    function _hashRespondMoveIntent(bytes32 tableId, bytes32 gameStateHash, bytes32 moveHash, uint256 nonce, uint64 deadline)
+        internal
+        pure
+        returns (bytes32)
+    {
+        return keccak256(abi.encode(RESPOND_MOVE_INTENT_TYPEHASH, tableId, gameStateHash, moveHash, nonce, deadline));
+    }
+
+    // Public digest helpers — same rationale as `stateDigest`: let off-chain code (and the
+    // Solidity<->viem parity tests) compute exactly what `_consumeIntent` will recover against,
+    // without duplicating the typehash/encoding on the TS side going stale silently.
+    function startIntentDigest(bytes32 tableId, uint256 nonce, uint64 deadline) public view returns (bytes32) {
+        return _hashTypedData(_hashStartIntent(tableId, nonce, deadline));
+    }
+
+    function registerDeckKeyIntentDigest(bytes32 tableId, uint256 pkX, uint256 pkY, uint256 nonce, uint64 deadline)
+        public
+        view
+        returns (bytes32)
+    {
+        return _hashTypedData(_hashRegisterDeckKeyIntent(tableId, pkX, pkY, nonce, deadline));
+    }
+
+    function leaveIntentDigest(bytes32 tableId, uint256 nonce, uint64 deadline) public view returns (bytes32) {
+        return _hashTypedData(_hashLeaveIntent(tableId, nonce, deadline));
+    }
+
+    function cancelIntentDigest(bytes32 tableId, uint256 nonce, uint64 deadline) public view returns (bytes32) {
+        return _hashTypedData(_hashCancelIntent(tableId, nonce, deadline));
+    }
+
+    function openDisputeIntentDigest(
+        bytes32 tableId,
+        bytes32 stateHash,
+        uint8 demandSeat,
+        uint8 demandKind,
+        uint32 demandSlot,
+        uint256 nonce,
+        uint64 deadline
+    ) public view returns (bytes32) {
+        return _hashTypedData(_hashOpenDisputeIntent(tableId, stateHash, demandSeat, demandKind, demandSlot, nonce, deadline));
+    }
+
+    function respondWithMoveIntentDigest(bytes32 tableId, bytes32 gameStateHash, bytes32 moveHash, uint256 nonce, uint64 deadline)
+        public
+        view
+        returns (bytes32)
+    {
+        return _hashTypedData(_hashRespondMoveIntent(tableId, gameStateHash, moveHash, nonce, deadline));
+    }
+
     // ── dispute machine ───────────────────────────────────────────────────────
 
     /// Post your latest N-of-N co-signed state and demand the owed protocol action from
@@ -495,6 +735,55 @@ contract HoldemTableN is EIP712, ChannelTableBase {
         Table storage t = _tables[tableId];
         if (t.status != Status.Live) revert BadStatus();
         _seatOf(t, msg.sender);
+        _openDispute(t, tableId, state, sigs, gameState, demandSeat, demandKind, demandSlot);
+    }
+
+    /// Relayed variant of `openDispute`: `stateHash` (the contested state's own
+    /// `ChannelStateNLib.structHash`, recomputed here from the relayer-supplied `state`) plus
+    /// `demandSeat`/`demandKind`/`demandSlot` (the signer's own choice) are bound into the signed
+    /// intent — see the `OpenDisputeIntent` typehash comment — so a relayer cannot swap in a
+    /// different contested state or a different demand than what the signer actually authorized;
+    /// any mismatch recomputes a different digest, recovers a garbage signer, and fails `_seatOf`
+    /// below. The N co-signed `sigs` over `state` need no separate binding: they are verified
+    /// against the table's own `channelKeys` inside `_checkCoSigned` exactly as the direct path
+    /// does. The OPENER identity (the signer) only has to be SOME seat at the table — exactly like
+    /// the direct path's `_seatOf(t, msg.sender)`, whose return value is likewise discarded —
+    /// HoldemTableN's dispute machinery keys forfeiture off `demandSeat`, never off who opened.
+    function openDisputeFor(
+        bytes32 tableId,
+        ChannelStateN calldata state,
+        bytes[] calldata sigs,
+        bytes calldata gameState,
+        uint8 demandSeat,
+        uint8 demandKind,
+        uint32 demandSlot,
+        uint256 nonce,
+        uint64 deadline,
+        bytes calldata intentSig
+    ) external {
+        Table storage t = _tables[tableId];
+        if (t.status != Status.Live) revert BadStatus();
+        bytes32 stateHash = state.structHash();
+        address signer = _consumeIntent(
+            _hashOpenDisputeIntent(tableId, stateHash, demandSeat, demandKind, demandSlot, nonce, deadline),
+            nonce,
+            deadline,
+            intentSig
+        );
+        _seatOf(t, signer);
+        _openDispute(t, tableId, state, sigs, gameState, demandSeat, demandKind, demandSlot);
+    }
+
+    function _openDispute(
+        Table storage t,
+        bytes32 tableId,
+        ChannelStateN calldata state,
+        bytes[] calldata sigs,
+        bytes calldata gameState,
+        uint8 demandSeat,
+        uint8 demandKind,
+        uint32 demandSlot
+    ) internal {
         _checkCoSigned(t, tableId, state, sigs);
         if (t.hasCheckpoint && state.nonce < t.checkpointNonce) revert StaleNonce();
         // Uniform rake ceiling across settle/timeout: the disputeState carried here is what
@@ -563,6 +852,39 @@ contract HoldemTableN is EIP712, ChannelTableBase {
         if (t.status != Status.Disputed) revert BadStatus();
         if (t.demandKind != DEMAND_MOVE) revert NotDemanded();
         uint8 seat = _seatOf(t, msg.sender);
+        _respondWithMove(t, tableId, seat, gameState, move);
+    }
+
+    /// Relayed variant of `respondWithMove`: `gameStateHash` is `t.rules.hashGameState(gameState)`
+    /// computed HERE, at execution time, from the submitted `gameState` — the exact same value
+    /// `_respondWithMove`'s own `BadGameState` guard below independently checks against
+    /// `t.disputeState.gameStateHash`. Binding it into the intent gives cross-dispute replay
+    /// protection for free: if this intent is replayed against a LATER dispute round on the same
+    /// table (a different contested game state), that guard rejects it, because the (unmodified)
+    /// replayed `gameState` bytes recompute to no longer match the table's CURRENT
+    /// `disputeState.gameStateHash`. `moveHash = keccak256(move)` pins the exact move bytes.
+    function respondWithMoveFor(
+        bytes32 tableId,
+        bytes calldata gameState,
+        bytes calldata move,
+        uint256 nonce,
+        uint64 deadline,
+        bytes calldata sig
+    ) external {
+        Table storage t = _tables[tableId];
+        if (t.status != Status.Disputed) revert BadStatus();
+        if (t.demandKind != DEMAND_MOVE) revert NotDemanded();
+        bytes32 gameStateHash = t.rules.hashGameState(gameState);
+        bytes32 moveHash = keccak256(move);
+        address signer =
+            _consumeIntent(_hashRespondMoveIntent(tableId, gameStateHash, moveHash, nonce, deadline), nonce, deadline, sig);
+        uint8 seat = _seatOf(t, signer);
+        _respondWithMove(t, tableId, seat, gameState, move);
+    }
+
+    function _respondWithMove(Table storage t, bytes32 tableId, uint8 seat, bytes calldata gameState, bytes calldata move)
+        internal
+    {
         if (seat != t.demandSeat) revert NotYourDispute();
         if (t.rules.hashGameState(gameState) != t.disputeState.gameStateHash) revert BadGameState();
         bytes memory newState = t.rules.applyMove(gameState, move);
@@ -577,6 +899,16 @@ contract HoldemTableN is EIP712, ChannelTableBase {
     /// never be force-folded for an action it actually performed; a forged/incorrect share
     /// reverts (BadShareProof) and the clock keeps running toward forced-fold.
     ///
+    /// @dev PERMISSIONLESS (2026-08 signed-intent pass) — no `_seatOf(msg.sender)` gate. The
+    /// responder is always `t.demandSeat` (read directly off the dispute, never derived from the
+    /// caller). The function is self-authenticating regardless: the DLEQ check below verifies the
+    /// proof against `_deckKey[tableId][t.demandSeat]`, a specific registered secret only that
+    /// seat's holder can produce a passing witness for — a stranger relaying this call can only
+    /// ever land the TRUE demanded seat's own truthful share (helping that seat exactly as if it
+    /// had submitted directly); it can never fabricate a share, redirect one to a different seat,
+    /// or move funds (this function only clears the dispute — it never pays out). An invalid
+    /// proof reverts `BadShareProof` and stores nothing.
+    ///
     /// `deck` is the full contested masked deck as affine secp256k1 coords, 4 words/card
     ///   [c1.x, c1.y, c2.x, c2.y], in slot order — bound to disputeState.deckCommitment.
     /// `share` is the claimed decryption share d = c1·sk (affine).
@@ -590,8 +922,9 @@ contract HoldemTableN is EIP712, ChannelTableBase {
         Table storage t = _tables[tableId];
         if (t.status != Status.Disputed) revert BadStatus();
         if (t.demandKind != DEMAND_SHARE) revert NotDemanded();
-        uint8 seat = _seatOf(t, msg.sender);
-        if (seat != t.demandSeat) revert NotYourDispute();
+        // The responder is always the structurally-demanded seat — see the @dev PERMISSIONLESS
+        // note above for why this is safe without a caller identity check.
+        uint8 seat = t.demandSeat;
         // The passed deck must be exactly the one committed in the contested state.
         if (_deckHash(deck) != t.disputeState.deckCommitment) revert BadDeck();
         uint32 slot = t.demandSlot;
