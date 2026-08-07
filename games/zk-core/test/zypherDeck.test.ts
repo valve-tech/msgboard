@@ -6,7 +6,7 @@
 // init_prover_key(52) is ~11s and each shuffle_cards is ~10s. Timeouts are generous accordingly.
 import { describe, it, expect } from 'vitest'
 import type { Hex } from 'viem'
-import { ZypherDeckProvider } from '../src/zypherDeck'
+import { ZypherDeckProvider, uncompressPoint, compressPoint } from '../src/zypherDeck'
 
 // A no-op signer: the Zypher shuffle proof is a SNARK, not a signature (the seam's ShuffleSigner
 // is unused by this provider, kept only for interface parity).
@@ -74,6 +74,19 @@ describe('ZypherDeckProvider (Baby-JubJub real ZK shuffle)', () => {
     tampered.deck[5] = d0[5]! // swap an original card back in
     expect(await deck.verifyShuffle(agg, d0, tampered, noopSigner.address)).toBe(false)
   }, 120_000)
+
+  it('compressPoint is the inverse of uncompressPoint (round-trips a packed pubkey through raw x,y)', async () => {
+    // Exercises the on-chain-deck-key-read path (H-2 fix): ZkTable.sol's `deckKeys` mapping
+    // stores raw (x, y), not a packed key, so a client reading it back must re-compress before
+    // handing it to `provider.aggregate(...)`/`verifyDealBinding`'s `registeredKeys`.
+    const a = await deck.keygen()
+    const { x, y } = uncompressPoint(a.pub)
+    const recompressed = compressPoint(x, y)
+    expect(recompressed).toBe(a.pub)
+    // and the recompressed key aggregates identically to the original packed one
+    const b = await deck.keygen()
+    expect(deck.aggregate([recompressed, b.pub])).toBe(deck.aggregate([a.pub, b.pub]))
+  }, 60_000)
 
   it('rejects a reveal from the wrong key', async () => {
     const a = await deck.keygen()

@@ -34,7 +34,7 @@ export type X402Domain = {
 /// its address passed explicitly, or it throws MissingLibraryAddressError /
 /// UnnecessaryLibraryLinkError. `deployDeckChallengeLib` below deploys DeckConstants first, links
 /// it into DeckChallengeLib, and returns the linked DeckChallengeLib address.
-const deployDeckChallengeLib = async () => {
+export const deployDeckChallengeLib = async () => {
   const deckConstants = await hre.viem.deployContract('DeckConstants')
   const deckChallengeLib = await hre.viem.deployContract('DeckChallengeLib', [], {
     libraries: { DeckConstants: deckConstants.address },
