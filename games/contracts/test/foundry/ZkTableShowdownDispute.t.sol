@@ -109,7 +109,7 @@ contract ZkTableShowdownDisputeTest is Test {
         // hardhat suite, ZkTableDispute.test.ts's deployOrEtchRevealVerifier).
         revealVerifier = _deployReveal();
         rules = new HiLoWarRules(revealVerifier, address(0));
-        zk = new ZkTable(address(0)); // factory=0 skips the clone-check (unit-test funding via a bare mock)
+        zk = new ZkTable(address(0), address(0)); // factory=0 skips the clone-check (unit-test funding via a bare mock)
     }
 
     // ── x402 deposit-auth helpers ────────────────────────────────────────────

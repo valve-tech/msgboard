@@ -31,7 +31,7 @@ contract ZkTableFuzzTest is Test {
     uint64 internal constant VALID_BEFORE = type(uint64).max;
 
     function setUp() public {
-        zk = new ZkTable(address(0)); // factory=0 skips the clone-check (unit-test funding via a bare mock)
+        zk = new ZkTable(address(0), address(0)); // factory=0 skips the clone-check (unit-test funding via a bare mock)
         rules = new MockGameRules();
         token = new MockX402();
         a = vm.addr(pkA);

@@ -8,6 +8,14 @@ import {IGameRules} from "./IGameRules.sol";
 import {ChannelTableBase} from "./ChannelTableBase.sol";
 import {SignedIntentBase} from "./SignedIntentBase.sol";
 import {ShowdownDecodeLib} from "../vendor/uzkge/ShowdownDecodeLib.sol";
+// DO NOT REMOVE as "unused" — ZkTable no longer calls DeckConstants directly (that moved into
+// DeckChallengeLib), but empirically (verified via repeated clean `hardhat compile` runs)
+// removing this import shifts solc's viaIR/optimizer-runs:1000 codegen for THIS contract from
+// 23,908 deployed bytes to 25,190 — over EIP-170's 24,576-byte limit. Whatever whole-compilation-
+// unit effect causes this, keeping the import is what keeps ZkTable deployable; DeckChallengeLib
+// itself is the one that actually calls `DeckConstants.initialDeckAndAgg`.
+import {DeckConstants} from "./DeckConstants.sol";
+import {DeckShuffleStep, DeckChallengeLib, IShuffleVerifier52DCL as IShuffleVerifier52} from "./DeckChallengeLib.sol";
 import {IX402Token} from "../games/FlipBookX.sol";
 
 /// A wrapper clone's own view of the underlying asset it wraps (ValveWrapperImpl.underlying()).
@@ -22,6 +30,11 @@ interface IValveWrapperView {
 interface IWrapperFactory {
     function wrapperOf(address underlying) external view returns (address);
 }
+
+// NOTE: `IShuffleVerifier52` (the vendored 52-card PLONK shuffle verifier's calling interface —
+// NON-VIEW, see DeckChallengeLib.sol's `IShuffleVerifier52DCL` header for why) is imported above
+// as an alias of `DeckChallengeLib.IShuffleVerifier52DCL` rather than re-declared here, so ZkTable
+// and DeckChallengeLib share exactly ONE interface type — no cast needed at the call boundary.
 
 /// @notice Two-party state-channel card table. Stakes escrow at create/join, play is
 /// off-chain co-signed states, the chain is touched again only to settle, top up, or
@@ -98,10 +111,24 @@ contract ZkTable is EIP712, ChannelTableBase, SignedIntentBase {
     /// revealed (haveMask == 0x0F) — must settle via the permissionless, deadline-free
     /// finalizeShowdown instead (see resolveTimeout's header for why).
     error MustFinalize();
+    /// A `challengeDeck` transcript fails ANY structural/binding check against the co-signed
+    /// `disputeState` (shape, root, canonical head, chain, or per-step hash pins) — see
+    /// `_challengeDeck`'s ordered checklist. Deliberately one error for the whole class: every
+    /// failure mode here means "this is not the transcript the co-signed state committed to",
+    /// and the remedy is identical regardless of which specific pin didn't match (resubmit the
+    /// correct transcript, or let the window lapse to the guaranteed split terminal).
+    error BadTranscript();
     // An undecodable card is NOT an error path: CardTable52.decode returns (bool ok, uint8)
-    // rather than reverting, so finalizeShowdown routes a bad-decode or duplicate-card deck to the
-    // pot-split fallback (see _showdownOutcome) instead of bricking — this is what keeps a
-    // fully-revealed showdown always settleable (no freeze) even on a malformed deck.
+    // rather than reverting. Pre-Wave-2 this routed a bad-decode or duplicate-card deck straight
+    // to a pot-split fallback (see _showdownOutcome); Wave-2 (deckkey-binding-spec.md) instead
+    // opens a one-shot DEMAND_DECOY challenge window (see _finalizeShowdown /
+    // DecoyWindowOpened) so the masking-side deviation that CAUSES the bad decode can be
+    // attributed and forfeited to the counterparty. Split remains the guaranteed outcome either
+    // way the window can resolve without a real attribution: nobody successfully challenges
+    // before it lapses (_resolveDecoyTimeout), or a challenge comes back unattributable (every
+    // step verifies against the pinned pkc — see `_adjudicateDecoy`'s header for why that is
+    // never charged to the challenger). A fully-revealed showdown therefore stays settleable
+    // within one extra clock window, never frozen, exactly as before.
 
     struct Table {
         address playerA;
@@ -148,6 +175,14 @@ contract ZkTable is EIP712, ChannelTableBase, SignedIntentBase {
         uint8 haveMask;
     }
 
+    // NOTE: the co-signed shuffle-chain link type (deckkey-binding-spec.md B2 — `shuffleRoot`
+    // commits `keccak256(abi.encode(DeckShuffleStep[]))` over the ordered transcript) is
+    // `DeckShuffleStep`, imported from DeckChallengeLib.sol rather than nested here as `ZkTable.
+    // Step` — it's a FREE-STANDING struct so `DeckChallengeLib` (an external library ZkTable
+    // itself links against) can share the identical type with no circular import. See
+    // DeckChallengeLib.sol's header for the full struct-field rationale (framing-attack closure
+    // via authorSeat + proofHash) and `challengeDeck`'s own doc for how it's used.
+
     /// A signed x402 EIP-3009/7598 pull authorization: `from` is the player identity (NOT
     /// necessarily `msg.sender` — this is the whole point, see the contract header), `sig` is
     /// either a 65-byte (v,r,s) EOA signature or an EIP-7598 `bytes` payload (ERC-1271/Safe),
@@ -190,10 +225,29 @@ contract ZkTable is EIP712, ChannelTableBase, SignedIntentBase {
     /// the clone-check entirely (used by the unit-test suite, which funds via a bare MockX402).
     IWrapperFactory public immutable factory;
 
-    /// finalizeShowdown's `winner` value meaning "the pot was split" (a decode failure or a
-    /// duplicate-card deck, NOT an on-chain rank tie — that's `winner == 0`). Distinct from 0/1/2
-    /// so an off-chain listener can tell the two "nobody clearly won" outcomes apart.
-    uint8 internal constant SHOWDOWN_SPLIT = 3;
+    /// The vendored 52-card PLONK shuffle verifier (see IShuffleVerifier52's header for why this
+    /// is a real CALL, never a staticcall). Immutable, set once at deploy. `address(0)` degrades
+    /// safely — `_challengeDeck` reverts outright (see its zero-address guard) rather than ever
+    /// misattributing a step, so the guaranteed permissionless split terminal
+    /// (`_resolveDecoyTimeout`) is still reachable and no fund ever locks; this is the same
+    /// escape hatch the existing unit-test suites use for `factory` (address(0) skips a check
+    /// rather than requiring every unit test to deploy the full verifier stack).
+    IShuffleVerifier52 public immutable shuffleVerifier;
+
+    /// A fourth dispute demand, ZkTable-only (see DEMAND_MOVE/SHARE/SHOWDOWN in
+    /// ChannelTableBase — this one is declared locally rather than shared, same rationale as
+    /// DEMAND_SHOWDOWN: HoldemTableN has no path for it). Never reachable via `openDispute`
+    /// (which only accepts MOVE/SHARE/SHOWDOWN) — the ONLY writer is `_finalizeShowdown`'s
+    /// garbage branch, transitioning an already-open DEMAND_SHOWDOWN dispute into a one-shot
+    /// deck-shuffle challenge window (deckkey-binding-spec.md B5). See `challengeDeck` /
+    /// `_resolveDecoyTimeout` / resolveTimeout's exhaustive dispatch.
+    uint8 internal constant DEMAND_DECOY = 4;
+
+    // NOTE: the `VERIFY_GAS_FLOOR` gas-starvation guard (a floor on `gasleft()` required
+    // immediately before each `verify52` call — see EIP-150's 63/64 forwarding rule) lives in
+    // `DeckChallengeLib`, not here — the whole verify52 attribution loop was moved to that
+    // EXTERNAL library to keep it out of ZkTable's own deployed bytecode (see that file's header
+    // and `_challengeDeck`'s comment).
 
     // NOTE (x402 conversion): gained the `token` field (inserted before `rules`) — a new position
     // in the event's non-indexed tuple, not just a new trailing field. No ABI artifact is
@@ -225,9 +279,25 @@ contract ZkTable is EIP712, ChannelTableBase, SignedIntentBase {
     /// A DEMAND_SHOWDOWN dispute was finalized: both cards decoded and the pot routed per
     /// `winner` (1=A, 2=B, 0=tie — see finalizeShowdown for the tie/forfeit rule).
     event ShowdownFinalized(bytes32 indexed tableId, uint8 cardA, uint8 cardB, uint8 winner);
+    /// `_finalizeShowdown`'s garbage branch (a bad decode or a duplicate card) opened a one-shot
+    /// DEMAND_DECOY challenge window instead of splitting immediately. `okA`/`okB` mirror
+    /// ShowdownDecodeLib's per-slot decode flags (both true + cardA==cardB is the
+    /// duplicate-card case); `deadline` is the fresh `clockBlocks`-out window a `challengeDeck`
+    /// must land within before `resolveTimeout`'s permissionless split terminal applies.
+    event DecoyWindowOpened(bytes32 indexed tableId, bool okA, bool okB, uint8 cardA, uint8 cardB, uint64 deadline);
+    /// A DEMAND_DECOY challenge resolved. `culprit` is 0 (UNATTRIBUTABLE — every step verified
+    /// against the pinned pkc, which is NOT proof the challenge was frivolous; see
+    /// `_adjudicateDecoy`'s header — so the pot is a pure, unpenalized SPLIT, no bond ever moves)
+    /// or the attributed seat (1/2 — that seat's step failed verify52 and its pot share was
+    /// forfeited to the other seat); `badStep` is the index of the first failing step
+    /// (meaningless when `culprit == 0`).
+    event DeckChallengeResolved(
+        bytes32 indexed tableId, uint8 challenger, uint8 culprit, uint8 badStep, uint256 payoutA, uint256 payoutB
+    );
 
-    constructor(address factory_) {
+    constructor(address factory_, address shuffleVerifier_) {
         factory = IWrapperFactory(factory_);
+        shuffleVerifier = IShuffleVerifier52(shuffleVerifier_);
     }
 
     /// Matches makeDomain() in zk-cards-core: { name: 'ZkTable', version: '1' }.
@@ -578,6 +648,14 @@ contract ZkTable is EIP712, ChannelTableBase, SignedIntentBase {
     /// resolved via `_seatOf` (a channel-signing key alone must not be able to cancel a table).
     bytes32 internal constant CANCEL_INTENT_TYPEHASH =
         keccak256("CancelIntent(bytes32 tableId,uint256 nonce,uint64 deadline)");
+    /// Binds ONLY `tableId` (+ nonce/deadline) — deliberately not the transcript itself. Every
+    /// economically-relevant term of a decoy challenge (the transcript, pkc, deck data, proofs)
+    /// is already pinned by ON-CHAIN commitments (`disputeState.jointKeyCommit`/`shuffleRoot`/
+    /// `deckCommitment`) that `_challengeDeck` independently re-derives and checks — a relayer
+    /// cannot substitute a different transcript without failing those checks regardless of what
+    /// this intent binds, so widening it would add no security, only surface area.
+    bytes32 internal constant CHALLENGE_DECK_INTENT_TYPEHASH =
+        keccak256("ChallengeDeckIntent(bytes32 tableId,uint256 nonce,uint64 deadline)");
 
     function _hashDisputeSetupIntent(bytes32 tableId, uint256 nonce, uint64 deadline) internal pure returns (bytes32) {
         return keccak256(abi.encode(DISPUTE_SETUP_INTENT_TYPEHASH, tableId, nonce, deadline));
@@ -605,6 +683,10 @@ contract ZkTable is EIP712, ChannelTableBase, SignedIntentBase {
 
     function _hashCancelIntent(bytes32 tableId, uint256 nonce, uint64 deadline) internal pure returns (bytes32) {
         return keccak256(abi.encode(CANCEL_INTENT_TYPEHASH, tableId, nonce, deadline));
+    }
+
+    function _hashChallengeDeckIntent(bytes32 tableId, uint256 nonce, uint64 deadline) internal pure returns (bytes32) {
+        return keccak256(abi.encode(CHALLENGE_DECK_INTENT_TYPEHASH, tableId, nonce, deadline));
     }
 
     // Public digest helpers — same rationale as `stateDigest`: let off-chain code (and the
@@ -636,6 +718,10 @@ contract ZkTable is EIP712, ChannelTableBase, SignedIntentBase {
 
     function cancelIntentDigest(bytes32 tableId, uint256 nonce, uint64 deadline) public view returns (bytes32) {
         return _hashTypedData(_hashCancelIntent(tableId, nonce, deadline));
+    }
+
+    function challengeDeckIntentDigest(bytes32 tableId, uint256 nonce, uint64 deadline) public view returns (bytes32) {
+        return _hashTypedData(_hashChallengeDeckIntent(tableId, nonce, deadline));
     }
 
     /// Every state the contract accepts must conserve the CURRENT escrow total —
@@ -818,7 +904,19 @@ contract ZkTable is EIP712, ChannelTableBase, SignedIntentBase {
         if (t.status != Status.Disputed) revert BadStatus();
         _checkCoSigned(t, tableId, state, sigA, sigB);
         // setup dispute (demandKind 0): any co-signed state proves liveness;
-        // move/share disputes need strictly newer than the contested state.
+        // move/share/showdown/decoy disputes need strictly newer than the contested state.
+        // DEMAND_DECOY (M4): this is a deliberate mutual abort of an open decoy-challenge
+        // window — but note "strictly newer" is measured against the DISPUTED state's nonce, and
+        // `openDispute` allows opening at an OLDER BET_COMMIT state than the latest one both seats
+        // actually co-signed. So a cheater who legitimately holds a higher-nonce co-signed state
+        // CAN produce a strictly-newer one here and front-run the decoy window back to Live — a
+        // newer co-signed state existing is NOT impossible. This abort path is reachable, but
+        // still safe: the honest victim is never forced to accept it as final, because it can
+        // simply open a FRESH DEMAND_MOVE dispute against that same cheater and grind it to the
+        // MOVE-timeout backstop (forfeit-to-disputant on an unanswered clock), rather than relying
+        // on the decoy window's split-only outcome ever being the last word. `_clearDispute` below
+        // wipes the DEMAND_DECOY phase exactly like any other demand kind — no special-casing
+        // needed.
         if (t.demandKind != 0 && state.nonce <= t.disputeState.nonce) revert StaleNonce();
         t.checkpointNonce = state.nonce;
         t.hasCheckpoint = true;
@@ -898,19 +996,28 @@ contract ZkTable is EIP712, ChannelTableBase, SignedIntentBase {
     /// can no longer free-roll the pot by timeout — see resolveTimeout's header for the full
     /// truth table.
     ///
-    /// @dev OFF-CHAIN OBLIGATION — deck-key binding. respondWithShare (and postShowdownReveals)
-    /// prove a share against the key each seat registered at create/join (deckKeys), but NOTHING
-    /// on-chain ties that key to the key actually used to mask the committed deck. A seat that
-    /// registers a decoy key can answer with snark-valid but useless shares. For a SHARE dispute
-    /// this only defeats reveal-forcing (forfeit-only, per the note above). For a SHOWDOWN
-    /// dispute it can make its own slot decrypt to a point outside the fixed 52-card table —
-    /// finalizeShowdown detects that (CardTable52.decode reports ok=false) and falls back to
-    /// SPLITTING the pot rather than reverting or forfeiting the whole pot to either side, so a
-    /// decoy key can at most cost its registrant half the pot, never steal the other half. Full
-    /// closure — on-chain enforcement that each registered deckKey actually multiplies into the
-    /// state's committed joint masking key — is a follow-up, out of scope here. Clients MUST
-    /// verify the deck's aggregate masking key equals the product of the registered deckKeys before
-    /// co-signing any DEAL state.
+    /// @dev OFF-CHAIN OBLIGATION — deck-key binding (PARTIALLY CLOSED, Wave-2). respondWithShare
+    /// (and postShowdownReveals) prove a share against the key each seat registered at
+    /// create/join (deckKeys), but NOTHING in THIS function ties that key to the key actually
+    /// used to mask the committed deck. A seat that registers a decoy key can answer with
+    /// snark-valid but useless shares. For a bare SHARE dispute this only defeats reveal-forcing
+    /// (forfeit-only, per the note above) — a SHARE demand never reaches the deck-key-binding
+    /// machinery below, so that gap is unchanged and remains out of scope here.
+    ///
+    /// For a SHOWDOWN dispute, deckkey-binding-spec.md's Wave-2 closes this: a decoy/wrong key
+    /// makes its own slot decrypt to a point outside the fixed 52-card table (or, for a
+    /// stacked/duplicated deck, both slots decode to the SAME card) — `finalizeShowdown` detects
+    /// that (CardTable52.decode reports ok=false, or cardA==cardB) and, per the §1 theorem
+    /// (attribution can only come from the masking side, never the reveal side — every reveal is
+    /// already snark-proven honest), opens a one-shot DEMAND_DECOY challenge window
+    /// instead of guessing (see `_finalizeShowdown`'s garbage branch / `challengeDeck`). A
+    /// successful challenge forfeits the WHOLE pot to the deviating seat's counterparty — no
+    /// longer capped at "half the pot" — with the pre-Wave-2 50/50 split remaining the guaranteed
+    /// fallback only if the window lapses with no successful attribution (never a steal). Clients
+    /// still MUST verify the deck's aggregate masking key equals the sum of the registered
+    /// deckKeys, and persist the full signed shuffle transcript, before co-signing any DEAL state
+    /// (deckkey-binding-spec.md B3) — a client that skips this forfeits the protection exactly as
+    /// before, falling back to the split terminal.
     ///
     /// @dev PERMISSIONLESS (2026-08 signed-intent pass) — no `_seatOf(msg.sender)` gate. The
     /// responder is always the STRUCTURAL counterparty of the dispute (`seat = 3 - t.disputant`
@@ -941,9 +1048,9 @@ contract ZkTable is EIP712, ChannelTableBase, SignedIntentBase {
         if (slot > 51) revert BadDeck();
         uint256[2] memory pk = deckKeys[tableId][seat];
         uint256[6] memory pi = [deck[4 * slot], deck[4 * slot + 1], reveal[0], reveal[1], pk[0], pk[1]];
-        (bool callOk, bytes memory ret) = t.rules.revealVerifier()
-            .staticcall(abi.encodeWithSignature("verifyRevealWithSnark(uint256[6],uint256[8])", pi, zkproof));
-        if (!callOk || ret.length < 32 || !abi.decode(ret, (bool))) revert BadProof();
+        // Shared staticcall+decode logic lives in DeckChallengeLib.verifyReveal (moved out
+        // verbatim — see that function's header); same checks, same order, same BadProof revert.
+        if (!DeckChallengeLib.verifyReveal(t.rules.revealVerifier(), pi, zkproof)) revert BadProof();
         _clearDispute(tableId, t);
         emit DisputeAnsweredWithShare(tableId, slot, reveal[0], reveal[1]);
     }
@@ -976,9 +1083,9 @@ contract ZkTable is EIP712, ChannelTableBase, SignedIntentBase {
 
         uint256[2] memory pk = deckKeys[tableId][seat];
         uint256[6] memory pi = [deck[4 * slot], deck[4 * slot + 1], reveal[0], reveal[1], pk[0], pk[1]];
-        (bool callOk, bytes memory ret) = t.rules.revealVerifier()
-            .staticcall(abi.encodeWithSignature("verifyRevealWithSnark(uint256[6],uint256[8])", pi, zkproof));
-        if (!callOk || ret.length < 32 || !abi.decode(ret, (bool))) revert BadProof();
+        // Shared staticcall+decode logic lives in DeckChallengeLib.verifyReveal (moved out
+        // verbatim — see that function's header); same checks, same order, same BadProof revert.
+        if (!DeckChallengeLib.verifyReveal(t.rules.revealVerifier(), pi, zkproof)) revert BadProof();
 
         uint8 seatIdx = seat - 1; // seat is always 1 or 2 (from _seatOf)
         uint8 bit = uint8(1 << (slotIdx * 2 + seatIdx));
@@ -1063,32 +1170,50 @@ contract ZkTable is EIP712, ChannelTableBase, SignedIntentBase {
         ];
         (bool okA, uint8 cardA, bool okB, uint8 cardB) = ShowdownDecodeLib.decodeBothCards(deck, sd.slotA, sd.slotB, revealsFlat);
 
-        // Conservation invariant (_checkCoSigned, enforced when this state was co-signed and
-        // accepted at openDispute) guarantees balanceA + balanceB + pot == escrowA + escrowB,
-        // so routing the pot below consumes the full escrow exactly — same accounting shape as
-        // resolveTimeout.
-        (uint256 toA, uint256 toB, uint8 winner) = _showdownOutcome(t, okA, cardA, okB, cardB, gameState);
+        if (okA && okB && cardA != cardB) {
+            // Conservation invariant (_checkCoSigned, enforced when this state was co-signed and
+            // accepted at openDispute) guarantees balanceA + balanceB + pot == escrowA + escrowB,
+            // so routing the pot below consumes the full escrow exactly — same accounting shape
+            // as resolveTimeout.
+            (uint256 toA, uint256 toB, uint8 winner) = _showdownOutcome(t, cardA, cardB, gameState);
 
-        // Effects before the token transfers (CEI, matching _payout's own discipline): emit, wipe
-        // the reveal accumulator + dispute fields, THEN transfer. NB: payout is a wrapper-token
-        // safeTransfer (no receiver callback), not a native forced-send — a genuine clone's
-        // transfer cannot revert-grief, but the treasury/recipients must be transfer-able addresses.
-        emit ShowdownFinalized(tableId, cardA, cardB, winner);
-        _clearDispute(tableId, t);
-        _payout(t, tableId, toA, toB);
+            // Effects before the token transfers (CEI, matching _payout's own discipline): emit,
+            // wipe the reveal accumulator + dispute fields, THEN transfer. NB: payout is a
+            // wrapper-token safeTransfer (no receiver callback), not a native forced-send — a
+            // genuine clone's transfer cannot revert-grief, but the treasury/recipients must be
+            // transfer-able addresses.
+            emit ShowdownFinalized(tableId, cardA, cardB, winner);
+            _clearDispute(tableId, t);
+            _payout(t, tableId, toA, toB);
+        } else {
+            // deckkey-binding-spec.md §1 theorem: a fully-revealed garbage decode (!okA||!okB) or
+            // a duplicate card (cardA==cardB, provably impossible under a canonical, honestly-
+            // shuffled head) can ONLY be caused by a masking-side deviation — the reveal side is
+            // already snark-proven honest per seat, so it carries zero attribution information.
+            // Do NOT split/payout/clear here: open the one-shot DEMAND_DECOY challenge
+            // window instead, with a FRESH deadline, so the actual deviating seat can be
+            // attributed and forfeited via `challengeDeck`. `disputeState` (deckCommitment,
+            // balances, pot, gameStateHash, jointKeyCommit, shuffleRoot), `deckKeys`, and
+            // `showdowns[tableId]`'s reveal accumulator are all left exactly as they were — the
+            // window's guaranteed terminal (a successful challenge, or `resolveTimeout`'s
+            // permissionless split once the window lapses) still settles the table within one
+            // extra clock window, preserving the "a fully-revealed showdown is always
+            // settleable" invariant (see the H2 note at this file's header).
+            t.demandKind = DEMAND_DECOY;
+            t.disputeDeadline = uint64(block.number) + t.clockBlocks;
+            emit DecoyWindowOpened(tableId, okA, okB, cardA, cardB, t.disputeDeadline);
+        }
     }
 
-    /// Both cards must have decoded to real, DISTINCT table entries to have a real winner;
-    /// otherwise (a decode failure from a decoy/garbage deck key, or a stacked/duplicated deck
-    /// producing cardA==cardB) this SPLITS the pot instead of forfeiting it to either side — see
-    /// the off-chain-obligation note on respondWithShare for why this is the correct fallback
-    /// (a decoy key can cost its registrant at most half the pot, never hand the other seat's
-    /// half to it, and never revert the whole settlement). `winner` returned is 1/2 (a real
-    /// winner), 0 (an on-chain rank tie — forfeit-to-disputant, matching resolveTimeout's
-    /// undecided-terminal policy), or SHOWDOWN_SPLIT (this fallback), purely for the
-    /// ShowdownFinalized event; the tie and split cases are accounting-distinct even though
-    /// both can withhold the "whole pot to one side" outcome.
-    function _showdownOutcome(Table storage t, bool okA, uint8 cardA, bool okB, uint8 cardB, bytes calldata gameState)
+    /// The CLEAN branch only — `_finalizeShowdown` calls this exclusively when both cards decoded
+    /// to real, DISTINCT table entries (`okA && okB && cardA != cardB`); the garbage/duplicate
+    /// branch (deckkey-binding-spec.md §1: only ever caused by a masking-side deviation) is
+    /// hoisted OUT of this function and handled by `_finalizeShowdown` itself, which opens the
+    /// one-shot DEMAND_DECOY challenge window instead of splitting immediately — see that
+    /// function's `else` branch / `DecoyWindowOpened`. `winner` returned is 1/2 (a real winner) or
+    /// 0 (an on-chain rank tie — forfeit-to-disputant, matching resolveTimeout's undecided-
+    /// terminal policy), purely for the ShowdownFinalized event.
+    function _showdownOutcome(Table storage t, uint8 cardA, uint8 cardB, bytes calldata gameState)
         internal
         view
         returns (uint256 toA, uint256 toB, uint8 winner)
@@ -1096,17 +1221,128 @@ contract ZkTable is EIP712, ChannelTableBase, SignedIntentBase {
         toA = t.disputeState.balanceA;
         toB = t.disputeState.balanceB;
         uint256 pot = t.disputeState.pot;
-        if (okA && okB && cardA != cardB) {
-            winner = t.rules.showdownResult(gameState, cardA, cardB);
-            if (winner > 2) revert BadGameState();
-            uint8 potTo = winner == 0 ? t.disputant : winner;
-            if (potTo == 1) toA += pot; else toB += pot;
+        winner = t.rules.showdownResult(gameState, cardA, cardB);
+        if (winner > 2) revert BadGameState();
+        uint8 potTo = winner == 0 ? t.disputant : winner;
+        if (potTo == 1) toA += pot; else toB += pot;
+    }
+
+    // ── Decoy-deck challenge (deckkey-binding-spec.md B5 — attributable garbage decode) ──────
+
+    /// Seat-gated entry point: a seated party challenges the transcript behind the currently-open
+    /// DEMAND_DECOY window. `pkc` is the PINNED 24-word `refresh_joint_key` output the deck was
+    /// (honestly) masked under — checked against `disputeState.jointKeyCommit` together with the
+    /// on-chain-derived `Σ registered deckKeys` aggregate, never trusted bare. `steps` is the
+    /// ordered, co-signed shuffle-chain transcript (`disputeState.shuffleRoot`-pinned);
+    /// `afterDecks`/`proofs` are the actual deck words / verify52 proof bytes each step's hashes
+    /// commit to. See `_challengeDeck` for the full ordered checklist.
+    function challengeDeck(
+        bytes32 tableId,
+        uint256[24] calldata pkc,
+        DeckShuffleStep[] calldata steps,
+        uint256[][] calldata afterDecks,
+        bytes[] calldata proofs
+    ) external {
+        Table storage t = tables[tableId];
+        uint8 seat = _seatOf(t, msg.sender);
+        _challengeDeck(t, tableId, seat, pkc, steps, afterDecks, proofs);
+    }
+
+    /// Relayed variant of `challengeDeck`: seat resolved from the recovered signer via the same
+    /// `_seatOf` a direct call uses — see the contract header's signed-intent section. The intent
+    /// binds only `tableId` (see `CHALLENGE_DECK_INTENT_TYPEHASH`'s comment for why the
+    /// transcript itself needs no separate binding).
+    function challengeDeckFor(
+        bytes32 tableId,
+        uint256[24] calldata pkc,
+        DeckShuffleStep[] calldata steps,
+        uint256[][] calldata afterDecks,
+        bytes[] calldata proofs,
+        uint256 nonce,
+        uint64 deadline,
+        bytes calldata intentSig
+    ) external {
+        Table storage t = tables[tableId];
+        address signer = _consumeIntent(_hashChallengeDeckIntent(tableId, nonce, deadline), nonce, deadline, intentSig);
+        uint8 seat = _seatOf(t, signer);
+        _challengeDeck(t, tableId, seat, pkc, steps, afterDecks, proofs);
+    }
+
+    /// Ordered checklist (deckkey-binding-spec.md B5/§3.3 — every check MUST run in this order,
+    /// each a hard revert on failure, no partial credit): (0) zero-verifier fail-closed, (1)
+    /// phase gates, (2) transcript shape, (3) `shuffleRoot` binding, (4)-(5) on-chain-derived
+    /// `agg`/canonical head `D0` + `jointKeyCommit` binding, (6) head/chain/per-step-hash pins,
+    /// (7) the `verify52` attribution loop. ALL of this is
+    /// delegated to `DeckChallengeLib.verify` (an EXTERNAL library — see its header for why: this
+    /// is a large, loop-heavy, one-time-per-dispute path that pushed ZkTable's own deployed
+    /// bytecode over EIP-170's limit when it lived here) — `_challengeDeck` itself only reads the
+    /// table's own fields to pass through and, on a successful (non-reverting) return, dispatches
+    /// `(culprit, badStep)` to `_adjudicateDecoy`.
+    function _challengeDeck(
+        Table storage t,
+        bytes32 tableId,
+        uint8 seat,
+        uint256[24] calldata pkc,
+        DeckShuffleStep[] calldata steps,
+        uint256[][] calldata afterDecks,
+        bytes[] calldata proofs
+    ) internal {
+        uint256 balA = t.disputeState.balanceA;
+        uint256 balB = t.disputeState.balanceB;
+        uint256[2] memory k1 = deckKeys[tableId][1];
+        uint256[2] memory k2 = deckKeys[tableId][2];
+        (uint8 culprit, uint8 badStep) = DeckChallengeLib.verify(
+            shuffleVerifier,
+            t.status,
+            t.demandKind,
+            k1,
+            k2,
+            pkc,
+            steps,
+            afterDecks,
+            proofs,
+            t.disputeState.jointKeyCommit,
+            t.disputeState.shuffleRoot,
+            t.disputeState.deckCommitment
+        );
+        _adjudicateDecoy(t, tableId, seat, culprit, badStep, balA, balB);
+    }
+
+    /// Split out of `_challengeDeck` purely for viaIR stack budget (same rationale as
+    /// `_finalizeShowdown`/`ShowdownDecodeLib`'s split — see those headers). `culprit != 0` means
+    /// that seat's step failed verify52 against the pinned pkc: a REAL, attributable deviation, so
+    /// it forfeits the WHOLE pot to the other seat. `culprit == 0` means every step verified
+    /// against the pinned `pkc` — this is NOT proof the challenge was frivolous (see
+    /// `DeckChallengeLib.verify`'s header: on-chain we can only bind the PAIR (derived `agg`,
+    /// supplied `pkc`) to the co-signed `jointKeyCommit`, never prove `pkc == refresh_joint_key
+    /// (agg)`), so it is unattributable — co-sign-time binding fraud the contract cannot pin on
+    /// either seat. Charging the challenger anything in that case would make an honest victim of
+    /// exactly that fraud pay for raising it, so the outcome is a pure, unpenalized SPLIT of the
+    /// pot, identical in spirit to `resolveTimeout`'s undecided-terminal policy. Conservation:
+    /// `toA + toB == balA + balB + pot` always (the pot is either wholly reassigned or split, and
+    /// nothing else moves between the seats).
+    function _adjudicateDecoy(
+        Table storage t,
+        bytes32 tableId,
+        uint8 challenger,
+        uint8 culprit,
+        uint8 badStep,
+        uint256 balA,
+        uint256 balB
+    ) internal {
+        uint256 pot = t.disputeState.pot;
+        uint256 toA = balA;
+        uint256 toB = balB;
+        if (culprit != 0) {
+            if (culprit == 1) toB += pot; else toA += pot;
         } else {
-            winner = SHOWDOWN_SPLIT;
             uint256 half = pot / 2;
             toA += half + (pot - half * 2); // odd wei stays with A
             toB += half;
         }
+        emit DeckChallengeResolved(tableId, challenger, culprit, badStep, toA, toB);
+        _clearDispute(tableId, t);
+        _payout(t, tableId, toA, toB);
     }
 
     /// Clock expired unanswered. Setup disputes (demandKind 0) refund both escrows in full (no
@@ -1134,42 +1370,51 @@ contract ZkTable is EIP712, ChannelTableBase, SignedIntentBase {
     ///                                                   denies either side a griefing edge).
     /// Balances are always refunded to their respective seats in every branch; only the pot's
     /// destination differs.
+    ///
+    /// EXHAUSTIVE DISPATCH (H1): every branch below names an EXPLICIT `demandKind` (0,
+    /// DEMAND_SHOWDOWN, DEMAND_DECOY, or MOVE/SHARE) and the final `else` reverts `BadDemand` —
+    /// there is no implicit fall-through bucket that a future demand kind could silently land in
+    /// with the wrong payout rule. `_disputeSetup`/`_openDispute`/`_finalizeShowdown` are the only
+    /// three writers of `t.demandKind`, and each writes a value this dispatch explicitly names.
     function resolveTimeout(bytes32 tableId) external {
         Table storage t = tables[tableId];
         if (t.status != Status.Disputed) revert BadStatus();
         _validateClockExpired(t.disputeDeadline);
-        if (t.demandKind == 0) {
+        uint8 kind = t.demandKind;
+        if (kind == 0) {
             emit SetupDisputeRefunded(tableId);
             _payout(t, tableId, t.escrowA, t.escrowB);
-            return;
-        }
-        if (t.demandKind == DEMAND_SHOWDOWN) {
+        } else if (kind == DEMAND_SHOWDOWN) {
             _resolveShowdownTimeout(tableId, t);
-            return;
+        } else if (kind == DEMAND_DECOY) {
+            _resolveDecoyTimeout(tableId, t);
+        } else if (kind == DEMAND_MOVE || kind == DEMAND_SHARE) {
+            // Conservation invariant (_checkCoSigned) guarantees the contested state's
+            // balances + pot == escrowA + escrowB, so handing the pot to the recorded
+            // party and balances to each seat consumes the full escrow exactly — no excess.
+            uint256 toA = t.disputeState.balanceA;
+            uint256 toB = t.disputeState.balanceB;
+            // A3: at a co-signed *decided* terminal state pay the recorded winner, not the
+            // disputant — otherwise the loser could open an unanswerable dispute at FLIP_DONE
+            // and steal the pot on timeout. Undecided states keep forfeit-to-disputant (the
+            // reveal/move-forcing lever). Keyed on decided-ness, NOT demandKind, so it covers
+            // both MOVE and SHARE disputes opened at a decided FLIP_DONE.
+            //
+            // KNOWN v1 LIMITATION — undecided-terminal (tie/"war") carry-pot race. A rank-tie
+            // FLIP_DONE is undecided (resultSet=false, pot carried into warPot), so it takes this
+            // forfeit-to-disputant branch: if a player force-terminates an ongoing war by disputing
+            // the co-signed tie state, whichever of the TWO seated players reaches chain first takes
+            // the carried pot on timeout. Accepted as-is: low-stakes (only a carried pot, at a tie),
+            // symmetric (either player can do it), and both contributed equally. Only the two seats
+            // can dispute (_seatOf) — no outsider path. A fair 50/50 split would need a tri-state
+            // result() hook; deferred.
+            uint8 potTo = t.disputeResultDecided ? t.disputeResultWinner : t.disputant;
+            if (potTo == 1) toA += t.disputeState.pot; else toB += t.disputeState.pot;
+            emit DisputeForfeited(tableId, potTo, toA, toB);
+            _payout(t, tableId, toA, toB);
+        } else {
+            revert BadDemand();
         }
-        // Conservation invariant (_checkCoSigned) guarantees the contested state's
-        // balances + pot == escrowA + escrowB, so handing the pot to the recorded
-        // party and balances to each seat consumes the full escrow exactly — no excess.
-        uint256 toA = t.disputeState.balanceA;
-        uint256 toB = t.disputeState.balanceB;
-        // A3: at a co-signed *decided* terminal state pay the recorded winner, not the
-        // disputant — otherwise the loser could open an unanswerable dispute at FLIP_DONE
-        // and steal the pot on timeout. Undecided states keep forfeit-to-disputant (the
-        // reveal/move-forcing lever). Keyed on decided-ness, NOT demandKind, so it covers
-        // both MOVE and SHARE disputes opened at a decided FLIP_DONE.
-        //
-        // KNOWN v1 LIMITATION — undecided-terminal (tie/"war") carry-pot race. A rank-tie
-        // FLIP_DONE is undecided (resultSet=false, pot carried into warPot), so it takes this
-        // forfeit-to-disputant branch: if a player force-terminates an ongoing war by disputing
-        // the co-signed tie state, whichever of the TWO seated players reaches chain first takes
-        // the carried pot on timeout. Accepted as-is: low-stakes (only a carried pot, at a tie),
-        // symmetric (either player can do it), and both contributed equally. Only the two seats
-        // can dispute (_seatOf) — no outsider path. A fair 50/50 split would need a tri-state
-        // result() hook; deferred.
-        uint8 potTo = t.disputeResultDecided ? t.disputeResultWinner : t.disputant;
-        if (potTo == 1) toA += t.disputeState.pot; else toB += t.disputeState.pot;
-        emit DisputeForfeited(tableId, potTo, toA, toB);
-        _payout(t, tableId, toA, toB);
     }
 
     /// See resolveTimeout's header for the full truth table. `winner` in the emitted
@@ -1214,6 +1459,24 @@ contract ZkTable is EIP712, ChannelTableBase, SignedIntentBase {
 
         delete showdowns[tableId];
         emit DisputeForfeited(tableId, potTo, toA, toB);
+        _payout(t, tableId, toA, toB);
+    }
+
+    /// Guaranteed permissionless terminal (H2) for a DEMAND_DECOY window nobody successfully
+    /// challenged before the deadline: SPLIT the pot (never steal — matches the pre-Wave-2
+    /// fallback exactly, see `_finalizeShowdown`'s garbage-branch note). No `_seatOf` gate —
+    /// clock-gated only via `resolveTimeout`'s own `_validateClockExpired`, same as every other
+    /// timeout terminal. `winner == 0` in the emitted event means SPLIT here, same convention as
+    /// `_resolveShowdownTimeout`'s own no-real-winner case.
+    function _resolveDecoyTimeout(bytes32 tableId, Table storage t) internal {
+        uint256 toA = t.disputeState.balanceA;
+        uint256 toB = t.disputeState.balanceB;
+        uint256 pot = t.disputeState.pot;
+        uint256 half = pot / 2;
+        toA += half + (pot - half * 2); // odd wei stays with A
+        toB += half;
+        delete showdowns[tableId]; // mirrors _resolveShowdownTimeout — harmless no-op if unset
+        emit DisputeForfeited(tableId, 0, toA, toB);
         _payout(t, tableId, toA, toB);
     }
 

@@ -12,6 +12,8 @@ const state: ChannelState = {
   deckCommitment: '0x' + '22'.repeat(32) as `0x${string}`,
   phase: 3,
   gameStateHash: '0x' + '33'.repeat(32) as `0x${string}`,
+  jointKeyCommit: '0x' + '44'.repeat(32) as `0x${string}`,
+  shuffleRoot: '0x' + '55'.repeat(32) as `0x${string}`,
 }
 
 describe('channel state signing', () => {

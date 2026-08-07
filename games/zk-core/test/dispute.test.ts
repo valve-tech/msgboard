@@ -11,6 +11,8 @@ const coSigned: CoSignedState = {
     tableId, nonce: 4n, balanceA: 90n, balanceB: 100n, pot: 10n,
     deckCommitment: ('0x' + '11'.repeat(32)) as `0x${string}`,
     phase: 2, gameStateHash: ('0x' + '22'.repeat(32)) as `0x${string}`,
+    jointKeyCommit: ('0x' + '00'.repeat(32)) as `0x${string}`,
+    shuffleRoot: ('0x' + '00'.repeat(32)) as `0x${string}`,
   },
   sigA: '0xaa', sigB: '0xbb',
 }

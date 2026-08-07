@@ -19,6 +19,20 @@ import { buildModule } from "@nomicfoundation/hardhat-ignition/modules"
 // `msg.sender` (the Ignition deployer) — override `holdemTreasury` for a real deploy where the
 // deployer is not the intended rake recipient. HoldemTableN does NOT link ShowdownDecodeLib (or
 // any other external library) — unlike ZkTable, no `libraries` option is needed.
+//
+// ZkTable's constructor also takes `shuffleVerifier_` (deckkey-binding-spec.md Wave-2 — see
+// ZkTable.sol's `shuffleVerifier` immutable header): the SAME `shuffleVerifier` this module
+// already deploys for HiLoWarRules, wired into ZkTable too so `challengeDeck` can verify real
+// shuffle-chain transcripts. ZkTable now link-references TWO external libraries —
+// ShowdownDecodeLib (pre-existing) and DeckChallengeLib (new: houses `challengeDeck`'s
+// cryptographic verification pipeline, extracted out of ZkTable's own bytecode to stay under
+// EIP-170's 24576-byte deployed-code limit — see DeckChallengeLib.sol's header). DeckChallengeLib
+// itself link-references DeckConstants (the canonical-deck/on-chain-aggregate derivation — see
+// DeckConstants.sol's `initialDeckAndAgg`) — a TRANSITIVE library dependency that must be deployed
+// and linked into DeckChallengeLib BEFORE DeckChallengeLib is deployed, exactly like
+// hardhat-viem's `deployContract` requires (see games-contracts/test/x402.ts's
+// `deployDeckChallengeLib` for the identical pattern) — Ignition does not auto-resolve transitive
+// library links any more than hardhat-viem does.
 const ZkCardsModule = buildModule("ZkCardsModule", (m) => {
   const wrapperFactory = m.getParameter("wrapperFactory", "0xB10A088ea04B261371Edc9Fe9e6121B8355aDe70")
   const holdemTreasury = m.getParameter("holdemTreasury", "0x0000000000000000000000000000000000000000")
@@ -31,13 +45,33 @@ const ZkCardsModule = buildModule("ZkCardsModule", (m) => {
   // auto-link external libraries; the deploy fails validation (IGN716: "Invalid libraries...")
   // without this deployed and passed explicitly.
   const showdownDecodeLib = m.library("ShowdownDecodeLib")
-  const zkTable = m.contract("ZkTable", [wrapperFactory], {
-    libraries: { "contracts/vendor/uzkge/ShowdownDecodeLib.sol:ShowdownDecodeLib": showdownDecodeLib },
+  // DeckConstants must be deployed + linked into DeckChallengeLib BEFORE DeckChallengeLib itself
+  // is deployed (transitive external-library link — see this block's header comment).
+  const deckConstants = m.library("DeckConstants")
+  const deckChallengeLib = m.library("DeckChallengeLib", {
+    libraries: { "contracts/zk/DeckConstants.sol:DeckConstants": deckConstants },
+  })
+  const zkTable = m.contract("ZkTable", [wrapperFactory, shuffleVerifier], {
+    libraries: {
+      "contracts/vendor/uzkge/ShowdownDecodeLib.sol:ShowdownDecodeLib": showdownDecodeLib,
+      "contracts/zk/DeckChallengeLib.sol:DeckChallengeLib": deckChallengeLib,
+    },
   })
   const hiLoWarRules = m.contract("HiLoWarRules", [revealVerifier, shuffleVerifier])
   const holdemTableN = m.contract("HoldemTableN", [holdemTreasury, wrapperFactory])
 
-  return { vk1, vk2, shuffleVerifier, revealVerifier, zkTable, hiLoWarRules, showdownDecodeLib, holdemTableN }
+  return {
+    vk1,
+    vk2,
+    shuffleVerifier,
+    revealVerifier,
+    zkTable,
+    hiLoWarRules,
+    showdownDecodeLib,
+    deckConstants,
+    deckChallengeLib,
+    holdemTableN,
+  }
 })
 
 export default ZkCardsModule

@@ -51,7 +51,7 @@ contract ZkTableX402Test is Test {
     uint64 internal constant VALID_BEFORE = type(uint64).max;
 
     function setUp() public {
-        zk = new ZkTable(address(0)); // factory=0: the clone-check has its own dedicated tests below
+        zk = new ZkTable(address(0), address(0)); // factory=0: the clone-check has its own dedicated tests below
         rules = new MockGameRules();
         token = new MockX402();
         a = vm.addr(PK_A);
@@ -538,7 +538,7 @@ contract ZkTableX402Test is Test {
 
     function test_factoryCloneCheck_revertsBadToken_wrongWrapper() public {
         MockWrapperFactory factory = new MockWrapperFactory();
-        ZkTable zkChecked = new ZkTable(address(factory));
+        ZkTable zkChecked = new ZkTable(address(factory), address(0));
         MockX402 fakeToken = new MockX402();
         address underlying = address(0x1234);
         fakeToken.setUnderlying(underlying);
@@ -559,7 +559,7 @@ contract ZkTableX402Test is Test {
 
     function test_factoryCloneCheck_succeedsForGenuineWrapper() public {
         MockWrapperFactory factory = new MockWrapperFactory();
-        ZkTable zkChecked = new ZkTable(address(factory));
+        ZkTable zkChecked = new ZkTable(address(factory), address(0));
         MockX402 realToken = new MockX402();
         address underlying = address(0x1234);
         realToken.setUnderlying(underlying);

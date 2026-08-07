@@ -49,7 +49,7 @@ contract ZkTableRelayTest is Test {
     uint8 internal constant DEMAND_SHOWDOWN = 3;
 
     function setUp() public {
-        zk = new ZkTable(address(0)); // factory=0: unit-test funding via a bare MockX402
+        zk = new ZkTable(address(0), address(0)); // factory=0: unit-test funding via a bare MockX402
         rules = new MockGameRules();
         token = new MockX402();
         a = vm.addr(PK_A);

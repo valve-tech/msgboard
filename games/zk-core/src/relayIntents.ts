@@ -30,7 +30,7 @@ import type { ChannelDomain, ChannelState, StateSigner } from './stateSig'
 // intent without a second domain-wrap.
 const CHANNEL_STATE_TYPEHASH: Hex = keccak256(
   toHex(
-    'ChannelState(bytes32 tableId,uint64 nonce,uint256 balanceA,uint256 balanceB,uint256 pot,bytes32 deckCommitment,uint8 phase,bytes32 gameStateHash)',
+    'ChannelState(bytes32 tableId,uint64 nonce,uint256 balanceA,uint256 balanceB,uint256 pot,bytes32 deckCommitment,uint8 phase,bytes32 gameStateHash,bytes32 jointKeyCommit,bytes32 shuffleRoot)',
   ),
 )
 
@@ -47,6 +47,8 @@ export function channelStateStructHash(state: ChannelState): Hex {
         { type: 'bytes32' },
         { type: 'uint8' },
         { type: 'bytes32' },
+        { type: 'bytes32' },
+        { type: 'bytes32' },
       ],
       [
         CHANNEL_STATE_TYPEHASH,
@@ -58,6 +60,8 @@ export function channelStateStructHash(state: ChannelState): Hex {
         state.deckCommitment,
         state.phase,
         state.gameStateHash,
+        state.jointKeyCommit,
+        state.shuffleRoot,
       ],
     ),
   )
@@ -202,6 +206,28 @@ export const signCancelIntent = (signer: StateSigner, domain: ChannelDomain, int
 export const verifyCancelIntentSig = (
   expected: Hex, domain: ChannelDomain, intent: CancelIntent, sig: Hex,
 ): Promise<boolean> => verifyIntentSig(expected, domain, CANCEL_INTENT_TYPES, 'CancelIntent', intent, sig)
+
+// ── ChallengeDeckIntent(bytes32 tableId,uint256 nonce,uint64 deadline) — gasless relay for
+// ZkTable's `challengeDeckFor` (deckkey-binding wave-2 contract blueprint §3). Binds ONLY
+// `tableId` — everything economically-relevant about the challenge (the transcript, the pinned
+// pkc, the bond) is pinned by on-chain commitments (`disputeState.jointKeyCommit`/`shuffleRoot`),
+// not by the intent itself, mirroring `CancelIntent`'s minimal shape.
+export interface ChallengeDeckIntent { tableId: Hex; nonce: bigint; deadline: bigint }
+export const CHALLENGE_DECK_INTENT_TYPES = {
+  ChallengeDeckIntent: [
+    { name: 'tableId', type: 'bytes32' },
+    { name: 'nonce', type: 'uint256' },
+    { name: 'deadline', type: 'uint64' },
+  ],
+} as const
+
+export const hashChallengeDeckIntent = (domain: ChannelDomain, intent: ChallengeDeckIntent): Hex =>
+  hashIntent(domain, CHALLENGE_DECK_INTENT_TYPES, 'ChallengeDeckIntent', intent)
+export const signChallengeDeckIntent = (signer: StateSigner, domain: ChannelDomain, intent: ChallengeDeckIntent): Promise<Hex> =>
+  signIntent(signer, domain, CHALLENGE_DECK_INTENT_TYPES, 'ChallengeDeckIntent', intent)
+export const verifyChallengeDeckIntentSig = (
+  expected: Hex, domain: ChannelDomain, intent: ChallengeDeckIntent, sig: Hex,
+): Promise<boolean> => verifyIntentSig(expected, domain, CHALLENGE_DECK_INTENT_TYPES, 'ChallengeDeckIntent', intent, sig)
 
 // ════════════════════════════════════════════════════════════════════════════════════════════
 // HoldemTableN (2026-08 pass): the N-party sibling's `*For` entrypoints — `start`/

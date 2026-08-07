@@ -79,7 +79,7 @@ contract ZkTableUnitTest is Test {
     event TopUpReclaimed(bytes32 indexed tableId, uint8 seat, uint256 amount);
 
     function setUp() public {
-        zk = new ZkTable(address(0)); // factory=0 skips the clone-check (see ZkTableX402.t.sol for that path)
+        zk = new ZkTable(address(0), address(0)); // factory=0 skips the clone-check (see ZkTableX402.t.sol for that path)
         rules = new MockGameRules();
         token = new MockX402();
         a = vm.addr(PK_A);

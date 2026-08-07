@@ -73,11 +73,13 @@ contract ChannelStateUnitTest is Test {
         s.deckCommitment = keccak256("deck");
         s.phase = 2;
         s.gameStateHash = keccak256("gs");
+        s.jointKeyCommit = keccak256("jointKeyCommit");
+        s.shuffleRoot = keccak256("shuffleRoot");
     }
 
     function test_typehashConstant() public view {
         bytes32 expected = keccak256(
-            "ChannelState(bytes32 tableId,uint64 nonce,uint256 balanceA,uint256 balanceB,uint256 pot,bytes32 deckCommitment,uint8 phase,bytes32 gameStateHash)"
+            "ChannelState(bytes32 tableId,uint64 nonce,uint256 balanceA,uint256 balanceB,uint256 pot,bytes32 deckCommitment,uint8 phase,bytes32 gameStateHash,bytes32 jointKeyCommit,bytes32 shuffleRoot)"
         );
         assertEq(h.typehash(), expected);
     }
@@ -125,6 +127,14 @@ contract ChannelStateUnitTest is Test {
 
         s = _base();
         s.gameStateHash = keccak256("gs2");
+        assertTrue(h.structHashMem(s) != d);
+
+        s = _base();
+        s.jointKeyCommit = keccak256("jointKeyCommit2");
+        assertTrue(h.structHashMem(s) != d);
+
+        s = _base();
+        s.shuffleRoot = keccak256("shuffleRoot2");
         assertTrue(h.structHashMem(s) != d);
     }
 

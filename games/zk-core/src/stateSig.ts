@@ -9,6 +9,8 @@ export interface ChannelState {
   deckCommitment: Hex   // bytes32 keccak of serialized masked deck
   phase: number         // uint8, game-defined
   gameStateHash: Hex    // bytes32, game package owns the preimage
+  jointKeyCommit: Hex   // bytes32 keccak256(abi.encode(aggX, aggY, pkc[24])) — see deckkey-binding spec B1/B2
+  shuffleRoot: Hex      // bytes32 keccak256 of the ordered shuffle transcript — see deckkey-binding spec B2
 }
 
 export interface ChannelDomain {
@@ -30,6 +32,8 @@ export const CHANNEL_STATE_TYPES = {
     { name: 'deckCommitment', type: 'bytes32' },
     { name: 'phase', type: 'uint8' },
     { name: 'gameStateHash', type: 'bytes32' },
+    { name: 'jointKeyCommit', type: 'bytes32' },
+    { name: 'shuffleRoot', type: 'bytes32' },
   ],
 } as const
 

@@ -52,7 +52,7 @@ no_match_contract = '^ZkTable$'
 # HoldemShareDispute.t.sol shells out (vm.ffi) to the real off-chain secp256k1 prover; it runs
 # under the dedicated `ffi` profile (FOUNDRY_PROFILE=ffi ... --ffi), excluded here so the default
 # `forge test` (no --ffi) stays green.
-skip = ['test/foundry/ShuffleVerifier52.t.sol', 'test/foundry/ShuffleVerifier52Positive.t.sol', 'test/foundry/RevealVerifierBabyJubJub.t.sol', 'test/foundry/DiceSettleVerifier.t.sol', 'test/foundry/SettleWithProof.t.sol', 'test/foundry/HoldemShareDispute.t.sol', 'test/foundry/SolveResolvers.t.sol', 'test/foundry/CardTable52.t.sol', 'test/foundry/ZkTableShowdownDispute.t.sol']
+skip = ['test/foundry/ShuffleVerifier52.t.sol', 'test/foundry/ShuffleVerifier52Positive.t.sol', 'test/foundry/RevealVerifierBabyJubJub.t.sol', 'test/foundry/DiceSettleVerifier.t.sol', 'test/foundry/SettleWithProof.t.sol', 'test/foundry/HoldemShareDispute.t.sol', 'test/foundry/SolveResolvers.t.sol', 'test/foundry/CardTable52.t.sol', 'test/foundry/ZkTableShowdownDispute.t.sol', 'test/foundry/DeckConstants.t.sol']
 
 # M2 (zk mode-2) integration test (SettleWithProof) reads the proof fixture + the
 # etched verifier-runtime fixture. (The reveal-snark tamper test keeps ./test/fixtures.)
