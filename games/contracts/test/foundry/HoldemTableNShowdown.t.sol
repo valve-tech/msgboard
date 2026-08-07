@@ -7,6 +7,9 @@ import {ChannelTableBase} from "../../contracts/zk/ChannelTableBase.sol";
 import {ChannelStateN, SidePot as ChannelSidePot} from "../../contracts/zk/ChannelStateN.sol";
 import {IGameRulesN} from "../../contracts/zk/IGameRulesN.sol";
 import {HoldemRules} from "../../contracts/zk/HoldemRules.sol";
+import {MockX402} from "../../contracts/test/MockX402.sol";
+import {IX402Token} from "../../contracts/games/FlipBookX.sol";
+import {X402AuthLib} from "./X402AuthLib.sol";
 
 /// @notice Task 7 channel-settle acceptance: drive the real HoldemRules SHOWDOWN resolution,
 /// bridge the resulting per-seat balances + rake into a ChannelStateN, co-sign N-of-N and
@@ -15,6 +18,7 @@ import {HoldemRules} from "../../contracts/zk/HoldemRules.sol";
 contract HoldemTableNShowdownTest is Test {
     HoldemTableN internal zk;
     HoldemRules internal rules;
+    MockX402 internal token;
     address internal treasury = address(0x7);
 
     uint64 internal constant CLOCK = 30;
@@ -30,8 +34,71 @@ contract HoldemTableNShowdownTest is Test {
     function _card(uint8 rank, uint8 suit) internal pure returns (uint8) { return (rank - 2) * 4 + suit; }
 
     function setUp() public {
-        zk = new HoldemTableN(treasury);
+        zk = new HoldemTableN(treasury, address(0));
         rules = new HoldemRules();
+        token = new MockX402();
+        for (uint256 i = 0; i <= 9; i++) {
+            token.mint(vm.addr(_pk(i)), 10_000_000 ether);
+        }
+    }
+
+    // ── x402 deposit-auth helpers ────────────────────────────────────────────
+
+    uint64 internal constant VALID_BEFORE = type(uint64).max;
+
+    function _authFor(uint256 pk, address from, uint256 value, bytes32 nonce) internal returns (HoldemTableN.DepositAuth memory) {
+        bytes32 digest = X402AuthLib.receiveDigest(token.DOMAIN_SEPARATOR(), from, address(zk), value, VALID_BEFORE, nonce);
+        return HoldemTableN.DepositAuth({from: from, validBefore: VALID_BEFORE, salt: bytes32(0), sig: X402AuthLib.sign65(pk, digest)});
+    }
+
+    function _createAuth(
+        uint256 pk,
+        address from,
+        uint256 buyIn,
+        IGameRulesN rules_,
+        uint256 maxSeats,
+        uint16 rakeBps,
+        uint256 rakeCap,
+        uint64 clock,
+        address channelKey,
+        uint256[2] memory deckKey
+    ) internal returns (HoldemTableN.DepositAuth memory) {
+        bytes32 nonce = zk.createNonce(from, IX402Token(address(token)), rules_, buyIn, maxSeats, rakeBps, rakeCap, clock, channelKey, deckKey, bytes32(0));
+        return _authFor(pk, from, buyIn, nonce);
+    }
+
+    function _joinAuth(uint256 pk, address from, bytes32 tableId, uint256 stake, address channelKey, uint256[2] memory deckKey)
+        internal
+        returns (HoldemTableN.DepositAuth memory)
+    {
+        bytes32 nonce = zk.joinNonce(tableId, from, channelKey, deckKey, bytes32(0));
+        return _authFor(pk, from, stake, nonce);
+    }
+
+    /// create() with a signed auth for seat pk, relayed by that same seat (vm.prank(from)).
+    function _create(
+        uint256 pk,
+        IGameRulesN rules_,
+        uint256 buyIn,
+        uint256 maxSeats,
+        uint16 rakeBps,
+        uint256 rakeCap,
+        uint64 clock,
+        address channelKey,
+        uint256[2] memory deckKey
+    ) internal returns (bytes32 tableId) {
+        address from = vm.addr(pk);
+        HoldemTableN.DepositAuth memory auth = _createAuth(pk, from, buyIn, rules_, maxSeats, rakeBps, rakeCap, clock, channelKey, deckKey);
+        vm.prank(from);
+        tableId = zk.create(IX402Token(address(token)), rules_, buyIn, maxSeats, rakeBps, rakeCap, clock, channelKey, deckKey, auth);
+    }
+
+    /// join() with a signed auth for seat pk, relayed by that same seat (vm.prank(from)).
+    function _join(uint256 pk, bytes32 tableId, uint256 stake, address channelKey, uint256[2] memory deckKey) internal {
+        address from = vm.addr(pk);
+        HoldemTableN.DepositAuth memory auth = _joinAuth(pk, from, tableId, stake, channelKey, deckKey);
+        vm.prank(from);
+        zk.join(tableId, channelKey, deckKey, auth);
     }
 
     function _coSign(uint256 n, ChannelStateN memory s) internal view returns (bytes[] memory sigs) {
@@ -82,14 +149,10 @@ contract HoldemTableNShowdownTest is Test {
 
         // create table with the matching rake params
         address a0 = vm.addr(_pk(0));
-        vm.deal(a0, buyIn);
-        vm.prank(a0);
-        bytes32 tableId = zk.create{value: buyIn}(IGameRulesN(address(rules)), buyIn, n, rakeBps, rakeCap, CLOCK, a0, [GX, GY]);
+        bytes32 tableId = _create(_pk(0), IGameRulesN(address(rules)), buyIn, n, rakeBps, rakeCap, CLOCK, a0, [GX, GY]);
         for (uint256 i = 1; i < n; i++) {
             address ai = vm.addr(_pk(i));
-            vm.deal(ai, buyIn);
-            vm.prank(ai);
-            zk.join{value: buyIn}(tableId, ai, [GX, GY]);
+            _join(_pk(i), tableId, buyIn, ai, [GX, GY]);
         }
         vm.prank(a0);
         zk.start(tableId);
@@ -129,18 +192,18 @@ contract HoldemTableNShowdownTest is Test {
 
         bytes[] memory sigs = _coSign(n, cs);
 
-        uint256 zkBefore = address(zk).balance;
-        uint256 treBefore = treasury.balance;
-        uint256 winnerBefore = vm.addr(_pk(0)).balance;
+        uint256 zkBefore = token.balanceOf(address(zk));
+        uint256 treBefore = token.balanceOf(treasury);
+        uint256 winnerBefore = token.balanceOf(vm.addr(_pk(0)));
 
         vm.prank(a0);
         zk.settle(tableId, cs, sigs);
 
         // seat 0 (trip aces) wins pot - rake.
-        assertEq(vm.addr(_pk(0)).balance - winnerBefore, settled.stacks[0], "winner paid balances[0]");
-        assertEq(zkBefore - address(zk).balance, total, "exactly Sigma escrow left the contract");
-        assertEq(treasury.balance - treBefore, settled.rakeAccrued, "treasury got the rake");
-        assertEq(address(zk).balance, 0, "no residue");
+        assertEq(token.balanceOf(vm.addr(_pk(0))) - winnerBefore, settled.stacks[0], "winner paid balances[0]");
+        assertEq(zkBefore - token.balanceOf(address(zk)), total, "exactly Sigma escrow left the contract");
+        assertEq(token.balanceOf(treasury) - treBefore, settled.rakeAccrued, "treasury got the rake");
+        assertEq(token.balanceOf(address(zk)), 0, "no residue");
         assertEq(uint8(zk.status(tableId)), uint8(ChannelTableBase.Status.Settled), "settled");
     }
 
