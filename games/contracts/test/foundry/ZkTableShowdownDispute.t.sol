@@ -12,6 +12,9 @@ import {ZkTable} from "../../contracts/zk/ZkTable.sol";
 import {ChannelTableBase} from "../../contracts/zk/ChannelTableBase.sol";
 import {ChannelState} from "../../contracts/zk/ChannelState.sol";
 import {IGameRules} from "../../contracts/zk/IGameRules.sol";
+import {MockX402} from "../../contracts/test/MockX402.sol";
+import {IX402Token} from "../../contracts/games/FlipBookX.sol";
+import {X402AuthLib} from "./X402AuthLib.sol";
 import {HiLoWarRules} from "../../contracts/zk/HiLoWarRules.sol";
 import {HiLo, HiLoCodec} from "./HiLoWarRules.t.sol";
 // Referenced only by name (via deployCodeTo, to sidestep EIP-170 — see setUp()), but the import
@@ -55,6 +58,7 @@ import {RevealVerifier as _RevealVerifierArtifact} from "../../contracts/vendor/
 /// coverage.
 contract ZkTableShowdownDisputeTest is Test {
     ZkTable internal zk;
+    MockX402 internal token;
     HiLoWarRules internal rules;
     address internal revealVerifier;
 
@@ -95,8 +99,9 @@ contract ZkTableShowdownDisputeTest is Test {
     function setUp() public {
         a = vm.addr(PK_A);
         b = vm.addr(PK_B);
-        vm.deal(a, 1_000 ether);
-        vm.deal(b, 1_000 ether);
+        token = new MockX402();
+        token.mint(a, 1_000 ether);
+        token.mint(b, 1_000 ether);
 
         // RevealVerifier's runtime (~30KB) exceeds EIP-170; etch it via forge-std's deployCodeTo
         // (runs the real constructor through a raw call, then etches the resulting runtime code —
@@ -104,7 +109,33 @@ contract ZkTableShowdownDisputeTest is Test {
         // hardhat suite, ZkTableDispute.test.ts's deployOrEtchRevealVerifier).
         revealVerifier = _deployReveal();
         rules = new HiLoWarRules(revealVerifier, address(0));
-        zk = new ZkTable();
+        zk = new ZkTable(address(0)); // factory=0 skips the clone-check (unit-test funding via a bare mock)
+    }
+
+    // ── x402 deposit-auth helpers ────────────────────────────────────────────
+
+    uint64 internal constant VALID_BEFORE = type(uint64).max;
+
+    function _authFor(uint256 pk, address from, uint256 value, bytes32 nonce) internal returns (ZkTable.DepositAuth memory) {
+        bytes32 digest = X402AuthLib.receiveDigest(token.DOMAIN_SEPARATOR(), from, address(zk), value, VALID_BEFORE, nonce);
+        return ZkTable.DepositAuth({from: from, validBefore: VALID_BEFORE, salt: bytes32(0), sig: X402AuthLib.sign65(pk, digest)});
+    }
+
+    function _create(uint256 pk, address from, uint256 buyIn, IGameRules rules_, uint256 stake, uint64 clock, address channelKey, uint256[2] memory deckKey)
+        internal
+        returns (bytes32 tableId)
+    {
+        bytes32 nonce = zk.createNonce(from, IX402Token(address(token)), rules_, buyIn, stake, clock, channelKey, deckKey, bytes32(0));
+        ZkTable.DepositAuth memory auth = _authFor(pk, from, buyIn, nonce);
+        vm.prank(from);
+        tableId = zk.create(IX402Token(address(token)), buyIn, rules_, stake, clock, channelKey, deckKey, auth);
+    }
+
+    function _join(uint256 pk, address from, bytes32 tableId, uint256 stake, address channelKey, uint256[2] memory deckKey) internal {
+        bytes32 nonce = zk.joinNonce(tableId, from, channelKey, deckKey);
+        ZkTable.DepositAuth memory auth = _authFor(pk, from, stake, nonce);
+        vm.prank(from);
+        zk.join(tableId, channelKey, deckKey, auth);
     }
 
     function _deployReveal() internal returns (address addr) {
@@ -144,10 +175,8 @@ contract ZkTableShowdownDisputeTest is Test {
     /// create + join with the fixture's real deck keys, then open a DEMAND_SHOWDOWN dispute
     /// (disputant A) at DECK_INDEX. Escrow 2+2 ETH; balances 1.5/1.5, pot 1 ETH.
     function _setupDisputed(Fixture memory f) internal returns (bytes32 tableId, bytes memory gameState) {
-        vm.prank(a);
-        tableId = zk.create{value: ESCROW}(IGameRules(address(rules)), ESCROW, CLOCK, address(0), f.deckKeyA);
-        vm.prank(b);
-        zk.join{value: ESCROW}(tableId, address(0), f.deckKeyB);
+        tableId = _create(PK_A, a, ESCROW, IGameRules(address(rules)), ESCROW, CLOCK, address(0), f.deckKeyA);
+        _join(PK_B, b, tableId, ESCROW, address(0), f.deckKeyB);
 
         gameState = _hiloGameState(DECK_INDEX);
         ChannelState memory s;
@@ -184,17 +213,17 @@ contract ZkTableShowdownDisputeTest is Test {
         zk.postShowdownReveals(tableId, f.deck, [SLOT_A, SLOT_B], [_reveal(f, 1), _reveal(f, 3)], [_proof(f, 1), _proof(f, 3)]);
         assertEq(uint8(_status(tableId)), uint8(ChannelTableBase.Status.Disputed), "still disputed, finalize is a separate step");
 
-        uint256 beforeA = a.balance;
-        uint256 beforeB = b.balance;
+        uint256 beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
 
         vm.expectEmit(true, false, false, true);
         emit ZkTable.ShowdownFinalized(tableId, 3, 4, 2); // cardA=3(rank0), cardB=4(rank1) -> B
         zk.finalizeShowdown(tableId, f.deck, gameState); // permissionless — no seat restriction
 
         assertEq(uint8(_status(tableId)), uint8(ChannelTableBase.Status.Settled));
-        assertEq(a.balance - beforeA, 1.5 ether, "A keeps only its balance");
-        assertEq(b.balance - beforeB, 1.5 ether + 1 ether, "B (rank winner) gets balance + pot");
-        assertEq((a.balance - beforeA) + (b.balance - beforeB), ESCROW * 2, "conservation: no dust");
+        assertEq(token.balanceOf(a) - beforeA, 1.5 ether, "A keeps only its balance");
+        assertEq(token.balanceOf(b) - beforeB, 1.5 ether + 1 ether, "B (rank winner) gets balance + pot");
+        assertEq((token.balanceOf(a) - beforeA) + (token.balanceOf(b) - beforeB), ESCROW * 2, "conservation: no dust");
     }
 
     /// HEADLINE FIX (free-roll closed), real crypto both directions:
@@ -209,12 +238,12 @@ contract ZkTableShowdownDisputeTest is Test {
         zk.postShowdownReveals(tableId, f.deck, [SLOT_A, SLOT_B], [_reveal(f, 1), _reveal(f, 3)], [_proof(f, 1), _proof(f, 3)]);
 
         vm.roll(block.number + CLOCK + 1);
-        uint256 beforeA = a.balance;
-        uint256 beforeB = b.balance;
+        uint256 beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
         zk.resolveTimeout(tableId);
 
-        assertEq(b.balance - beforeB, 1.5 ether + 1 ether, "counterparty answered -> gets balance + pot");
-        assertEq(a.balance - beforeA, 1.5 ether, "disputant refused to reveal -> only its balance, NOT the pot");
+        assertEq(token.balanceOf(b) - beforeB, 1.5 ether + 1 ether, "counterparty answered -> gets balance + pot");
+        assertEq(token.balanceOf(a) - beforeA, 1.5 ether, "disputant refused to reveal -> only its balance, NOT the pot");
     }
 
     /// Mirror direction: disputant fully reveals, counterparty posts nothing -> pot to disputant.
@@ -226,12 +255,12 @@ contract ZkTableShowdownDisputeTest is Test {
         zk.postShowdownReveals(tableId, f.deck, [SLOT_A, SLOT_B], [_reveal(f, 0), _reveal(f, 2)], [_proof(f, 0), _proof(f, 2)]);
 
         vm.roll(block.number + CLOCK + 1);
-        uint256 beforeA = a.balance;
-        uint256 beforeB = b.balance;
+        uint256 beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
         zk.resolveTimeout(tableId);
 
-        assertEq(a.balance - beforeA, 1.5 ether + 1 ether, "disputant answered -> gets balance + pot");
-        assertEq(b.balance - beforeB, 1.5 ether, "counterparty refused -> only its balance");
+        assertEq(token.balanceOf(a) - beforeA, 1.5 ether + 1 ether, "disputant answered -> gets balance + pot");
+        assertEq(token.balanceOf(b) - beforeB, 1.5 ether, "counterparty refused -> only its balance");
     }
 
     /// Once both seats fully revealed, resolveTimeout must refuse (MustFinalize) even past the

@@ -8,8 +8,11 @@ import {ChannelState} from "../../contracts/zk/ChannelState.sol";
 import {IGameRules} from "../../contracts/zk/IGameRules.sol";
 import {MockGameRules} from "../../contracts/test/MockGameRules.sol";
 import {MockRevealVerifier} from "../../contracts/test/MockRevealVerifier.sol";
+import {MockX402} from "../../contracts/test/MockX402.sol";
+import {IX402Token} from "../../contracts/games/FlipBookX.sol";
 import {HiLoWarRules} from "../../contracts/zk/HiLoWarRules.sol";
 import {HiLo, HiLoCodec} from "./HiLoWarRules.t.sol";
+import {X402AuthLib} from "./X402AuthLib.sol";
 
 /// A revealVerifier stand-in whose fallback unconditionally reverts, so
 /// respondWithShare's `staticcall` sees `callOk == false`.
@@ -39,6 +42,7 @@ contract ShortReturnVerifier {
 contract ZkTableUnitTest is Test {
     ZkTable internal zk;
     MockGameRules internal rules;
+    MockX402 internal token;
 
     // Player wallets (send txs / own escrow).
     uint256 internal constant PK_A = 0xA11CE;
@@ -60,7 +64,7 @@ contract ZkTableUnitTest is Test {
     uint64 internal constant CLOCK = 30; // MIN_CLOCK_BLOCKS
     uint256[2] internal ZERO_DECK = [uint256(0), uint256(0)];
 
-    event TableCreated(bytes32 indexed tableId, address indexed playerA, address rules, uint256 escrow, uint256 joinStake, uint64 clockBlocks);
+    event TableCreated(bytes32 indexed tableId, address indexed playerA, address token, address rules, uint256 escrow, uint256 joinStake, uint64 clockBlocks);
     event TableJoined(bytes32 indexed tableId, address indexed playerB);
     event TableCancelled(bytes32 indexed tableId);
     event ToppedUp(bytes32 indexed tableId, uint8 seat, uint256 amount);
@@ -75,17 +79,87 @@ contract ZkTableUnitTest is Test {
     event TopUpReclaimed(bytes32 indexed tableId, uint8 seat, uint256 amount);
 
     function setUp() public {
-        zk = new ZkTable();
+        zk = new ZkTable(address(0)); // factory=0 skips the clone-check (see ZkTableX402.t.sol for that path)
         rules = new MockGameRules();
+        token = new MockX402();
         a = vm.addr(PK_A);
         b = vm.addr(PK_B);
         keyA = vm.addr(PK_KEYA);
         keyB = vm.addr(PK_KEYB);
-        vm.deal(a, 1_000_000 ether);
-        vm.deal(b, 1_000_000 ether);
-        vm.deal(stranger, 1_000_000 ether);
-        vm.deal(keyA, 1_000_000 ether);
-        vm.deal(keyB, 1_000_000 ether);
+        token.mint(a, 1_000_000 ether);
+        token.mint(b, 1_000_000 ether);
+        token.mint(stranger, 1_000_000 ether);
+        token.mint(keyA, 1_000_000 ether);
+        token.mint(keyB, 1_000_000 ether);
+    }
+
+    // ── x402 deposit-auth helpers ────────────────────────────────────────────
+
+    uint64 internal constant VALID_BEFORE = type(uint64).max;
+
+    function _authFor(uint256 pk, address from, uint256 value, bytes32 nonce) internal returns (ZkTable.DepositAuth memory) {
+        bytes32 digest = X402AuthLib.receiveDigest(token.DOMAIN_SEPARATOR(), from, address(zk), value, VALID_BEFORE, nonce);
+        return ZkTable.DepositAuth({from: from, validBefore: VALID_BEFORE, salt: bytes32(0), sig: X402AuthLib.sign65(pk, digest)});
+    }
+
+    function _authForSalt(uint256 pk, address from, uint256 value, bytes32 nonce, bytes32 salt) internal returns (ZkTable.DepositAuth memory) {
+        bytes32 digest = X402AuthLib.receiveDigest(token.DOMAIN_SEPARATOR(), from, address(zk), value, VALID_BEFORE, nonce);
+        return ZkTable.DepositAuth({from: from, validBefore: VALID_BEFORE, salt: salt, sig: X402AuthLib.sign65(pk, digest)});
+    }
+
+    function _create(uint256 pk, address from, uint256 buyIn, IGameRules rules_, uint256 stake, uint64 clock, address channelKey, uint256[2] memory deckKey)
+        internal
+        returns (bytes32 tableId)
+    {
+        bytes32 nonce = zk.createNonce(from, IX402Token(address(token)), rules_, buyIn, stake, clock, channelKey, deckKey, bytes32(0));
+        ZkTable.DepositAuth memory auth = _authFor(pk, from, buyIn, nonce);
+        vm.prank(from);
+        tableId = zk.create(IX402Token(address(token)), buyIn, rules_, stake, clock, channelKey, deckKey, auth);
+    }
+
+    function _join(uint256 pk, address from, bytes32 tableId, uint256 stake, address channelKey, uint256[2] memory deckKey) internal {
+        bytes32 nonce = zk.joinNonce(tableId, from, channelKey, deckKey);
+        ZkTable.DepositAuth memory auth = _authFor(pk, from, stake, nonce);
+        vm.prank(from);
+        zk.join(tableId, channelKey, deckKey, auth);
+    }
+
+    function _topUp(uint256 pk, address from, bytes32 tableId, uint256 amount) internal {
+        bytes32 nonce = zk.topUpNonce(tableId, from, amount, bytes32(0));
+        ZkTable.DepositAuth memory auth = _authFor(pk, from, amount, nonce);
+        vm.prank(from);
+        zk.topUp(tableId, amount, auth);
+    }
+
+    /// A garbage (unsigned, empty-sig) auth for `from`. Safe ONLY for call sites that revert
+    /// before `_pull` is ever reached (WrongValue/BadClock/BadRules/BadStatus/NotPlayer/etc. —
+    /// every one of create/join/topUp's OWN guards runs before the token pull) — using this where
+    /// a real signature is required would either revert on the wrapper's own check (masking the
+    /// guard actually under test) or, if placed after vm.expectRevert, corrupt the expectation by
+    /// interposing a real `zk.createNonce`/etc. view call as "the next call".
+    function _dummyAuth(address from) internal pure returns (ZkTable.DepositAuth memory) {
+        return ZkTable.DepositAuth({from: from, validBefore: 0, salt: bytes32(0), sig: ""});
+    }
+
+    /// create() with a garbage auth — for revert-path tests only (see _dummyAuth).
+    function _createDummy(address from, uint256 buyIn, IGameRules rules_, uint256 stake, uint64 clock, address channelKey, uint256[2] memory deckKey)
+        internal
+        returns (bytes32 tableId)
+    {
+        vm.prank(from);
+        tableId = zk.create(IX402Token(address(token)), buyIn, rules_, stake, clock, channelKey, deckKey, _dummyAuth(from));
+    }
+
+    /// join() with a garbage auth — for revert-path tests only (see _dummyAuth).
+    function _joinDummy(address from, bytes32 tableId, address channelKey, uint256[2] memory deckKey) internal {
+        vm.prank(from);
+        zk.join(tableId, channelKey, deckKey, _dummyAuth(from));
+    }
+
+    /// topUp() with a garbage auth — for revert-path tests only (see _dummyAuth).
+    function _topUpDummy(address from, bytes32 tableId, uint256 amount) internal {
+        vm.prank(from);
+        zk.topUp(tableId, amount, _dummyAuth(from));
     }
 
     // ── generic helpers ──────────────────────────────────────────────────────
@@ -156,20 +230,16 @@ contract ZkTableUnitTest is Test {
     /// create(A) + join(B) using the default channelKey == address(0) (keyA/keyB ==
     /// the wallet addresses), co-signing with the wallet private keys.
     function _createJoin(uint256 escrowA, uint256 stake) internal returns (bytes32 tableId) {
-        vm.prank(a);
-        tableId = zk.create{value: escrowA}(IGameRules(address(rules)), stake, CLOCK, address(0), ZERO_DECK);
-        vm.prank(b);
-        zk.join{value: stake}(tableId, address(0), ZERO_DECK);
+        tableId = _create(PK_A, a, escrowA, IGameRules(address(rules)), stake, CLOCK, address(0), ZERO_DECK);
+        _join(PK_B, b, tableId, stake, address(0), ZERO_DECK);
     }
 
     /// create(A) + join(B) using DEDICATED channel signing keys (keyA/keyB != the
     /// wallet addresses), so tests can drive `_seatOf`'s `who == t.keyA/keyB` arm and
     /// co-sign with the dedicated keys.
     function _createJoinWithChannelKeys(uint256 escrowA, uint256 stake) internal returns (bytes32 tableId) {
-        vm.prank(a);
-        tableId = zk.create{value: escrowA}(IGameRules(address(rules)), stake, CLOCK, keyA, ZERO_DECK);
-        vm.prank(b);
-        zk.join{value: stake}(tableId, keyB, ZERO_DECK);
+        tableId = _create(PK_A, a, escrowA, IGameRules(address(rules)), stake, CLOCK, keyA, ZERO_DECK);
+        _join(PK_B, b, tableId, stake, keyB, ZERO_DECK);
     }
 
     function _deck208() internal pure returns (uint256[] memory deck) {
@@ -182,36 +252,31 @@ contract ZkTableUnitTest is Test {
     // ═══════════════════════════════════════════════════════════════════════
 
     function test_create_revertsWrongValue_zero() public {
-        vm.prank(a);
         vm.expectRevert(ChannelTableBase.WrongValue.selector);
-        zk.create{value: 0}(IGameRules(address(rules)), 1 ether, CLOCK, address(0), ZERO_DECK);
+        _createDummy(a, 0, IGameRules(address(rules)), 1 ether, CLOCK, address(0), ZERO_DECK);
     }
 
     function test_create_revertsBadRules_noCode() public {
-        vm.prank(a);
         vm.expectRevert(ChannelTableBase.BadRules.selector);
-        zk.create{value: 1 ether}(IGameRules(stranger), 1 ether, CLOCK, address(0), ZERO_DECK);
+        _createDummy(a, 1 ether, IGameRules(stranger), 1 ether, CLOCK, address(0), ZERO_DECK);
     }
 
     function test_create_defaultChannelKeyIsSender() public {
-        vm.prank(a);
-        bytes32 id = zk.create{value: 1 ether}(IGameRules(address(rules)), 1 ether, CLOCK, address(0), ZERO_DECK);
+        bytes32 id = _create(PK_A, a, 1 ether, IGameRules(address(rules)), 1 ether, CLOCK, address(0), ZERO_DECK);
         (address kA, ) = _keys(id);
         assertEq(kA, a, "channelKey==0 => keyA==sender");
     }
 
     function test_create_customChannelKey() public {
-        vm.prank(a);
-        bytes32 id = zk.create{value: 1 ether}(IGameRules(address(rules)), 1 ether, CLOCK, keyA, ZERO_DECK);
+        bytes32 id = _create(PK_A, a, 1 ether, IGameRules(address(rules)), 1 ether, CLOCK, keyA, ZERO_DECK);
         (address kA, ) = _keys(id);
         assertEq(kA, keyA, "custom channelKey honored");
     }
 
     function test_create_emitsTableCreated() public {
         vm.expectEmit(false, true, false, true);
-        emit TableCreated(bytes32(0), a, address(rules), 1 ether, 2 ether, CLOCK);
-        vm.prank(a);
-        zk.create{value: 1 ether}(IGameRules(address(rules)), 2 ether, CLOCK, address(0), ZERO_DECK);
+        emit TableCreated(bytes32(0), a, address(token), address(rules), 1 ether, 2 ether, CLOCK);
+        _create(PK_A, a, 1 ether, IGameRules(address(rules)), 2 ether, CLOCK, address(0), ZERO_DECK);
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -220,41 +285,43 @@ contract ZkTableUnitTest is Test {
 
     function test_join_revertsBadStatus_notCreated() public {
         bytes32 id = _createJoin(1 ether, 1 ether); // already Live
-        vm.prank(stranger);
         vm.expectRevert(ChannelTableBase.BadStatus.selector);
-        zk.join{value: 1 ether}(id, address(0), ZERO_DECK);
+        _joinDummy(stranger, id, address(0), ZERO_DECK);
     }
 
     function test_join_revertsNotPlayer_selfJoin() public {
-        vm.prank(a);
-        bytes32 id = zk.create{value: 1 ether}(IGameRules(address(rules)), 1 ether, CLOCK, address(0), ZERO_DECK);
-        vm.prank(a);
+        bytes32 id = _create(PK_A, a, 1 ether, IGameRules(address(rules)), 1 ether, CLOCK, address(0), ZERO_DECK);
         vm.expectRevert(ChannelTableBase.NotPlayer.selector);
-        zk.join{value: 1 ether}(id, address(0), ZERO_DECK);
+        _joinDummy(a, id, address(0), ZERO_DECK);
     }
 
-    function test_join_revertsWrongValue() public {
-        vm.prank(a);
-        bytes32 id = zk.create{value: 1 ether}(IGameRules(address(rules)), 1 ether, CLOCK, address(0), ZERO_DECK);
+    /// join() has no caller-supplied amount anymore — it always pulls exactly t.joinStake, taken
+    /// from contract state, never from calldata. The old msg.value-mismatch WrongValue check is
+    /// gone along with msg.value itself; its replacement is structural: a joiner who signs an
+    /// authorization for a DIFFERENT value than joinStake produces a digest the wrapper's EIP-712
+    /// recovery can never match (value is baked into the signed struct), so join() reverts at the
+    /// token (InvalidSignature), not via any ZkTable-level guard.
+    function test_join_revertsBadSig_authSignedForWrongAmount() public {
+        bytes32 id = _create(PK_A, a, 1 ether, IGameRules(address(rules)), 1 ether, CLOCK, address(0), ZERO_DECK);
+        bytes32 nonce = zk.joinNonce(id, b, address(0), ZERO_DECK);
+        // Signed for 0.5 ether; join() will try to pull the real joinStake (1 ether) under this
+        // same nonce, so the wrapper recomputes a digest over 1 ether that this signature never covered.
+        ZkTable.DepositAuth memory auth = _authFor(PK_B, b, 0.5 ether, nonce);
+        vm.expectRevert(); // MockX402.InvalidSignature
         vm.prank(b);
-        vm.expectRevert(ChannelTableBase.WrongValue.selector);
-        zk.join{value: 0.5 ether}(id, address(0), ZERO_DECK);
+        zk.join(id, address(0), ZERO_DECK, auth);
     }
 
     function test_join_revertsNotPlayer_keyCollidesWithPlayerA() public {
-        vm.prank(a);
-        bytes32 id = zk.create{value: 1 ether}(IGameRules(address(rules)), 1 ether, CLOCK, address(0), ZERO_DECK);
-        vm.prank(b);
+        bytes32 id = _create(PK_A, a, 1 ether, IGameRules(address(rules)), 1 ether, CLOCK, address(0), ZERO_DECK);
         vm.expectRevert(ChannelTableBase.NotPlayer.selector);
-        zk.join{value: 1 ether}(id, a, ZERO_DECK); // channelKey == playerA
+        _joinDummy(b, id, a, ZERO_DECK); // channelKey == playerA
     }
 
     function test_join_revertsNotPlayer_keyCollidesWithKeyA() public {
-        vm.prank(a);
-        bytes32 id = zk.create{value: 1 ether}(IGameRules(address(rules)), 1 ether, CLOCK, keyA, ZERO_DECK);
-        vm.prank(b);
+        bytes32 id = _create(PK_A, a, 1 ether, IGameRules(address(rules)), 1 ether, CLOCK, keyA, ZERO_DECK);
         vm.expectRevert(ChannelTableBase.NotPlayer.selector);
-        zk.join{value: 1 ether}(id, keyA, ZERO_DECK); // channelKey == t.keyA (!= playerA)
+        _joinDummy(b, id, keyA, ZERO_DECK); // channelKey == t.keyA (!= playerA)
     }
 
     function test_join_defaultChannelKeyIsSender() public {
@@ -264,12 +331,10 @@ contract ZkTableUnitTest is Test {
     }
 
     function test_join_customChannelKeyAndEvent() public {
-        vm.prank(a);
-        bytes32 id = zk.create{value: 1 ether}(IGameRules(address(rules)), 1 ether, CLOCK, address(0), ZERO_DECK);
+        bytes32 id = _create(PK_A, a, 1 ether, IGameRules(address(rules)), 1 ether, CLOCK, address(0), ZERO_DECK);
         vm.expectEmit(true, true, false, true);
         emit TableJoined(id, b);
-        vm.prank(b);
-        zk.join{value: 1 ether}(id, keyB, ZERO_DECK);
+        _join(PK_B, b, id, 1 ether, keyB, ZERO_DECK);
         (, address kB) = _keys(id);
         assertEq(kB, keyB, "custom channelKey honored");
         assertEq(uint8(_status(id)), uint8(ChannelTableBase.Status.Live));
@@ -280,14 +345,13 @@ contract ZkTableUnitTest is Test {
     // ═══════════════════════════════════════════════════════════════════════
 
     function test_cancel_success() public {
-        vm.prank(a);
-        bytes32 id = zk.create{value: 3 ether}(IGameRules(address(rules)), 1 ether, CLOCK, address(0), ZERO_DECK);
-        uint256 before = a.balance;
+        bytes32 id = _create(PK_A, a, 3 ether, IGameRules(address(rules)), 1 ether, CLOCK, address(0), ZERO_DECK);
+        uint256 before = token.balanceOf(a);
         vm.expectEmit(true, false, false, true);
         emit TableCancelled(id);
         vm.prank(a);
         zk.cancel(id);
-        assertEq(a.balance - before, 3 ether, "full escrow refunded");
+        assertEq(token.balanceOf(a) - before, 3 ether, "full escrow refunded");
         (uint256 escA, ) = _escrows(id);
         assertEq(escA, 0, "escrowA zeroed");
         assertEq(uint8(_status(id)), uint8(ChannelTableBase.Status.Cancelled));
@@ -301,8 +365,7 @@ contract ZkTableUnitTest is Test {
     }
 
     function test_cancel_revertsNotPlayer() public {
-        vm.prank(a);
-        bytes32 id = zk.create{value: 1 ether}(IGameRules(address(rules)), 1 ether, CLOCK, address(0), ZERO_DECK);
+        bytes32 id = _create(PK_A, a, 1 ether, IGameRules(address(rules)), 1 ether, CLOCK, address(0), ZERO_DECK);
         vm.prank(b);
         vm.expectRevert(ChannelTableBase.NotPlayer.selector);
         zk.cancel(id);
@@ -313,33 +376,28 @@ contract ZkTableUnitTest is Test {
     // ═══════════════════════════════════════════════════════════════════════
 
     function test_topUp_revertsBadStatus_notLive() public {
-        vm.prank(a);
-        bytes32 id = zk.create{value: 1 ether}(IGameRules(address(rules)), 1 ether, CLOCK, address(0), ZERO_DECK);
-        vm.prank(a);
+        bytes32 id = _create(PK_A, a, 1 ether, IGameRules(address(rules)), 1 ether, CLOCK, address(0), ZERO_DECK);
         vm.expectRevert(ChannelTableBase.BadStatus.selector);
-        zk.topUp{value: 1 ether}(id);
+        _topUpDummy(a, id, 1 ether);
     }
 
     function test_topUp_revertsWrongValue_zero() public {
         bytes32 id = _createJoin(1 ether, 1 ether);
-        vm.prank(a);
         vm.expectRevert(ChannelTableBase.WrongValue.selector);
-        zk.topUp{value: 0}(id);
+        _topUpDummy(a, id, 0);
     }
 
     function test_topUp_revertsNotPlayer() public {
         bytes32 id = _createJoin(1 ether, 1 ether);
-        vm.prank(stranger);
         vm.expectRevert(ChannelTableBase.NotPlayer.selector);
-        zk.topUp{value: 1 ether}(id);
+        _topUpDummy(stranger, id, 1 ether);
     }
 
     function test_topUp_seatA() public {
         bytes32 id = _createJoin(1 ether, 1 ether);
         vm.expectEmit(true, false, false, true);
         emit ToppedUp(id, 1, 0.5 ether);
-        vm.prank(a);
-        zk.topUp{value: 0.5 ether}(id);
+        _topUp(PK_A, a, id, 0.5 ether);
         (uint256 escA, ) = _escrows(id);
         assertEq(escA, 1.5 ether);
     }
@@ -348,8 +406,7 @@ contract ZkTableUnitTest is Test {
         bytes32 id = _createJoin(1 ether, 1 ether);
         vm.expectEmit(true, false, false, true);
         emit ToppedUp(id, 2, 0.5 ether);
-        vm.prank(b);
-        zk.topUp{value: 0.5 ether}(id);
+        _topUp(PK_B, b, id, 0.5 ether);
         (, uint256 escB) = _escrows(id);
         assertEq(escB, 1.5 ether);
     }
@@ -357,8 +414,7 @@ contract ZkTableUnitTest is Test {
     function test_topUp_viaChannelKeyIdentity() public {
         // Hits the `who == t.keyA` arm of _seatOf (as opposed to `who == t.playerA`).
         bytes32 id = _createJoinWithChannelKeys(1 ether, 1 ether);
-        vm.prank(keyA);
-        zk.topUp{value: 1 ether}(id);
+        _topUp(PK_KEYA, keyA, id, 1 ether);
         (uint256 escA, ) = _escrows(id);
         assertEq(escA, 2 ether);
     }
@@ -368,8 +424,7 @@ contract ZkTableUnitTest is Test {
     // ═══════════════════════════════════════════════════════════════════════
 
     function test_settle_revertsBadStatus_created() public {
-        vm.prank(a);
-        bytes32 id = zk.create{value: 1 ether}(IGameRules(address(rules)), 1 ether, CLOCK, address(0), ZERO_DECK);
+        bytes32 id = _create(PK_A, a, 1 ether, IGameRules(address(rules)), 1 ether, CLOCK, address(0), ZERO_DECK);
         ChannelState memory s = _emptyState(id);
         s.phase = 1;
         (bytes memory sigA, bytes memory sigB) = _coSign(s);
@@ -378,16 +433,22 @@ contract ZkTableUnitTest is Test {
         zk.settle(id, s, sigA, sigB);
     }
 
-    function test_settle_revertsNotPlayer() public {
+    /// settle() is now fully permissionless (x402 conversion, see ZkTable.sol's header): payout
+    /// is determined entirely by the two verified channel-key signatures, conservation, isFinal,
+    /// pot==0, and nonce monotonicity — msg.sender's identity is never consulted, so a stranger
+    /// (a relayer/watchtower) submitting the co-signed final on the players' behalf succeeds.
+    function test_settle_permissionless_strangerSubmits() public {
         bytes32 id = _createJoin(1 ether, 1 ether);
         ChannelState memory s = _emptyState(id);
         s.nonce = 1;
         s.balanceA = 2 ether;
         s.phase = 1;
         (bytes memory sigA, bytes memory sigB) = _coSign(s);
+        uint256 beforeA = token.balanceOf(a);
         vm.prank(stranger);
-        vm.expectRevert(ChannelTableBase.NotPlayer.selector);
         zk.settle(id, s, sigA, sigB);
+        assertEq(token.balanceOf(a) - beforeA, 2 ether, "stranger-submitted settle still pays the real player");
+        assertEq(uint8(_status(id)), uint8(ChannelTableBase.Status.Settled));
     }
 
     function test_settle_revertsWrongTable() public {
@@ -502,14 +563,14 @@ contract ZkTableUnitTest is Test {
         s.balanceB = 2 ether;
         s.phase = 1;
         (bytes memory sigA, bytes memory sigB) = _coSign(s);
-        uint256 beforeA = a.balance;
-        uint256 beforeB = b.balance;
+        uint256 beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
         vm.expectEmit(true, false, false, true);
         emit TableSettled(id, 0, 2 ether);
         vm.prank(a);
         zk.settle(id, s, sigA, sigB);
-        assertEq(a.balance, beforeA, "A gets nothing");
-        assertEq(b.balance - beforeB, 2 ether, "B gets it all");
+        assertEq(token.balanceOf(a), beforeA, "A gets nothing");
+        assertEq(token.balanceOf(b) - beforeB, 2 ether, "B gets it all");
     }
 
     function test_settle_payoutAllToA() public {
@@ -520,12 +581,12 @@ contract ZkTableUnitTest is Test {
         s.balanceB = 0;
         s.phase = 1;
         (bytes memory sigA, bytes memory sigB) = _coSign(s);
-        uint256 beforeA = a.balance;
-        uint256 beforeB = b.balance;
+        uint256 beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
         vm.prank(a);
         zk.settle(id, s, sigA, sigB);
-        assertEq(a.balance - beforeA, 2 ether, "A gets it all");
-        assertEq(b.balance, beforeB, "B gets nothing");
+        assertEq(token.balanceOf(a) - beforeA, 2 ether, "A gets it all");
+        assertEq(token.balanceOf(b), beforeB, "B gets nothing");
     }
 
     function test_settle_viaChannelKeyIdentity() public {
@@ -554,8 +615,7 @@ contract ZkTableUnitTest is Test {
     // ═══════════════════════════════════════════════════════════════════════
 
     function test_disputeSetup_revertsBadStatus_notLive() public {
-        vm.prank(a);
-        bytes32 id = zk.create{value: 1 ether}(IGameRules(address(rules)), 1 ether, CLOCK, address(0), ZERO_DECK);
+        bytes32 id = _create(PK_A, a, 1 ether, IGameRules(address(rules)), 1 ether, CLOCK, address(0), ZERO_DECK);
         vm.prank(a);
         vm.expectRevert(ChannelTableBase.BadStatus.selector);
         zk.disputeSetup(id);
@@ -610,13 +670,13 @@ contract ZkTableUnitTest is Test {
 
         vm.roll(block.number + CLOCK + 1);
 
-        uint256 beforeA = a.balance;
-        uint256 beforeB = b.balance;
+        uint256 beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
         vm.expectEmit(true, false, false, false);
         emit SetupDisputeRefunded(id);
         zk.resolveTimeout(id);
-        assertEq(a.balance - beforeA, 1 ether, "A refunded its own escrow");
-        assertEq(b.balance - beforeB, 3 ether, "B refunded its own escrow");
+        assertEq(token.balanceOf(a) - beforeA, 1 ether, "A refunded its own escrow");
+        assertEq(token.balanceOf(b) - beforeB, 3 ether, "B refunded its own escrow");
         assertEq(uint8(_status(id)), uint8(ChannelTableBase.Status.Settled));
     }
 
@@ -641,8 +701,7 @@ contract ZkTableUnitTest is Test {
     // ═══════════════════════════════════════════════════════════════════════
 
     function test_openDispute_revertsBadStatus_notLive() public {
-        vm.prank(a);
-        bytes32 id = zk.create{value: 1 ether}(IGameRules(address(rules)), 1 ether, CLOCK, address(0), ZERO_DECK);
+        bytes32 id = _create(PK_A, a, 1 ether, IGameRules(address(rules)), 1 ether, CLOCK, address(0), ZERO_DECK);
         ChannelState memory s = _emptyState(id);
         (bytes memory sigA, bytes memory sigB) = _coSign(s);
         vm.prank(a);
@@ -782,15 +841,19 @@ contract ZkTableUnitTest is Test {
         zk.respondWithState(id, s, sigA, sigB);
     }
 
-    function test_respondWithState_revertsNotPlayer() public {
+    /// respondWithState() is now fully permissionless (x402 conversion, see ZkTable.sol's
+    /// header): it's the self-authenticating (co-signed, conservation-checked, strictly-newer)
+    /// defensive answer, so a watchtower/relayer submitting it on a gasless player's behalf
+    /// succeeds — no `_seatOf(msg.sender)` gate anymore.
+    function test_respondWithState_permissionless_strangerSubmits() public {
         bytes32 id = _createJoin(1 ether, 1 ether);
         _openMoveDispute(id, 1);
-        ChannelState memory s = _emptyState(id);
+        ChannelState memory s = _conservingState(id);
         s.nonce = 2;
         (bytes memory sigA, bytes memory sigB) = _coSign(s);
         vm.prank(stranger);
-        vm.expectRevert(ChannelTableBase.NotPlayer.selector);
         zk.respondWithState(id, s, sigA, sigB);
+        assertEq(uint8(_status(id)), uint8(ChannelTableBase.Status.Live), "stranger-submitted response clears the dispute");
     }
 
     function test_respondWithState_revertsStaleNonce() public {
@@ -1058,13 +1121,13 @@ contract ZkTableUnitTest is Test {
 
         vm.roll(block.number + CLOCK + 1);
 
-        uint256 beforeA = a.balance;
-        uint256 beforeB = b.balance;
+        uint256 beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
         vm.expectEmit(true, false, false, true);
         emit DisputeForfeited(id, 2, 1 ether, 3 ether);
         zk.resolveTimeout(id);
-        assertEq(a.balance - beforeA, 1 ether, "A gets only its balance");
-        assertEq(b.balance - beforeB, 3 ether, "B (disputant) gets balance + pot");
+        assertEq(token.balanceOf(a) - beforeA, 1 ether, "A gets only its balance");
+        assertEq(token.balanceOf(b) - beforeB, 3 ether, "B (disputant) gets balance + pot");
         assertEq(uint8(_status(id)), uint8(ChannelTableBase.Status.Settled));
     }
 
@@ -1101,13 +1164,13 @@ contract ZkTableUnitTest is Test {
 
         vm.roll(block.number + CLOCK + 1);
 
-        uint256 beforeA = a.balance;
-        uint256 beforeB = b.balance;
+        uint256 beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
         vm.expectEmit(true, false, false, true);
         emit DisputeForfeited(id, 1, 1.5 ether, 0.5 ether);
         zk.resolveTimeout(id);
-        assertEq(a.balance - beforeA, 1.5 ether, "recorded winner A gets balance + pot");
-        assertEq(b.balance - beforeB, 0.5 ether, "loser/disputant B gets only its own balance");
+        assertEq(token.balanceOf(a) - beforeA, 1.5 ether, "recorded winner A gets balance + pot");
+        assertEq(token.balanceOf(b) - beforeB, 0.5 ether, "loser/disputant B gets only its own balance");
     }
 
     /// Same decided-state theft, but the loser opens a SHARE demand instead of MOVE.
@@ -1129,13 +1192,13 @@ contract ZkTableUnitTest is Test {
 
         vm.roll(block.number + CLOCK + 1);
 
-        uint256 beforeA = a.balance;
-        uint256 beforeB = b.balance;
+        uint256 beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
         vm.expectEmit(true, false, false, true);
         emit DisputeForfeited(id, 1, 1.5 ether, 0.5 ether);
         zk.resolveTimeout(id);
-        assertEq(a.balance - beforeA, 1.5 ether, "recorded winner A gets balance + pot even under a SHARE demand");
-        assertEq(b.balance - beforeB, 0.5 ether, "loser/disputant B gets only its own balance");
+        assertEq(token.balanceOf(a) - beforeA, 1.5 ether, "recorded winner A gets balance + pot even under a SHARE demand");
+        assertEq(token.balanceOf(b) - beforeB, 0.5 ether, "loser/disputant B gets only its own balance");
     }
 
     /// An UNDECIDED contested state (e.g. a war/tie FLIP_DONE, or any non-terminal
@@ -1160,13 +1223,13 @@ contract ZkTableUnitTest is Test {
 
         vm.roll(block.number + CLOCK + 1);
 
-        uint256 beforeA = a.balance;
-        uint256 beforeB = b.balance;
+        uint256 beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
         vm.expectEmit(true, false, false, true);
         emit DisputeForfeited(id, 1, 1.5 ether, 0.5 ether);
         zk.resolveTimeout(id);
-        assertEq(a.balance - beforeA, 1.5 ether, "disputant A forfeits the pot to itself (undecided)");
-        assertEq(b.balance - beforeB, 0.5 ether, "B gets only its own balance");
+        assertEq(token.balanceOf(a) - beforeA, 1.5 ether, "disputant A forfeits the pot to itself (undecided)");
+        assertEq(token.balanceOf(b) - beforeB, 0.5 ether, "B gets only its own balance");
     }
 
     /// A rules contract that reports decided=true with a winner outside {1,2} is a
@@ -1191,10 +1254,8 @@ contract ZkTableUnitTest is Test {
     /// to the recorded winner (A), not the disputing loser (B).
     function test_resolveTimeout_realHiLoWar_paysWinner_notLoserDisputant() public {
         HiLoWarRules hiloRules = new HiLoWarRules(address(0xBEEF), address(0xCAFE));
-        vm.prank(a);
-        bytes32 id = zk.create{value: 1 ether}(IGameRules(address(hiloRules)), 1 ether, CLOCK, address(0), ZERO_DECK);
-        vm.prank(b);
-        zk.join{value: 1 ether}(id, address(0), ZERO_DECK);
+        bytes32 id = _create(PK_A, a, 1 ether, IGameRules(address(hiloRules)), 1 ether, CLOCK, address(0), ZERO_DECK);
+        _join(PK_B, b, id, 1 ether, address(0), ZERO_DECK);
 
         // A real hand at CALL_OR_FOLD: A raised, B (non-raiser) folds -> A wins the pot.
         HiLo memory hs;
@@ -1221,11 +1282,11 @@ contract ZkTableUnitTest is Test {
 
         vm.roll(block.number + CLOCK + 1);
 
-        uint256 beforeA = a.balance;
-        uint256 beforeB = b.balance;
+        uint256 beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
         zk.resolveTimeout(id);
-        assertEq(a.balance - beforeA, 1.5 ether, "real winner A gets balance + pot");
-        assertEq(b.balance - beforeB, 0.5 ether, "loser/disputant B gets only its own balance, pot denied");
+        assertEq(token.balanceOf(a) - beforeA, 1.5 ether, "real winner A gets balance + pot");
+        assertEq(token.balanceOf(b) - beforeB, 0.5 ether, "loser/disputant B gets only its own balance, pot denied");
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -1272,8 +1333,7 @@ contract ZkTableUnitTest is Test {
         (bytes memory lA, bytes memory lB) = _coSign(latest);
 
         // The griefing top-up: A unilaterally adds 0.5 ether; B countersigns nothing new.
-        vm.prank(a);
-        zk.topUp{value: 0.5 ether}(id);
+        _topUp(PK_A, a, id, 0.5 ether);
         (uint256 pend, uint64 deadline) = zk.pendingTopUps(id, 1);
         assertEq(pend, 0.5 ether, "pending top-up recorded");
         assertEq(deadline, uint64(block.number) + CLOCK, "reclaim deadline = now + clockBlocks");
@@ -1295,24 +1355,24 @@ contract ZkTableUnitTest is Test {
 
         // ── the recovery path (does not exist pre-fix) ──
         vm.roll(block.number + CLOCK + 1);
-        uint256 beforeA = a.balance;
+        uint256 beforeA = token.balanceOf(a);
         vm.expectEmit(true, false, false, true);
         emit TopUpReclaimed(id, 1, 0.5 ether);
         vm.prank(a);
         zk.reclaimTopUp(id);
-        assertEq(a.balance - beforeA, 0.5 ether, "A reclaims exactly the un-acknowledged top-up");
+        assertEq(token.balanceOf(a) - beforeA, 0.5 ether, "A reclaims exactly the un-acknowledged top-up");
         (uint256 escA, uint256 escB) = _escrows(id);
         assertEq(escA, 1 ether, "escrowA back to the conserved base");
         assertEq(escB, 1 ether, "escrowB untouched");
 
         // The old co-signed state conserves again: either seat settles unilaterally.
-        beforeA = a.balance;
-        uint256 beforeB = b.balance;
+        beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
         vm.prank(b); // even the stonewalled counterparty can drive the exit
         zk.settle(id, latest, lA, lB);
-        assertEq(a.balance - beforeA, 0.8 ether, "A exits with its co-signed balance");
-        assertEq(b.balance - beforeB, 1.2 ether, "B exits with its co-signed balance");
-        assertEq(address(zk).balance, 0, "zero residue: every escrowed wei paid out");
+        assertEq(token.balanceOf(a) - beforeA, 0.8 ether, "A exits with its co-signed balance");
+        assertEq(token.balanceOf(b) - beforeB, 1.2 ether, "B exits with its co-signed balance");
+        assertEq(token.balanceOf(address(zk)), 0, "zero residue: every escrowed wei paid out");
     }
 
     /// Cooperative path unchanged: a top-up reflected in a newer co-signed state settles
@@ -1320,8 +1380,7 @@ contract ZkTableUnitTest is Test {
     /// by the settle itself, zero residue.
     function test_topUp_acknowledged_settlesNormally() public {
         bytes32 id = _createJoin(1 ether, 1 ether); // base total = 2 ether
-        vm.prank(a);
-        zk.topUp{value: 0.5 ether}(id); // total = 2.5 ether
+        _topUp(PK_A, a, id, 0.5 ether); // total = 2.5 ether
 
         ChannelState memory s = _emptyState(id);
         s.nonce = 1;
@@ -1330,13 +1389,13 @@ contract ZkTableUnitTest is Test {
         s.phase = 1;
         (bytes memory sigA, bytes memory sigB) = _coSign(s);
 
-        uint256 beforeA = a.balance;
-        uint256 beforeB = b.balance;
+        uint256 beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
         vm.prank(a);
         zk.settle(id, s, sigA, sigB);
-        assertEq(a.balance - beforeA, 1.7 ether, "A paid from the increased total");
-        assertEq(b.balance - beforeB, 0.8 ether, "B paid from the increased total");
-        assertEq(address(zk).balance, 0, "full 2.5 ether left the contract");
+        assertEq(token.balanceOf(a) - beforeA, 1.7 ether, "A paid from the increased total");
+        assertEq(token.balanceOf(b) - beforeB, 0.8 ether, "B paid from the increased total");
+        assertEq(token.balanceOf(address(zk)), 0, "full 2.5 ether left the contract");
         (uint256 pend, ) = zk.pendingTopUps(id, 1);
         assertEq(pend, 0, "no leftover pending claim after an acknowledging settle");
     }
@@ -1347,8 +1406,7 @@ contract ZkTableUnitTest is Test {
     /// The final settle then pays out the full increased total exactly once.
     function test_reclaim_deniedAfterAcknowledgment_noDoubleSpend() public {
         bytes32 id = _createJoin(1 ether, 1 ether);
-        vm.prank(a);
-        zk.topUp{value: 0.5 ether}(id); // total = 2.5, pending(A) = 0.5
+        _topUp(PK_A, a, id, 0.5 ether); // total = 2.5, pending(A) = 0.5
         bytes memory gameState = abi.encode("gs");
 
         // B countersigns a post-top-up state; A checkpoints it via openDispute.
@@ -1380,13 +1438,13 @@ contract ZkTableUnitTest is Test {
         fin.balanceB = 1.25 ether;
         fin.phase = 1;
         (bytes memory fA, bytes memory fB) = _coSign(fin);
-        uint256 beforeA = a.balance;
-        uint256 beforeB = b.balance;
+        uint256 beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
         vm.prank(a);
         zk.settle(id, fin, fA, fB);
-        assertEq(a.balance - beforeA, 1.25 ether);
-        assertEq(b.balance - beforeB, 1.25 ether);
-        assertEq(address(zk).balance, 0, "top-up paid out exactly once (settled, not reclaimed)");
+        assertEq(token.balanceOf(a) - beforeA, 1.25 ether);
+        assertEq(token.balanceOf(b) - beforeB, 1.25 ether);
+        assertEq(token.balanceOf(address(zk)), 0, "top-up paid out exactly once (settled, not reclaimed)");
     }
 
     /// Reclaim pays each seat exactly its OWN pending amount and nothing more: a second
@@ -1394,27 +1452,25 @@ contract ZkTableUnitTest is Test {
     /// touch A's pending), and a stranger is NotPlayer.
     function test_reclaim_cannotExceedOwnPending() public {
         bytes32 id = _createJoin(1 ether, 1 ether);
-        vm.prank(a);
-        zk.topUp{value: 0.3 ether}(id);
-        vm.prank(b);
-        zk.topUp{value: 0.7 ether}(id); // escrow = (1.3, 1.7)
+        _topUp(PK_A, a, id, 0.3 ether);
+        _topUp(PK_B, b, id, 0.7 ether); // escrow = (1.3, 1.7)
         vm.roll(block.number + CLOCK + 1);
 
         vm.prank(stranger);
         vm.expectRevert(ChannelTableBase.NotPlayer.selector);
         zk.reclaimTopUp(id);
 
-        uint256 beforeA = a.balance;
-        uint256 beforeB = b.balance;
+        uint256 beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
         vm.prank(a);
         zk.reclaimTopUp(id);
-        assertEq(a.balance - beforeA, 0.3 ether, "A gets exactly its own pending, not B's");
+        assertEq(token.balanceOf(a) - beforeA, 0.3 ether, "A gets exactly its own pending, not B's");
         vm.prank(a);
         vm.expectRevert(ZkTable.NothingToReclaim.selector);
         zk.reclaimTopUp(id); // nothing left to take on a second call
         vm.prank(b);
         zk.reclaimTopUp(id);
-        assertEq(b.balance - beforeB, 0.7 ether, "B gets exactly its own pending");
+        assertEq(token.balanceOf(b) - beforeB, 0.7 ether, "B gets exactly its own pending");
         (uint256 escA, uint256 escB) = _escrows(id);
         assertEq(escA, 1 ether, "base escrow untouchable via reclaim");
         assertEq(escB, 1 ether, "base escrow untouchable via reclaim");
@@ -1425,8 +1481,7 @@ contract ZkTableUnitTest is Test {
     /// A later top-up accumulates the pending amount and refreshes the shared deadline.
     function test_reclaim_deadlineBoundary_andAccumulation() public {
         bytes32 id = _createJoin(1 ether, 1 ether);
-        vm.prank(a);
-        zk.topUp{value: 0.3 ether}(id);
+        _topUp(PK_A, a, id, 0.3 ether);
         (, uint64 dl1) = zk.pendingTopUps(id, 1);
 
         vm.roll(uint256(dl1)); // exactly AT the deadline: not yet
@@ -1435,8 +1490,7 @@ contract ZkTableUnitTest is Test {
         zk.reclaimTopUp(id);
 
         // second top-up: amount accumulates, deadline refreshes forward
-        vm.prank(a);
-        zk.topUp{value: 0.2 ether}(id);
+        _topUp(PK_A, a, id, 0.2 ether);
         (uint256 pend, uint64 dl2) = zk.pendingTopUps(id, 1);
         assertEq(pend, 0.5 ether, "pending accumulates across top-ups");
         assertEq(dl2, uint64(block.number) + CLOCK, "deadline refreshed by the later top-up");
@@ -1448,10 +1502,10 @@ contract ZkTableUnitTest is Test {
         zk.reclaimTopUp(id);
 
         vm.roll(uint256(dl2) + 1); // first reclaimable block
-        uint256 beforeA = a.balance;
+        uint256 beforeA = token.balanceOf(a);
         vm.prank(a);
         zk.reclaimTopUp(id);
-        assertEq(a.balance - beforeA, 0.5 ether, "full accumulated pending reclaimed at once");
+        assertEq(token.balanceOf(a) - beforeA, 0.5 ether, "full accumulated pending reclaimed at once");
     }
 
     /// Pending top-up + setup dispute (the only way to be Disputed with a live pending
@@ -1460,8 +1514,7 @@ contract ZkTableUnitTest is Test {
     /// top-up — to its own seat. No state where the pending amount is stuck or stolen.
     function test_reclaim_blockedWhileDisputed_setupTimeoutRefundsTopUp() public {
         bytes32 id = _createJoin(1 ether, 1 ether);
-        vm.prank(a);
-        zk.topUp{value: 0.5 ether}(id); // escrow = (1.5, 1)
+        _topUp(PK_A, a, id, 0.5 ether); // escrow = (1.5, 1)
         vm.prank(b);
         zk.disputeSetup(id); // no checkpoint exists -> allowed; table now Disputed
 
@@ -1470,11 +1523,11 @@ contract ZkTableUnitTest is Test {
         vm.expectRevert(ChannelTableBase.BadStatus.selector);
         zk.reclaimTopUp(id); // reclaim never fires while Disputed
 
-        uint256 beforeA = a.balance;
-        uint256 beforeB = b.balance;
+        uint256 beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
         zk.resolveTimeout(id); // setup-dispute timeout: full per-seat refund
-        assertEq(a.balance - beforeA, 1.5 ether, "A refunded base escrow + its pending top-up");
-        assertEq(b.balance - beforeB, 1 ether, "B refunded its base escrow");
-        assertEq(address(zk).balance, 0, "conservation: nothing created or destroyed");
+        assertEq(token.balanceOf(a) - beforeA, 1.5 ether, "A refunded base escrow + its pending top-up");
+        assertEq(token.balanceOf(b) - beforeB, 1 ether, "B refunded its base escrow");
+        assertEq(token.balanceOf(address(zk)), 0, "conservation: nothing created or destroyed");
     }
 }

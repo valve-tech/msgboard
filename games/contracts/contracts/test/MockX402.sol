@@ -20,6 +20,15 @@ contract MockX402 {
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(bytes32 => bool)) public authorizationState;
 
+    /// Mirrors ValveWrapperImpl.underlying() for ZkTableX402.t.sol's factory clone-check tests.
+    /// Defaults to address(0) (harmless for every other test — those all pass factory=address(0)
+    /// to ZkTable's constructor, which skips the clone-check entirely and never reads this).
+    address public underlying;
+
+    function setUnderlying(address u) external {
+        underlying = u;
+    }
+
     error AuthorizationNotYetValid(uint256 validAfter, uint256 nowTs);
     error AuthorizationExpired(uint256 validBefore, uint256 nowTs);
     error AuthorizationAlreadyUsed(address authorizer, bytes32 nonce);

@@ -5,51 +5,79 @@ import * as helpers from '@nomicfoundation/hardhat-toolbox-viem/network-helpers'
 import { privateKeyToAccount } from 'viem/accounts'
 import * as expectations from './expectations'
 import { makeDomain, signState as coreSignState, type ChannelState, type ChannelDomain } from '@msgboard/zk-cards-core'
+import { deployZkTable, makeX402Domain, buildCreateAuth, buildJoinAuth, buildTopUpAuth, type DepositAuth } from './x402'
 
 const STAKE = viem.parseEther('1')
 const CLOCK = 60n
 const DECK_KEY_A = [1n, 2n] as const
 const DECK_KEY_B = [3n, 4n] as const
+const MINT_AMOUNT = viem.parseEther('1000')
 
 const deployZk = async () => {
-  const zk = await hre.viem.deployContract('ZkTable')
+  // ZkTable's constructor now takes the x402 wrapper-factory address (see ZkTable.sol's
+  // IWrapperFactory) — zeroAddress skips the create()-time clone-check, matching the Foundry
+  // unit suites (which fund via the same bare MockX402, not a real wrapper clone).
+  const zk = await deployZkTable(viem.zeroAddress)
   const rules = await hre.viem.deployContract('MockGameRules')
+  const token = await hre.viem.deployContract('MockX402')
   const signers = await hre.viem.getWalletClients()
   const publicClient = await hre.viem.getPublicClient()
-  const domain = makeDomain(await publicClient.getChainId(), zk.address)
-  return { zk, rules, signers, publicClient, domain, hre }
+  const chainId = await publicClient.getChainId()
+  const domain = makeDomain(chainId, zk.address)
+  const x402Domain = makeX402Domain(chainId, token.address)
+  await Promise.all(signers.map((s) => token.write.mint([s.account!.address, MINT_AMOUNT])))
+  return { zk, rules, token, signers, publicClient, domain, x402Domain, hre }
 }
 
 type ZkContext = Awaited<ReturnType<typeof deployZk>>
 // expectations helpers only touch ctx.hre
 const asCtx = (ctx: ZkContext) => ctx as any
 
+// A garbage (unsigned) DepositAuth for revert-path tests whose failure occurs BEFORE `_pull` is
+// ever reached (WrongValue/BadClock/BadRules/BadStatus/NotPlayer/... — every one of
+// create/join/topUp's OWN guards runs before the token pull, per ZkTable.sol's CEI reorder).
+// Using this where a real signature is actually required would either mask the guard under test
+// behind the wrapper's own InvalidSignature, or (for a happy path) simply fail to pull funds.
+const dummyAuth = (from: viem.Hex): DepositAuth => ({ from, validBefore: 0n, salt: viem.zeroHash, sig: '0x' })
+
 const createTable = async (
   ctx: ZkContext,
-  opts: { value?: bigint; joinStake?: bigint; clock?: bigint; channelKey?: viem.Hex } = {},
+  opts: { buyIn?: bigint; joinStake?: bigint; clock?: bigint; channelKey?: viem.Hex; badAuth?: boolean } = {},
 ) => {
   const [a] = ctx.signers
-  const hash = await ctx.zk.write.create(
-    [
-      ctx.rules.address,
-      opts.joinStake ?? STAKE,
-      opts.clock ?? CLOCK,
-      opts.channelKey ?? viem.zeroAddress,
-      DECK_KEY_A as unknown as [bigint, bigint],
-    ],
-    { value: opts.value ?? STAKE, account: a!.account },
-  )
+  const buyIn = opts.buyIn ?? STAKE
+  const rules = ctx.rules.address
+  const joinStake = opts.joinStake ?? STAKE
+  const clockBlocks = opts.clock ?? CLOCK
+  const channelKey = opts.channelKey ?? viem.zeroAddress
+  const auth = opts.badAuth
+    ? dummyAuth(a!.account!.address)
+    : await buildCreateAuth(ctx.zk, ctx.token.address, ctx.x402Domain, a!, {
+        rules,
+        buyIn,
+        joinStake,
+        clockBlocks,
+        channelKey,
+        deckKey: DECK_KEY_A,
+      })
+  const hash = await ctx.zk.write.create([ctx.token.address, buyIn, rules, joinStake, clockBlocks, channelKey, DECK_KEY_A as unknown as [bigint, bigint], auth])
   const receipt = await ctx.publicClient.waitForTransactionReceipt({ hash })
   const [created] = viem.parseEventLogs({ logs: receipt.logs, abi: ctx.zk.abi, eventName: 'TableCreated' })
   return { tableId: created!.args.tableId, hash, receipt }
 }
 
-const joinTable = async (ctx: ZkContext, tableId: viem.Hex, opts: { value?: bigint; channelKey?: viem.Hex } = {}) => {
+const joinTable = async (
+  ctx: ZkContext,
+  tableId: viem.Hex,
+  opts: { stake?: bigint; channelKey?: viem.Hex; badAuth?: boolean } = {},
+) => {
   const [, b] = ctx.signers
-  return await ctx.zk.write.join(
-    [tableId, opts.channelKey ?? viem.zeroAddress, DECK_KEY_B as unknown as [bigint, bigint]],
-    { value: opts.value ?? STAKE, account: b!.account },
-  )
+  const stake = opts.stake ?? STAKE
+  const channelKey = opts.channelKey ?? viem.zeroAddress
+  const auth = opts.badAuth
+    ? dummyAuth(b!.account!.address)
+    : await buildJoinAuth(ctx.zk, ctx.x402Domain, b!, { tableId, stake, channelKey, deckKey: DECK_KEY_B })
+  return await ctx.zk.write.join([tableId, channelKey, DECK_KEY_B as unknown as [bigint, bigint], auth])
 }
 
 const mkState = (tableId: viem.Hex, over: Partial<ChannelState> = {}): ChannelState => ({
@@ -105,13 +133,15 @@ describe('ZkTable', () => {
       const table = await ctx.zk.read.tables([tableId])
       expect(table[ESCROW_A]).to.equal(STAKE)
       expect(table[STATUS]).to.equal(Status.Created)
-      expect(await ctx.publicClient.getBalance({ address: ctx.zk.address })).to.equal(STAKE)
+      expect(await ctx.token.read.balanceOf([ctx.zk.address])).to.equal(STAKE)
     })
 
     it('issues distinct tableIds across creates', async () => {
       const ctx = await helpers.loadFixture(deployZk)
       const { tableId: first } = await createTable(ctx)
-      const { tableId: second } = await createTable(ctx)
+      // A distinct buyIn so the second create's auth nonce (which does NOT include a per-call
+      // counter, only the signed terms + salt) doesn't collide with the first's already-burned one.
+      const { tableId: second } = await createTable(ctx, { buyIn: STAKE * 2n })
       expect(first).to.not.equal(second)
     })
 
@@ -119,10 +149,7 @@ describe('ZkTable', () => {
       const ctx = await helpers.loadFixture(deployZk)
       await expectations.revertedWithCustomError(
         ctx.zk,
-        ctx.zk.write.create(
-          [ctx.rules.address, STAKE, CLOCK, viem.zeroAddress, DECK_KEY_A as unknown as [bigint, bigint]],
-          { value: 0n },
-        ),
+        createTable(ctx, { buyIn: 0n, badAuth: true }),
         'WrongValue',
       )
     })
@@ -131,10 +158,7 @@ describe('ZkTable', () => {
       const ctx = await helpers.loadFixture(deployZk)
       await expectations.revertedWithCustomError(
         ctx.zk,
-        ctx.zk.write.create(
-          [ctx.rules.address, STAKE, 10n, viem.zeroAddress, DECK_KEY_A as unknown as [bigint, bigint]],
-          { value: STAKE },
-        ),
+        createTable(ctx, { clock: 10n, badAuth: true }),
         'BadClock',
       )
     })
@@ -143,36 +167,52 @@ describe('ZkTable', () => {
       const ctx = await helpers.loadFixture(deployZk)
       await expectations.revertedWithCustomError(
         ctx.zk,
-        ctx.zk.write.create(
-          [ctx.rules.address, STAKE, 99999n, viem.zeroAddress, DECK_KEY_A as unknown as [bigint, bigint]],
-          { value: STAKE },
-        ),
+        createTable(ctx, { clock: 99999n, badAuth: true }),
         'BadClock',
       )
     })
 
     it('rejects an EOA rules address', async () => {
       const ctx = await helpers.loadFixture(deployZk)
-      const [, b] = ctx.signers
+      const [a] = ctx.signers
+      const auth = dummyAuth(a!.account!.address)
       await expectations.revertedWithCustomError(
         ctx.zk,
-        ctx.zk.write.create(
-          [b!.account!.address, STAKE, CLOCK, viem.zeroAddress, DECK_KEY_A as unknown as [bigint, bigint]],
-          { value: STAKE },
-        ),
+        ctx.zk.write.create([
+          ctx.token.address,
+          STAKE,
+          ctx.signers[1]!.account!.address, // an EOA, not a deployed IGameRules
+          STAKE,
+          CLOCK,
+          viem.zeroAddress,
+          DECK_KEY_A as unknown as [bigint, bigint],
+          auth,
+        ]),
         'BadRules',
       )
     })
   })
 
   describe('join', () => {
-    it('rejects a stake that is not exactly joinStake', async () => {
+    // join() no longer takes a caller-supplied stake amount at all — it always pulls exactly
+    // t.joinStake from contract state, never from calldata (see ZkTable.sol's join()). The old
+    // msg.value-mismatch WrongValue check is gone along with msg.value itself; a joiner who
+    // signs an authorization for a DIFFERENT value than joinStake instead fails at the wrapper's
+    // own signature check (the value is baked into the signed EIP-712 struct).
+    it('rejects a join-auth signed for the wrong amount', async () => {
       const ctx = await helpers.loadFixture(deployZk)
+      const [, b] = ctx.signers
       const { tableId } = await createTable(ctx)
+      const badAuth = await buildJoinAuth(ctx.zk, ctx.x402Domain, b!, {
+        tableId,
+        stake: STAKE + 1n, // signed for a DIFFERENT amount than the real joinStake (STAKE)
+        channelKey: viem.zeroAddress,
+        deckKey: DECK_KEY_B,
+      })
       await expectations.revertedWithCustomError(
         ctx.zk,
-        joinTable(ctx, tableId, { value: STAKE + 1n }),
-        'WrongValue',
+        ctx.zk.write.join([tableId, viem.zeroAddress, DECK_KEY_B as unknown as [bigint, bigint], badAuth]),
+        'InvalidSignature',
       )
     })
 
@@ -180,12 +220,10 @@ describe('ZkTable', () => {
       const ctx = await helpers.loadFixture(deployZk)
       const [a] = ctx.signers
       const { tableId } = await createTable(ctx)
+      const auth = dummyAuth(a!.account!.address)
       await expectations.revertedWithCustomError(
         ctx.zk,
-        ctx.zk.write.join([tableId, viem.zeroAddress, DECK_KEY_B as unknown as [bigint, bigint]], {
-          value: STAKE,
-          account: a!.account,
-        }),
+        ctx.zk.write.join([tableId, viem.zeroAddress, DECK_KEY_B as unknown as [bigint, bigint], auth]),
         'NotPlayer',
       )
     })
@@ -209,12 +247,10 @@ describe('ZkTable', () => {
       const [, , c] = ctx.signers
       const { tableId } = await createTable(ctx)
       await joinTable(ctx, tableId)
+      const auth = dummyAuth(c!.account!.address)
       await expectations.revertedWithCustomError(
         ctx.zk,
-        ctx.zk.write.join([tableId, viem.zeroAddress, DECK_KEY_B as unknown as [bigint, bigint]], {
-          value: STAKE,
-          account: c!.account,
-        }),
+        ctx.zk.write.join([tableId, viem.zeroAddress, DECK_KEY_B as unknown as [bigint, bigint], auth]),
         'BadStatus',
       )
     })
@@ -228,9 +264,11 @@ describe('ZkTable', () => {
       const [, , k] = ctx.signers
       const channelKey = viem.getAddress(k!.account!.address)
       const { tableId } = await createTable(ctx, { channelKey })
+      const [, b] = ctx.signers
+      const auth = dummyAuth(b!.account!.address)
       await expectations.revertedWithCustomError(
         ctx.zk,
-        joinTable(ctx, tableId, { channelKey }),
+        ctx.zk.write.join([tableId, channelKey, DECK_KEY_B as unknown as [bigint, bigint], auth]),
         'NotPlayer',
       )
     })
@@ -264,8 +302,9 @@ describe('ZkTable', () => {
       const ctx = await helpers.loadFixture(deployZk)
       const [a] = ctx.signers
       const { tableId } = await createTable(ctx)
-      await expectations.changeEtherBalances(
+      await expectations.changeTokenBalances(
         asCtx(ctx),
+        ctx.token,
         ctx.zk.write.cancel([tableId], { account: a!.account }),
         [a!, ctx.zk.address],
         [STAKE, -STAKE],
@@ -289,6 +328,11 @@ describe('ZkTable', () => {
   })
 
   describe('topUp', () => {
+    const topUp = async (ctx: ZkContext, tableId: viem.Hex, signer: any, amount: bigint) => {
+      const auth = await buildTopUpAuth(ctx.zk, ctx.x402Domain, signer, { tableId, amount })
+      return await ctx.zk.write.topUp([tableId, amount, auth])
+    }
+
     it('bumps seat A escrow and emits ToppedUp', async () => {
       const ctx = await helpers.loadFixture(deployZk)
       const [a] = ctx.signers
@@ -297,7 +341,7 @@ describe('ZkTable', () => {
       const amount = viem.parseEther('0.3')
       await expectations.emit(
         asCtx(ctx),
-        ctx.zk.write.topUp([tableId], { value: amount, account: a!.account }),
+        topUp(ctx, tableId, a!, amount),
         ctx.zk,
         'ToppedUp',
         { tableId, seat: 1, amount },
@@ -315,7 +359,7 @@ describe('ZkTable', () => {
       const amount = viem.parseEther('0.7')
       await expectations.emit(
         asCtx(ctx),
-        ctx.zk.write.topUp([tableId], { value: amount, account: b!.account }),
+        topUp(ctx, tableId, b!, amount),
         ctx.zk,
         'ToppedUp',
         { tableId, seat: 2, amount },
@@ -330,9 +374,10 @@ describe('ZkTable', () => {
       const [, , c] = ctx.signers
       const { tableId } = await createTable(ctx)
       await joinTable(ctx, tableId)
+      const auth = dummyAuth(c!.account!.address)
       await expectations.revertedWithCustomError(
         ctx.zk,
-        ctx.zk.write.topUp([tableId], { value: STAKE, account: c!.account }),
+        ctx.zk.write.topUp([tableId, STAKE, auth]),
         'NotPlayer',
       )
     })
@@ -342,9 +387,10 @@ describe('ZkTable', () => {
       const [a] = ctx.signers
       const { tableId } = await createTable(ctx)
       await joinTable(ctx, tableId)
+      const auth = dummyAuth(a!.account!.address)
       await expectations.revertedWithCustomError(
         ctx.zk,
-        ctx.zk.write.topUp([tableId], { value: 0n, account: a!.account }),
+        ctx.zk.write.topUp([tableId, 0n, auth]),
         'WrongValue',
       )
     })
@@ -353,16 +399,17 @@ describe('ZkTable', () => {
       const ctx = await helpers.loadFixture(deployZk)
       const [a] = ctx.signers
       const { tableId } = await createTable(ctx)
+      const auth = dummyAuth(a!.account!.address)
       await expectations.revertedWithCustomError(
         ctx.zk,
-        ctx.zk.write.topUp([tableId], { value: STAKE, account: a!.account }),
+        ctx.zk.write.topUp([tableId, STAKE, auth]),
         'BadStatus',
       )
     })
   })
 
   describe('settle', () => {
-    // Live table with 2 ETH total escrow, plus a default final state splitting it 1.5/0.5.
+    // Live table with 2 ETH-equivalent total escrow, plus a default final state splitting it 1.5/0.5.
     const liveTable = async () => {
       const ctx = await helpers.loadFixture(deployZk)
       const { tableId } = await createTable(ctx)
@@ -376,8 +423,9 @@ describe('ZkTable', () => {
 
     it('pays out a co-signed final state and marks the table Settled', async () => {
       const ctx = await liveTable()
-      await expectations.changeEtherBalances(
+      await expectations.changeTokenBalances(
         asCtx(ctx),
+        ctx.token,
         ctx.zk.write.settle([ctx.tableId, ctx.state, ctx.sigA, ctx.sigB], { account: ctx.a.account }),
         [ctx.a, ctx.b, ctx.zk.address],
         [ctx.state.balanceA, ctx.state.balanceB, -(ctx.state.balanceA + ctx.state.balanceB)],
@@ -400,8 +448,9 @@ describe('ZkTable', () => {
       })
       const sigA = await signState(ctx.a, ctx.domain, oneSided)
       const sigB = await signState(ctx.b, ctx.domain, oneSided)
-      await expectations.changeEtherBalances(
+      await expectations.changeTokenBalances(
         asCtx(ctx),
+        ctx.token,
         ctx.zk.write.settle([ctx.tableId, oneSided, sigA, sigB], { account: ctx.b.account }),
         [ctx.a, ctx.b, ctx.zk.address],
         [0n, oneSided.balanceB, -oneSided.balanceB],
@@ -444,9 +493,10 @@ describe('ZkTable', () => {
     })
 
     it('a top-up invalidates states signed against the old escrow total', async () => {
-      const ctx = await liveTable() // default state sums to the pre-top-up 2 ETH escrow
+      const ctx = await liveTable() // default state sums to the pre-top-up 2 ETH-equivalent escrow
       const amount = viem.parseEther('0.5')
-      await ctx.zk.write.topUp([ctx.tableId], { value: amount, account: ctx.a.account })
+      const topUpAuth = await buildTopUpAuth(ctx.zk, ctx.x402Domain, ctx.a, { tableId: ctx.tableId, amount })
+      await ctx.zk.write.topUp([ctx.tableId, amount, topUpAuth], { account: ctx.a.account })
       await expectations.revertedWithCustomError(
         ctx.zk,
         ctx.zk.write.settle([ctx.tableId, ctx.state, ctx.sigA, ctx.sigB], { account: ctx.a.account }),
@@ -459,8 +509,9 @@ describe('ZkTable', () => {
       })
       const sigA = await signState(ctx.a, ctx.domain, fresh)
       const sigB = await signState(ctx.b, ctx.domain, fresh)
-      await expectations.changeEtherBalances(
+      await expectations.changeTokenBalances(
         asCtx(ctx),
+        ctx.token,
         ctx.zk.write.settle([ctx.tableId, fresh, sigA, sigB], { account: ctx.a.account }),
         [ctx.a, ctx.b],
         [fresh.balanceA, fresh.balanceB],
@@ -512,14 +563,23 @@ describe('ZkTable', () => {
       )
     })
 
-    it('rejects strangers', async () => {
+    // settle() is now fully permissionless (x402 conversion — see ZkTable.sol's header): the
+    // payout is determined entirely by the two verified channel-key signatures, conservation,
+    // isFinal, pot==0, and nonce monotonicity. msg.sender's identity is never consulted, so a
+    // stranger (a relayer/watchtower) submitting the co-signed final on the players' behalf
+    // succeeds and still pays the REAL players, not the stranger.
+    it('is permissionless: a stranger can submit it, and it still pays the real players', async () => {
       const ctx = await liveTable()
       const [, , stranger] = ctx.signers
-      await expectations.revertedWithCustomError(
-        ctx.zk,
+      await expectations.changeTokenBalances(
+        asCtx(ctx),
+        ctx.token,
         ctx.zk.write.settle([ctx.tableId, ctx.state, ctx.sigA, ctx.sigB], { account: stranger!.account }),
-        'NotPlayer',
+        [ctx.a, ctx.b, stranger!],
+        [ctx.state.balanceA, ctx.state.balanceB, 0n],
       )
+      const table = await ctx.zk.read.tables([ctx.tableId])
+      expect(table[STATUS]).to.equal(Status.Settled)
     })
 
     it('rejects a state bound to a different table', async () => {
@@ -562,8 +622,9 @@ describe('ZkTable', () => {
       )
       const sigA = await signState(keyA, ctx.domain, state)
       const sigB = await signState(keyB, ctx.domain, state)
-      await expectations.changeEtherBalances(
+      await expectations.changeTokenBalances(
         asCtx(ctx),
+        ctx.token,
         ctx.zk.write.settle([tableId, state, sigA, sigB], { account: a!.account }),
         [a!, b!],
         [state.balanceA, state.balanceB],

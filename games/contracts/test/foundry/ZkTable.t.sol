@@ -7,6 +7,9 @@ import {ChannelTableBase} from "../../contracts/zk/ChannelTableBase.sol";
 import {ChannelState} from "../../contracts/zk/ChannelState.sol";
 import {IGameRules} from "../../contracts/zk/IGameRules.sol";
 import {MockGameRules} from "../../contracts/test/MockGameRules.sol";
+import {MockX402} from "../../contracts/test/MockX402.sol";
+import {IX402Token} from "../../contracts/games/FlipBookX.sol";
+import {X402AuthLib} from "./X402AuthLib.sol";
 
 /// @notice Fuzzes the ZkTable lifecycle (create/join/top-up/settle), the conservation
 /// guard, dispute timeouts, and the clock bounds. Every co-signed state is signed for
@@ -16,6 +19,7 @@ import {MockGameRules} from "../../contracts/test/MockGameRules.sol";
 contract ZkTableFuzzTest is Test {
     ZkTable internal zk;
     MockGameRules internal rules;
+    MockX402 internal token;
 
     uint256 internal pkA = 0xA11CE;
     uint256 internal pkB = 0xB0B;
@@ -24,14 +28,16 @@ contract ZkTableFuzzTest is Test {
 
     uint64 internal constant CLOCK = 30; // MIN_CLOCK_BLOCKS
     uint256[2] internal ZERO_DECK = [uint256(0), uint256(0)];
+    uint64 internal constant VALID_BEFORE = type(uint64).max;
 
     function setUp() public {
-        zk = new ZkTable();
+        zk = new ZkTable(address(0)); // factory=0 skips the clone-check (unit-test funding via a bare mock)
         rules = new MockGameRules();
+        token = new MockX402();
         a = vm.addr(pkA);
         b = vm.addr(pkB);
-        vm.deal(a, 1_000_000 ether);
-        vm.deal(b, 1_000_000 ether);
+        token.mint(a, 1_000_000_000 ether);
+        token.mint(b, 1_000_000_000 ether);
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
@@ -56,12 +62,31 @@ contract ZkTableFuzzTest is Test {
         (, , , , escA, escB, , , , status, , , , , , , , , ) = zk.tables(tableId);
     }
 
+    function _authFor(uint256 pk, address from, uint256 value, bytes32 nonce) internal returns (ZkTable.DepositAuth memory) {
+        bytes32 digest = X402AuthLib.receiveDigest(token.DOMAIN_SEPARATOR(), from, address(zk), value, VALID_BEFORE, nonce);
+        return ZkTable.DepositAuth({from: from, validBefore: VALID_BEFORE, salt: bytes32(0), sig: X402AuthLib.sign65(pk, digest)});
+    }
+
     /// Create (A) + join (B), returning the table id and the total escrow on the table.
     function _createJoin(uint256 escrowA, uint256 stake) internal returns (bytes32 tableId) {
+        IGameRules r = IGameRules(address(rules));
+        bytes32 cNonce = zk.createNonce(a, IX402Token(address(token)), r, escrowA, stake, CLOCK, a, ZERO_DECK, bytes32(0));
+        ZkTable.DepositAuth memory cAuth = _authFor(pkA, a, escrowA, cNonce);
         vm.prank(a);
-        tableId = zk.create{value: escrowA}(IGameRules(address(rules)), stake, CLOCK, a, ZERO_DECK);
+        tableId = zk.create(IX402Token(address(token)), escrowA, r, stake, CLOCK, a, ZERO_DECK, cAuth);
+
+        bytes32 jNonce = zk.joinNonce(tableId, b, b, ZERO_DECK);
+        ZkTable.DepositAuth memory jAuth = _authFor(pkB, b, stake, jNonce);
         vm.prank(b);
-        zk.join{value: stake}(tableId, b, ZERO_DECK);
+        zk.join(tableId, b, ZERO_DECK, jAuth);
+    }
+
+    /// A single top-up of `amount` from `from`/`pk`.
+    function _topUp(uint256 pk, address from, bytes32 tableId, uint256 amount) internal {
+        bytes32 nonce = zk.topUpNonce(tableId, from, amount, bytes32(0));
+        ZkTable.DepositAuth memory auth = _authFor(pk, from, amount, nonce);
+        vm.prank(from);
+        zk.topUp(tableId, amount, auth);
     }
 
     // ── fuzz cases ───────────────────────────────────────────────────────────
@@ -77,12 +102,10 @@ contract ZkTableFuzzTest is Test {
 
         bytes32 tableId = _createJoin(eA, st);
         if (tA > 0) {
-            vm.prank(a);
-            zk.topUp{value: tA}(tableId);
+            _topUp(pkA, a, tableId, tA);
         }
         if (tB > 0) {
-            vm.prank(b);
-            zk.topUp{value: tB}(tableId);
+            _topUp(pkB, b, tableId, tB);
         }
 
         uint256 total = eA + st + tA + tB;
@@ -97,16 +120,16 @@ contract ZkTableFuzzTest is Test {
         s.phase = 1; // finalAll = true, so any phase is final
         (bytes memory sigA, bytes memory sigB) = _coSign(s);
 
-        uint256 beforeA = a.balance;
-        uint256 beforeB = b.balance;
-        uint256 zkBefore = address(zk).balance;
+        uint256 beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
+        uint256 zkBefore = token.balanceOf(address(zk));
 
         vm.prank(a);
         zk.settle(tableId, s, sigA, sigB);
 
-        assertEq(a.balance - beforeA, toA, "A paid its balance");
-        assertEq(b.balance - beforeB, toB, "B paid its balance");
-        assertEq(zkBefore - address(zk).balance, total, "exactly the table escrow left the contract");
+        assertEq(token.balanceOf(a) - beforeA, toA, "A paid its balance");
+        assertEq(token.balanceOf(b) - beforeB, toB, "B paid its balance");
+        assertEq(zkBefore - token.balanceOf(address(zk)), total, "exactly the table escrow left the contract");
 
         (uint256 escA, uint256 escB, ChannelTableBase.Status status) = _seatState(tableId);
         assertEq(uint8(status), uint8(ChannelTableBase.Status.Settled), "terminal");
@@ -136,7 +159,7 @@ contract ZkTableFuzzTest is Test {
         vm.expectRevert(ChannelTableBase.ConservationViolated.selector);
         zk.settle(tableId, s, sigA, sigB);
 
-        assertEq(address(zk).balance, total, "no funds moved");
+        assertEq(token.balanceOf(address(zk)), total, "no funds moved");
     }
 
     /// Open a MOVE dispute, let the clock expire unanswered, and resolve: the disputant
@@ -170,13 +193,13 @@ contract ZkTableFuzzTest is Test {
 
         vm.roll(block.number + CLOCK + 1); // past the deadline
 
-        uint256 beforeA = a.balance;
-        uint256 beforeB = b.balance;
+        uint256 beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
         zk.resolveTimeout(tableId);
 
-        assertEq(a.balance - beforeA, balA + pot, "disputant A gets balance + pot");
-        assertEq(b.balance - beforeB, balB, "counterparty B gets its balance");
-        assertEq(address(zk).balance, 0, "no dust");
+        assertEq(token.balanceOf(a) - beforeA, balA + pot, "disputant A gets balance + pot");
+        assertEq(token.balanceOf(b) - beforeB, balB, "counterparty B gets its balance");
+        assertEq(token.balanceOf(address(zk)), 0, "no dust");
 
         (uint256 escA, uint256 escB, ChannelTableBase.Status status) = _seatState(tableId);
         assertEq(uint8(status), uint8(ChannelTableBase.Status.Settled), "terminal");
@@ -188,14 +211,21 @@ contract ZkTableFuzzTest is Test {
     function testFuzz_clockBounds(uint64 blocks) public {
         uint64 minC = zk.MIN_CLOCK_BLOCKS();
         uint64 maxC = zk.MAX_CLOCK_BLOCKS();
-        vm.deal(a, 10 ether);
+        IGameRules r = IGameRules(address(rules));
         if (blocks < minC || blocks > maxC) {
+            // _validateClock runs before _pull, so a garbage (unsigned) auth is safe here —
+            // the call reverts BadClock long before the auth would ever be consulted.
             vm.prank(a);
             vm.expectRevert(ChannelTableBase.BadClock.selector);
-            zk.create{value: 1 ether}(IGameRules(address(rules)), 1 ether, blocks, a, ZERO_DECK);
+            zk.create(
+                IX402Token(address(token)), 1 ether, r, 1 ether, blocks, a, ZERO_DECK,
+                ZkTable.DepositAuth({from: a, validBefore: 0, salt: bytes32(0), sig: ""})
+            );
         } else {
+            bytes32 nonce = zk.createNonce(a, IX402Token(address(token)), r, 1 ether, 1 ether, blocks, a, ZERO_DECK, bytes32(0));
+            ZkTable.DepositAuth memory auth = _authFor(pkA, a, 1 ether, nonce);
             vm.prank(a);
-            bytes32 tableId = zk.create{value: 1 ether}(IGameRules(address(rules)), 1 ether, blocks, a, ZERO_DECK);
+            bytes32 tableId = zk.create(IX402Token(address(token)), 1 ether, r, 1 ether, blocks, a, ZERO_DECK, auth);
             (uint256 escA, , ChannelTableBase.Status status) = _seatState(tableId);
             assertEq(escA, 1 ether, "escrow recorded");
             assertEq(uint8(status), uint8(ChannelTableBase.Status.Created), "created");
