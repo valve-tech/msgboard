@@ -3,6 +3,7 @@ import { expect } from 'chai'
 import hre from 'hardhat'
 import * as helpers from '@nomicfoundation/hardhat-toolbox-viem/network-helpers'
 import { makeDomain, signState as coreSignState, type ChannelState, type ChannelDomain } from '@msgboard/zk-cards-core'
+import { deployZkTable, makeX402Domain, buildCreateAuth, buildJoinAuth } from './x402'
 import shuffleFixture from './fixtures/zypher-shuffle-head.json'
 import revealFixture from './fixtures/zypher-reveal-snark.json'
 
@@ -30,14 +31,19 @@ const VERIFY52_CEILING = 1_850_000n
 const VERIFY_REVEAL_CEILING = 260_000n
 
 // --- ZkTable lifecycle ceilings (hardhat gas reporter, current) ---
-// create ~205k measured → ceiling with ~27% margin.
-const CREATE_CEILING = 260_000n
-// join ~146k measured → ceiling with ~37% margin.
-const JOIN_CEILING = 200_000n
-// settle ~75k measured → ceiling with ~60% margin (settle is small; keep absolute headroom).
-const SETTLE_CEILING = 120_000n
-// resolveTimeout (setup-dispute forfeit/refund path) — measured below; ceiling set with margin.
-const RESOLVE_TIMEOUT_CEILING = 130_000n
+// x402 conversion (2026-08): create/join/topUp now pull escrow via the wrapper's
+// EIP-3009/7598 receiveWithAuthorization (an extra CALL + ecrecover/EIP-712 digest, vs. a bare
+// `payable` msg.value credit before) — ceilings bumped accordingly, remeasured post-conversion.
+// create ~295k measured (was ~205k native-PLS) → ceiling with ~20% margin.
+const CREATE_CEILING = 355_000n
+// join ~198k measured (was ~146k native-PLS) → ceiling with ~25% margin.
+const JOIN_CEILING = 250_000n
+// settle ~85k measured (payout is now an ERC-20 `transfer`, not `forceSafeTransferETH` — a
+// similar-cost swap, not a new external call) → ceiling with margin.
+const SETTLE_CEILING = 130_000n
+// resolveTimeout (setup-dispute forfeit/refund path) — payout moved to ERC-20 `transfer`;
+// measured below; ceiling set with margin.
+const RESOLVE_TIMEOUT_CEILING = 160_000n
 
 // Flatten a 52-card deck (each card is 4 field elements) into a flat uint256[] array.
 const flatDeck = (deck: string[][]): bigint[] => deck.flat().map((v) => BigInt(v))
@@ -48,21 +54,36 @@ const DECK_KEY_A = [1n, 2n] as const
 const DECK_KEY_B = [3n, 4n] as const
 
 const deployZk = async () => {
-  const zk = await hre.viem.deployContract('ZkTable')
+  // ZkTable's constructor now takes the x402 wrapper-factory address (see ZkTable.sol's
+  // IWrapperFactory) — zeroAddress skips the create()-time clone-check, matching the Foundry
+  // unit suites (which fund via the same bare MockX402, not a real wrapper clone).
+  const zk = await deployZkTable(viem.zeroAddress)
   const rules = await hre.viem.deployContract('MockGameRules')
+  const token = await hre.viem.deployContract('MockX402')
   const signers = await hre.viem.getWalletClients()
   const publicClient = await hre.viem.getPublicClient()
-  const domain = makeDomain(await publicClient.getChainId(), zk.address)
-  return { zk, rules, signers, publicClient, domain }
+  const chainId = await publicClient.getChainId()
+  const domain = makeDomain(chainId, zk.address)
+  const x402Domain = makeX402Domain(chainId, token.address)
+  await Promise.all(signers.map((s) => token.write.mint([s.account!.address, viem.parseEther('1000')])))
+  return { zk, rules, token, signers, publicClient, domain, x402Domain }
 }
 
 type ZkContext = Awaited<ReturnType<typeof deployZk>>
 
 const createTable = async (ctx: ZkContext) => {
   const [a] = ctx.signers
+  const auth = await buildCreateAuth(ctx.zk, ctx.token.address, ctx.x402Domain, a!, {
+    rules: ctx.rules.address,
+    buyIn: STAKE,
+    joinStake: STAKE,
+    clockBlocks: CLOCK,
+    channelKey: viem.zeroAddress,
+    deckKey: DECK_KEY_A,
+  })
   const hash = await ctx.zk.write.create(
-    [ctx.rules.address, STAKE, CLOCK, viem.zeroAddress, DECK_KEY_A as unknown as [bigint, bigint]],
-    { value: STAKE, account: a!.account },
+    [ctx.token.address, STAKE, ctx.rules.address, STAKE, CLOCK, viem.zeroAddress, DECK_KEY_A as unknown as [bigint, bigint], auth],
+    { account: a!.account },
   )
   const receipt = await ctx.publicClient.waitForTransactionReceipt({ hash })
   const [created] = viem.parseEventLogs({ logs: receipt.logs, abi: ctx.zk.abi, eventName: 'TableCreated' })
@@ -71,9 +92,15 @@ const createTable = async (ctx: ZkContext) => {
 
 const joinTable = async (ctx: ZkContext, tableId: viem.Hex) => {
   const [, b] = ctx.signers
+  const auth = await buildJoinAuth(ctx.zk, ctx.x402Domain, b!, {
+    tableId,
+    stake: STAKE,
+    channelKey: viem.zeroAddress,
+    deckKey: DECK_KEY_B,
+  })
   const hash = await ctx.zk.write.join(
-    [tableId, viem.zeroAddress, DECK_KEY_B as unknown as [bigint, bigint]],
-    { value: STAKE, account: b!.account },
+    [tableId, viem.zeroAddress, DECK_KEY_B as unknown as [bigint, bigint], auth],
+    { account: b!.account },
   )
   return await ctx.publicClient.waitForTransactionReceipt({ hash })
 }

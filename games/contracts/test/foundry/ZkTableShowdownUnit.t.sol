@@ -8,6 +8,9 @@ import {ChannelState} from "../../contracts/zk/ChannelState.sol";
 import {IGameRules} from "../../contracts/zk/IGameRules.sol";
 import {MockGameRules} from "../../contracts/test/MockGameRules.sol";
 import {MockRevealVerifier} from "../../contracts/test/MockRevealVerifier.sol";
+import {MockX402} from "../../contracts/test/MockX402.sol";
+import {IX402Token} from "../../contracts/games/FlipBookX.sol";
+import {X402AuthLib} from "./X402AuthLib.sol";
 import {HiLoWarRules} from "../../contracts/zk/HiLoWarRules.sol";
 import {HiLo, HiLoCodec} from "./HiLoWarRules.t.sol";
 
@@ -32,6 +35,7 @@ contract ZkTableShowdownUnitTest is Test {
     MockGameRules internal mockRules;
     HiLoWarRules internal hiloRules;
     MockRevealVerifier internal verifier;
+    MockX402 internal token;
 
     uint256 internal constant PK_A = 0xA11CE;
     uint256 internal constant PK_B = 0xB0B;
@@ -84,14 +88,41 @@ contract ZkTableShowdownUnitTest is Test {
     uint256 constant TIE_REVEAL_B_Y = 0x2e0fb382bc9db60b05a06477d39181c5cae435c227cb6588a2669755813d211f;
 
     function setUp() public {
-        zk = new ZkTable();
+        zk = new ZkTable(address(0)); // factory=0 skips the clone-check (unit-test funding via a bare mock)
         mockRules = new MockGameRules();
         verifier = new MockRevealVerifier();
         hiloRules = new HiLoWarRules(address(verifier), address(0));
+        token = new MockX402();
         a = vm.addr(PK_A);
         b = vm.addr(PK_B);
-        vm.deal(a, 1_000_000 ether);
-        vm.deal(b, 1_000_000 ether);
+        token.mint(a, 1_000_000 ether);
+        token.mint(b, 1_000_000 ether);
+    }
+
+    // ── x402 deposit-auth helpers ────────────────────────────────────────────
+
+    uint64 internal constant VALID_BEFORE = type(uint64).max;
+
+    function _authFor(uint256 pk, address from, uint256 value, bytes32 nonce) internal returns (ZkTable.DepositAuth memory) {
+        bytes32 digest = X402AuthLib.receiveDigest(token.DOMAIN_SEPARATOR(), from, address(zk), value, VALID_BEFORE, nonce);
+        return ZkTable.DepositAuth({from: from, validBefore: VALID_BEFORE, salt: bytes32(0), sig: X402AuthLib.sign65(pk, digest)});
+    }
+
+    function _create(uint256 pk, address from, uint256 buyIn, IGameRules rules_, uint256 stake, uint64 clock, address channelKey, uint256[2] memory deckKey)
+        internal
+        returns (bytes32 tableId)
+    {
+        bytes32 nonce = zk.createNonce(from, IX402Token(address(token)), rules_, buyIn, stake, clock, channelKey, deckKey, bytes32(0));
+        ZkTable.DepositAuth memory auth = _authFor(pk, from, buyIn, nonce);
+        vm.prank(from);
+        tableId = zk.create(IX402Token(address(token)), buyIn, rules_, stake, clock, channelKey, deckKey, auth);
+    }
+
+    function _join(uint256 pk, address from, bytes32 tableId, uint256 stake, address channelKey, uint256[2] memory deckKey) internal {
+        bytes32 nonce = zk.joinNonce(tableId, from, channelKey, deckKey);
+        ZkTable.DepositAuth memory auth = _authFor(pk, from, stake, nonce);
+        vm.prank(from);
+        zk.join(tableId, channelKey, deckKey, auth);
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
@@ -129,10 +160,8 @@ contract ZkTableShowdownUnitTest is Test {
     }
 
     function _createJoin(IGameRules rules_, uint256 escrowA, uint256 stake) internal returns (bytes32 tableId) {
-        vm.prank(a);
-        tableId = zk.create{value: escrowA}(rules_, stake, CLOCK, address(0), ZERO_DECK);
-        vm.prank(b);
-        zk.join{value: stake}(tableId, address(0), ZERO_DECK);
+        tableId = _create(PK_A, a, escrowA, rules_, stake, CLOCK, address(0), ZERO_DECK);
+        _join(PK_B, b, tableId, stake, address(0), ZERO_DECK);
     }
 
     function _deck208() internal pure returns (uint256[] memory deck) {
@@ -404,16 +433,16 @@ contract ZkTableShowdownUnitTest is Test {
 
         (uint256 escABefore, uint256 escBBefore) = _escrows(id);
         uint256 total = escABefore + escBBefore;
-        uint256 beforeA = a.balance;
-        uint256 beforeB = b.balance;
+        uint256 beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
 
         vm.expectEmit(true, false, false, true);
         emit ZkTable.ShowdownFinalized(id, 3, 4, 2); // cardA=3 (rank0), cardB=4 (rank1) -> B wins
         zk.finalizeShowdown(id, deck, gameState); // called by neither seat — permissionless
 
         assertEq(uint8(_status(id)), uint8(ChannelTableBase.Status.Settled));
-        uint256 paidA = a.balance - beforeA;
-        uint256 paidB = b.balance - beforeB;
+        uint256 paidA = token.balanceOf(a) - beforeA;
+        uint256 paidB = token.balanceOf(b) - beforeB;
         assertEq(paidA, 1.5 ether, "A keeps only its balance (loses the pot)");
         assertEq(paidB, 1.5 ether + 1 ether, "B gets its balance + the pot");
         assertEq(paidA + paidB, total, "conservation: full escrow paid out, no dust");
@@ -430,15 +459,15 @@ contract ZkTableShowdownUnitTest is Test {
 
         (uint256 escABefore, uint256 escBBefore) = _escrows(id);
         uint256 total = escABefore + escBBefore;
-        uint256 beforeA = a.balance;
-        uint256 beforeB = b.balance;
+        uint256 beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
 
         vm.expectEmit(true, false, false, true);
         emit ZkTable.ShowdownFinalized(id, 0, 1, 0); // rank tie
         zk.finalizeShowdown(id, deck, gameState);
 
-        uint256 paidA = a.balance - beforeA;
-        uint256 paidB = b.balance - beforeB;
+        uint256 paidA = token.balanceOf(a) - beforeA;
+        uint256 paidB = token.balanceOf(b) - beforeB;
         assertEq(paidA, 1.5 ether + 1 ether, "disputant A gets its balance + the pot on a tie");
         assertEq(paidB, 1.5 ether, "B keeps only its balance");
         assertEq(paidA + paidB, total, "conservation: full escrow paid out, no dust");
@@ -470,12 +499,12 @@ contract ZkTableShowdownUnitTest is Test {
         _post(id, a, deck, 3, 4, [WIN_REVEAL_A_SLOTA_X, WIN_REVEAL_A_SLOTA_Y], [WIN_REVEAL_A_SLOTB_X, WIN_REVEAL_A_SLOTB_Y]);
         _post(id, b, deck, 3, 4, [WIN_REVEAL_B_SLOTA_X, WIN_REVEAL_B_SLOTA_Y], [WIN_REVEAL_B_SLOTB_X, WIN_REVEAL_B_SLOTB_Y]);
 
-        uint256 beforeA = a.balance;
-        uint256 beforeB = b.balance;
+        uint256 beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
         zk.finalizeShowdown(id, deck, gameState);
 
-        uint256 paidA = a.balance - beforeA;
-        uint256 paidB = b.balance - beforeB;
+        uint256 paidA = token.balanceOf(a) - beforeA;
+        uint256 paidB = token.balanceOf(b) - beforeB;
         assertEq(paidA, balA, "A (loser) keeps exactly its balance, to the wei");
         assertEq(paidB, balB + pot, "B (winner) gets exactly balance + pot, to the wei");
         assertEq(paidA + paidB, escrowA + escrowB, "conservation holds exactly, no dust, odd wei");
@@ -501,16 +530,16 @@ contract ZkTableShowdownUnitTest is Test {
         _post(id, a, deck, slotA, slotB, [uint256(5), uint256(6)], [TIE_REVEAL_A_X, TIE_REVEAL_A_Y]);
         _post(id, b, deck, slotA, slotB, [uint256(7), uint256(8)], [TIE_REVEAL_B_X, TIE_REVEAL_B_Y]);
 
-        uint256 beforeA = a.balance;
-        uint256 beforeB = b.balance;
+        uint256 beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
 
         vm.expectEmit(true, false, false, false); // only check tableId; cardA is meaningless (ok=false)
         emit ZkTable.ShowdownFinalized(id, 0, 0, SHOWDOWN_SPLIT);
         zk.finalizeShowdown(id, deck, gameState);
 
         uint256 half = pot / 2;
-        uint256 paidA = a.balance - beforeA;
-        uint256 paidB = b.balance - beforeB;
+        uint256 paidA = token.balanceOf(a) - beforeA;
+        uint256 paidB = token.balanceOf(b) - beforeB;
         assertEq(paidA, balA + half + 1, "A gets balance + half pot + odd wei");
         assertEq(paidB, balB + half, "B gets balance + half pot");
         assertLt(paidA, balA + pot, "disputant (A) must NOT get the whole pot from a decoy key");
@@ -534,16 +563,16 @@ contract ZkTableShowdownUnitTest is Test {
         _post(id, a, deck, slotA, slotB, [WIN_REVEAL_A_SLOTA_X, WIN_REVEAL_A_SLOTA_Y], [WIN_REVEAL_A_SLOTA_X, WIN_REVEAL_A_SLOTA_Y]);
         _post(id, b, deck, slotA, slotB, [WIN_REVEAL_B_SLOTA_X, WIN_REVEAL_B_SLOTA_Y], [WIN_REVEAL_B_SLOTA_X, WIN_REVEAL_B_SLOTA_Y]);
 
-        uint256 beforeA = a.balance;
-        uint256 beforeB = b.balance;
+        uint256 beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
 
         vm.expectEmit(true, false, false, true);
         emit ZkTable.ShowdownFinalized(id, 3, 3, SHOWDOWN_SPLIT); // both decode ok, but cardA==cardB
         zk.finalizeShowdown(id, deck, gameState);
 
         uint256 half = pot / 2;
-        uint256 paidA = a.balance - beforeA;
-        uint256 paidB = b.balance - beforeB;
+        uint256 paidA = token.balanceOf(a) - beforeA;
+        uint256 paidB = token.balanceOf(b) - beforeB;
         assertEq(paidA, balA + half, "A gets balance + half pot (pot is even here)");
         assertEq(paidB, balB + half, "B gets balance + half pot");
         assertEq(paidA + paidB, 2 * ESCROW, "conservation holds exactly on the duplicate-card split");
@@ -567,21 +596,21 @@ contract ZkTableShowdownUnitTest is Test {
     function test_finalizeShowdown_mockWinner1_paysA() public {
         mockRules.setShowdownWinner(1);
         (bytes32 id, bytes memory gameState, uint256[] memory deck) = _openWinnerGuardShowdown(1.5 ether, 1.5 ether, 1 ether);
-        uint256 beforeA = a.balance;
-        uint256 beforeB = b.balance;
+        uint256 beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
         zk.finalizeShowdown(id, deck, gameState);
-        assertEq(a.balance - beforeA, 2.5 ether, "winner=1 pays A balance + pot");
-        assertEq(b.balance - beforeB, 1.5 ether, "B gets only its balance");
+        assertEq(token.balanceOf(a) - beforeA, 2.5 ether, "winner=1 pays A balance + pot");
+        assertEq(token.balanceOf(b) - beforeB, 1.5 ether, "B gets only its balance");
     }
 
     function test_finalizeShowdown_mockWinner2_paysB() public {
         mockRules.setShowdownWinner(2);
         (bytes32 id, bytes memory gameState, uint256[] memory deck) = _openWinnerGuardShowdown(1.5 ether, 1.5 ether, 1 ether);
-        uint256 beforeA = a.balance;
-        uint256 beforeB = b.balance;
+        uint256 beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
         zk.finalizeShowdown(id, deck, gameState);
-        assertEq(b.balance - beforeB, 2.5 ether, "winner=2 pays B balance + pot");
-        assertEq(a.balance - beforeA, 1.5 ether, "A gets only its balance");
+        assertEq(token.balanceOf(b) - beforeB, 2.5 ether, "winner=2 pays B balance + pot");
+        assertEq(token.balanceOf(a) - beforeA, 1.5 ether, "A gets only its balance");
     }
 
     function test_finalizeShowdown_mockWinner3_revertsBadGameState() public {
@@ -619,17 +648,17 @@ contract ZkTableShowdownUnitTest is Test {
         bytes memory nextState = abi.encode("gs2");
         mockRules.setApply(nextState, false);
 
-        uint256 beforeA = a.balance;
-        uint256 beforeB = b.balance;
-        uint256 contractBefore = address(zk).balance;
+        uint256 beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
+        uint256 contractBefore = token.balanceOf(address(zk));
 
         vm.prank(b);
         zk.respondWithMove(id, gameState, fakeMove);
 
         assertEq(uint8(_status(id)), uint8(ChannelTableBase.Status.Live), "dispute cleared, not settled");
-        assertEq(a.balance, beforeA, "no payout to A");
-        assertEq(b.balance, beforeB, "no payout to B");
-        assertEq(address(zk).balance, contractBefore, "escrow untouched");
+        assertEq(token.balanceOf(a), beforeA, "no payout to A");
+        assertEq(token.balanceOf(b), beforeB, "no payout to B");
+        assertEq(token.balanceOf(address(zk)), contractBefore, "escrow untouched");
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -702,12 +731,12 @@ contract ZkTableShowdownUnitTest is Test {
         _post(id, a, deck, 0, 1, [uint256(1), uint256(2)], [uint256(3), uint256(4)]); // A == disputant
 
         vm.roll(block.number + CLOCK + 1);
-        uint256 beforeA = a.balance;
-        uint256 beforeB = b.balance;
+        uint256 beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
         zk.resolveTimeout(id);
 
-        assertEq(a.balance - beforeA, balA + 1 ether, "disputant answered -> gets balance + pot");
-        assertEq(b.balance - beforeB, balB, "counterparty refused -> gets only its balance");
+        assertEq(token.balanceOf(a) - beforeA, balA + 1 ether, "disputant answered -> gets balance + pot");
+        assertEq(token.balanceOf(b) - beforeB, balB, "counterparty refused -> gets only its balance");
     }
 
     /// HEADLINE FIX: counterparty fully reveals; the DISPUTANT posts nothing (the free-roll
@@ -720,12 +749,12 @@ contract ZkTableShowdownUnitTest is Test {
         _post(id, b, deck, 0, 1, [uint256(5), uint256(6)], [uint256(7), uint256(8)]); // B == counterparty
 
         vm.roll(block.number + CLOCK + 1);
-        uint256 beforeA = a.balance;
-        uint256 beforeB = b.balance;
+        uint256 beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
         zk.resolveTimeout(id);
 
-        assertEq(b.balance - beforeB, balB + 1 ether, "counterparty answered -> gets balance + pot (free-roll closed)");
-        assertEq(a.balance - beforeA, balA, "disputant refused to reveal -> gets only its balance, NOT the pot");
+        assertEq(token.balanceOf(b) - beforeB, balB + 1 ether, "counterparty answered -> gets balance + pot (free-roll closed)");
+        assertEq(token.balanceOf(a) - beforeA, balA, "disputant refused to reveal -> gets only its balance, NOT the pot");
     }
 
     /// Neither seat reveals: mutual no-show splits the pot (denies either side a griefing edge)
@@ -736,13 +765,13 @@ contract ZkTableShowdownUnitTest is Test {
         (bytes32 id, , uint256 balA, uint256 balB) = _openTimeoutShowdown(pot);
 
         vm.roll(block.number + CLOCK + 1);
-        uint256 beforeA = a.balance;
-        uint256 beforeB = b.balance;
+        uint256 beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
         zk.resolveTimeout(id);
 
         uint256 half = pot / 2;
-        uint256 paidA = a.balance - beforeA;
-        uint256 paidB = b.balance - beforeB;
+        uint256 paidA = token.balanceOf(a) - beforeA;
+        uint256 paidB = token.balanceOf(b) - beforeB;
         assertEq(paidA, balA + half + 1, "A gets balance + half pot + odd wei");
         assertEq(paidB, balB + half, "B gets balance + half pot");
         assertEq(paidA + paidB, 2 * ESCROW, "conservation holds exactly on mutual-no-show split");

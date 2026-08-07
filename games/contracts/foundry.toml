@@ -127,6 +127,8 @@ skip = [
   'test/foundry/HoldemShareDispute.t.sol',
   'test/foundry/CardTable52.t.sol',
   'test/foundry/ZkTableShowdownDispute.t.sol',
+  'test/foundry/ZkTableX402.t.sol',
+  'test/foundry/ZkTableX402Fork.t.sol',
   'test/foundry/SolveResolvers.t.sol',
   'test/foundry/HoldemTableNShowdown.t.sol',
   'test/foundry/MockRandom.sol',
@@ -234,6 +236,8 @@ skip = [
   'test/foundry/HoldemShareDispute.t.sol',
   'test/foundry/CardTable52.t.sol',
   'test/foundry/ZkTableShowdownDispute.t.sol',
+  'test/foundry/ZkTableX402.t.sol',
+  'test/foundry/ZkTableX402Fork.t.sol',
   'test/foundry/SolveResolvers.t.sol',
 ]
 
@@ -317,6 +321,8 @@ skip = [
   'test/foundry/HoldemShareDispute.t.sol',
   'test/foundry/CardTable52.t.sol',
   'test/foundry/ZkTableShowdownDispute.t.sol',
+  'test/foundry/ZkTableX402.t.sol',
+  'test/foundry/ZkTableX402Fork.t.sol',
   'test/foundry/SolveResolvers.t.sol',
 ]
 
@@ -411,6 +417,8 @@ skip = [
   'test/foundry/HoldemShareDispute.t.sol',
   'test/foundry/CardTable52.t.sol',
   'test/foundry/ZkTableShowdownDispute.t.sol',
+  'test/foundry/ZkTableX402.t.sol',
+  'test/foundry/ZkTableX402Fork.t.sol',
   'test/foundry/HoldemTableN.t.sol',
   'test/foundry/HoldemTableNInvariant.t.sol',
   'test/foundry/HoldemTableNShowdown.t.sol',

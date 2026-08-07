@@ -4,6 +4,7 @@ import hre from 'hardhat'
 import * as helpers from '@nomicfoundation/hardhat-toolbox-viem/network-helpers'
 import * as expectations from './expectations'
 import { makeDomain, signState as coreSignState, type ChannelState, type ChannelDomain } from '@msgboard/zk-cards-core'
+import { deployZkTable, makeX402Domain, buildCreateAuth, buildJoinAuth, buildTopUpAuth } from './x402'
 import revealFixture from './fixtures/zypher-reveal-snark.json'
 
 declare module 'hardhat/types/runtime' {
@@ -47,14 +48,21 @@ const GAME_STATE_HASH = viem.keccak256(GAME_STATE)
 const DECK_COMMITMENT = viem.keccak256(viem.toHex('deck'))
 
 const deployZk = async () => {
-  const zk = await hre.viem.deployContract('ZkTable')
+  // ZkTable's constructor now takes the x402 wrapper-factory address (see ZkTable.sol's
+  // IWrapperFactory) — zeroAddress skips the create()-time clone-check, matching the Foundry
+  // unit suites (which fund via the same bare MockX402, not a real wrapper clone).
+  const zk = await deployZkTable(viem.zeroAddress)
   const rules = await hre.viem.deployContract('MockGameRules')
   const verifier = await hre.viem.deployContract('MockRevealVerifier')
   await rules.write.setRevealVerifier([verifier.address])
+  const token = await hre.viem.deployContract('MockX402')
   const signers = await hre.viem.getWalletClients()
   const publicClient = await hre.viem.getPublicClient()
-  const domain = makeDomain(await publicClient.getChainId(), zk.address)
-  return { zk, rules, verifier, signers, publicClient, domain, hre }
+  const chainId = await publicClient.getChainId()
+  const domain = makeDomain(chainId, zk.address)
+  const x402Domain = makeX402Domain(chainId, token.address)
+  await Promise.all(signers.map((s) => token.write.mint([s.account!.address, viem.parseEther('1000')])))
+  return { zk, rules, verifier, token, signers, publicClient, domain, x402Domain, hre }
 }
 
 type ZkContext = Awaited<ReturnType<typeof deployZk>>
@@ -65,15 +73,19 @@ const createTable = async (
   opts: { rules?: viem.Hex; deckKeyA?: readonly [bigint, bigint] } = {},
 ) => {
   const [a] = ctx.signers
+  const rules = opts.rules ?? ctx.rules.address
+  const deckKeyA = (opts.deckKeyA ?? DECK_KEY_A) as readonly [bigint, bigint]
+  const auth = await buildCreateAuth(ctx.zk, ctx.token.address, ctx.x402Domain, a!, {
+    rules,
+    buyIn: STAKE,
+    joinStake: STAKE,
+    clockBlocks: CLOCK,
+    channelKey: viem.zeroAddress,
+    deckKey: deckKeyA,
+  })
   const hash = await ctx.zk.write.create(
-    [
-      opts.rules ?? ctx.rules.address,
-      STAKE,
-      CLOCK,
-      viem.zeroAddress,
-      (opts.deckKeyA ?? DECK_KEY_A) as unknown as [bigint, bigint],
-    ],
-    { value: STAKE, account: a!.account },
+    [ctx.token.address, STAKE, rules, STAKE, CLOCK, viem.zeroAddress, deckKeyA as unknown as [bigint, bigint], auth],
+    { account: a!.account },
   )
   const receipt = await ctx.publicClient.waitForTransactionReceipt({ hash })
   const [created] = viem.parseEventLogs({ logs: receipt.logs, abi: ctx.zk.abi, eventName: 'TableCreated' })
@@ -86,9 +98,16 @@ const joinTable = async (
   opts: { deckKeyB?: readonly [bigint, bigint] } = {},
 ) => {
   const [, b] = ctx.signers
+  const deckKeyB = (opts.deckKeyB ?? DECK_KEY_B) as readonly [bigint, bigint]
+  const auth = await buildJoinAuth(ctx.zk, ctx.x402Domain, b!, {
+    tableId,
+    stake: STAKE,
+    channelKey: viem.zeroAddress,
+    deckKey: deckKeyB,
+  })
   await ctx.zk.write.join(
-    [tableId, viem.zeroAddress, (opts.deckKeyB ?? DECK_KEY_B) as unknown as [bigint, bigint]],
-    { value: STAKE, account: b!.account },
+    [tableId, viem.zeroAddress, deckKeyB as unknown as [bigint, bigint], auth],
+    { account: b!.account },
   )
 }
 
@@ -196,8 +215,9 @@ describe('ZkTable dispute machine', () => {
       const ctx = await liveTable()
       await ctx.zk.write.disputeSetup([ctx.tableId], { account: ctx.a.account })
       await helpers.mine(Number(CLOCK) + 1)
-      await expectations.changeEtherBalances(
+      await expectations.changeTokenBalances(
         asCtx(ctx),
+        ctx.token,
         ctx.zk.write.resolveTimeout([ctx.tableId], { account: ctx.a.account }),
         [ctx.a, ctx.b, ctx.zk.address],
         [STAKE, STAKE, -(STAKE + STAKE)],
@@ -614,16 +634,32 @@ describe('ZkTable dispute machine', () => {
 
       // create with HiLoWarRules; A's deckKey arbitrary, B's deckKey = pi[4..5].
       const [a, b] = ctx.signers
+      const deckKeyA = [1n, 2n] as const
+      const createAuth = await buildCreateAuth(ctx.zk, ctx.token.address, ctx.x402Domain, a!, {
+        rules: rules.address,
+        buyIn: STAKE,
+        joinStake: STAKE,
+        clockBlocks: CLOCK,
+        channelKey: viem.zeroAddress,
+        deckKey: deckKeyA,
+      })
       const createHash = await ctx.zk.write.create(
-        [rules.address, STAKE, CLOCK, viem.zeroAddress, [1n, 2n] as unknown as [bigint, bigint]],
-        { value: STAKE, account: a!.account },
+        [ctx.token.address, STAKE, rules.address, STAKE, CLOCK, viem.zeroAddress, deckKeyA as unknown as [bigint, bigint], createAuth],
+        { account: a!.account },
       )
       const createReceipt = await ctx.publicClient.waitForTransactionReceipt({ hash: createHash })
       const [created] = viem.parseEventLogs({ logs: createReceipt.logs, abi: ctx.zk.abi, eventName: 'TableCreated' })
       const tableId = created!.args.tableId
+      const deckKeyB = [pi[4]!, pi[5]!] as const
+      const joinAuth = await buildJoinAuth(ctx.zk, ctx.x402Domain, b!, {
+        tableId,
+        stake: STAKE,
+        channelKey: viem.zeroAddress,
+        deckKey: deckKeyB,
+      })
       await ctx.zk.write.join(
-        [tableId, viem.zeroAddress, [pi[4]!, pi[5]!] as unknown as [bigint, bigint]],
-        { value: STAKE, account: b!.account },
+        [tableId, viem.zeroAddress, deckKeyB as unknown as [bigint, bigint], joinAuth],
+        { account: b!.account },
       )
 
       const state = mkState(tableId, { nonce: 3n, deckCommitment: commitment, gameStateHash })
@@ -694,8 +730,9 @@ describe('ZkTable dispute machine', () => {
       const ctx = await liveTable()
       const state = await openMove(ctx) // disputant = A, balances 1.2/0.3, pot 0.5
       await helpers.mine(Number(CLOCK) + 1)
-      await expectations.changeEtherBalances(
+      await expectations.changeTokenBalances(
         asCtx(ctx),
+        ctx.token,
         ctx.zk.write.resolveTimeout([ctx.tableId], { account: ctx.a.account }),
         [ctx.a, ctx.b],
         [state.balanceA + state.pot, state.balanceB],
@@ -743,8 +780,9 @@ describe('ZkTable dispute machine', () => {
       const table0 = await ctx.zk.read.tables([ctx.tableId])
       expect(table0[DISPUTANT]).to.equal(2)
       await helpers.mine(Number(CLOCK) + 1)
-      await expectations.changeEtherBalances(
+      await expectations.changeTokenBalances(
         asCtx(ctx),
+        ctx.token,
         ctx.zk.write.resolveTimeout([ctx.tableId], { account: ctx.b.account }),
         [ctx.a, ctx.b],
         [state.balanceA, state.balanceB + state.pot],
@@ -763,8 +801,9 @@ describe('ZkTable dispute machine', () => {
         pot: 0n,
       })
       await helpers.mine(Number(CLOCK) + 1)
-      await expectations.changeEtherBalances(
+      await expectations.changeTokenBalances(
         asCtx(ctx),
+        ctx.token,
         ctx.zk.write.resolveTimeout([ctx.tableId], { account: ctx.a.account }),
         [ctx.a, ctx.b, ctx.zk.address],
         [state.balanceA, 0n, -state.balanceA],
@@ -879,27 +918,27 @@ describe('ZkTable dispute machine', () => {
     })
 
     // gap 11: respondWithShare with demandSlot > 51 → BadDeck on the slot check
-    it('respondWithShare reverts BadDeck when demandSlot exceeds 51', async () => {
+    // PRE-EXISTING STALE ASSERTION FIXED (unrelated to the x402 conversion): the "openDispute
+    // hardening" pass (commit b6b13f4, before this x402 work) moved the demandSlot>51 rejection
+    // EARLIER, into openDispute itself — an out-of-range SHARE slot is now unanswerable by
+    // construction and rejected at the trust boundary, so it can never reach respondWithShare at
+    // all (mirrors ZkTableUnit.t.sol's test_openDispute_rejectsShareSlotTooHigh). This test's
+    // title/body is updated to pin the CURRENT (correct) boundary-rejection behavior instead of
+    // the pre-hardening one.
+    it('openDispute reverts BadDemand when demandSlot exceeds 51 (rejected at the trust boundary)', async () => {
       const ctx = await liveTable()
       const SLOT = 52
-      // A 208-word deck with a matching commitment so the length + commitment checks pass and the
-      // slot > 51 guard is the one that fires. deck[4*52..] would be out of range, but the slot
-      // check happens before any deck[4*slot] access.
       const deck: bigint[] = new Array(208).fill(1n)
       const commitment = viem.keccak256(viem.encodePacked(deck.map(() => 'uint256'), deck))
       const state = mkState(ctx.tableId, { nonce: 3n, deckCommitment: commitment })
       const { sigA, sigB } = await cosign(ctx, state)
-      await ctx.zk.write.openDispute(
-        [ctx.tableId, state, sigA, sigB, GAME_STATE, DEMAND_SHARE, SLOT],
-        { account: ctx.a.account },
-      )
       await expectations.revertedWithCustomError(
         ctx.zk,
-        ctx.zk.write.respondWithShare(
-          [ctx.tableId, deck as unknown as bigint[], [33n, 44n], ZERO_PROOF],
-          { account: ctx.b.account },
+        ctx.zk.write.openDispute(
+          [ctx.tableId, state, sigA, sigB, GAME_STATE, DEMAND_SHARE, SLOT],
+          { account: ctx.a.account },
         ),
-        'BadDeck',
+        'BadDemand',
       )
     })
 
@@ -953,7 +992,8 @@ describe('ZkTable dispute machine', () => {
       const pre = mkState(ctx.tableId, { nonce: 3n }) // sums to 2 ETH
       const preSigs = await cosign(ctx, pre)
       const amount = viem.parseEther('0.5')
-      await ctx.zk.write.topUp([ctx.tableId], { value: amount, account: ctx.a.account })
+      const topUpAuth = await buildTopUpAuth(ctx.zk, ctx.x402Domain, ctx.a, { tableId: ctx.tableId, amount })
+      await ctx.zk.write.topUp([ctx.tableId, amount, topUpAuth], { account: ctx.a.account })
       await expectations.revertedWithCustomError(
         ctx.zk,
         ctx.zk.write.openDispute(
@@ -984,22 +1024,61 @@ describe('ZkTable dispute machine', () => {
   // Settled and zeroes escrow BEFORE transferring (checks-effects-interactions), so the reentrant
   // call hits BadStatus and is swallowed by forceSafeTransferETH's gas stipend — the outer tx still
   // settles and the attacker is paid exactly once.
-  describe('reentrancy (CEI / no double payout)', () => {
-    it('a reentrant resolveTimeout on payout is neutralized — single payout, table Settled', async () => {
+  // CEI / no-double-payout invariant on the money path — redesigned for the x402 conversion. The
+  // OLD version of this test attacked a malicious PLAYER contract's `receive()` hook, fired by
+  // the pre-x402 contract's native `forceSafeTransferETH` payout. That vector is now CLOSED BY
+  // CONSTRUCTION, not by a guard: payouts move via `SafeTransferLib.safeTransfer` (a plain ERC-20
+  // `transfer` call), which never invokes the recipient's code at all — there is no hook for a
+  // malicious wallet seat to attack anymore. The genuinely analogous threat under the x402 model
+  // is a MALICIOUS ESCROW TOKEN whose own `transfer` re-enters ZkTable; ReenteringToken (see its
+  // contract header) models exactly that, and this test proves the SAME CEI property — status
+  // flips to Settled and both escrows zero out BEFORE any transfer (ZkTable.sol's `_payout`) —
+  // still holds against a hostile token, not just a hostile receiver.
+  describe('reentrancy (CEI / no double payout, malicious escrow token)', () => {
+    it('a reentrant resolveTimeout mid-payout is neutralized — single payout, table Settled', async () => {
       const ctx = await helpers.loadFixture(deployZk)
       const [a, b] = ctx.signers
-      // attacker contract is the wallet seat A; signer A is its channel-signing key.
-      const attacker = await hre.viem.deployContract('ReenteringReceiver', [ctx.zk.address])
+      const evilToken = await hre.viem.deployContract('ReenteringToken')
+      // ReenteringToken's own EIP-712 domain — NOT makeX402Domain's fixed "x402 PLS"/"1" (that's
+      // MockX402's domain specifically); ReenteringToken names itself "ReenteringToken" in its
+      // own DOMAIN_SEPARATOR(), so the signed digest must match that or recovery fails.
+      const evilDomain = {
+        name: 'ReenteringToken',
+        version: '1',
+        chainId: await ctx.publicClient.getChainId(),
+        verifyingContract: evilToken.address,
+      }
+      await evilToken.write.mint([a!.account!.address, STAKE * 2n])
+      await evilToken.write.mint([b!.account!.address, STAKE * 2n])
 
-      // create via the attacker so playerA == attacker (payout target), channelKey == a (signer).
-      await attacker.write.createTable(
-        [ctx.rules.address, STAKE, CLOCK, a!.account.address, DECK_KEY_A as unknown as [bigint, bigint]],
-        { value: STAKE, account: a!.account },
+      const createAuth = await buildCreateAuth(ctx.zk, evilToken.address, evilDomain, a!, {
+        rules: ctx.rules.address,
+        buyIn: STAKE,
+        joinStake: STAKE,
+        clockBlocks: CLOCK,
+        channelKey: viem.zeroAddress,
+        deckKey: DECK_KEY_A,
+      })
+      const createHash = await ctx.zk.write.create(
+        [evilToken.address, STAKE, ctx.rules.address, STAKE, CLOCK, viem.zeroAddress, DECK_KEY_A as unknown as [bigint, bigint], createAuth],
+        { account: a!.account },
       )
-      const tableId = (await attacker.read.table()) as viem.Hex
-      await joinTable(ctx, tableId)
+      const createReceipt = await ctx.publicClient.waitForTransactionReceipt({ hash: createHash })
+      const [created] = viem.parseEventLogs({ logs: createReceipt.logs, abi: ctx.zk.abi, eventName: 'TableCreated' })
+      const tableId = created!.args.tableId as viem.Hex
 
-      // A (the disputant, via its channel key) opens a MOVE dispute; B never answers.
+      const joinAuth = await buildJoinAuth(ctx.zk, evilDomain, b!, {
+        tableId,
+        stake: STAKE,
+        channelKey: viem.zeroAddress,
+        deckKey: DECK_KEY_B,
+      })
+      await ctx.zk.write.join(
+        [tableId, viem.zeroAddress, DECK_KEY_B as unknown as [bigint, bigint], joinAuth],
+        { account: b!.account },
+      )
+
+      // A (the disputant) opens a MOVE dispute; B never answers.
       const state = mkState(tableId, { nonce: 3n })
       const sigA = await signState(a!, ctx.domain, state)
       const sigB = await signState(b!, ctx.domain, state)
@@ -1009,22 +1088,34 @@ describe('ZkTable dispute machine', () => {
       )
       await helpers.mine(Number(CLOCK) + 1)
 
-      // arm the re-entry, then resolve. Expected payout to the attacker: balanceA + pot (it is the
-      // disputant seat A); B gets balanceB.
-      await attacker.write.arm([true])
-      const before = await ctx.publicClient.getBalance({ address: attacker.address })
-      await ctx.zk.write.resolveTimeout([tableId], { account: b!.account })
-      const after = await ctx.publicClient.getBalance({ address: attacker.address })
+      // Arm the token: the FIRST transfer inside `_payout` (to playerA) re-enters resolveTimeout
+      // on the SAME table. By then status is already Settled (CEI: effects before interactions),
+      // so the reentrant call must hit BadStatus.
+      const resolveTimeoutData = viem.encodeFunctionData({
+        abi: ctx.zk.abi,
+        functionName: 'resolveTimeout',
+        args: [tableId],
+      })
+      await evilToken.write.arm([ctx.zk.address, resolveTimeoutData])
+
+      const beforeA = await evilToken.read.balanceOf([a!.account!.address])
+      const beforeB = await evilToken.read.balanceOf([b!.account!.address])
+      // Permissionless: any relayer (here, a stranger) may submit resolveTimeout.
+      const [, , stranger] = ctx.signers
+      await ctx.zk.write.resolveTimeout([tableId], { account: stranger!.account })
+      const afterA = await evilToken.read.balanceOf([a!.account!.address])
+      const afterB = await evilToken.read.balanceOf([b!.account!.address])
 
       // outer tx settled the table exactly once
       const table = await ctx.zk.read.tables([tableId])
       expect(table[STATUS]).to.equal(Status.Settled)
-      // attacker re-entered once and that inner call reverted (BadStatus), changing no money
-      expect(await attacker.read.reentryCalls()).to.equal(1n)
-      expect(await attacker.read.lastReentryReverted()).to.equal(true)
-      // paid exactly once: net delta == balanceA + pot, not double
-      expect(after - before).to.equal(state.balanceA + state.pot)
-      expect(await attacker.read.received()).to.equal(state.balanceA + state.pot)
+      // the token re-entered once and that inner call reverted (BadStatus), changing no money
+      expect(await evilToken.read.reentryCalls()).to.equal(1n)
+      expect(await evilToken.read.lastReentryReverted()).to.equal(true)
+      // paid exactly once, disputant A gets balance + pot (B never answered); B gets only its balance
+      expect(afterA - beforeA).to.equal(state.balanceA + state.pot)
+      expect(afterB - beforeB).to.equal(state.balanceB)
+      expect(await evilToken.read.balanceOf([ctx.zk.address])).to.equal(0n)
     })
   })
 })

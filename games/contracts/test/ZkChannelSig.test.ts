@@ -2,10 +2,14 @@ import * as viem from 'viem'
 import { expect } from 'chai'
 import hre from 'hardhat'
 import { makeDomain, hashState, type ChannelState } from '@msgboard/zk-cards-core'
+import { deployZkTable } from './x402'
 
 describe('ZkChannelSig', () => {
   it('TS hashState matches the on-chain EIP-712 digest for a fully populated state', async () => {
-    const zk = await hre.viem.deployContract('ZkTable')
+    // ZkTable's constructor now takes the x402 wrapper-factory address (see ZkTable.sol's
+    // IWrapperFactory); zeroAddress skips the create()-time clone-check entirely — moot here,
+    // this test never calls create/join/topUp, only the pure stateDigest() view.
+    const zk = await deployZkTable(viem.zeroAddress)
     const publicClient = await hre.viem.getPublicClient()
     const chainId = await publicClient.getChainId()
     const domain = makeDomain(chainId, zk.address)

@@ -7,6 +7,20 @@ import {ChannelState, ChannelStateLib} from "./ChannelState.sol";
 import {IGameRules} from "./IGameRules.sol";
 import {ChannelTableBase} from "./ChannelTableBase.sol";
 import {ShowdownDecodeLib} from "../vendor/uzkge/ShowdownDecodeLib.sol";
+import {IX402Token} from "../games/FlipBookX.sol";
+
+/// A wrapper clone's own view of the underlying asset it wraps (ValveWrapperImpl.underlying()).
+interface IValveWrapperView {
+    function underlying() external view returns (address);
+}
+
+/// The CREATE2 factory that deploys x402 wrapper clones (ValveWrapperFactory.wrapperOf), used at
+/// `create()` to confirm a supplied token address is a genuine wrapper clone for its underlying —
+/// not an arbitrary ERC-20 masquerading as one. `factory_ == address(0)` skips the check entirely
+/// (unit-test / pre-factory-deploy escape hatch).
+interface IWrapperFactory {
+    function wrapperOf(address underlying) external view returns (address);
+}
 
 /// @notice Two-party state-channel card table. Stakes escrow at create/join, play is
 /// off-chain co-signed states, the chain is touched again only to settle, top up, or
@@ -16,6 +30,27 @@ import {ShowdownDecodeLib} from "../vendor/uzkge/ShowdownDecodeLib.sol";
 /// Shared errors/Status/dispute-clock constants/co-sign helpers live in ChannelTableBase,
 /// alongside its HoldemTableN counterpart (2026-08 DRY pass) — see that file's header for
 /// what's shared vs. why the escrow/state shape stays separate.
+///
+/// ── x402 ASSET PLUMBING (2026-08 conversion) ─────────────────────────────────────────────────
+/// Escrow no longer moves as native PLS (`msg.value`). Every table is denominated in ONE x402
+/// wrapper token (`tableToken[tableId]`, set once at `create` and immutable thereafter), pulled
+/// gaslessly via the wrapper's EIP-3009/7598 `receiveWithAuthorization` (see `_pull`, lifted
+/// verbatim from FlipBookX). The signer of each `DepositAuth` — `auth.from` — is the player;
+/// `msg.sender` is whoever relays the call (a bot, a paymaster, the player themselves) and is
+/// NEVER used as a player identity anywhere funds move. This is the seat-hijack closure: each of
+/// `createNonce`/`joinNonce`/`topUpNonce` binds every economically-relevant term (table id where
+/// applicable, channelKey, deckKey, rules, amounts, clock) into the wrapper's own EIP-712 nonce,
+/// so a relayer that tampers with any term recomputes a different nonce, the wrapper's signature
+/// recovery then fails against the player's original signature, and the call reverts — a relayer
+/// can relay a call unmodified or not at all, never a mutated one. Payouts move via `token
+/// .transfer` (a plain push of the wrapper token — NEVER unwrapped in-contract; the player holds
+/// the wrapper and unwraps it themselves if they want native PLS back).
+///
+/// `settle` and `respondWithState` are now fully permissionless (no `_seatOf(msg.sender)` gate):
+/// each is self-authenticating via the two co-signed channel-key signatures, so any relayer/
+/// watchtower can submit them on a player's behalf without ever touching that player's escrow
+/// identity. `cancel`/`reclaimTopUp`/the dispute-open/respond family stay seat-gated on
+/// `msg.sender` exactly as before — those are direct-action paths, not relayable deposits.
 contract ZkTable is EIP712, ChannelTableBase {
     using SafeTransferLib for address;
     using ChannelStateLib for ChannelState;
@@ -23,6 +58,9 @@ contract ZkTable is EIP712, ChannelTableBase {
     // ZkTable-only errors: BadSig/BadGameState/etc are inherited from ChannelTableBase.
     error BadProof();
     error NothingToReclaim();
+    /// `create()`'s token argument does not round-trip through the wrapper factory
+    /// (`factory.wrapperOf(token.underlying()) != token`) — not a genuine x402 wrapper clone.
+    error BadToken();
     /// A showdown demand is answered again for a (slot, seat) pair already stored.
     error AlreadyRevealed();
     /// finalizeShowdown called before all 4 showdown reveals (2 slots x 2 seats) are on-chain.
@@ -81,6 +119,30 @@ contract ZkTable is EIP712, ChannelTableBase {
         uint8 haveMask;
     }
 
+    /// A signed x402 EIP-3009/7598 pull authorization: `from` is the player identity (NOT
+    /// necessarily `msg.sender` — this is the whole point, see the contract header), `sig` is
+    /// either a 65-byte (v,r,s) EOA signature or an EIP-7598 `bytes` payload (ERC-1271/Safe),
+    /// routed by `_pull` exactly as FlipBookX does. `validBefore` is the wrapper authorization's
+    /// own expiry; `salt` lets a signer mint a fresh nonce for actions (create/topUp) that would
+    /// otherwise be replay-identical.
+    ///
+    /// @dev CLIENT OBLIGATION — `validBefore` sizing for `topUp`. A signed topUp auth is
+    /// bearer-submittable by ANY relayer at ANY time before it expires or is burned — this
+    /// contract has no way to know when the signer actually *wants* it submitted. A hostile
+    /// relayer holding a topUp auth with a far-future `validBefore` can withhold it indefinitely
+    /// and then submit it at a moment of its choosing — e.g. racing it against a `settle`
+    /// (breaking the counterparty's expectation of the pre-top-up total) or simply forcing the
+    /// signer into `reclaimTopUp`'s full `clockBlocks` wait to get an unwanted top-up reverted.
+    /// Clients MUST sign topUp authorizations with a SHORT `validBefore` (seconds-to-minutes out,
+    /// matched to how quickly the top-up is expected to land) — never a far-future one — so an
+    /// un-submitted authorization expires on its own instead of sitting as a live landmine.
+    struct DepositAuth {
+        address from;
+        uint64 validBefore;
+        bytes32 salt;
+        bytes sig;
+    }
+
     uint256 internal _counter;
     mapping(bytes32 => Table) public tables;
     // EdOnBN254 deck pubkeys for snark-reveal disputes: tableId => seat (1/2) => [x, y]
@@ -89,13 +151,28 @@ contract ZkTable is EIP712, ChannelTableBase {
     mapping(bytes32 => mapping(uint8 => PendingTopUp)) public pendingTopUps;
     // tableId => open DEMAND_SHOWDOWN dispute's accumulated reveals (see ShowdownDispute above).
     mapping(bytes32 => ShowdownDispute) internal showdowns;
+    /// The x402 wrapper token a table is denominated + escrowed in, set once at `create` and
+    /// immutable thereafter. Separate mapping (not a Table field) for the same reason as
+    /// PendingTopUp/ShowdownDispute: keeps the `tables()` getter's tuple shape unchanged.
+    mapping(bytes32 => IX402Token) public tableToken;
+
+    /// The CREATE2 wrapper factory used to confirm a `create()`-supplied token is a genuine x402
+    /// wrapper clone (see IWrapperFactory). Immutable, set once at deploy; `address(0)` disables
+    /// the clone-check entirely (used by the unit-test suite, which funds via a bare MockX402).
+    IWrapperFactory public immutable factory;
 
     /// finalizeShowdown's `winner` value meaning "the pot was split" (a decode failure or a
     /// duplicate-card deck, NOT an on-chain rank tie — that's `winner == 0`). Distinct from 0/1/2
     /// so an off-chain listener can tell the two "nobody clearly won" outcomes apart.
     uint8 internal constant SHOWDOWN_SPLIT = 3;
 
-    event TableCreated(bytes32 indexed tableId, address indexed playerA, address rules, uint256 escrow, uint256 joinStake, uint64 clockBlocks);
+    // NOTE (x402 conversion): gained the `token` field (inserted before `rules`) — a new position
+    // in the event's non-indexed tuple, not just a new trailing field. No ABI artifact is
+    // committed for this package (hardhat's artifacts/ + typechain-types/ are both gitignored,
+    // regenerated on `hardhat compile`) and no off-chain indexer consumes this event yet
+    // (ZkTable is undeployed) — but whichever indexer/ABI IS built against this contract MUST be
+    // rebuilt from this source, not from a stale copy, or it will decode `token`'s slot as `rules`.
+    event TableCreated(bytes32 indexed tableId, address indexed playerA, address token, address rules, uint256 escrow, uint256 joinStake, uint64 clockBlocks);
     event TableJoined(bytes32 indexed tableId, address indexed playerB);
     event TableCancelled(bytes32 indexed tableId);
     event ToppedUp(bytes32 indexed tableId, uint8 seat, uint256 amount);
@@ -120,6 +197,10 @@ contract ZkTable is EIP712, ChannelTableBase {
     /// `winner` (1=A, 2=B, 0=tie — see finalizeShowdown for the tie/forfeit rule).
     event ShowdownFinalized(bytes32 indexed tableId, uint8 cardA, uint8 cardB, uint8 winner);
 
+    constructor(address factory_) {
+        factory = IWrapperFactory(factory_);
+    }
+
     /// Matches makeDomain() in zk-cards-core: { name: 'ZkTable', version: '1' }.
     /// (Solady EIP712 rather than OZ: OZ 5.6's Strings->Bytes dependency uses MCOPY
     /// assembly, which solc rejects outright when targeting shanghai for 943.)
@@ -127,41 +208,151 @@ contract ZkTable is EIP712, ChannelTableBase {
         return ("ZkTable", "1");
     }
 
-    function create(IGameRules rules, uint256 joinStake, uint64 clockBlocks, address channelKey, uint256[2] calldata deckKey)
-        external
-        payable
-        returns (bytes32 tableId)
+    /// Route to the wrapper's matching authorization overload: exactly-65-byte signatures use the
+    /// universal (v,r,s) form (works on every wrapper build, incl. 943's older impl); any other
+    /// length is an ERC-1271 payload for the EIP-7598 `bytes` form (Safes / smart accounts).
+    /// Lifted verbatim from FlipBookX._pull.
+    function _pull(IX402Token token, address from, uint256 value, uint64 validBefore, bytes32 nonce, bytes calldata sig)
+        internal
     {
-        if (msg.value == 0) revert WrongValue();
+        if (sig.length == 65) {
+            bytes32 r = bytes32(sig[0:32]);
+            bytes32 s = bytes32(sig[32:64]);
+            uint8 v = uint8(sig[64]);
+            token.receiveWithAuthorization(from, address(this), value, 0, validBefore, nonce, v, r, s);
+        } else {
+            token.receiveWithAuthorization(from, address(this), value, 0, validBefore, nonce, sig);
+        }
+    }
+
+    /// The `create()` authorization's nonce — binds EVERY economically-relevant term (the token,
+    /// the rules contract, both stake amounts, the clock, the channel key, and the deck key) so a
+    /// relayer altering any one of them recomputes a different nonce and the wrapper's signature
+    /// check fails. `salt` lets the same signer mint distinct table-creation authorizations.
+    function createNonce(
+        address from,
+        IX402Token token,
+        IGameRules rules,
+        uint256 buyIn,
+        uint256 joinStake,
+        uint64 clockBlocks,
+        address channelKey,
+        uint256[2] memory deckKey,
+        bytes32 salt
+    ) public view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                keccak256("ZkTable.X402.Create"),
+                block.chainid,
+                address(this),
+                from,
+                token,
+                rules,
+                buyIn,
+                joinStake,
+                clockBlocks,
+                channelKey,
+                deckKey[0],
+                deckKey[1],
+                salt
+            )
+        );
+    }
+
+    /// The `join()` authorization's nonce — binds the exact table plus the joiner's channel key
+    /// and deck key, so a relayer cannot redirect a join's escrow to a different table or seat it
+    /// under a different channel/deck key than the one the player actually signed.
+    function joinNonce(bytes32 tableId, address from, address channelKey, uint256[2] memory deckKey)
+        public
+        view
+        returns (bytes32)
+    {
+        return keccak256(
+            abi.encode(keccak256("ZkTable.X402.Join"), block.chainid, address(this), tableId, from, channelKey, deckKey[0], deckKey[1])
+        );
+    }
+
+    /// The `topUp()` authorization's nonce — binds the table and amount; `salt` distinguishes
+    /// repeated top-ups of the same amount by the same player.
+    function topUpNonce(bytes32 tableId, address from, uint256 amount, bytes32 salt) public view returns (bytes32) {
+        return keccak256(abi.encode(keccak256("ZkTable.X402.TopUp"), block.chainid, address(this), tableId, from, amount, salt));
+    }
+
+    function create(
+        IX402Token token,
+        uint256 buyIn,
+        IGameRules rules,
+        uint256 joinStake,
+        uint64 clockBlocks,
+        address channelKey,
+        uint256[2] calldata deckKey,
+        DepositAuth calldata auth
+    ) external returns (bytes32 tableId) {
+        if (buyIn == 0) revert WrongValue();
         _validateClock(clockBlocks);
         _validateRulesCode(address(rules));
+        // Clone-check: confirm `token` is a genuine x402 wrapper clone for its own underlying,
+        // not an arbitrary ERC-20 impersonating one. Skipped when no factory is configured
+        // (address(0) — unit tests funding via a bare mock).
+        if (address(factory) != address(0)) {
+            address underlying = IValveWrapperView(address(token)).underlying();
+            if (factory.wrapperOf(underlying) != address(token)) revert BadToken();
+        }
         tableId = keccak256(abi.encode(block.chainid, address(this), ++_counter));
+        // Effects BEFORE the pull (CEI): the table fully exists — Created, escrowed, keyed — by
+        // the time `_pull` makes its one external call. A revert inside `_pull` still unwinds
+        // every write below in the same transaction (so a bad auth persists no table at all —
+        // see ZkTableX402.t.sol's badAuth-leaves-no-trace tests), but a reentrant deposit that
+        // somehow re-entered `create`/`join`/`topUp` during that external call would see this
+        // table already fully formed, not a half-written one.
         Table storage t = tables[tableId];
-        t.playerA = msg.sender;
-        t.keyA = channelKey == address(0) ? msg.sender : channelKey;
-        t.escrowA = msg.value;
+        tableToken[tableId] = token;
+        t.playerA = auth.from;
+        t.keyA = channelKey == address(0) ? auth.from : channelKey; // see join()'s channelKey @dev note — same footgun applies here
+        t.escrowA = buyIn;
         t.joinStake = joinStake;
         t.rules = rules;
         t.clockBlocks = clockBlocks;
         t.status = Status.Created;
         deckKeys[tableId][1] = deckKey;
-        emit TableCreated(tableId, msg.sender, address(rules), msg.value, joinStake, clockBlocks);
+        emit TableCreated(tableId, auth.from, address(token), address(rules), buyIn, joinStake, clockBlocks);
+        // Interaction LAST: the single external call this function makes.
+        bytes32 nonce = createNonce(auth.from, token, rules, buyIn, joinStake, clockBlocks, channelKey, deckKey, auth.salt);
+        _pull(token, auth.from, buyIn, auth.validBefore, nonce, auth.sig);
     }
 
-    function join(bytes32 tableId, address channelKey, uint256[2] calldata deckKey) external payable {
+    /// @dev CLIENT OBLIGATION — `channelKey` is a real signing key for your seat, not a label. It
+    /// is whichever address co-signs every `ChannelState` on this table's behalf for the rest of
+    /// the table's life (see `_checkCoSigned`/`_seatOf`); `create`/`join` bind it to YOUR
+    /// signature (it's a term inside `createNonce`/`joinNonce`), which closes the seat-hijack
+    /// where a relayer substitutes a different key — but nothing stops a client from
+    /// *legitimately signing* a self-defeating one. Nominating the COUNTERPARTY's address (or
+    /// any key you do not exclusively control) as your own `channelKey` hands them a valid
+    /// signing key for your own seat, letting them co-sign losing states as "you". This is a
+    /// pre-existing footgun carried over unchanged from the native-PLS contract, not something
+    /// this conversion introduces or closes — pick a channelKey you alone control.
+    function join(bytes32 tableId, address channelKey, uint256[2] calldata deckKey, DepositAuth calldata auth) external {
         Table storage t = tables[tableId];
         if (t.status != Status.Created) revert BadStatus();
-        if (msg.sender == t.playerA) revert NotPlayer();
-        if (msg.value != t.joinStake) revert WrongValue();
-        t.playerB = msg.sender;
-        address keyB = channelKey == address(0) ? msg.sender : channelKey;
+        if (auth.from == t.playerA) revert NotPlayer();
+        address keyB = channelKey == address(0) ? auth.from : channelKey;
         // keyB colliding with A's identities would make _seatOf ambiguous
         if (keyB == t.playerA || keyB == t.keyA) revert NotPlayer();
+        uint256 stake = t.joinStake;
+        // Effects BEFORE the pull (CEI): status flips to Live and the seat is fully seated here,
+        // so a reentrant join attempt during `_pull`'s external call hits BadStatus immediately
+        // rather than racing this function's own writes. A revert inside `_pull` still unwinds
+        // all of this in the same transaction (bad auth => no persisted seat — see
+        // ZkTableX402.t.sol's badAuth-leaves-no-trace tests).
+        t.playerB = auth.from;
         t.keyB = keyB;
-        t.escrowB = msg.value;
+        t.escrowB = stake;
         t.status = Status.Live;
         deckKeys[tableId][2] = deckKey;
-        emit TableJoined(tableId, msg.sender);
+        emit TableJoined(tableId, auth.from);
+        // Interaction LAST: the single external call this function makes.
+        bytes32 nonce = joinNonce(tableId, auth.from, channelKey, deckKey);
+        _pull(tableToken[tableId], auth.from, stake, auth.validBefore, nonce, auth.sig);
     }
 
     /// Creator backs out before anyone joins.
@@ -173,8 +364,7 @@ contract ZkTable is EIP712, ChannelTableBase {
         uint256 amount = t.escrowA;
         t.escrowA = 0;
         emit TableCancelled(tableId);
-        // forced send so a reverting receiver cannot hold the counterparty's payout hostage
-        t.playerA.forceSafeTransferETH(amount);
+        address(tableToken[tableId]).safeTransfer(t.playerA, amount);
     }
 
     /// Spec: top-up only at a flip boundary, reflected in the next co-signed state
@@ -190,19 +380,32 @@ contract ZkTable is EIP712, ChannelTableBase {
     /// signature on that state IS the acknowledgment. If none arrives before the
     /// deadline, the top-upper can reclaimTopUp() exactly the un-acknowledged amount,
     /// returning escrow to the previously-conserved total so pre-top-up states work again.
-    function topUp(bytes32 tableId) external payable {
+    ///
+    /// @dev See the `validBefore` sizing warning on `DepositAuth` above: SIGN THIS AUTH WITH A
+    /// SHORT `validBefore`. Unlike create/join (which seat a specific table the instant they
+    /// land), a signed topUp authorization is a live, bearer-submittable claim against an
+    /// ALREADY-Live table for as long as it remains valid and unburned — a far-future
+    /// `validBefore` hands a relayer an option to submit it whenever suits them, not the signer.
+    function topUp(bytes32 tableId, uint256 amount, DepositAuth calldata auth) external {
         Table storage t = tables[tableId];
         if (t.status != Status.Live) revert BadStatus();
-        if (msg.value == 0) revert WrongValue();
-        uint8 seat = _seatOf(t, msg.sender);
-        if (seat == 1) t.escrowA += msg.value;
-        else t.escrowB += msg.value;
+        if (amount == 0) revert WrongValue();
+        uint8 seat = _seatOf(t, auth.from);
+        // Effects BEFORE the pull (CEI): escrow and the pending-top-up accounting are fully
+        // updated here, before `_pull`'s external call. A revert inside `_pull` still unwinds
+        // all of this in the same transaction (bad auth => no escrow bump, no pending record —
+        // see ZkTableX402.t.sol's badAuth-leaves-no-trace tests).
+        if (seat == 1) t.escrowA += amount;
+        else t.escrowB += amount;
         PendingTopUp storage p = pendingTopUps[tableId][seat];
-        p.amount += msg.value;
+        p.amount += amount;
         // refresh: a later top-up extends the whole pending amount's window (top-upper's
         // own choice — it only delays their own reclaim, never the counterparty's rights)
         p.deadline = uint64(block.number) + t.clockBlocks;
-        emit ToppedUp(tableId, seat, msg.value);
+        emit ToppedUp(tableId, seat, amount);
+        // Interaction LAST: the single external call this function makes.
+        bytes32 nonce = topUpNonce(tableId, auth.from, amount, auth.salt);
+        _pull(tableToken[tableId], auth.from, amount, auth.validBefore, nonce, auth.sig);
     }
 
     /// Claw back a top-up the counterparty never acknowledged: if no co-signed state
@@ -229,9 +432,9 @@ contract ZkTable is EIP712, ChannelTableBase {
         if (seat == 1) t.escrowA -= amount;
         else t.escrowB -= amount;
         emit TopUpReclaimed(tableId, seat, amount);
-        // effects fully settled above; forced send so a reverting receiver can't wedge it
+        // effects fully settled above
         address to = seat == 1 ? t.playerA : t.playerB;
-        to.forceSafeTransferETH(amount);
+        address(tableToken[tableId]).safeTransfer(to, amount);
     }
 
     /// Any accepted co-signed state conserves the CURRENT escrow total and carries both
@@ -244,12 +447,14 @@ contract ZkTable is EIP712, ChannelTableBase {
         if (pendingTopUps[tableId][2].amount != 0) delete pendingTopUps[tableId][2];
     }
 
-    /// Cooperative settle: either party submits the final co-signed state.
+    /// Cooperative settle: either party (or ANY relayer/watchtower on their behalf — see the
+    /// contract header) submits the final co-signed state. Fully permissionless: the payout is
+    /// determined entirely by the two verified channel-key signatures, conservation, isFinal,
+    /// pot==0, and nonce monotonicity — msg.sender's identity is never consulted.
     /// (A Disputed table must first return to Live via a dispute response.)
     function settle(bytes32 tableId, ChannelState calldata state, bytes calldata sigA, bytes calldata sigB) external {
         Table storage t = tables[tableId];
         if (t.status != Status.Live) revert BadStatus();
-        _seatOf(t, msg.sender); // reverts NotPlayer for strangers
         _checkCoSigned(t, tableId, state, sigA, sigB);
         if (!t.rules.isFinal(state.phase)) revert NotFinal();
         if (state.pot != 0) revert PotNotZero();
@@ -382,11 +587,12 @@ contract ZkTable is EIP712, ChannelTableBase {
         emit DisputeOpened(tableId, seat, demandKind, demandSlot, t.disputeDeadline);
     }
 
-    /// Universal answer: a co-signed state newer than the contested one.
+    /// Universal answer: a co-signed state newer than the contested one. Fully permissionless
+    /// (no `_seatOf(msg.sender)` gate — see the contract header) so a watchtower can defend a
+    /// gasless player's table without needing that player's own key to submit the tx.
     function respondWithState(bytes32 tableId, ChannelState calldata state, bytes calldata sigA, bytes calldata sigB) external {
         Table storage t = tables[tableId];
         if (t.status != Status.Disputed) revert BadStatus();
-        _seatOf(t, msg.sender);
         _checkCoSigned(t, tableId, state, sigA, sigB);
         // setup dispute (demandKind 0): any co-signed state proves liveness;
         // move/share disputes need strictly newer than the contested state.
@@ -759,8 +965,8 @@ contract ZkTable is EIP712, ChannelTableBase {
         t.escrowA = 0;
         t.escrowB = 0;
         emit TableSettled(tableId, toA, toB);
-        // forced send so a reverting receiver cannot hold the counterparty's payout hostage
-        if (toA > 0) t.playerA.forceSafeTransferETH(toA);
-        if (toB > 0) t.playerB.forceSafeTransferETH(toB);
+        address token = address(tableToken[tableId]);
+        if (toA > 0) token.safeTransfer(t.playerA, toA);
+        if (toB > 0) token.safeTransfer(t.playerB, toB);
     }
 }
