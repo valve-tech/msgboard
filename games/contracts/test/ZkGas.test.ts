@@ -3,7 +3,7 @@ import { expect } from 'chai'
 import hre from 'hardhat'
 import * as helpers from '@nomicfoundation/hardhat-toolbox-viem/network-helpers'
 import { makeDomain, signState as coreSignState, type ChannelState, type ChannelDomain } from '@msgboard/zk-cards-core'
-import { deployZkTable, makeX402Domain, buildCreateAuth, buildJoinAuth } from './x402'
+import { deployZkTable, deployDeckChallengeLib, makeX402Domain, buildCreateAuth, buildJoinAuth } from './x402'
 import shuffleFixture from './fixtures/zypher-shuffle-head.json'
 import revealFixture from './fixtures/zypher-reveal-snark.json'
 
@@ -188,6 +188,59 @@ describe('ZkGas (gas-ceiling regression)', () => {
       reportGas('verify52', gasUsed, VERIFY52_CEILING)
       expect(ok).to.equal(true)
       expect(gasUsed).to.be.lessThan(VERIFY52_CEILING)
+    })
+
+    // L-1 (deckkey-binding-spec.md audit): DeckChallengeLib's verify52 attribution loop checks
+    // `gasleft() >= VERIFY_GAS_FLOOR` immediately before each `verifier.verify52(...)` call, then
+    // relies on EIP-150's 63/64 forwarding rule to make sure the call itself can't run out of gas
+    // mid-execution. EIP-150 caps the gas an external CALL can receive at 63/64 of the caller's
+    // OWN remaining gas — so in the worst case (gasleft() sitting exactly at the floor right
+    // before the call), verify52 only ever receives `VERIFY_GAS_FLOOR * 63/64`, not the full
+    // floor. If the REAL verify52 execution cost ever exceeds that forwarded amount, an HONEST
+    // step can OOG inside the library's `try/catch` and get misattributed to its author as a
+    // losing step — the exact seat-framing this floor exists to prevent (see DeckChallengeLib.sol
+    // and ZkTable.sol's VERIFY_GAS_FLOOR headers). `VERIFY_GAS_FLOOR` was a bare, unasserted magic
+    // number before this test: nothing failed loudly if it were ever lowered below the safe
+    // threshold, or if verify52 organically got more expensive. This test re-derives the safe
+    // threshold from a FRESH measurement (independent of the ceiling test above, so this guard
+    // still holds even if that test's fixture/logic ever changes) and requires
+    // `VERIFY_GAS_FLOOR >= measuredVerify52Gas * 64/63 * 1.2`: the `64/63` term undoes EIP-150's
+    // forwarding haircut (the minimum floor for the call to receive AT LEAST measuredGas), and the
+    // extra 1.2x on top is a safety margin absorbing compiler/opcode-cost drift between this
+    // measurement and mainnet reality (same margin convention as the ceilings above). It must FAIL
+    // if someone lowers VERIFY_GAS_FLOOR below that safe threshold.
+    it('VERIFY_GAS_FLOOR stays safely above the EIP-150-forwarding-adjusted verify52 cost', async () => {
+      await etch('VerifierKeyExtra1_52', VK1_ADDR)
+      await etch('VerifierKeyExtra2_52', VK2_ADDR)
+      const shuffler = await hre.viem.deployContract('ShuffleVerifier52', [VK1_ADDR, VK2_ADDR])
+      const probe = await hre.viem.deployContract('GasProbe')
+
+      const pi: bigint[] = [...flatDeck(shuffleFixture.before), ...flatDeck(shuffleFixture.after)]
+      const pkc: bigint[] = shuffleFixture.pkc.map((v) => BigInt(v))
+      const proof = shuffleFixture.proof as `0x${string}`
+
+      const publicClient = await hre.viem.getPublicClient()
+      const { result } = await publicClient.simulateContract({
+        address: probe.address,
+        abi: probe.abi,
+        functionName: 'probeVerify52',
+        args: [shuffler.address, proof, pi, pkc],
+        gas: 29_000_000n,
+      })
+      const [measuredGas, ok] = result as readonly [bigint, boolean]
+      expect(ok).to.equal(true)
+
+      const deckChallengeLib = await deployDeckChallengeLib()
+      const floor = await deckChallengeLib.read.VERIFY_GAS_FLOOR()
+
+      // requiredFloor = measuredGas * 64/63 * 1.2, all in bigint arithmetic (12/10 for the 1.2x).
+      const requiredFloor = (measuredGas * 64n * 12n) / (63n * 10n)
+      // eslint-disable-next-line no-console
+      console.log(
+        `      gas[VERIFY_GAS_FLOOR] floor=${floor.toString()} required(>=)=${requiredFloor.toString()} ` +
+          `(measuredVerify52=${measuredGas.toString()})`,
+      )
+      expect(floor).to.be.at.least(requiredFloor)
     })
 
     const REVEAL_ADDR = viem.getAddress('0x00000000000000000000000000000000000ce523')

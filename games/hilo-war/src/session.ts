@@ -1,7 +1,7 @@
 import { keccak256, concatHex, bytesToHex, type Hex } from 'viem'
 import {
   Channel, Transcript, makeEnvelope, verifyEnvelope, hashState,
-  ZypherDeckProvider, buildDealBinding, ZERO_DEAL_BINDING,
+  ZypherDeckProvider, buildDealBinding, verifyDealBinding, ZERO_DEAL_BINDING, hashDeck, compressPoint,
   type ChannelDomain, type ChannelState, type CoSignedState, type Envelope,
   type MaskedDeckProvider, type ShuffleRound, type Transport, type WireMasked, type WireShare, type WireShuffle,
 } from '@msgboard/zk-cards-core'
@@ -70,6 +70,16 @@ export interface WalletSigner {
   signTypedData(args: any): Promise<Hex>
 }
 
+/**
+ * Reads a seat's ON-CHAIN registered deck pubkey — i.e. `ZkTable.sol`'s `deckKeys(tableId, seat)`
+ * getter (raw affine `(x, y)`, exactly as `create`/`join`'s `deckKey` param stores it). REQUIRED
+ * when `deck` is a `ZypherDeckProvider`, so the validate-before-sign guard (deckkey-binding-spec
+ * §B3, audit gap H-2) can source `registeredKeys` from the chain rather than from the gossiped
+ * KEYGEN pubkeys — a seat that registers key X on-chain but gossips a different key Y over the
+ * wire (the "wrong-agg decoy") is invisible to a check that trusts the wire.
+ */
+export type DeckKeyReader = (tableId: Hex, seat: 1 | 2) => Promise<[bigint, bigint]>
+
 export interface PlayerConfig {
   role: Seat
   wallet: WalletSigner
@@ -82,6 +92,8 @@ export interface PlayerConfig {
   escrowEach: bigint
   /** wall clock for per-turn timing metadata; defaults to Date.now(). Injectable for tests. */
   clock?: Clock
+  /** on-chain deck-key source for the setup() validate-before-sign guard — see `DeckKeyReader`. */
+  deckKeyReader?: DeckKeyReader
 }
 
 export interface FlipChoices { bet: Bet; onRaise: 'CALL' | 'FOLD' }
@@ -127,6 +139,25 @@ export class Player {
   private agg!: Hex
   private deckState!: WireMasked[]
   private reshuffleCount = 0
+  /**
+   * The current `{jointKeyCommit, shuffleRoot}` co-signed into `ChannelState` — set at genesis
+   * (setup()) and refreshed by reshuffle() so the on-chain challenge stays valid past the first
+   * hand (deckkey-binding H-2 fix c). `jointKeyCommit` never actually changes post-setup (the
+   * registered keys/agg are fixed for the table's life); only `shuffleRoot` moves.
+   */
+  private currentBinding!: { jointKeyCommit: Hex; shuffleRoot: Hex }
+
+  /**
+   * This seat's own registered deck pubkey (packed Zypher `pk` hex on the ZypherDeckProvider
+   * path, or the equivalent gossiped pub on any other provider), populated after `setup()`'s
+   * KEYGEN phase. Exposed read-only so a `DeckKeyReader` (which must model an on-chain read, per
+   * `DeckKeyReader`'s own doc) can be backed, in tests, by a fixture that mirrors what a real
+   * `create`/`join` call would have registered — production callers back it with an actual chain
+   * read instead.
+   */
+  get deckPublicKey(): Hex {
+    return this.deckPub
+  }
 
   private flip!: HiLoState
 
@@ -269,6 +300,9 @@ export class Player {
         balanceB: prev.balanceB - ante,
         pot: flip.pot + flip.warPot,
         deckCommitment: deckCommitment(this.deckState),
+        // carries the post-reshuffle shuffleRoot forward (deckkey-binding H-2 fix c); a no-op
+        // outside a reshuffle epoch since currentBinding.shuffleRoot is otherwise unchanged.
+        shuffleRoot: this.currentBinding.shuffleRoot,
         phase: flip.phase,
         gameStateHash: hashGameState(flip),
       }
@@ -317,8 +351,39 @@ export class Player {
     // dispute path understands (spec §C3 struck the secp256k1/AttestedElGamalDeck path). A
     // session on any other provider has no on-chain attribution available; ZERO is the correct,
     // documented placeholder there (matches today's split-only fallback).
-    const binding =
-      this.cfg.deck instanceof ZypherDeckProvider ? buildDealBinding(this.agg, rounds) : ZERO_DEAL_BINDING
+    if (this.cfg.deck instanceof ZypherDeckProvider) {
+      const binding = buildDealBinding(this.agg, rounds)
+      // VALIDATE-BEFORE-SIGN GUARD (audit gap H-2, spec §B3 hard client obligation). A poisoner
+      // can commit the TRUE agg on-chain but hand its peer a decoy `agg'`/deck: the chain has no
+      // way to prove `pkc == refresh(agg)` from ITS side, so this off-chain recheck is the only
+      // thing that stops it. `registeredKeys` MUST come from an on-chain read of ZkTable's
+      // `deckKeys[tableId][seat]` — never from the gossiped KEYGEN pubkeys already sitting in
+      // `this.deckPub`/`this.peerDeckPub` (a seat can register X on-chain and gossip Y over the
+      // wire; trusting the wire would validate the aggregate against the WRONG registered keys,
+      // exactly the gap this guard exists to close).
+      const reader = this.cfg.deckKeyReader
+      if (!reader) {
+        throw new Error(
+          'session: ZypherDeckProvider requires a deckKeyReader (on-chain ZkTable.deckKeys getter) — refusing to co-sign a deal binding with no on-chain-verified registered keys',
+        )
+      }
+      const [seat1, seat2] = await Promise.all([reader(this.cfg.tableId, 1), reader(this.cfg.tableId, 2)])
+      const registeredKeys: Hex[] = [compressPoint(seat1[0], seat1[1]), compressPoint(seat2[0], seat2[1])]
+      const check = await verifyDealBinding({
+        provider: this.cfg.deck,
+        registeredKeys,
+        jointKeyCommit: binding.jointKeyCommit,
+        shuffleRoot: binding.shuffleRoot,
+        deckCommitment: deckCommitment(this.deckState),
+        rounds,
+      })
+      if (!check.ok) {
+        throw new Error(`session: deal-binding validation failed — refusing to co-sign a decoy deck (${check.reason})`)
+      }
+      this.currentBinding = { jointKeyCommit: binding.jointKeyCommit, shuffleRoot: binding.shuffleRoot }
+    } else {
+      this.currentBinding = { jointKeyCommit: ZERO_DEAL_BINDING.jointKeyCommit, shuffleRoot: ZERO_DEAL_BINDING.shuffleRoot }
+    }
 
     // 4. genesis co-sign at nonce 0 — the turn was offered when setup began;
     // approximate with now() at the co-sign boundary (setup has no discrete decision)
@@ -332,8 +397,8 @@ export class Player {
       deckCommitment: deckCommitment(this.deckState),
       phase: Phase.SETUP,
       gameStateHash: ZERO32,
-      jointKeyCommit: binding.jointKeyCommit,
-      shuffleRoot: binding.shuffleRoot,
+      jointKeyCommit: this.currentBinding.jointKeyCommit,
+      shuffleRoot: this.currentBinding.shuffleRoot,
     })
 
     // 5. first flip
@@ -365,15 +430,23 @@ export class Player {
     } else {
       const env = await this.waitFor(kindA)
       const body = env.body as { before: WireMasked[]; after: WireShuffle }
-      // v0 gap: we only check the BEFORE deck has 52 entries; deeper validation of the
-      // initial masking is not possible here because initialDeck masks with fresh
-      // randomness (regeneration won't match). A could mask a stacked deck — but the
-      // SNARK provider proves correct initial masking, and in v0 the deck is also
-      // remasked+shuffled by B, so A alone cannot know the final order: fairness holds
-      // for ORDER, though a malformed initial deck (non-card points) would surface as
-      // unmask failures.
       if (body.before.length !== DECK_SIZE)
         throw new Error('session: SHUFFLE_A before-deck must have 52 entries')
+      // deckkey-binding H-2 fix (b) — canonical-head check: on the ZypherDeckProvider path,
+      // `initialDeck(agg)` is a PURE function of the joint key (deterministic masking per card
+      // index — see zypherDeck.ts), so B can independently recompute the canonical D0 and reject
+      // A starting the shuffle chain from a stacked deck. NOT possible on AttestedElGamalDeck:
+      // its `initialDeck` masks with fresh per-call randomness (see elgamal.ts's `maskCard`
+      // default `r`), so two calls never match even for an honest A — that path keeps the
+      // length-only check (documented v0 gap, unchanged by this fix). Either way the SNARK/
+      // signature shuffle proof below still proves correct RE-masking; the ORDER-fairness
+      // argument for the non-canonical-checkable path is unchanged from before.
+      if (this.cfg.deck instanceof ZypherDeckProvider) {
+        const canonicalD0 = await this.cfg.deck.initialDeck(this.agg)
+        if (hashDeck(body.before) !== hashDeck(canonicalD0)) {
+          throw new Error('session: SHUFFLE_A before-deck is not the canonical initial deck D0 — refusing a stacked-deck start')
+        }
+      }
       if (!(await this.cfg.deck.verifyShuffle(this.agg, body.before, body.after, this.cfg.peer)))
         throw new Error('session: bad shuffle proof from A')
       const mine = await this.cfg.deck.shuffle(this.agg, body.after.deck, this.cfg.wallet)
@@ -388,13 +461,19 @@ export class Player {
 
   private async reshuffle(): Promise<void> {
     const n = ++this.reshuffleCount
-    // NOTE(deckkey-binding): a reshuffle produces a fresh Step[]/shuffleRoot for the NEW deck,
-    // but ChannelState carries only one `shuffleRoot` slot and this v0 does not re-post it after
-    // a reshuffle (only `deckCommitment` is refreshed by the next `syncFlipState`) — so the
-    // co-signed `shuffleRoot` goes stale relative to `deckCommitment` past the first reshuffle.
-    // `jointKeyCommit` stays valid (the registered keys/agg never change post-setup). Tracked as
-    // an open follow-up; out of this task's scope (genesis-only per the spec).
-    await this.runShuffles(`SHUFFLE_A_R${n}`, `SHUFFLE_B_R${n}`)
+    const rounds = await this.runShuffles(`SHUFFLE_A_R${n}`, `SHUFFLE_B_R${n}`)
+    // deckkey-binding H-2 fix (c): rebuild the transcript + `shuffleRoot` for the NEW deck so the
+    // co-signed `shuffleRoot` doesn't go stale relative to the refreshed `deckCommitment` past the
+    // first hand. `jointKeyCommit` is untouched — the registered keys/agg never change post-setup
+    // (`runShuffles` reuses `this.agg` unconditionally), so only `shuffleRoot` needs recomputing.
+    // The fresh value is carried into the next co-signed `ChannelState` by `syncFlipState`'s
+    // BET_COMMIT branch (the same branch that refreshes `deckCommitment`); the on-chain challenge
+    // path already reads whatever `shuffleRoot` the disputed co-signed state carries, so nothing
+    // on the contract side needs to change.
+    if (this.cfg.deck instanceof ZypherDeckProvider) {
+      const binding = buildDealBinding(this.agg, rounds)
+      this.currentBinding = { jointKeyCommit: this.currentBinding.jointKeyCommit, shuffleRoot: binding.shuffleRoot }
+    }
   }
 
   // ---------------------------------------------------------------- play

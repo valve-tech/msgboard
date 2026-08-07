@@ -52,7 +52,15 @@ library DeckChallengeLib {
     /// See ZkTable.sol's `VERIFY_GAS_FLOOR` for the full rationale (EIP-150 gas-starvation
     /// framing guard). Duplicated here (not imported) since this library holds no dependency on
     /// ZkTable itself.
-    uint256 internal constant VERIFY_GAS_FLOOR = 2_500_000;
+    ///
+    /// `public` (not `internal`) so this is externally readable off the deployed library address
+    /// — see test/ZkGas.test.ts's "VERIFY_GAS_FLOOR" regression guard, which asserts this stays
+    /// safely above the measured verify52 execution cost (a real-world figure only obtainable
+    /// off-chain via GasProbe) rather than trusting the magic number forever. `public` on a
+    /// library constant costs nothing extra in ZkTable's own bytecode — it only adds a getter to
+    /// DeckChallengeLib's OWN deployed code, a separate external library already excluded from
+    /// ZkTable's EIP-170 budget (see this file's header).
+    uint256 public constant VERIFY_GAS_FLOOR = 2_500_000;
 
     /// Runs the FULL `_challengeDeck` ordered checklist (checks 1-7 — phase gates, transcript
     /// shape/root/head/chain/hash pins, and the verify52 attribution loop) and returns the
