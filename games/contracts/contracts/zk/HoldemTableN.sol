@@ -9,6 +9,23 @@ import {IGameRulesN} from "./IGameRulesN.sol";
 import {RevealShareDLEQ} from "./lib/RevealShareDLEQ.sol";
 import {EllipticCurve} from "./lib/EllipticCurve.sol";
 import {ChannelTableBase} from "./ChannelTableBase.sol";
+import {IX402Token} from "../games/FlipBookX.sol";
+
+/// A wrapper clone's own view of the underlying asset it wraps (ValveWrapperImpl.underlying()).
+/// Duplicated verbatim from ZkTable.sol (its sibling x402 conversion) rather than imported from
+/// it, so this file's compilation graph does not pick up ZkTable's own dependencies (incl. the
+/// external ShowdownDecodeLib library) merely to reach two tiny interfaces.
+interface IValveWrapperView {
+    function underlying() external view returns (address);
+}
+
+/// The CREATE2 factory that deploys x402 wrapper clones (ValveWrapperFactory.wrapperOf), used at
+/// `create()` to confirm a supplied token address is a genuine wrapper clone for its underlying —
+/// not an arbitrary ERC-20 masquerading as one. `factory_ == address(0)` skips the check entirely
+/// (unit-test / pre-factory-deploy escape hatch).
+interface IWrapperFactory {
+    function wrapperOf(address underlying) external view returns (address);
+}
 
 /// @notice N-party state-channel card table (3–9 seats; supports N=2). Generalizes ZkTable:
 /// seats escrow buy-ins, play is off-chain N-of-N co-signed ChannelStateN, and the chain is
@@ -34,6 +51,55 @@ import {ChannelTableBase} from "./ChannelTableBase.sol";
 /// alongside its ZkTable counterpart (2026-08 DRY pass) — see that file's header for what's
 /// shared vs. why the escrow/state shape stays separate. (Status.Created is this contract's
 /// "Forming" — the enum keeps ZkTable's original member name; see ChannelTableBase.)
+///
+/// ── x402 ASSET PLUMBING (2026-08 conversion) ─────────────────────────────────────────────────
+/// Escrow no longer moves as native PLS (`msg.value`). Every table is denominated in ONE x402
+/// wrapper token (`tableToken[tableId]`, set once at `create` and immutable thereafter), pulled
+/// gaslessly via the wrapper's EIP-3009/7598 `receiveWithAuthorization` (see `_pull`, lifted
+/// verbatim from FlipBookX/ZkTable). The signer of each `DepositAuth` — `auth.from` — is the
+/// player; `msg.sender` is whoever relays the call (a bot, a paymaster, the player themselves)
+/// and is NEVER used as a player identity anywhere funds move. This is the seat-hijack closure:
+/// `createNonce`/`joinNonce` bind every economically-relevant term (the token, the rules
+/// contract, the buy-in, the seat cap, BOTH rake parameters, the clock, the channel key, the
+/// deck key, and a `salt`) into the wrapper's own EIP-712 nonce, so a relayer that tampers with
+/// any term recomputes a different nonce, the wrapper's signature recovery then fails against
+/// the player's original signature, and the call reverts. `join`'s `salt` exists purely for
+/// REJOIN liveness, not anti-double-join: the seat/key collision loop is what actually enforces
+/// one seat per (tableId, from) while a player is seated, so a bare `joinNonce` (no salt) would
+/// otherwise be a one-shot authorization a player who `leaveBeforeStart`s can never reuse to
+/// rejoin the SAME table with the SAME channelKey/deckKey (the wrapper's nonce is burned
+/// forever) — a genuine liveness bug, not a fund-safety one, since a stale burned auth cannot be
+/// replayed while the original seat still exists. Seat INDEX is deliberately NOT bound into
+/// either nonce — it is assigned by execution order and is mutable via `leaveBeforeStart`'s
+/// swap-and-pop, so binding it would make a perfectly valid join replay-fail merely because
+/// another seat joined or left first; identity + channel key + deck key + table is what a
+/// signer actually commits to. Payouts move via `token.safeTransfer` (a plain push of the
+/// wrapper token — NEVER unwrapped in-contract; a player holds the wrapper and unwraps it
+/// themselves if they want native PLS back). The accrued rake is paid to `treasury` in the SAME
+/// wrapper token as the table — see `_payoutVector`'s note on multi-token treasury inflow AND
+/// on why `treasury` must be a non-reverting receiver.
+///
+/// `settle` and `respondWithState` are now fully permissionless (no `_seatOf(msg.sender)` gate):
+/// each is self-authenticating via the N co-signed channel-key signatures, so any relayer/
+/// watchtower can submit them on a player's behalf without ever touching that player's escrow
+/// identity. `openDispute`/`respondWithMove`/`respondWithShare`/`registerDeckKey`/`start` stay
+/// seat-gated on `msg.sender` exactly as before — those are direct-action paths (identity
+/// load-bearing, or only meaningful while Forming), not relayable deposits. `leaveBeforeStart`/
+/// `cancel` likewise stay `msg.sender`-gated: they are withdrawal requests by an already-seated
+/// wallet, not something a relayer needs to submit on a signer's behalf.
+///
+/// ── GAS PRECONDITION for gasless seating (2026-08, F3) ───────────────────────────────────────
+/// Deposits (`create`/`join`) are gasless/relayable, but EVERY defensive path is NOT: `start`,
+/// `leaveBeforeStart`, `cancel`, `openDispute`, `respondWithMove`, and `respondWithShare` are all
+/// gas-gated on the seat/channelKey actually submitting the transaction as `msg.sender` (see
+/// `_seatOf`). A seat whose escrow was funded entirely by a relayer, but which holds zero native
+/// PLS of its own, cannot defend itself: it cannot `leaveBeforeStart` to exit a Forming table it
+/// no longer wants to be at, and once Live it cannot answer a MOVE or SHARE demand naming it —
+/// `resolveTimeout` then force-folds its stake to the other seats. For an N-seat table this means
+/// N−1 of the N players each need their OWN gas-funded wallet, not just a signed deposit
+/// authorization. This is a HARD client/product precondition for gasless seating as shipped here;
+/// removing it needs a follow-up dispute-relay path (signed-intent MOVE/SHARE/leave responses a
+/// relayer can submit on a gas-less seat's behalf), which is out of scope for this conversion.
 contract HoldemTableN is EIP712, ChannelTableBase {
     using SafeTransferLib for address;
     using ChannelStateNLib for ChannelStateN;
@@ -51,6 +117,9 @@ contract HoldemTableN is EIP712, ChannelTableBase {
     error BadDeckKey();
     error DeckKeyNotSet();
     error BadShareProof();
+    /// `create()`'s token argument does not round-trip through the wrapper factory
+    /// (`factory.wrapperOf(token.underlying()) != token`) — not a genuine x402 wrapper clone.
+    error BadToken();
 
     uint256 public constant MAX_SEATS = 9;
     uint256 public constant MAX_RAKE_BPS = 250; // 2.5%
@@ -76,6 +145,19 @@ contract HoldemTableN is EIP712, ChannelTableBase {
         ChannelStateN disputeState;
     }
 
+    /// A signed x402 EIP-3009/7598 pull authorization: `from` is the player identity (NOT
+    /// necessarily `msg.sender` — this is the whole point, see the contract header), `sig` is
+    /// either a 65-byte (v,r,s) EOA signature or an EIP-7598 `bytes` payload (ERC-1271/Safe),
+    /// routed by `_pull` exactly as FlipBookX/ZkTable do. `validBefore` is the wrapper
+    /// authorization's own expiry; `salt` lets a signer mint a fresh nonce for `create` (join
+    /// needs none — see the contract header).
+    struct DepositAuth {
+        address from;
+        uint64 validBefore;
+        bytes32 salt;
+        bytes sig;
+    }
+
     address public immutable treasury;
     uint256 internal _counter;
     mapping(bytes32 => Table) internal _tables;
@@ -83,8 +165,23 @@ contract HoldemTableN is EIP712, ChannelTableBase {
     /// These are the SAME per-seat keys that aggregate into the off-chain joint deck key;
     /// registered while Forming and read by respondWithShare to check a contested share.
     mapping(bytes32 => mapping(uint256 => uint256[2])) internal _deckKey;
+    /// The x402 wrapper token a table is denominated + escrowed in, set once at `create` and
+    /// immutable thereafter. Separate mapping (not a Table field), mirroring ZkTable's
+    /// `tableToken` — keeps the Table struct's shape (and every existing view getter) unchanged.
+    mapping(bytes32 => IX402Token) public tableToken;
 
-    event TableCreated(bytes32 indexed tableId, address indexed creator, address rules, uint256 buyIn, uint256 maxSeats, uint16 rakeBps, uint256 rakeCap, uint64 clockBlocks);
+    /// The CREATE2 wrapper factory used to confirm a `create()`-supplied token is a genuine x402
+    /// wrapper clone (see IWrapperFactory). Immutable, set once at deploy; `address(0)` disables
+    /// the clone-check entirely (used by the unit-test suite, which funds via a bare MockX402).
+    IWrapperFactory public immutable factory;
+
+    // NOTE (x402 conversion): TableCreated gained the `token` field (inserted right after
+    // `creator`) — a new position in the event's tuple, not just a new trailing field. No ABI
+    // artifact is committed for this package (hardhat's artifacts/ + typechain-types/ are both
+    // gitignored, regenerated on `hardhat compile`) and no off-chain indexer consumes this event
+    // yet (HoldemTableN is undeployed) — but whichever indexer/ABI IS built against this contract
+    // MUST be rebuilt from this source, not from a stale copy.
+    event TableCreated(bytes32 indexed tableId, address indexed creator, address token, address rules, uint256 buyIn, uint256 maxSeats, uint16 rakeBps, uint256 rakeCap, uint64 clockBlocks);
     event TableJoined(bytes32 indexed tableId, address indexed player, uint256 seat);
     event TableStarted(bytes32 indexed tableId, uint256 seatCount);
     event TableCancelled(bytes32 indexed tableId);
@@ -99,8 +196,9 @@ contract HoldemTableN is EIP712, ChannelTableBase {
     /// `forfeitedSeat` is the demandSeat that was force-folded on the chess clock — NOT a game winner.
     event ForcedFold(bytes32 indexed tableId, uint8 forfeitedSeat, uint256[] payouts, uint256 rake);
 
-    constructor(address treasury_) {
+    constructor(address treasury_, address factory_) {
         treasury = treasury_ == address(0) ? msg.sender : treasury_;
+        factory = IWrapperFactory(factory_);
     }
 
     /// Matches makeDomainN() in the holdem stateSigN.ts: name 'HoldemTableN', version '1'.
@@ -108,9 +206,30 @@ contract HoldemTableN is EIP712, ChannelTableBase {
         return ("HoldemTableN", "1");
     }
 
-    // ── lifecycle ──────────────────────────────────────────────────────────────
+    /// Route to the wrapper's matching authorization overload: exactly-65-byte signatures use the
+    /// universal (v,r,s) form (works on every wrapper build, incl. 943's older impl); any other
+    /// length is an ERC-1271 payload for the EIP-7598 `bytes` form (Safes / smart accounts).
+    /// Lifted verbatim from FlipBookX._pull / ZkTable._pull.
+    function _pull(IX402Token token, address from, uint256 value, uint64 validBefore, bytes32 nonce, bytes calldata sig)
+        internal
+    {
+        if (sig.length == 65) {
+            bytes32 r = bytes32(sig[0:32]);
+            bytes32 s = bytes32(sig[32:64]);
+            uint8 v = uint8(sig[64]);
+            token.receiveWithAuthorization(from, address(this), value, 0, validBefore, nonce, v, r, s);
+        } else {
+            token.receiveWithAuthorization(from, address(this), value, 0, validBefore, nonce, sig);
+        }
+    }
 
-    function create(
+    /// The `create()` authorization's nonce — binds EVERY economically-relevant term: the token,
+    /// the rules contract, the buy-in, the seat cap, BOTH rake parameters (the creator signs off
+    /// on exactly the rake it exposes every future joiner to), the clock, the channel key, and
+    /// the deck key. `salt` lets the same signer mint distinct table-creation authorizations.
+    function createNonce(
+        address from,
+        IX402Token token,
         IGameRulesN rules,
         uint256 buyIn,
         uint256 maxSeats,
@@ -118,16 +237,88 @@ contract HoldemTableN is EIP712, ChannelTableBase {
         uint256 rakeCap,
         uint64 clockBlocks,
         address channelKey,
-        uint256[2] calldata deckKey
-    ) external payable returns (bytes32 tableId) {
-        if (buyIn == 0 || msg.value != buyIn) revert WrongValue();
+        uint256[2] memory deckKey,
+        bytes32 salt
+    ) public view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                keccak256("HoldemTableN.X402.Create"),
+                block.chainid,
+                address(this),
+                from,
+                token,
+                rules,
+                buyIn,
+                maxSeats,
+                rakeBps,
+                rakeCap,
+                clockBlocks,
+                channelKey,
+                deckKey[0],
+                deckKey[1],
+                salt
+            )
+        );
+    }
+
+    /// The `join()` authorization's nonce — binds the exact table plus the joiner's channel key
+    /// and deck key, so a relayer cannot redirect a join's escrow to a different table or seat it
+    /// under a different channel/deck key than the one the player actually signed. `salt` here
+    /// exists purely for REJOIN LIVENESS, not anti-double-join: `join()`'s own seat/key collision
+    /// loop is what actually prevents a second, concurrent seat for the same (tableId, from) —
+    /// the nonce's job is only to make each signed join authorization distinguishable. Without a
+    /// salt, a player who signs a join, gets seated, then calls `leaveBeforeStart` (freeing that
+    /// (tableId, from) slot) could NEVER rejoin the same table with the identical channelKey/
+    /// deckKey: the wrapper's nonce for that exact tuple is already burned forever. A fresh salt
+    /// lets the same signer mint a new, distinguishable authorization to rejoin; an identical
+    /// salt on a rejoin attempt still correctly dies at the wrapper's burned-nonce check (bearer
+    /// replay of the exact same authorization is still rejected). Seat INDEX is deliberately NOT
+    /// bound — see the contract header.
+    function joinNonce(bytes32 tableId, address from, address channelKey, uint256[2] memory deckKey, bytes32 salt)
+        public
+        view
+        returns (bytes32)
+    {
+        return keccak256(
+            abi.encode(
+                keccak256("HoldemTableN.X402.Join"), block.chainid, address(this), tableId, from, channelKey, deckKey[0], deckKey[1], salt
+            )
+        );
+    }
+
+    // ── lifecycle ──────────────────────────────────────────────────────────────
+
+    function create(
+        IX402Token token,
+        IGameRulesN rules,
+        uint256 buyIn,
+        uint256 maxSeats,
+        uint16 rakeBps,
+        uint256 rakeCap,
+        uint64 clockBlocks,
+        address channelKey,
+        uint256[2] calldata deckKey,
+        DepositAuth calldata auth
+    ) external returns (bytes32 tableId) {
+        if (buyIn == 0) revert WrongValue();
         _validateClock(clockBlocks);
         _validateRulesCode(address(rules));
         if (maxSeats < 2 || maxSeats > MAX_SEATS) revert BadSeatCount();
         if (rakeBps > MAX_RAKE_BPS) revert RakeTooHigh();
         if (!EllipticCurve.isOnCurve(deckKey[0], deckKey[1])) revert BadDeckKey();
+        // Clone-check: confirm `token` is a genuine x402 wrapper clone for its own underlying,
+        // not an arbitrary ERC-20 impersonating one. Skipped when no factory is configured
+        // (address(0) — unit tests funding via a bare mock).
+        if (address(factory) != address(0)) {
+            address underlying = IValveWrapperView(address(token)).underlying();
+            if (factory.wrapperOf(underlying) != address(token)) revert BadToken();
+        }
         tableId = keccak256(abi.encode(block.chainid, address(this), ++_counter));
+        // Effects BEFORE the pull (CEI): the table (seat 0, keys, escrow, deck key) fully exists
+        // by the time `_pull` makes its one external call. A revert inside `_pull` still unwinds
+        // every write below in the same transaction (bad auth => no persisted table at all).
         Table storage t = _tables[tableId];
+        tableToken[tableId] = token;
         t.rules = rules;
         t.buyIn = buyIn;
         t.maxSeats = maxSeats;
@@ -135,33 +326,63 @@ contract HoldemTableN is EIP712, ChannelTableBase {
         t.rakeCap = rakeCap;
         t.clockBlocks = clockBlocks;
         t.status = Status.Created;
-        address key = channelKey == address(0) ? msg.sender : channelKey;
-        t.seats.push(msg.sender);
+        address key = channelKey == address(0) ? auth.from : channelKey;
+        t.seats.push(auth.from);
         t.channelKeys.push(key);
-        t.escrow.push(msg.value);
+        t.escrow.push(buyIn);
         _deckKey[tableId][0] = deckKey;
-        emit TableCreated(tableId, msg.sender, address(rules), buyIn, maxSeats, rakeBps, rakeCap, clockBlocks);
-        emit TableJoined(tableId, msg.sender, 0);
+        emit TableCreated(tableId, auth.from, address(token), address(rules), buyIn, maxSeats, rakeBps, rakeCap, clockBlocks);
+        emit TableJoined(tableId, auth.from, 0);
+        // Interaction LAST: the single external call this function makes.
+        bytes32 nonce = createNonce(auth.from, token, rules, buyIn, maxSeats, rakeBps, rakeCap, clockBlocks, channelKey, deckKey, auth.salt);
+        _pull(token, auth.from, buyIn, auth.validBefore, nonce, auth.sig);
     }
 
-    function join(bytes32 tableId, address channelKey, uint256[2] calldata deckKey) external payable {
+    /// @dev CLIENT OBLIGATION — `validBefore` sizing on a join `DepositAuth`. Exactly like
+    /// ZkTable's topUp warning: a signed join authorization is bearer-submittable by ANY relayer
+    /// at ANY time before it expires or is burned. A hostile/lazy relayer holding a join auth
+    /// with a far-future `validBefore` can withhold it and then submit it at a moment of its
+    /// choosing — e.g. right before another seat calls `start()`, locking the signer's buy-in
+    /// into a table that immediately goes Live around them while they aren't watching. Recovery
+    /// via `leaveBeforeStart` only works Forming-side AND still costs the signer their own gas to
+    /// call it — no help if the relayer times the join to land the instant before `start()`.
+    /// Clients MUST sign join authorizations with a SHORT `validBefore` (seconds-to-minutes out),
+    /// and can proactively burn a stale/un-submitted one via the wrapper's own
+    /// `cancelAuthorization` if they change their mind before it would otherwise land.
+    ///
+    /// @dev CLIENT OBLIGATION — `channelKey` is a real signing key for your seat, not a label
+    /// (mirrors ZkTable's identical footgun note). `_seatOf` matches EITHER the wallet (`auth
+    /// .from`) OR the channel key, and `leaveBeforeStart` refunds to `msg.sender` — so nominating
+    /// a channelKey you do not exclusively control (e.g. the table creator's address, or any key
+    /// shared with another seat) hands that party co-signing power over your seat's channel
+    /// states AND the ability to call `leaveBeforeStart`/`registerDeckKey`/`start` AS you while
+    /// Forming. This is carried over unchanged from the native-PLS contract, not something the
+    /// x402 conversion introduces or closes — nominate only a channelKey you alone control (or
+    /// pass `address(0)` to default it to your own wallet).
+    function join(bytes32 tableId, address channelKey, uint256[2] calldata deckKey, DepositAuth calldata auth) external {
         Table storage t = _tables[tableId];
         if (t.status != Status.Created) revert BadStatus();
-        if (msg.value != t.buyIn) revert WrongValue();
         if (t.seats.length >= t.maxSeats) revert TooManySeats();
-        address key = channelKey == address(0) ? msg.sender : channelKey;
+        address key = channelKey == address(0) ? auth.from : channelKey;
         // reject any wallet/key collision with an existing seat (keeps _seatOf unambiguous)
         for (uint256 i = 0; i < t.seats.length; i++) {
-            if (t.seats[i] == msg.sender || t.channelKeys[i] == msg.sender) revert NotPlayer();
+            if (t.seats[i] == auth.from || t.channelKeys[i] == auth.from) revert NotPlayer();
             if (t.seats[i] == key || t.channelKeys[i] == key) revert DuplicateKey();
         }
         if (!EllipticCurve.isOnCurve(deckKey[0], deckKey[1])) revert BadDeckKey();
-        t.seats.push(msg.sender);
+        uint256 stake = t.buyIn;
+        // Effects BEFORE the pull (CEI): the new seat is fully seated here, before `_pull`'s
+        // external call. A revert inside `_pull` still unwinds all of this in the same
+        // transaction (bad auth => no persisted seat).
+        t.seats.push(auth.from);
         t.channelKeys.push(key);
-        t.escrow.push(msg.value);
+        t.escrow.push(stake);
         uint256 seat = t.seats.length - 1;
         _deckKey[tableId][seat] = deckKey;
-        emit TableJoined(tableId, msg.sender, seat);
+        emit TableJoined(tableId, auth.from, seat);
+        // Interaction LAST: the single external call this function makes.
+        bytes32 nonce = joinNonce(tableId, auth.from, channelKey, deckKey, auth.salt);
+        _pull(tableToken[tableId], auth.from, stake, auth.validBefore, nonce, auth.sig);
     }
 
     /// Forming → Live once at least 2 seats have joined. Every seat already has a registered
@@ -216,7 +437,7 @@ contract HoldemTableN is EIP712, ChannelTableBase {
             t.status = Status.Cancelled;
             emit TableCancelled(tableId);
         }
-        if (refund > 0) msg.sender.forceSafeTransferETH(refund);
+        if (refund > 0) address(tableToken[tableId]).safeTransfer(msg.sender, refund);
     }
 
     /// Creator cancels a Forming table that only they occupy; refunds all current escrow.
@@ -228,16 +449,19 @@ contract HoldemTableN is EIP712, ChannelTableBase {
         uint256 refund = t.escrow[0];
         t.escrow[0] = 0;
         emit TableCancelled(tableId);
-        if (refund > 0) msg.sender.forceSafeTransferETH(refund);
+        if (refund > 0) address(tableToken[tableId]).safeTransfer(msg.sender, refund);
     }
 
     // ── settle ───────────────────────────────────────────────────────────────
 
-    /// Cooperative settle: any seat submits the final N-of-N co-signed state.
+    /// Cooperative settle: fully permissionless (no `_seatOf(msg.sender)` gate — see the
+    /// contract header) — any relayer/watchtower may submit the final N-of-N co-signed state on
+    /// a seat's behalf. The payout is determined entirely by the N verified channel-key
+    /// signatures, conservation, isFinal, pot==0, and nonce monotonicity — msg.sender's identity
+    /// is never consulted.
     function settle(bytes32 tableId, ChannelStateN calldata state, bytes[] calldata sigs) external {
         Table storage t = _tables[tableId];
         if (t.status != Status.Live) revert BadStatus();
-        _seatOf(t, msg.sender);
         _checkCoSigned(t, tableId, state, sigs);
         if (!t.rules.isFinal(state.phase)) revert NotFinal();
         if (state.pot != 0 || state.sidePots.length != 0) revert PotNotZero();
@@ -318,11 +542,12 @@ contract HoldemTableN is EIP712, ChannelTableBase {
         emit DisputeOpened(tableId, demandSeat, demandKind, demandSlot, t.disputeDeadline);
     }
 
-    /// Universal answer: any seat posts a strictly-newer N-of-N co-signed state.
+    /// Universal answer: fully permissionless (no `_seatOf(msg.sender)` gate — see the contract
+    /// header) — any relayer/watchtower may post a strictly-newer N-of-N co-signed state on a
+    /// seat's behalf.
     function respondWithState(bytes32 tableId, ChannelStateN calldata state, bytes[] calldata sigs) external {
         Table storage t = _tables[tableId];
         if (t.status != Status.Disputed) revert BadStatus();
-        _seatOf(t, msg.sender);
         _checkCoSigned(t, tableId, state, sigs);
         if (state.nonce <= t.disputeState.nonce) revert StaleNonce();
         t.checkpointNonce = state.nonce;
@@ -530,7 +755,26 @@ contract HoldemTableN is EIP712, ChannelTableBase {
     }
 
     /// Pay each seat its `payouts[i]` and the accrued rake to the treasury, then mark settled.
-    /// One griefing receiver cannot block the others (forceSafeTransferETH).
+    ///
+    /// NOTE — this is NOT griefing-proof the way the old ETH path's `forceSafeTransferETH` was.
+    /// Solady's `SafeTransferLib.safeTransfer` for ERC-20s REVERTS THE WHOLE CALL if the
+    /// underlying `transfer` fails or returns `false` — unlike `forceSafeTransferETH`, it does
+    /// NOT swallow a failing send and move on. A single reverting recipient here — any seat, or
+    /// `treasury` — would therefore brick `settle`/`resolveTimeout` for EVERY seat at this table,
+    /// not just itself. This is safe ONLY because `create()`'s factory clone-check pins `token`
+    /// to a genuine ValveWrapperImpl clone: a plain, hook-free ERC-20 with no blacklist, no
+    /// transfer-tax, and no recipient callback — so `transfer` to an arbitrary address cannot be
+    /// made to revert by that address. It is NOT safe in general (a factory-less deployment with
+    /// `factory == address(0)`, or a future wrapper implementation gaining hooks/blacklisting,
+    /// would reopen exactly this griefing vector). @dev DEPLOY OBLIGATION: `treasury` must be an
+    /// address the wrapper can ALWAYS successfully `transfer` to — a plain EOA, or a contract
+    /// that is guaranteed never to revert on receiving an ERC-20 transfer — never a contract that
+    /// could plausibly reject the transfer (e.g. a paused multisig-like receiver).
+    ///
+    /// NOTE (multi-token treasury inflow): `treasury` receives rake in WHATEVER wrapper token
+    /// this table is denominated in — a HoldemTableN deployment serving several distinct wrapper
+    /// tokens accrues rake in each of them separately, not into one common asset. Ops sweeping
+    /// the treasury must account for this.
     function _payoutVector(
         Table storage t,
         bytes32 tableId,
@@ -548,10 +792,11 @@ contract HoldemTableN is EIP712, ChannelTableBase {
         }
         if (forcedFold) emit ForcedFold(tableId, forfeitedSeat, payouts, rake);
         else emit TableSettled(tableId, payouts, rake);
+        address token = address(tableToken[tableId]);
         for (uint256 i = 0; i < n; i++) {
-            if (payouts[i] > 0) recipients[i].forceSafeTransferETH(payouts[i]);
+            if (payouts[i] > 0) token.safeTransfer(recipients[i], payouts[i]);
         }
-        if (rake > 0) treasury.forceSafeTransferETH(rake);
+        if (rake > 0) token.safeTransfer(treasury, rake);
     }
 
     // ── views ────────────────────────────────────────────────────────────────

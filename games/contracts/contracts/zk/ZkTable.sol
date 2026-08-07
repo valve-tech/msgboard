@@ -797,8 +797,10 @@ contract ZkTable is EIP712, ChannelTableBase {
         // resolveTimeout.
         (uint256 toA, uint256 toB, uint8 winner) = _showdownOutcome(t, okA, cardA, okB, cardB, gameState);
 
-        // Effects before the forced sends (CEI, matching _payout's own discipline): emit, wipe
-        // the reveal accumulator + dispute fields, THEN transfer.
+        // Effects before the token transfers (CEI, matching _payout's own discipline): emit, wipe
+        // the reveal accumulator + dispute fields, THEN transfer. NB: payout is a wrapper-token
+        // safeTransfer (no receiver callback), not a native forced-send — a genuine clone's
+        // transfer cannot revert-grief, but the treasury/recipients must be transfer-able addresses.
         emit ShowdownFinalized(tableId, cardA, cardB, winner);
         _clearDispute(tableId, t);
         _payout(t, tableId, toA, toB);

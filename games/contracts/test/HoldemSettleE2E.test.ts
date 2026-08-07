@@ -12,14 +12,22 @@ import {
   type SeatScript,
   type SessionSeat,
 } from '@msgboard/holdem'
+import { deployHoldemTableN, makeX402Domain, buildCreateAuthN, buildJoinAuthN } from './x402'
 
 /// Task 8 — END-TO-END on-chain settle. Runs the full off-chain @msgboard/holdem session
 /// (deck → deal → betting → showdown → N-of-N co-signed SETTLED ChannelStateN) and submits
 /// the co-signed final state to an anvil-deployed HoldemTableN.settle, asserting it is ACCEPTED:
-/// each seat's wallet balance changes by its payout, the rake reaches the treasury, the table
-/// reaches Settled and holds zero residue. Template: MsgBoardSettleE2E.test.ts.
+/// each seat's TOKEN balance changes by its payout, the rake reaches the treasury in the same
+/// wrapper token, the table reaches Settled and holds zero residue. Template: MsgBoardSettleE2E.test.ts.
+///
+/// x402 conversion (2026-08): escrow no longer moves as native PLS — every create()/join() now
+/// pulls a signed `DepositAuth` against a MockX402 wrapper token (mirrors ZkTable.test.ts's own
+/// x402 migration). Because payouts move in the TOKEN, not native ETH, the settle/resolveTimeout
+/// submitter's OWN gas spend (still paid in ETH) no longer needs to be netted out of the payout
+/// assertions — a genuine simplification versus the pre-conversion version of this file.
 describe('Holdem on-chain settle E2E (HoldemTableN.settle accepts the co-signed final state)', () => {
   // Build a player wallet for a non-hardhat key: viem signs locally and submits via the node.
+  // Still needs NATIVE ETH for gas (escrow itself is now token-denominated, not gas).
   async function fundWallet(account: ReturnType<typeof privateKeyToAccount>) {
     const publicClient = await hre.viem.getPublicClient()
     await hre.network.provider.request({
@@ -56,8 +64,8 @@ describe('Holdem on-chain settle E2E (HoldemTableN.settle accepts the co-signed 
     return seats
   }
 
-  // Submit settle from seat `submitter` (a seat must submit — _seatOf gates msg.sender) and
-  // return the gas cost the submitter paid, so payout assertions can add it back.
+  // Submit settle from seat `submitter` (settle is now fully permissionless, but a seat
+  // submitting its own settle is the common/simplest case and still exercised here).
   async function settleAs(
     zk: any,
     publicClient: any,
@@ -65,55 +73,70 @@ describe('Holdem on-chain settle E2E (HoldemTableN.settle accepts the co-signed 
     tableId: viem.Hex,
     state: any,
     sigs: viem.Hex[],
-  ): Promise<bigint> {
+  ): Promise<void> {
     const hash = await submitter.walletClient.writeContract({
       address: zk.address,
       abi: zk.abi,
       functionName: 'settle',
       args: [tableId, state, sigs],
     })
-    const receipt: viem.TransactionReceipt = await publicClient.getTransactionReceipt({ hash })
-    return receipt.gasUsed * receipt.effectiveGasPrice
+    await publicClient.waitForTransactionReceipt({ hash })
   }
 
   async function deploy(treasury: viem.Hex) {
-    const zk = await hre.viem.deployContract('HoldemTableN', [treasury])
+    // factory = zeroAddress: skips the create()-time clone-check, matching the Foundry unit
+    // suites (which fund via the same bare MockX402, not a real wrapper clone).
+    const zk = await deployHoldemTableN(treasury, viem.zeroAddress)
     const rules = await hre.viem.deployContract('HoldemRules', [])
+    const token = await hre.viem.deployContract('MockX402')
     const publicClient = await hre.viem.getPublicClient()
     const chainId = await publicClient.getChainId()
     const domain = makeDomainN(chainId, zk.address)
-    return { zk, rules, publicClient, chainId, domain }
+    const x402Domain = makeX402Domain(chainId, token.address)
+    return { zk, rules, token, publicClient, chainId, domain, x402Domain }
   }
 
   async function createJoinStart(
     zk: any,
     rules: any,
+    token: any,
+    x402Domain: ReturnType<typeof makeX402Domain>,
     seats: Awaited<ReturnType<typeof makeSeats>>,
-    _tableId: viem.Hex, // legacy positional arg; the real id is read from the TableCreated log below
     buyIn: bigint,
     rakeBps: number,
     rakeCap: bigint,
   ) {
     const n = seats.length
     const CLOCK = 30n
+    // Fund every seat's wallet with the wrapper token (mint has no access control).
+    for (const seat of seats) {
+      await token.write.mint([seat.wallet.address, buyIn * 10n])
+    }
     // Each seat's on-chain deck pubkey (secp256k1 affine [x,y]) is now a create/join
     // parameter — a seat can never be occupied without one (no separate registerDeckKey step).
     const deckKeyOf = (seat: (typeof seats)[number]): readonly [bigint, bigint] => {
       const a = deserializePoint(seat.pub).toAffine()
       return [a.x, a.y]
     }
-    // seat 0 creates (escrows buyIn), declaring its channel key + deck key.
-    await seats[0].walletClient.writeContract({
+    // seat 0 creates (escrows buyIn via a signed x402 deposit authorization), declaring its
+    // channel key + deck key.
+    const createAuth = await buildCreateAuthN(zk, token.address, x402Domain, seats[0]!.wallet, {
+      rules: rules.address,
+      buyIn,
+      maxSeats: BigInt(n),
+      rakeBps,
+      rakeCap,
+      clockBlocks: CLOCK,
+      channelKey: seats[0]!.channel.address,
+      deckKey: deckKeyOf(seats[0]!),
+    })
+    await seats[0]!.walletClient.writeContract({
       address: zk.address,
       abi: zk.abi,
       functionName: 'create',
-      args: [rules.address, buyIn, BigInt(n), rakeBps, rakeCap, CLOCK, seats[0].channel.address, deckKeyOf(seats[0])],
-      value: buyIn,
+      args: [token.address, rules.address, buyIn, BigInt(n), rakeBps, rakeCap, CLOCK, seats[0]!.channel.address, deckKeyOf(seats[0]!), createAuth],
     })
-    // resolve the tableId the contract derived: it emits TableCreated(tableId,...). Recompute it
-    // by reading from the create receipt is fiddly; instead the contract derives tableId from
-    // (creator, block, nonce-ish). Simpler: the contract returns it — fetch via the event.
-    // We pass the same tableId by reading the single TableCreated log.
+    // resolve the tableId the contract derived by reading the single TableCreated log.
     const pub = await hre.viem.getPublicClient()
     const logs = (await pub.getContractEvents({
       address: zk.address,
@@ -122,15 +145,20 @@ describe('Holdem on-chain settle E2E (HoldemTableN.settle accepts the co-signed 
     })) as unknown as Array<{ args: { tableId: viem.Hex } }>
     const realTableId = logs[logs.length - 1]!.args.tableId
     for (let i = 1; i < n; i++) {
-      await seats[i].walletClient.writeContract({
+      const joinAuth = await buildJoinAuthN(zk, x402Domain, seats[i]!.wallet, {
+        tableId: realTableId,
+        stake: buyIn,
+        channelKey: seats[i]!.channel.address,
+        deckKey: deckKeyOf(seats[i]!),
+      })
+      await seats[i]!.walletClient.writeContract({
         address: zk.address,
         abi: zk.abi,
         functionName: 'join',
-        args: [realTableId, seats[i].channel.address, deckKeyOf(seats[i])],
-        value: buyIn,
+        args: [realTableId, seats[i]!.channel.address, deckKeyOf(seats[i]!), joinAuth],
       })
     }
-    await seats[0].walletClient.writeContract({
+    await seats[0]!.walletClient.writeContract({
       address: zk.address,
       abi: zk.abi,
       functionName: 'start',
@@ -141,13 +169,12 @@ describe('Holdem on-chain settle E2E (HoldemTableN.settle accepts the co-signed 
 
   it('N=2 contested: full session → settle pays the evaluator winner; table Settled, zero residue', async () => {
     const treasury = viem.getAddress('0x000000000000000000000000000000000000bEEF')
-    const { zk, rules, publicClient, domain } = await deploy(treasury)
+    const { zk, rules, token, publicClient, domain, x402Domain } = await deploy(treasury)
     const p = new AttestedElGamalDeck()
     const seats = await makeSeats(p, 2)
     const buyIn = viem.parseEther('1')
 
-    // create/join/start with the ON-CHAIN-derived tableId, then co-sign with that domain.
-    const tableId = await createJoinStart(zk, rules, seats, '0x' as viem.Hex, buyIn, 0, 0n)
+    const tableId = await createJoinStart(zk, rules, token, x402Domain, seats, buyIn, 0, 0n)
 
     const scripts: SeatScript[] = [
       { preflop: ['CALL'], flop: ['CHECK'], turn: ['CHECK'], river: ['CHECK'] },
@@ -167,24 +194,20 @@ describe('Holdem on-chain settle E2E (HoldemTableN.settle accepts the co-signed 
       domain,
     })
 
-    const before = await Promise.all(seats.map((s) => publicClient.getBalance({ address: s.wallet.address })))
-    const zkBefore = await publicClient.getBalance({ address: zk.address })
+    const before = await Promise.all(seats.map((s) => token.read.balanceOf([s.wallet.address])))
+    const zkBefore = await token.read.balanceOf([zk.address])
 
-    // Submit the co-signed SETTLED state from seat 0 (a seat must submit). Capture its gas so
-    // the payout assertion can add it back.
-    const gas = await settleAs(zk, publicClient, seats[0], tableId, res.settleState, res.settleSigs as viem.Hex[])
+    await settleAs(zk, publicClient, seats[0]!, tableId, res.settleState, res.settleSigs as viem.Hex[])
 
     // table Settled, zero residue
     const status = await zk.read.status([tableId])
     expect(Number(status)).to.equal(4) // Status.Settled
-    expect(await publicClient.getBalance({ address: zk.address })).to.equal(0n)
+    expect(await token.read.balanceOf([zk.address])).to.equal(0n)
 
-    // each seat's wallet changed by exactly its co-signed balance (the payout vector); seat 0
-    // additionally paid the settle gas.
-    const after = await Promise.all(seats.map((s) => publicClient.getBalance({ address: s.wallet.address })))
+    // each seat's TOKEN balance changed by exactly its co-signed balance (the payout vector).
+    const after = await Promise.all(seats.map((s) => token.read.balanceOf([s.wallet.address])))
     for (let i = 0; i < seats.length; i++) {
-      const gasAdj = i === 0 ? gas : 0n
-      expect(after[i] - before[i] + gasAdj, `seat ${i} payout`).to.equal(res.settleState.balances[i])
+      expect(after[i]! - before[i]!, `seat ${i} payout`).to.equal(res.settleState.balances[i])
     }
     // exactly Σ escrow left the contract
     expect(zkBefore).to.equal(buyIn * 2n)
@@ -192,14 +215,14 @@ describe('Holdem on-chain settle E2E (HoldemTableN.settle accepts the co-signed 
 
   it('N=3 contested with rake: settle pays winners + rake to treasury; conserves Σ escrow', async () => {
     const treasury = viem.getAddress('0x000000000000000000000000000000000000cAfe')
-    const { zk, rules, publicClient, domain } = await deploy(treasury)
+    const { zk, rules, token, publicClient, domain, x402Domain } = await deploy(treasury)
     const p = new AttestedElGamalDeck()
     const seats = await makeSeats(p, 3)
     const buyIn = viem.parseEther('1')
     const rakeBps = 250 // 2.5%
     const rakeCap = viem.parseEther('0.1')
 
-    const tableId = await createJoinStart(zk, rules, seats, '0x' as viem.Hex, buyIn, rakeBps, rakeCap)
+    const tableId = await createJoinStart(zk, rules, token, x402Domain, seats, buyIn, rakeBps, rakeCap)
 
     // Everyone calls/checks to a 3-way showdown so the evaluator + rake fire. Use ether-scale
     // blinds so the pot is large enough for a non-zero rake (2.5% of ~0.06 ETH).
@@ -225,22 +248,20 @@ describe('Holdem on-chain settle E2E (HoldemTableN.settle accepts the co-signed 
     // rake must be non-zero for this test to exercise the rake path.
     expect(res.settleState.rakeAccrued > 0n, 'rake accrued > 0').to.equal(true)
 
-    const before = await Promise.all(seats.map((s) => publicClient.getBalance({ address: s.wallet.address })))
-    const treasuryBefore = await publicClient.getBalance({ address: treasury })
+    const before = await Promise.all(seats.map((s) => token.read.balanceOf([s.wallet.address])))
+    const treasuryBefore = await token.read.balanceOf([treasury])
 
-    // settle must be submitted BY a seat (the contract gates on _seatOf(msg.sender)).
-    const gas = await settleAs(zk, publicClient, seats[0], tableId, res.settleState, res.settleSigs as viem.Hex[])
+    await settleAs(zk, publicClient, seats[0]!, tableId, res.settleState, res.settleSigs as viem.Hex[])
 
     expect(Number(await zk.read.status([tableId]))).to.equal(4) // Settled
-    expect(await publicClient.getBalance({ address: zk.address })).to.equal(0n)
+    expect(await token.read.balanceOf([zk.address])).to.equal(0n)
 
-    const after = await Promise.all(seats.map((s) => publicClient.getBalance({ address: s.wallet.address })))
+    const after = await Promise.all(seats.map((s) => token.read.balanceOf([s.wallet.address])))
     for (let i = 0; i < seats.length; i++) {
-      const gasAdj = i === 0 ? gas : 0n
-      expect(after[i] - before[i] + gasAdj, `seat ${i} payout`).to.equal(res.settleState.balances[i])
+      expect(after[i]! - before[i]!, `seat ${i} payout`).to.equal(res.settleState.balances[i])
     }
-    const treasuryAfter = await publicClient.getBalance({ address: treasury })
-    expect(treasuryAfter - treasuryBefore, 'rake to treasury').to.equal(res.settleState.rakeAccrued)
+    const treasuryAfter = await token.read.balanceOf([treasury])
+    expect(treasuryAfter - treasuryBefore, 'rake to treasury, in the wrapper token').to.equal(res.settleState.rakeAccrued)
 
     // whole-table conservation: Σ payouts + rake == Σ escrow
     const sumPayouts = res.settleState.balances.reduce((a, b) => a + b, 0n)
@@ -249,12 +270,12 @@ describe('Holdem on-chain settle E2E (HoldemTableN.settle accepts the co-signed 
 
   it('N=3 uncontested sweep: everyone folds to one seat; settle pays the last seat, conserves', async () => {
     const treasury = viem.getAddress('0x000000000000000000000000000000000000dEaD')
-    const { zk, rules, publicClient, domain } = await deploy(treasury)
+    const { zk, rules, token, publicClient, domain, x402Domain } = await deploy(treasury)
     const p = new AttestedElGamalDeck()
     const seats = await makeSeats(p, 3)
     const buyIn = viem.parseEther('1')
 
-    const tableId = await createJoinStart(zk, rules, seats, '0x' as viem.Hex, buyIn, 0, 0n)
+    const tableId = await createJoinStart(zk, rules, token, x402Domain, seats, buyIn, 0, 0n)
 
     const scripts: SeatScript[] = [
       { preflop: ['FOLD'] },
@@ -276,16 +297,14 @@ describe('Holdem on-chain settle E2E (HoldemTableN.settle accepts the co-signed 
     })
     expect(res.final.stubWinner).to.equal(2)
 
-    const before = await Promise.all(seats.map((s) => publicClient.getBalance({ address: s.wallet.address })))
-    // settle must be submitted BY a seat (the contract gates on _seatOf(msg.sender)).
-    const gas = await settleAs(zk, publicClient, seats[0], tableId, res.settleState, res.settleSigs as viem.Hex[])
+    const before = await Promise.all(seats.map((s) => token.read.balanceOf([s.wallet.address])))
+    await settleAs(zk, publicClient, seats[0]!, tableId, res.settleState, res.settleSigs as viem.Hex[])
 
     expect(Number(await zk.read.status([tableId]))).to.equal(4)
-    expect(await publicClient.getBalance({ address: zk.address })).to.equal(0n)
-    const after = await Promise.all(seats.map((s) => publicClient.getBalance({ address: s.wallet.address })))
+    expect(await token.read.balanceOf([zk.address])).to.equal(0n)
+    const after = await Promise.all(seats.map((s) => token.read.balanceOf([s.wallet.address])))
     for (let i = 0; i < seats.length; i++) {
-      const gasAdj = i === 0 ? gas : 0n
-      expect(after[i] - before[i] + gasAdj, `seat ${i} payout`).to.equal(res.settleState.balances[i])
+      expect(after[i]! - before[i]!, `seat ${i} payout`).to.equal(res.settleState.balances[i])
     }
     const sumPayouts = res.settleState.balances.reduce((a, b) => a + b, 0n)
     expect(sumPayouts + res.settleState.rakeAccrued).to.equal(buyIn * 3n)
@@ -297,14 +316,14 @@ describe('Holdem on-chain settle E2E (HoldemTableN.settle accepts the co-signed 
     // stake is redistributed to the still-eligible honest seats while it keeps its out-of-pot
     // balance. Exercises the REAL Task-4 HoldemTableN dispute path end-to-end (not just the fuzz).
     const treasury = viem.getAddress('0x000000000000000000000000000000000000FaCe')
-    const { zk, rules, publicClient, domain } = await deploy(treasury)
+    const { zk, rules, token, publicClient, domain, x402Domain } = await deploy(treasury)
     const p = new AttestedElGamalDeck()
     const seats = await makeSeats(p, 3)
     const buyIn = viem.parseEther('1')
     const escrow = buyIn * 3n
     const CLOCK = 30 // must match createJoinStart's CLOCK
 
-    const tableId = await createJoinStart(zk, rules, seats, '0x' as viem.Hex, buyIn, 0, 0n)
+    const tableId = await createJoinStart(zk, rules, token, x402Domain, seats, buyIn, 0, 0n)
 
     // Run a full hand off-chain only to HARVEST a legitimately co-signed mid-hand snapshot whose
     // gameStateHash preimage is a BET-phase state where exactly one seat owes the next action.
@@ -397,7 +416,7 @@ describe('Holdem on-chain settle E2E (HoldemTableN.settle accepts the co-signed 
     // conservation of the expected vector
     expect(expected.reduce((a, b) => a + b, 0n) + checkpoint.state.rakeAccrued).to.equal(escrow)
 
-    const before = await Promise.all(seats.map((s) => publicClient.getBalance({ address: s.wallet.address })))
+    const before = await Promise.all(seats.map((s) => token.read.balanceOf([s.wallet.address])))
 
     // Clock expires with no response -> force-fold the silent seat.
     await helpers.mine(CLOCK + 1)
@@ -407,37 +426,27 @@ describe('Holdem on-chain settle E2E (HoldemTableN.settle accepts the co-signed 
       functionName: 'resolveTimeout',
       args: [tableId],
     })
-    const ffReceipt: viem.TransactionReceipt = await publicClient.getTransactionReceipt({ hash: ffHash })
-    const openerGas = ffReceipt.gasUsed * ffReceipt.effectiveGasPrice
-    // the opener also paid openDispute gas; add it back only via the net-of-gas assertion below.
+    await publicClient.waitForTransactionReceipt({ hash: ffHash })
 
     // table Settled, zero residue.
     expect(Number(await zk.read.status([tableId]))).to.equal(4) // Settled
-    expect(await publicClient.getBalance({ address: zk.address })).to.equal(0n)
+    expect(await token.read.balanceOf([zk.address])).to.equal(0n)
 
-    // each seat's wallet changed by exactly its expected forced-fold payout (the opener paid gas
-    // for openDispute + resolveTimeout — assert it received its payout net of the total gas it spent).
-    const after = await Promise.all(seats.map((s) => publicClient.getBalance({ address: s.wallet.address })))
-    const openerIdx = seats.findIndex((_, i) => i !== demandSeat)
+    // each seat's TOKEN balance changed by exactly its expected forced-fold payout — no gas
+    // netting needed (gas is paid in native ETH; the escrow/payout asset is the wrapper token).
+    const after = await Promise.all(seats.map((s) => token.read.balanceOf([s.wallet.address])))
     for (let i = 0; i < n; i++) {
-      if (i === openerIdx) {
-        // opener's net delta = payout - (openDispute gas + resolveTimeout gas). We only metered
-        // resolveTimeout above; assert the opener received AT LEAST its payout minus a gas budget
-        // and that the silent seat + the third seat reconcile exactly (closed-form).
-        continue
-      }
-      expect(after[i] - before[i], `seat ${i} forced-fold payout`).to.equal(expected[i])
+      expect(after[i]! - before[i]!, `seat ${i} forced-fold payout`).to.equal(expected[i])
     }
     // The silent (forfeiting) seat received exactly its kept out-of-pot balance — it cannot gain
     // by stalling.
-    expect(after[demandSeat] - before[demandSeat], 'silent seat keeps out-of-pot balance only').to.equal(
+    expect(after[demandSeat]! - before[demandSeat]!, 'silent seat keeps out-of-pot balance only').to.equal(
       checkpoint.state.balances[demandSeat],
     )
-    // Whole-table conservation: Σ on-chain deltas + opener gas == Σ escrow that left the contract.
+    // Whole-table conservation: Σ token deltas == Σ escrow that left the contract (exact, no gas
+    // netting required since payouts are token-denominated).
     const sumDeltas = after.reduce((a, b, i) => a + (b - before[i]!), 0n)
-    expect(sumDeltas + openerGas, 'Σ payouts (net opener gas) conserves escrow').to.be.lessThanOrEqual(escrow)
-    // the forced-fold redistribution conserves exactly (independent of gas):
+    expect(sumDeltas, 'Σ payouts conserves escrow').to.equal(escrow)
     expect(expected.reduce((a, b) => a + b, 0n) + checkpoint.state.rakeAccrued).to.equal(escrow)
-    void openerGas
   })
 })

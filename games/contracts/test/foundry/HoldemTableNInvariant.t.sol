@@ -8,18 +8,22 @@ import {ChannelTableBase} from "../../contracts/zk/ChannelTableBase.sol";
 import {ChannelStateN, SidePot} from "../../contracts/zk/ChannelStateN.sol";
 import {IGameRulesN} from "../../contracts/zk/IGameRulesN.sol";
 import {MockGameRulesN} from "../../contracts/test/MockGameRulesN.sol";
+import {MockX402} from "../../contracts/test/MockX402.sol";
+import {IX402Token} from "../../contracts/games/FlipBookX.sol";
+import {X402AuthLib} from "./X402AuthLib.sol";
 
 /// @notice Drives HoldemTableN tables through randomized create / join / start / settle /
 /// dispute / respond / timeout / cancel interleavings, every co-signed state signed for real
 /// via vm.sign over the EIP-712 digest. A small pool of handler-owned EOAs both prank as
-/// seats (so escrow lands) AND co-sign as their channel keys (the EOA IS the channel key).
-/// Ghost accounting:
-///   ghostIn  += msg.value on every successful create / join
-///   ghostOut += the pool's actual balance delta after every successful settle / timeout / cancel
-/// so address(zk).balance == ghostIn - ghostOut must always hold (solvency).
+/// seats (so escrow lands, via signed x402 deposit authorizations) AND co-sign as their
+/// channel keys (the EOA IS the channel key). Ghost accounting:
+///   ghostIn  += buyIn/stake on every successful create / join
+///   ghostOut += the pool's actual TOKEN balance delta after every successful settle / timeout / cancel
+/// so token.balanceOf(address(zk)) == ghostIn - ghostOut must always hold (solvency).
 contract HoldemTableNHandler is Test {
     HoldemTableN public zk;
     MockGameRulesN public rules;
+    MockX402 public token;
 
     uint256 public ghostIn;
     uint256 public ghostOut;
@@ -29,6 +33,7 @@ contract HoldemTableNHandler is Test {
     address[POOL] internal addrs;
 
     uint64 internal constant CLOCK = 30;
+    uint64 internal constant VALID_BEFORE = type(uint64).max;
     // secp256k1 generator — on-curve deck key; create()/join() now require one directly.
     uint256 internal constant GX = 0x79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798;
     uint256 internal constant GY = 0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8;
@@ -49,13 +54,14 @@ contract HoldemTableNHandler is Test {
     mapping(bytes32 => TableRec) internal recs;
     bytes32[] public terminalIds;
 
-    constructor(HoldemTableN _zk, MockGameRulesN _rules) {
+    constructor(HoldemTableN _zk, MockGameRulesN _rules, MockX402 _token) {
         zk = _zk;
         rules = _rules;
+        token = _token;
         for (uint256 i = 0; i < POOL; i++) {
             pks[i] = 0xC0FFEE + i;
             addrs[i] = vm.addr(pks[i]);
-            vm.deal(addrs[i], 1_000_000 ether);
+            token.mint(addrs[i], 1_000_000 ether);
         }
     }
 
@@ -64,7 +70,14 @@ contract HoldemTableNHandler is Test {
     function terminalIdAt(uint256 i) external view returns (bytes32) { return terminalIds[i]; }
 
     function _poolBalance() internal view returns (uint256 sum) {
-        for (uint256 i = 0; i < POOL; i++) sum += addrs[i].balance;
+        for (uint256 i = 0; i < POOL; i++) sum += token.balanceOf(addrs[i]);
+    }
+
+    /// x402 deposit authorization for `from`, signed for real over the wrapper's own EIP-712
+    /// digest (mirrors X402AuthLib usage in the ZkTable invariant handler).
+    function _authFor(uint256 pk, address from, uint256 value, bytes32 nonce) internal returns (HoldemTableN.DepositAuth memory) {
+        bytes32 digest = X402AuthLib.receiveDigest(token.DOMAIN_SEPARATOR(), from, address(zk), value, VALID_BEFORE, nonce);
+        return HoldemTableN.DepositAuth({from: from, validBefore: VALID_BEFORE, salt: bytes32(0), sig: X402AuthLib.sign65(pk, digest)});
     }
 
     function _coSign(TableRec storage r, ChannelStateN memory s) internal view returns (bytes[] memory sigs) {
@@ -109,8 +122,12 @@ contract HoldemTableNHandler is Test {
         uint256 buyIn = bound(uint256(buySeed), 1, 1_000 ether);
         uint256 ia = seatSeed % POOL;
         address who = addrs[ia];
+        IGameRulesN r_ = IGameRulesN(address(rules));
+        uint256[2] memory deckKey = [GX, GY];
+        bytes32 nonce = zk.createNonce(who, IX402Token(address(token)), r_, buyIn, n, 0, 0, CLOCK, who, deckKey, bytes32(0));
+        HoldemTableN.DepositAuth memory auth = _authFor(pks[ia], who, buyIn, nonce);
         vm.prank(who);
-        try zk.create{value: buyIn}(IGameRulesN(address(rules)), buyIn, n, 0, 0, CLOCK, who, [GX, GY]) returns (bytes32 id) {
+        try zk.create(IX402Token(address(token)), r_, buyIn, n, 0, 0, CLOCK, who, deckKey, auth) returns (bytes32 id) {
             ghostIn += buyIn;
             TableRec storage r = recs[id];
             r.id = id;
@@ -136,8 +153,11 @@ contract HoldemTableNHandler is Test {
             bool used;
             for (uint256 k = 0; k < seated; k++) if (zk.seatAt(id, k) == cand) { used = true; break; }
             if (used) continue;
+            uint256[2] memory deckKey = [GX, GY];
+            bytes32 nonce = zk.joinNonce(id, cand, cand, deckKey, bytes32(0));
+            HoldemTableN.DepositAuth memory auth = _authFor(pks[j], cand, r.buyIn, nonce);
             vm.prank(cand);
-            try zk.join{value: r.buyIn}(id, cand, [GX, GY]) {
+            try zk.join(id, cand, deckKey, auth) {
                 ghostIn += r.buyIn;
                 r.seatPk[seated] = pks[j];
             } catch {}
@@ -253,12 +273,14 @@ contract HoldemTableNHandler is Test {
 contract HoldemTableNInvariantTest is StdInvariant, Test {
     HoldemTableN internal zk;
     MockGameRulesN internal rules;
+    MockX402 internal token;
     HoldemTableNHandler internal handler;
 
     function setUp() public {
-        zk = new HoldemTableN(address(0xBEEF));
+        token = new MockX402();
+        zk = new HoldemTableN(address(0xBEEF), address(0)); // factory=0 skips the clone-check
         rules = new MockGameRulesN();
-        handler = new HoldemTableNHandler(zk, rules);
+        handler = new HoldemTableNHandler(zk, rules, token);
 
         bytes4[] memory sels = new bytes4[](8);
         sels[0] = HoldemTableNHandler.createTable.selector;
@@ -275,7 +297,7 @@ contract HoldemTableNInvariantTest is StdInvariant, Test {
 
     /// Solvency: the contract holds exactly what came in minus what left.
     function invariant_solvent() public view {
-        assertEq(address(zk).balance, handler.ghostIn() - handler.ghostOut(), "balance == in - out");
+        assertEq(token.balanceOf(address(zk)), handler.ghostIn() - handler.ghostOut(), "balance == in - out");
     }
 
     /// Payouts never exceed total escrow received.

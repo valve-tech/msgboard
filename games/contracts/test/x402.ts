@@ -186,3 +186,93 @@ export const buildTopUpAuth = async (
     salt,
   )
 }
+
+// ── HoldemTableN (N-party) helpers ──────────────────────────────────────────────────────────
+// HoldemTableN.sol's sibling x402 conversion (2026-08). Same DepositAuth shape and
+// ReceiveWithAuthorization signing as ZkTable — only the create()/join() nonce formulas differ
+// (createNonce additionally binds maxSeats/rakeBps/rakeCap; joinNonce ALSO carries a salt, as of
+// F2 — not for anti-double-join, which the seat/key collision loop already enforces, but so a
+// player who `leaveBeforeStart`s can rejoin the same table with a fresh salt instead of being
+// permanently locked out by the wrapper's burned nonce for the bare (tableId, from, channelKey,
+// deckKey) tuple).
+
+/// Deploys HoldemTableN with `(treasury, factory_)` constructor args (see HoldemTableN.sol's
+/// IWrapperFactory — pass `viem.zeroAddress` for `factory` to skip the create()-time clone-check,
+/// matching the Foundry unit suites' factory=address(0) escape hatch). Unlike ZkTable,
+/// HoldemTableN links NO external library, so this is a plain deployContract call.
+export const deployHoldemTableN = async (treasury: viem.Hex, factory: viem.Hex) => {
+  return await hre.viem.deployContract('HoldemTableN', [treasury, factory])
+}
+
+export const buildCreateAuthN = async (
+  zk: ZkLike,
+  tokenAddress: viem.Hex,
+  domain: X402Domain,
+  signer: TypedDataSigner,
+  opts: {
+    rules: viem.Hex
+    buyIn: bigint
+    maxSeats: bigint
+    rakeBps: number
+    rakeCap: bigint
+    clockBlocks: bigint
+    channelKey: viem.Hex
+    deckKey: readonly [bigint, bigint]
+    salt?: viem.Hex
+    validBefore?: bigint
+  },
+): Promise<DepositAuth> => {
+  const from = signerAddress(signer)
+  const salt = opts.salt ?? viem.zeroHash
+  const validBefore = opts.validBefore ?? defaultValidBefore()
+  const nonce = await zk.read.createNonce([
+    from,
+    tokenAddress,
+    opts.rules,
+    opts.buyIn,
+    opts.maxSeats,
+    opts.rakeBps,
+    opts.rakeCap,
+    opts.clockBlocks,
+    opts.channelKey,
+    opts.deckKey,
+    salt,
+  ])
+  return await signDepositAuth(
+    signer,
+    domain,
+    { from, to: zk.address, value: opts.buyIn, validAfter: 0n, validBefore, nonce },
+    salt,
+  )
+}
+
+export const buildJoinAuthN = async (
+  zk: ZkLike,
+  domain: X402Domain,
+  signer: TypedDataSigner,
+  opts: {
+    tableId: viem.Hex
+    stake: bigint
+    channelKey: viem.Hex
+    deckKey: readonly [bigint, bigint]
+    salt?: viem.Hex
+    validBefore?: bigint
+  },
+): Promise<DepositAuth> => {
+  const from = signerAddress(signer)
+  // F2 (2026-08): joinNonce now takes a salt too — NOT for anti-double-join (the seat/key
+  // collision loop already enforces one seat per (tableId, from) while a player is seated), but
+  // for REJOIN LIVENESS: without it, a player who `leaveBeforeStart`s could never rejoin the
+  // same table with the identical channelKey/deckKey (the wrapper's nonce for that bare tuple
+  // would already be burned forever). Defaults to zeroHash for the common case (first join);
+  // callers doing a rejoin after `leaveBeforeStart` must pass a FRESH salt.
+  const salt = opts.salt ?? viem.zeroHash
+  const validBefore = opts.validBefore ?? defaultValidBefore()
+  const nonce = await zk.read.joinNonce([opts.tableId, from, opts.channelKey, opts.deckKey, salt])
+  return await signDepositAuth(
+    signer,
+    domain,
+    { from, to: zk.address, value: opts.stake, validAfter: 0n, validBefore, nonce },
+    salt,
+  )
+}

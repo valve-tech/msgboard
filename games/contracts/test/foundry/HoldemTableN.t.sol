@@ -7,6 +7,9 @@ import {ChannelTableBase} from "../../contracts/zk/ChannelTableBase.sol";
 import {ChannelStateN, SidePot} from "../../contracts/zk/ChannelStateN.sol";
 import {IGameRulesN} from "../../contracts/zk/IGameRulesN.sol";
 import {MockGameRulesN} from "../../contracts/test/MockGameRulesN.sol";
+import {MockX402} from "../../contracts/test/MockX402.sol";
+import {IX402Token} from "../../contracts/games/FlipBookX.sol";
+import {X402AuthLib} from "./X402AuthLib.sol";
 
 /// @notice Fuzzes the HoldemTableN lifecycle (create/join/start/settle), the N-seat
 /// conservation guard incl. side-pots + rake, per-seat dispute, and the
@@ -15,6 +18,7 @@ import {MockGameRulesN} from "../../contracts/test/MockGameRulesN.sol";
 contract HoldemTableNTest is Test {
     HoldemTableN internal zk;
     MockGameRulesN internal rules;
+    MockX402 internal token;
     address internal treasury = address(0x7);
 
     uint64 internal constant CLOCK = 30; // MIN_CLOCK_BLOCKS
@@ -28,8 +32,12 @@ contract HoldemTableNTest is Test {
     uint256 internal constant GY = 0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8;
 
     function setUp() public {
-        zk = new HoldemTableN(treasury);
+        zk = new HoldemTableN(treasury, address(0));
         rules = new MockGameRulesN();
+        token = new MockX402();
+        for (uint256 i = 0; i <= 9; i++) {
+            token.mint(vm.addr(_pk(i)), 10_000_000 ether);
+        }
     }
 
     // ── helpers ────────────────────────────────────────────────────────────────
@@ -53,18 +61,73 @@ contract HoldemTableNTest is Test {
         }
     }
 
+    // ── x402 deposit-auth helpers ────────────────────────────────────────────
+
+    uint64 internal constant VALID_BEFORE = type(uint64).max;
+
+    function _authFor(uint256 pk, address from, uint256 value, bytes32 nonce) internal returns (HoldemTableN.DepositAuth memory) {
+        bytes32 digest = X402AuthLib.receiveDigest(token.DOMAIN_SEPARATOR(), from, address(zk), value, VALID_BEFORE, nonce);
+        return HoldemTableN.DepositAuth({from: from, validBefore: VALID_BEFORE, salt: bytes32(0), sig: X402AuthLib.sign65(pk, digest)});
+    }
+
+    function _createAuth(
+        uint256 pk,
+        address from,
+        uint256 buyIn,
+        IGameRulesN rules_,
+        uint256 maxSeats,
+        uint16 rakeBps,
+        uint256 rakeCap,
+        uint64 clock,
+        address channelKey,
+        uint256[2] memory deckKey
+    ) internal returns (HoldemTableN.DepositAuth memory) {
+        bytes32 nonce = zk.createNonce(from, IX402Token(address(token)), rules_, buyIn, maxSeats, rakeBps, rakeCap, clock, channelKey, deckKey, bytes32(0));
+        return _authFor(pk, from, buyIn, nonce);
+    }
+
+    function _joinAuth(uint256 pk, address from, bytes32 tableId, uint256 stake, address channelKey, uint256[2] memory deckKey)
+        internal
+        returns (HoldemTableN.DepositAuth memory)
+    {
+        bytes32 nonce = zk.joinNonce(tableId, from, channelKey, deckKey, bytes32(0));
+        return _authFor(pk, from, stake, nonce);
+    }
+
+    /// create() with a signed auth for seat pk, relayed by that same seat (vm.prank(from)).
+    function _create(
+        uint256 pk,
+        IGameRulesN rules_,
+        uint256 buyIn,
+        uint256 maxSeats,
+        uint16 rakeBps,
+        uint256 rakeCap,
+        uint64 clock,
+        address channelKey,
+        uint256[2] memory deckKey
+    ) internal returns (bytes32 tableId) {
+        address from = vm.addr(pk);
+        HoldemTableN.DepositAuth memory auth = _createAuth(pk, from, buyIn, rules_, maxSeats, rakeBps, rakeCap, clock, channelKey, deckKey);
+        vm.prank(from);
+        tableId = zk.create(IX402Token(address(token)), rules_, buyIn, maxSeats, rakeBps, rakeCap, clock, channelKey, deckKey, auth);
+    }
+
+    /// join() with a signed auth for seat pk, relayed by that same seat (vm.prank(from)).
+    function _join(uint256 pk, bytes32 tableId, uint256 stake, address channelKey, uint256[2] memory deckKey) internal {
+        address from = vm.addr(pk);
+        HoldemTableN.DepositAuth memory auth = _joinAuth(pk, from, tableId, stake, channelKey, deckKey);
+        vm.prank(from);
+        zk.join(tableId, channelKey, deckKey, auth);
+    }
+
     /// Create + (n-1) joins + start. Each seat's channel key IS its wallet (vm.addr(pk)); every
     /// seat's deck key is the generator, set directly at create()/join() time.
     function _table(uint256 n, uint256 buyIn) internal returns (bytes32 tableId) {
         address a0 = vm.addr(_pk(0));
-        vm.deal(a0, buyIn);
-        vm.prank(a0);
-        tableId = zk.create{value: buyIn}(IGameRulesN(address(rules)), buyIn, n, 0, 0, CLOCK, a0, [GX, GY]);
+        tableId = _create(_pk(0), IGameRulesN(address(rules)), buyIn, n, 0, 0, CLOCK, a0, [GX, GY]);
         for (uint256 i = 1; i < n; i++) {
             address ai = vm.addr(_pk(i));
-            vm.deal(ai, buyIn);
-            vm.prank(ai);
-            zk.join{value: buyIn}(tableId, ai, [GX, GY]);
+            _join(_pk(i), tableId, buyIn, ai, [GX, GY]);
         }
         vm.prank(a0);
         zk.start(tableId);
@@ -84,15 +147,15 @@ contract HoldemTableNTest is Test {
         s.phase = 11; // finalAll => any phase final
         bytes[] memory sigs = _coSign(n, s);
 
-        uint256 before0 = vm.addr(_pk(0)).balance;
-        uint256 zkBefore = address(zk).balance;
+        uint256 before0 = token.balanceOf(vm.addr(_pk(0)));
+        uint256 zkBefore = token.balanceOf(address(zk));
         vm.prank(vm.addr(_pk(0)));
         zk.settle(tableId, s, sigs);
 
-        assertEq(vm.addr(_pk(0)).balance - before0, total, "seat 0 paid the whole pot");
-        assertEq(zkBefore - address(zk).balance, total, "exactly Sigma escrow left the contract");
+        assertEq(token.balanceOf(vm.addr(_pk(0))) - before0, total, "seat 0 paid the whole pot");
+        assertEq(zkBefore - token.balanceOf(address(zk)), total, "exactly Sigma escrow left the contract");
         assertEq(uint8(zk.status(tableId)), uint8(ChannelTableBase.Status.Settled), "settled");
-        assertEq(address(zk).balance, 0, "no residue");
+        assertEq(token.balanceOf(address(zk)), 0, "no residue");
     }
 
     function test_createJoinSettle_N2() public { _createJoinSettle(2); }
@@ -122,15 +185,15 @@ contract HoldemTableNTest is Test {
         bytes[] memory sigs = _coSign(n, s);
 
         uint256[] memory before = new uint256[](n);
-        for (uint256 i = 0; i < n; i++) before[i] = vm.addr(_pk(i)).balance;
+        for (uint256 i = 0; i < n; i++) before[i] = token.balanceOf(vm.addr(_pk(i)));
 
         vm.prank(vm.addr(_pk(0)));
         zk.settle(tableId, s, sigs);
 
         for (uint256 i = 0; i < n; i++) {
-            assertEq(vm.addr(_pk(i)).balance - before[i], s.balances[i], "seat paid its balance");
+            assertEq(token.balanceOf(vm.addr(_pk(i))) - before[i], s.balances[i], "seat paid its balance");
         }
-        assertEq(address(zk).balance, 0, "no residue");
+        assertEq(token.balanceOf(address(zk)), 0, "no residue");
     }
 
     // ── conservation guard ──────────────────────────────────────────────────────
@@ -152,7 +215,7 @@ contract HoldemTableNTest is Test {
         vm.prank(vm.addr(_pk(0)));
         vm.expectRevert(ChannelTableBase.ConservationViolated.selector);
         zk.settle(tableId, s, sigs);
-        assertEq(address(zk).balance, total, "no funds moved");
+        assertEq(token.balanceOf(address(zk)), total, "no funds moved");
     }
 
     /// Conservation must count side-pots + rake: a state with a side-pot + rake that nets to
@@ -163,14 +226,10 @@ contract HoldemTableNTest is Test {
         uint256 total = n * buyIn; // 300
         // need rakeBps>0 for the rake bound; recreate with rakeBps 250, cap big
         address a0 = vm.addr(_pk(0));
-        vm.deal(a0, buyIn);
-        vm.prank(a0);
-        bytes32 tableId = zk.create{value: buyIn}(IGameRulesN(address(rules)), buyIn, n, 250, total, CLOCK, a0, [GX, GY]);
+        bytes32 tableId = _create(_pk(0), IGameRulesN(address(rules)), buyIn, n, 250, total, CLOCK, a0, [GX, GY]);
         for (uint256 i = 1; i < n; i++) {
             address ai = vm.addr(_pk(i));
-            vm.deal(ai, buyIn);
-            vm.prank(ai);
-            zk.join{value: buyIn}(tableId, ai, [GX, GY]);
+            _join(_pk(i), tableId, buyIn, ai, [GX, GY]);
         }
         vm.prank(a0);
         zk.start(tableId);
@@ -208,16 +267,12 @@ contract HoldemTableNTest is Test {
         uint256 total = n * buyIn; // 300
         uint256 rakeCap = 20; // tight cap
         address a0 = vm.addr(_pk(0));
-        vm.deal(a0, buyIn);
-        vm.prank(a0);
         // openDispute checks only the rakeCap ceiling (the bps reconstruction is settle-only),
         // so the cap is the binding constraint here. rakeBps at the protocol max (250).
-        bytes32 tableId = zk.create{value: buyIn}(IGameRulesN(address(rules)), buyIn, n, 250, rakeCap, CLOCK, a0, [GX, GY]);
+        bytes32 tableId = _create(_pk(0), IGameRulesN(address(rules)), buyIn, n, 250, rakeCap, CLOCK, a0, [GX, GY]);
         for (uint256 i = 1; i < n; i++) {
             address ai = vm.addr(_pk(i));
-            vm.deal(ai, buyIn);
-            vm.prank(ai);
-            zk.join{value: buyIn}(tableId, ai, [GX, GY]);
+            _join(_pk(i), tableId, buyIn, ai, [GX, GY]);
         }
         vm.prank(a0);
         zk.start(tableId);
@@ -276,17 +331,17 @@ contract HoldemTableNTest is Test {
         vm.roll(block.number + CLOCK + 1);
 
         uint256[] memory before = new uint256[](n);
-        for (uint256 i = 0; i < n; i++) before[i] = vm.addr(_pk(i)).balance;
+        for (uint256 i = 0; i < n; i++) before[i] = token.balanceOf(vm.addr(_pk(i)));
 
         zk.resolveTimeout(tableId);
 
         // forfeiting seat got exactly its kept balance (no pot share)
-        assertEq(vm.addr(_pk(forfeit)).balance - before[forfeit], keep, "staller keeps balance only");
+        assertEq(token.balanceOf(vm.addr(_pk(forfeit))) - before[forfeit], keep, "staller keeps balance only");
         // every wei accounted for: sum of deltas == total
         uint256 paid;
-        for (uint256 i = 0; i < n; i++) paid += vm.addr(_pk(i)).balance - before[i];
+        for (uint256 i = 0; i < n; i++) paid += token.balanceOf(vm.addr(_pk(i))) - before[i];
         assertEq(paid, total, "Sigma escrow distributed");
-        assertEq(address(zk).balance, 0, "no residue");
+        assertEq(token.balanceOf(address(zk)), 0, "no residue");
         assertEq(uint8(zk.status(tableId)), uint8(ChannelTableBase.Status.Settled), "settled");
     }
 
@@ -306,10 +361,10 @@ contract HoldemTableNTest is Test {
         vm.prank(vm.addr(_pk(0)));
         zk.openDispute(tableId, s, sigs, "g", 2, 1, 0); // demand seat 2
         vm.roll(block.number + CLOCK + 1);
-        uint256 b2 = vm.addr(_pk(2)).balance;
+        uint256 b2 = token.balanceOf(vm.addr(_pk(2)));
         zk.resolveTimeout(tableId);
         // seat 2 forfeited: keeps 50, gets none of the 150 pot. seats 0,1 split 150 => +75 each.
-        assertEq(vm.addr(_pk(2)).balance - b2, 50, "staller forfeited the pot");
+        assertEq(token.balanceOf(vm.addr(_pk(2))) - b2, 50, "staller forfeited the pot");
     }
 
     // ── share dispute wiring (full crypto e2e lives in HoldemShareDispute.t.sol) ─────
@@ -334,10 +389,8 @@ contract HoldemTableNTest is Test {
         uint256 n = 2;
         uint256 buyIn = 1 ether;
         address a0 = vm.addr(_pk(0));
-        vm.deal(a0, buyIn);
-        vm.prank(a0);
         // create() already sets seat 0's initial deck key to the generator.
-        bytes32 tableId = zk.create{value: buyIn}(IGameRulesN(address(rules)), buyIn, n, 0, 0, CLOCK, a0, [GX, GY]);
+        bytes32 tableId = _create(_pk(0), IGameRulesN(address(rules)), buyIn, n, 0, 0, CLOCK, a0, [GX, GY]);
         assertEq(zk.deckKeyOf(tableId, 0)[0], GX, "initial key set directly by create()");
         // off-curve key rejected (rotation attempt)
         vm.prank(a0);
@@ -352,9 +405,7 @@ contract HoldemTableNTest is Test {
         assertEq(got[0], g2x, "rotated key overwrote the initial one");
         // join a second seat (its own initial key from join()) + start, then rotation is locked
         address a1 = vm.addr(_pk(1));
-        vm.deal(a1, buyIn);
-        vm.prank(a1);
-        zk.join{value: buyIn}(tableId, a1, [GX, GY]);
+        _join(_pk(1), tableId, buyIn, a1, [GX, GY]);
         vm.prank(a0);
         zk.start(tableId);
         vm.prank(a0);
