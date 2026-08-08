@@ -175,6 +175,45 @@ const config: HardhatUserConfig = {
           },
         },
       },
+      // MCOPY FIX (2026-08-08): these deployed zk libs/contracts were missing a Shanghai override
+      // and fell through to the default cancun block, which emits MCOPY — REVERTS on 943/369
+      // (pre-Cancun) as "invalid opcode: MCOPY". HoldemShowdownLib was confirmed broken live
+      // (postShowdownReveals delegatecall reverted on 943); HoldemRules had a latent MCOPY; the
+      // ZkTable decode libs (DeckChallengeLib/DeckConstants/ShowdownDecodeLib) are deployed but were
+      // never exercised on live 943 (HiLoWar hit disputes, not showdown-decode) — pinned defensively
+      // so no deployed zk bytecode can ever carry MCOPY. Same settings shape as the family above.
+      'contracts/zk/HoldemRules.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/zk/HoldemShowdownLib.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/zk/CardTableSecp.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/zk/DeckChallengeLib.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/zk/DeckConstants.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/zk/ChannelTableBase.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/zk/SignedIntentBase.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/vendor/uzkge/ShowdownDecodeLib.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
       'contracts/games/SessionState.sol': {
         version: '0.8.25',
         settings: {
