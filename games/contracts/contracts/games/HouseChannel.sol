@@ -353,33 +353,36 @@ contract HouseChannel is SessionStateEIP712, HousePoolBase {
         emit DisputeOpened(tableId, seat, 0, t.disputeDeadline);
     }
 
-    /// WALK-AWAY FORFEITURE. A player who opens a table but then walks away without cooperatively
-    /// closing leaves the house's escrow locked. Once the table has sat open for a full abandonment
-    /// period (`openedAtBlock + clockBlocks`), the house may force a forfeit: it posts a synthetic
-    /// terminal state where the player forfeits their ENTIRE escrow to the house (balancePlayer = 0,
-    /// balanceHouse = pot) and starts the challenge clock. This is house-only — the player already has
-    /// `disputeFromOpen` (a refund, not a forfeit) as their own walk-away recourse.
+    /// WALK-AWAY RECLAIM (house-side). A player who opens a table but then walks away without
+    /// cooperatively closing leaves the house's `escrowHouse` locked. Once the table has sat open for
+    /// a full abandonment period (`openedAtBlock + clockBlocks`), the house may force the table into
+    /// dispute to free its own reservation. Like `disputeFromOpen`, the posted synthetic state is a
+    /// SPLIT — each side's own escrow back (balancePlayer = escrowPlayer, balanceHouse = escrowHouse) —
+    /// never a forfeit of the player's funds to the house. This is house-only (the player already has
+    /// `disputeFromOpen`, callable anytime, as its own walk-away recourse); the extra abandonment-clock
+    /// gate here just stops the house from forcing a dispute on a table that only just opened.
     ///
-    /// A PRESENT player never loses a real balance: within the challenge window they override the
-    /// forfeit with their latest co-signed running state via `respondWithState` (nonce ≥ 1 > 0), which
-    /// settles the true balances (including any winnings). Only a genuinely absent player — who did not
-    /// respond across BOTH the abandonment period AND the challenge window — forfeits, and forfeits
-    /// exactly what they escrowed (never more; the synthetic state conserves the pot). So: walk away
-    /// from a table and, win or lose, you can forfeit your tokens.
+    /// SECURITY (audit finding, HIGH): an earlier version posted balancePlayer = 0, balanceHouse = pot
+    /// — a steal-by-default that an absent/offline/gasless player's only co-signed state (the nonce-0
+    /// open co-sign) could never override, because `respondWithState` requires strictly-newer nonce and
+    /// the open co-sign IS nonce 0. That let the house silently expropriate a walked-away player's full
+    /// escrow. Posting the conserved refund split instead closes the hole: the house still recovers its
+    /// locked `escrowHouse` on genuine abandonment, but a present player who responds within the
+    /// challenge window with a real co-signed round (nonce ≥ 1 > 0) still overrides it with the true
+    /// balances (including any winnings), same as before.
     function claimForfeit(bytes32 tableId) external {
         Table storage t = tables[tableId];
         if (t.status != Status.Live) revert BadStatus();
         if (_seatOf(t, msg.sender) != 2) revert NotHouse();
         // The table must be demonstrably abandoned: open for at least one full clock with no
         // cooperative close and no dispute. This gives the player a full clock to play/settle/refund
-        // BEFORE forfeiture is even possible, on top of the challenge window that follows.
+        // BEFORE the house can force a dispute, on top of the challenge window that follows.
         if (uint64(block.number) < t.openedAtBlock + t.clockBlocks) revert ForfeitTooEarly();
-        uint256 pot = t.escrowPlayer + t.escrowHouse;
         SessionState memory s;
         s.tableId = tableId;
         s.nonce = 0;
-        s.balancePlayer = 0;      // the absent player forfeits their escrow…
-        s.balanceHouse = pot;     // …to the house
+        s.balancePlayer = t.escrowPlayer; // each side gets its own escrow back — split, not steal
+        s.balanceHouse = t.escrowHouse;
         s.settlementMode = 1;
         s.gameId = t.gameId;
         t.status = Status.Disputed;
