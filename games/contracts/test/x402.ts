@@ -226,10 +226,23 @@ export const buildTopUpAuth = async (
 
 /// Deploys HoldemTableN with `(treasury, factory_)` constructor args (see HoldemTableN.sol's
 /// IWrapperFactory — pass `viem.zeroAddress` for `factory` to skip the create()-time clone-check,
-/// matching the Foundry unit suites' factory=address(0) escape hatch). Unlike ZkTable,
-/// HoldemTableN links NO external library, so this is a plain deployContract call.
+/// matching the Foundry unit suites' factory=address(0) escape hatch).
+///
+/// HoldemTableN link-references the EXTERNAL (separately-deployed) HoldemShowdownLib library
+/// (2026-08 C1/C2 fund-safety hardening pass — see HoldemShowdownLib.sol's header): the
+/// secp256k1 point arithmetic, the 52-card decode table, the per-share DLEQ verify+store, the
+/// whole-showdown decode, the try/catch settle dispatch, and the tiered pot split all live there
+/// instead of in HoldemTableN's own deployed bytecode, to stay under EIP-170's 24576-byte
+/// deployed-code limit. Unlike Foundry (which auto-links external libraries transparently when a
+/// test does `new HoldemTableN(...)`), `hre.viem.deployContract` requires the library deployed
+/// and its address passed explicitly (see `deployZkTable`'s identical rationale above), or it
+/// throws MissingLibraryAddressError. HoldemShowdownLib has no transitive library dependency of
+/// its own (unlike ZkTable's DeckChallengeLib -> DeckConstants chain).
 export const deployHoldemTableN = async (treasury: viem.Hex, factory: viem.Hex) => {
-  return await hre.viem.deployContract('HoldemTableN', [treasury, factory])
+  const holdemShowdownLib = await hre.viem.deployContract('HoldemShowdownLib')
+  return await hre.viem.deployContract('HoldemTableN', [treasury, factory], {
+    libraries: { HoldemShowdownLib: holdemShowdownLib.address },
+  })
 }
 
 export const buildCreateAuthN = async (

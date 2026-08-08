@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {HoldemRules} from "../../contracts/zk/HoldemRules.sol";
+import {SidePot} from "../../contracts/zk/ChannelStateN.sol";
 
 /// @notice COVERAGE-ONLY follow-up to HoldemRulesUnit.t.sol, targeting the SHOWDOWN settlement
 /// path (`_showdown`, Task 7) which that suite's own docstring explicitly scopes OUT ("Showdown
@@ -347,5 +348,165 @@ contract HoldemRulesCovTest is Test {
         assertEq(out.pot, 500, "all 300+100+100 conserved: 300 base + 200 dead-money carry");
         assertEq(out.sidePots.length, 0, "single eligibility class -> no side pots");
         assertEq(out.toAct, 2, "round still open: action passes to the other live seat");
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════
+    // IGameRulesN seam: showdownEligible / settleShowdown (Task C2 enabler) — the
+    // dedicated on-chain-adjudication entry points HoldemTableN's showdown dispute path
+    // will consult; NOT reached via applyMove.
+    // ════════════════════════════════════════════════════════════════════════════
+
+    function test_showdownEligible_trueForMatchingState_liveMaskAndStub() public view {
+        HoldemRules.Holdem memory s = _showdownBase(3);
+        s.folded[2] = true; // seat2 folded, seat0/seat1 live
+        s.pot = 100;
+        s.stacks[0] = 10;
+        s.stacks[1] = 20;
+        s.stacks[2] = 30;
+        s.sidePots = new HoldemRules.SidePot[](1);
+        s.sidePots[0] = HoldemRules.SidePot({amount: 40, eligibleMask: uint256(0x3)});
+
+        uint256[] memory balances = new uint256[](3);
+        balances[0] = 10;
+        balances[1] = 20;
+        balances[2] = 30;
+        SidePot[] memory sp = new SidePot[](1);
+        sp[0] = SidePot({amount: 40, eligibleMask: uint256(0x3)});
+
+        (bool eligible, uint8 nSeats, uint256 liveMask, bool stub) =
+            rules.showdownEligible(abi.encode(s), balances, 100, sp);
+        assertTrue(eligible);
+        assertEq(nSeats, 3);
+        assertEq(liveMask, uint256(0x3), "seat0+seat1 live, seat2 folded");
+        assertFalse(stub, "two live seats -> not a stub");
+    }
+
+    function test_showdownEligible_falseWhenPhaseNotShowdown() public view {
+        HoldemRules.Holdem memory s = _base(2);
+        s.phase = BET_FLOP;
+        uint256[] memory balances = new uint256[](2);
+        SidePot[] memory sp = new SidePot[](0);
+        (bool eligible,,,) = rules.showdownEligible(abi.encode(s), balances, 0, sp);
+        assertFalse(eligible, "not in SHOWDOWN phase");
+    }
+
+    function test_showdownEligible_falseOnBalanceMismatch() public view {
+        HoldemRules.Holdem memory s = _showdownBase(2);
+        s.stacks[0] = 5;
+        s.stacks[1] = 5;
+        uint256[] memory balances = new uint256[](2);
+        balances[0] = 5;
+        balances[1] = 6; // mismatch vs s.stacks[1]
+        SidePot[] memory sp = new SidePot[](0);
+        (bool eligible,,,) = rules.showdownEligible(abi.encode(s), balances, 0, sp);
+        assertFalse(eligible, "balances vector diverges from gameState.stacks");
+    }
+
+    function test_showdownEligible_falseOnSidePotMismatch() public view {
+        HoldemRules.Holdem memory s = _showdownBase(2);
+        s.sidePots = new HoldemRules.SidePot[](1);
+        s.sidePots[0] = HoldemRules.SidePot({amount: 40, eligibleMask: uint256(0x3)});
+        uint256[] memory balances = new uint256[](2);
+        SidePot[] memory sp = new SidePot[](1);
+        sp[0] = SidePot({amount: 41, eligibleMask: uint256(0x3)}); // amount off by one
+        (bool eligible,,,) = rules.showdownEligible(abi.encode(s), balances, 0, sp);
+        assertFalse(eligible, "sidePots vector diverges from gameState.sidePots");
+    }
+
+    function test_showdownEligible_stubTrueForSingleLiveSeat() public view {
+        HoldemRules.Holdem memory s = _showdownBase(3);
+        s.folded[1] = true;
+        s.folded[2] = true;
+        uint256[] memory balances = new uint256[](3);
+        balances[0] = s.stacks[0];
+        balances[1] = s.stacks[1];
+        balances[2] = s.stacks[2];
+        SidePot[] memory sp = new SidePot[](0);
+        (bool eligible,, uint256 liveMask, bool stub) = rules.showdownEligible(abi.encode(s), balances, 0, sp);
+        assertTrue(eligible);
+        assertEq(liveMask, uint256(0x1), "only seat0 live");
+        assertTrue(stub, "single live seat -> pots already swept by _finishHand's STUB path");
+    }
+
+    function test_revert_settleShowdown_wrongPhase() public {
+        HoldemRules.Holdem memory s = _base(2);
+        s.phase = BET_FLOP;
+        uint8[2][] memory holes = new uint8[2][](2);
+        uint8[5] memory board;
+        vm.expectRevert(HoldemRules.WrongPhase.selector);
+        rules.settleShowdown(abi.encode(s), holes, board, 0);
+    }
+
+    /// Non-vacuous parity: `settleShowdown` must return the EXACT same balances/rake that
+    /// driving the identical pre-showdown state through `applyMove(MOVE_SHOWDOWN)` produces —
+    /// both paths run the SAME `_showdown` code, so this proves `settleShowdown` genuinely
+    /// reuses it (side pots, lazy hand scoring, rake) rather than reimplementing settlement.
+    /// Fixture mirrors `test_showdown_multiway_mainAndSidePot_differentWinners` above (staggered
+    /// all-in -> one main pot + one side pot with DIFFERENT winners), so this is not a trivial
+    /// single-pot/no-op case.
+    function test_settleShowdown_matchesApplyMoveShowdown_multiwayMainAndSidePot() public view {
+        HoldemRules.Holdem memory s = _base(3);
+        s.phase = BET_FLOP;
+        s.toAct = 0;
+        s.stacks[0] = 20;
+        s.stacks[1] = 50;
+        s.stacks[2] = 200;
+
+        HoldemRules.Holdem memory st = _apply(s, _mAmt(MOVE_BET, 0, 20));
+        st = _apply(st, _mAmt(MOVE_RAISE, 1, 50));
+        st = _apply(st, _mSeat(MOVE_CALL, 2));
+        st = _apply(st, _mNone(MOVE_DEAL_DONE));
+        st = _apply(st, _mNone(MOVE_DEAL_DONE));
+        assertEq(st.phase, SHOWDOWN);
+        assertEq(st.sidePots.length, 1, "genuine multiway fixture: a real side pot exists");
+
+        uint8[5] memory board = [_card(14, 0), _card(13, 0), _card(7, 1), _card(2, 2), _card(3, 3)];
+        uint8[2][] memory holes = new uint8[2][](3);
+        holes[0] = [_card(14, 1), _card(14, 2)]; // A♥A♦ -> wins main pot
+        holes[1] = [_card(13, 1), _card(13, 2)]; // K♥K♦ -> wins side pot
+        holes[2] = [_card(7, 0), _card(7, 3)]; // 7♠7♣ -> wins nothing
+
+        // Reference: the existing applyMove(MOVE_SHOWDOWN) bridge.
+        HoldemRules.Holdem memory viaApplyMove = _apply(st, _mShowdown(holes, board));
+
+        // Under test: the new IGameRulesN seam, driven from the SAME pre-showdown state.
+        (uint256[] memory balances, uint256 rakeAccrued) = rules.settleShowdown(abi.encode(st), holes, board, 0);
+
+        assertEq(balances.length, 3);
+        assertEq(balances[0], viaApplyMove.stacks[0]);
+        assertEq(balances[1], viaApplyMove.stacks[1]);
+        assertEq(balances[2], viaApplyMove.stacks[2]);
+        assertEq(rakeAccrued, viaApplyMove.rakeAccrued);
+        // Non-vacuous: a genuine multiway settlement with different winners per pot.
+        assertEq(balances[0], 60, "seat0: main-pot-only eligible, wins the 60 main pot");
+        assertEq(balances[1], 60, "seat1: wins the 60 side pot");
+        assertEq(balances[2], 150, "seat2: deep stack, wins nothing at showdown");
+    }
+
+    /// `extraFoldMask`: masking a live seat out of ranking (answer-aware forced-fold for a
+    /// no-show) changes the outcome vs. the unmasked settle -- proving the mask is genuinely
+    /// applied (not read-and-ignored) before `_showdown` runs.
+    function test_settleShowdown_extraFoldMask_forfeitsMaskedSeat() public view {
+        HoldemRules.Holdem memory s = _showdownBase(2);
+        s.pot = 100;
+        s.stacks[0] = 0;
+        s.stacks[1] = 0;
+        // Board has no made straight/flush of its own so the two holes cleanly rank: trip
+        // aces (seat0) strictly beats trip kings (seat1) — same combo proven unambiguous by
+        // test_showdown_multiway_mainAndSidePot_differentWinners above (no chop).
+        uint8[5] memory board = [_card(14, 0), _card(13, 0), _card(7, 1), _card(2, 2), _card(3, 3)];
+        uint8[2][] memory holes = new uint8[2][](2);
+        holes[0] = [_card(14, 1), _card(14, 2)]; // A♥A♦ -> trip aces: best hand
+        holes[1] = [_card(13, 1), _card(13, 2)]; // K♥K♦ -> trip kings: worse hand
+
+        // Unmasked: seat0 (pocket aces) wins the whole pot.
+        (uint256[] memory balUnmasked,) = rules.settleShowdown(abi.encode(s), holes, board, 0);
+        assertEq(balUnmasked[0], 100);
+        assertEq(balUnmasked[1], 0);
+
+        // seat0 masked out (forfeits) -> seat1 wins by default despite the worse hand.
+        (uint256[] memory balMasked,) = rules.settleShowdown(abi.encode(s), holes, board, uint256(0x1));
+        assertEq(balMasked[0], 0);
+        assertEq(balMasked[1], 100);
     }
 }

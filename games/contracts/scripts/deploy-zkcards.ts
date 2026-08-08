@@ -10,22 +10,27 @@
  * per-file compiler overrides (see its `overrides` block): ShuffleVerifier52 + VerifierKeyExtra1_52 +
  * VerifierKeyExtra2_52 + RevealVerifier compile viaIR:FALSE (matches the vendored uzkge verifiers'
  * spike-measured gas), while ZkTable/DeckChallengeLib/DeckConstants/ShowdownDecodeLib/HiLoWarRules/
- * HoldemTableN compile viaIR:TRUE (stack-too-deep otherwise). A single forge-out profile cannot
- * reproduce both settings at once — hardhat's artifacts/ directory is the one place each contract's
- * bytecode already reflects ITS OWN correct override. Run `hardhat compile` before this script.
+ * HoldemTableN/HoldemShowdownLib compile viaIR:TRUE (stack-too-deep otherwise). A single forge-out
+ * profile cannot reproduce both settings at once — hardhat's artifacts/ directory is the one place
+ * each contract's bytecode already reflects ITS OWN correct override. Run `hardhat compile` before
+ * this script.
  *
  * LIBRARY LINKING: hardhat does NOT auto-link external libraries for a bare bytecode deploy (only
  * hre.viem.deployContract / Ignition do, and only when told). This script implements the same manual
  * placeholder-patch dance as test/x402.ts's `deployDeckChallengeLib` — read each artifact's
  * `linkReferences` (byte offsets of the `__$<hash>$__` placeholder within the creation bytecode),
- * and splice in the deployed dependency's address. Two libraries need it:
+ * and splice in the deployed dependency's address. Three libraries need it:
  *   - DeckChallengeLib links DeckConstants (transitive — DeckConstants must exist FIRST)
  *   - ZkTable links BOTH ShowdownDecodeLib and DeckChallengeLib
+ *   - HoldemTableN links HoldemShowdownLib (see ignition/modules/ZkCards.ts + test/x402.ts's
+ *     identical wiring — HoldemShowdownLib has no transitive library dependency of its own)
  * `linkLibraries()` below throws if a placeholder is left unresolved (`__$` found post-link) — the
  * dry run below actually performs this splice (against the PREDICTED CREATE addresses) and asserts
- * cleanliness, so a broken link is caught before EXECUTE, not after a wasted broadcast.
+ * cleanliness, so a broken link is caught before EXECUTE, not after a wasted broadcast. CardTableSecp
+ * (HoldemShowdownLib's own 52-card decode table) is an INTERNAL library — it inlines into
+ * HoldemShowdownLib's bytecode at compile time and has no separate deploy/link step of its own.
  *
- * Deploy order (10 contracts — see ignition/modules/ZkCards.ts):
+ * Deploy order (11 contracts — see ignition/modules/ZkCards.ts):
  *   1. VerifierKeyExtra1_52()                                    no args
  *   2. VerifierKeyExtra2_52()                                    no args
  *   3. ShuffleVerifier52(vk1, vk2)
@@ -35,7 +40,8 @@
  *   7. DeckChallengeLib()                           [library]    linked: DeckConstants
  *   8. ZkTable(wrapperFactory, shuffleVerifier)                  linked: ShowdownDecodeLib, DeckChallengeLib
  *   9. HiLoWarRules(revealVerifier, shuffleVerifier)
- *  10. HoldemTableN(holdemTreasury, wrapperFactory)
+ *  10. HoldemShowdownLib()                          [library]    no args
+ *  11. HoldemTableN(holdemTreasury, wrapperFactory)              linked: HoldemShowdownLib
  *
  *   # dry run (prints the plan incl. resolved library links + gas — nothing sent)
  *   PRIVATE_KEY=<valve_deployer> CHAIN_ID=943 npx tsx scripts/deploy-zkcards.ts
@@ -96,6 +102,7 @@ const ARTIFACT_PATHS = {
   deckChallengeLib: 'contracts/zk/DeckChallengeLib.sol/DeckChallengeLib.json',
   zkTable: 'contracts/zk/ZkTable.sol/ZkTable.json',
   hiLoWarRules: 'contracts/zk/HiLoWarRules.sol/HiLoWarRules.json',
+  holdemShowdownLib: 'contracts/zk/HoldemShowdownLib.sol/HoldemShowdownLib.json',
   holdemTableN: 'contracts/zk/HoldemTableN.sol/HoldemTableN.json',
 } as const
 
@@ -103,6 +110,7 @@ const ARTIFACT_PATHS = {
 const FQ_DECK_CONSTANTS = 'contracts/zk/DeckConstants.sol:DeckConstants'
 const FQ_SHOWDOWN_DECODE_LIB = 'contracts/vendor/uzkge/ShowdownDecodeLib.sol:ShowdownDecodeLib'
 const FQ_DECK_CHALLENGE_LIB = 'contracts/zk/DeckChallengeLib.sol:DeckChallengeLib'
+const FQ_HOLDEM_SHOWDOWN_LIB = 'contracts/zk/HoldemShowdownLib.sol:HoldemShowdownLib'
 
 /**
  * Splice deployed library addresses into a creation bytecode's `__$<hash>$__` placeholders, using
@@ -177,6 +185,7 @@ export interface ZkCardsAddresses {
   deckChallengeLib: viem.Hex
   zkTable: viem.Hex
   hiLoWarRules: viem.Hex
+  holdemShowdownLib: viem.Hex
   holdemTableN: viem.Hex
 }
 
@@ -191,8 +200,9 @@ interface PlanStep {
 
 /** Build the deploy plan in dependency order. Requires the PREDICTED addresses for anything a later
  *  step links against (vk1/vk2 for the verifier, deckConstants for deckChallengeLib, showdownDecodeLib
- *  + deckChallengeLib for zkTable, shuffleVerifier for hiLoWarRules, wrapperFactory/shuffleVerifier
- *  for zkTable/holdemTableN) so the SAME linking code path runs identically in dry-run and execute. */
+ *  + deckChallengeLib for zkTable, shuffleVerifier for hiLoWarRules, holdemShowdownLib for
+ *  holdemTableN, wrapperFactory/shuffleVerifier for zkTable/holdemTableN) so the SAME linking code
+ *  path runs identically in dry-run and execute. */
 function buildPlan(predicted: ZkCardsAddresses, wrapperFactory: viem.Hex, holdemTreasury: viem.Hex): PlanStep[] {
   const art = {
     vk1: loadArtifact(ARTIFACT_PATHS.vk1),
@@ -204,6 +214,7 @@ function buildPlan(predicted: ZkCardsAddresses, wrapperFactory: viem.Hex, holdem
     deckChallengeLib: loadArtifact(ARTIFACT_PATHS.deckChallengeLib),
     zkTable: loadArtifact(ARTIFACT_PATHS.zkTable),
     hiLoWarRules: loadArtifact(ARTIFACT_PATHS.hiLoWarRules),
+    holdemShowdownLib: loadArtifact(ARTIFACT_PATHS.holdemShowdownLib),
     holdemTableN: loadArtifact(ARTIFACT_PATHS.holdemTableN),
   }
 
@@ -213,6 +224,9 @@ function buildPlan(predicted: ZkCardsAddresses, wrapperFactory: viem.Hex, holdem
   const zkTableLinked = linkLibraries(art.zkTable.bytecode, art.zkTable.linkReferences, {
     [FQ_SHOWDOWN_DECODE_LIB]: predicted.showdownDecodeLib,
     [FQ_DECK_CHALLENGE_LIB]: predicted.deckChallengeLib,
+  })
+  const holdemTableNLinked = linkLibraries(art.holdemTableN.bytecode, art.holdemTableN.linkReferences, {
+    [FQ_HOLDEM_SHOWDOWN_LIB]: predicted.holdemShowdownLib,
   })
 
   return [
@@ -247,9 +261,13 @@ function buildPlan(predicted: ZkCardsAddresses, wrapperFactory: viem.Hex, holdem
       bytecode: art.hiLoWarRules.bytecode, linkedLibs: [],
     },
     {
+      key: 'holdemShowdownLib', label: 'HoldemShowdownLib [library]', args: [], argsLabel: '(none)',
+      bytecode: art.holdemShowdownLib.bytecode, linkedLibs: [],
+    },
+    {
       key: 'holdemTableN', label: 'HoldemTableN', args: [holdemTreasury, wrapperFactory],
       argsLabel: `treasury=${holdemTreasury}, factory=${wrapperFactory}`,
-      bytecode: art.holdemTableN.bytecode, linkedLibs: [],
+      bytecode: holdemTableNLinked, linkedLibs: [`HoldemShowdownLib=${predicted.holdemShowdownLib}`],
     },
   ]
 }
@@ -265,6 +283,7 @@ function abiFor(key: keyof ZkCardsAddresses): viem.Abi {
     deckChallengeLib: ARTIFACT_PATHS.deckChallengeLib,
     zkTable: ARTIFACT_PATHS.zkTable,
     hiLoWarRules: ARTIFACT_PATHS.hiLoWarRules,
+    holdemShowdownLib: ARTIFACT_PATHS.holdemShowdownLib,
     holdemTableN: ARTIFACT_PATHS.holdemTableN,
   }
   return loadArtifact(map[key]).abi
@@ -317,7 +336,8 @@ async function main(): Promise<void> {
     deckChallengeLib: at(6),
     zkTable: at(7),
     hiLoWarRules: at(8),
-    holdemTableN: at(9),
+    holdemShowdownLib: at(9),
+    holdemTableN: at(10),
   }
 
   const plan = buildPlan(predicted, WRAPPER_FACTORY, HOLDEM_TREASURY)
@@ -401,11 +421,19 @@ async function main(): Promise<void> {
 
   const hiLoWarRules = await deployLegacy({ walletClient, publicClient, abi: abiFor('hiLoWarRules'), bytecode: plan[8].bytecode, args: [revealVerifier, shuffleVerifier], gasPrice: fee.gasPrice, label: 'HiLoWarRules' })
   console.log('  HiLoWarRules:', hiLoWarRules)
-  const holdemTableN = await deployLegacy({ walletClient, publicClient, abi: abiFor('holdemTableN'), bytecode: plan[9].bytecode, args: [HOLDEM_TREASURY, WRAPPER_FACTORY], gasPrice: fee.gasPrice, label: 'HoldemTableN' })
+  const holdemShowdownLib = await deployLegacy({ walletClient, publicClient, abi: abiFor('holdemShowdownLib'), bytecode: plan[9].bytecode, args: [], gasPrice: fee.gasPrice, label: 'HoldemShowdownLib' })
+  console.log('  HoldemShowdownLib:', holdemShowdownLib)
+
+  // Re-link HoldemTableN against the REAL HoldemShowdownLib address (not the prediction).
+  const holdemTableNArt = loadArtifact(ARTIFACT_PATHS.holdemTableN)
+  const holdemTableNBytecode = linkLibraries(holdemTableNArt.bytecode, holdemTableNArt.linkReferences, {
+    [FQ_HOLDEM_SHOWDOWN_LIB]: holdemShowdownLib,
+  })
+  const holdemTableN = await deployLegacy({ walletClient, publicClient, abi: holdemTableNArt.abi, bytecode: holdemTableNBytecode, args: [HOLDEM_TREASURY, WRAPPER_FACTORY], gasPrice: fee.gasPrice, label: 'HoldemTableN' })
   console.log('  HoldemTableN:', holdemTableN)
 
   const deployBlock = await publicClient.getBlockNumber()
-  Object.assign(addresses, { vk1, vk2, shuffleVerifier, revealVerifier, showdownDecodeLib, deckConstants, deckChallengeLib, zkTable, hiLoWarRules, holdemTableN })
+  Object.assign(addresses, { vk1, vk2, shuffleVerifier, revealVerifier, showdownDecodeLib, deckConstants, deckChallengeLib, zkTable, hiLoWarRules, holdemShowdownLib, holdemTableN })
   Object.assign(deployed, addresses)
 
   console.log('\n✓ deployed ZK cards stack')

@@ -6,6 +6,14 @@
 # imported here, so they never reach the compiler. evm_version is pinned to shanghai to match the
 # Hardhat per-contract overrides for the games (chain 943 is pre-cancun: PUSH0 ok, MCOPY/TSTORE
 # rejected). solc/viaIR/optimizer-runs mirror hardhat.config.ts so bytecode behavior matches.
+#
+# EIP-170 SIZE FIX (2026-08-08): optimizer_runs lowered 1000 -> 700 to bring HoldemTableN.sol
+# (25,203 deployed bytes, 627 over the 24,576 hard limit, post library-extraction) under the
+# 24,300-byte safety-margin ceiling — see hardhat.config.ts's matching override-block comment and
+# test/foundry/HoldemTableNSize.t.sol / test/ZkTableSize.test.ts for the full rationale + guards.
+# 700 was empirically the highest runs value clearing that margin. Keep in sync with the
+# hardhat.config.ts shanghai-family overrides; bump both back up only alongside a fresh
+# size-budget review.
 [profile.default]
 src = 'test/foundry'
 test = 'test/foundry'
@@ -15,7 +23,7 @@ libs = ['../../lib', '../../node_modules']
 solc = '0.8.25'
 via_ir = true
 optimizer = true
-optimizer_runs = 1000
+optimizer_runs = 700
 evm_version = 'shanghai'
 remappings = [
   'forge-std/=../../lib/forge-std/src/',
@@ -51,8 +59,12 @@ no_match_contract = '^ZkTable$'
 # under the `zkm2` profile (viaIR 0.8.25 for HouseChannel, out shared with zkverify).
 # HoldemShareDispute.t.sol shells out (vm.ffi) to the real off-chain secp256k1 prover; it runs
 # under the dedicated `ffi` profile (FOUNDRY_PROFILE=ffi ... --ffi), excluded here so the default
-# `forge test` (no --ffi) stays green.
-skip = ['test/foundry/ShuffleVerifier52.t.sol', 'test/foundry/ShuffleVerifier52Positive.t.sol', 'test/foundry/RevealVerifierBabyJubJub.t.sol', 'test/foundry/DiceSettleVerifier.t.sol', 'test/foundry/SettleWithProof.t.sol', 'test/foundry/HoldemShareDispute.t.sol', 'test/foundry/SolveResolvers.t.sol', 'test/foundry/CardTable52.t.sol', 'test/foundry/ZkTableShowdownDispute.t.sol', 'test/foundry/DeckConstants.t.sol']
+# `forge test` (no --ffi) stays green. CardTableSecp.t.sol's live-generator parity test does the
+# same (vm.ffi against gen-card-table-secp.mts), so it joins CardTable52.t.sol/DeckConstants.t.sol
+# in this skip list; its non-ffi assertions still run under the `ffi` profile alongside it.
+# HoldemTableNShowdownC2.t.sol (the C2 real-crypto showdown-adjudication suite) shells out to
+# gen-holdem-showdown.mts the same way — same skip-list treatment.
+skip = ['test/foundry/ShuffleVerifier52.t.sol', 'test/foundry/ShuffleVerifier52Positive.t.sol', 'test/foundry/RevealVerifierBabyJubJub.t.sol', 'test/foundry/DiceSettleVerifier.t.sol', 'test/foundry/SettleWithProof.t.sol', 'test/foundry/HoldemShareDispute.t.sol', 'test/foundry/SolveResolvers.t.sol', 'test/foundry/CardTable52.t.sol', 'test/foundry/ZkTableShowdownDispute.t.sol', 'test/foundry/DeckConstants.t.sol', 'test/foundry/CardTableSecp.t.sol', 'test/foundry/HoldemTableNShowdownC2.t.sol']
 
 # M2 (zk mode-2) integration test (SettleWithProof) reads the proof fixture + the
 # etched verifier-runtime fixture. (The reveal-snark tamper test keeps ./test/fixtures.)

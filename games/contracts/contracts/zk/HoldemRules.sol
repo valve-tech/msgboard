@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {IGameRulesN} from "./IGameRulesN.sol";
 import {HoldemHandEval} from "./HoldemHandEval.sol";
+import {SidePot as ChannelSidePot} from "./ChannelStateN.sol";
 
 /// @notice Pure mirror of @gibs/holdem src/rules.ts applyMove (betting half) — consulted only
 /// by HoldemTableN's per-seat dispute machine. The TS module is normative; test/HoldemParity
@@ -174,6 +175,68 @@ contract HoldemRules is IGameRulesN, HoldemHandEval {
             return abi.encode(s);
         }
         revert IllegalMove();
+    }
+
+    // ----- on-chain showdown adjudication seam (IGameRulesN, Task C2) -----
+
+    /// Non-reverting eligibility + structural-membership check. `eligible` requires: phase ==
+    /// SHOWDOWN; `nSeats` (from gameState) == balances.length; `stacks` == `balances`
+    /// elementwise; `pot` == `pot`; `sidePots` == `sidePots` elementwise (amount+eligibleMask).
+    /// `liveMask` is the non-folded bitmask regardless of `eligible` (0 when nSeats==0 is moot -
+    /// a real table always has >=2 seats). `stub` = exactly one live seat (the STUB uncontested
+    /// path already swept the pot(s) in `_finishHand`, so holes/board don't matter to settlement).
+    function showdownEligible(bytes calldata gameState, uint256[] calldata balances, uint256 pot, ChannelSidePot[] calldata sidePots)
+        external
+        pure
+        returns (bool eligible, uint8 nSeats, uint256 liveMask, bool stub)
+    {
+        Holdem memory s = abi.decode(gameState, (Holdem));
+        nSeats = s.nSeats;
+
+        uint256 live = 0;
+        for (uint256 i = 0; i < s.nSeats; i++) {
+            if (!s.folded[i]) {
+                liveMask |= (uint256(1) << i);
+                live++;
+            }
+        }
+        stub = (live == 1);
+
+        if (s.phase != SHOWDOWN) return (false, nSeats, liveMask, stub);
+        if (uint256(s.nSeats) != balances.length) return (false, nSeats, liveMask, stub);
+        if (s.stacks.length != balances.length) return (false, nSeats, liveMask, stub);
+        for (uint256 i = 0; i < balances.length; i++) {
+            if (s.stacks[i] != balances[i]) return (false, nSeats, liveMask, stub);
+        }
+        if (s.pot != pot) return (false, nSeats, liveMask, stub);
+        if (s.sidePots.length != sidePots.length) return (false, nSeats, liveMask, stub);
+        for (uint256 i = 0; i < sidePots.length; i++) {
+            if (s.sidePots[i].amount != sidePots[i].amount || s.sidePots[i].eligibleMask != sidePots[i].eligibleMask) {
+                return (false, nSeats, liveMask, stub);
+            }
+        }
+
+        eligible = true;
+    }
+
+    /// Run the EXISTING `_showdown` (same code MOVE_SHOWDOWN drives via `applyMove`) and return
+    /// the settled money vector, so a caller that only needs the payout (not the re-encoded
+    /// gameState) doesn't have to re-decode it. `extraFoldMask` answer-aware-masks seats out of
+    /// ranking (bit i set => seat i treated as folded for this settlement only); `_showdown`
+    /// never reads a folded seat's holes (pot masks intersect `!folded` and hand scoring is
+    /// lazy/memoized per eligible seat), so the caller may pass zeros for masked/folded seats.
+    function settleShowdown(bytes calldata gameState, uint8[2][] calldata holes, uint8[5] calldata board, uint256 extraFoldMask)
+        external
+        pure
+        returns (uint256[] memory balances, uint256 rakeAccrued)
+    {
+        Holdem memory s = abi.decode(gameState, (Holdem));
+        if (s.phase != SHOWDOWN) revert WrongPhase();
+        for (uint256 i = 0; i < s.nSeats; i++) {
+            if (((extraFoldMask >> i) & 1) == 1) s.folded[i] = true;
+        }
+        _showdown(s, holes, board);
+        return (s.stacks, s.rakeAccrued);
     }
 
     // ----- transitions (mirror rules.ts) -----

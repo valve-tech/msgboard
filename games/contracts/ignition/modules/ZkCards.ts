@@ -17,8 +17,15 @@ import { buildModule } from "@nomicfoundation/hardhat-ignition/modules"
 // each table is denominated in — see HoldemTableN.sol's `_payoutVector` note on multi-token
 // treasury inflow). Defaults to the zero address, which the constructor falls back to
 // `msg.sender` (the Ignition deployer) — override `holdemTreasury` for a real deploy where the
-// deployer is not the intended rake recipient. HoldemTableN does NOT link ShowdownDecodeLib (or
-// any other external library) — unlike ZkTable, no `libraries` option is needed.
+// deployer is not the intended rake recipient.
+//
+// HoldemTableN link-references the EXTERNAL (separately-deployed) HoldemShowdownLib library
+// (2026-08 C1/C2 fund-safety hardening pass — see HoldemShowdownLib.sol's header): the secp256k1
+// point arithmetic, the 52-card decode table, the per-share DLEQ verify+store, the whole-showdown
+// decode, the try/catch settle dispatch, and the tiered pot split all live there instead of in
+// HoldemTableN's own deployed bytecode — extracted to stay under EIP-170's 24576-byte deployed-
+// code limit (mirrors ZkTable's ShowdownDecodeLib/DeckChallengeLib extraction above). Unlike
+// DeckChallengeLib, HoldemShowdownLib has no transitive library dependency of its own.
 //
 // ZkTable's constructor also takes `shuffleVerifier_` (deckkey-binding-spec.md Wave-2 — see
 // ZkTable.sol's `shuffleVerifier` immutable header): the SAME `shuffleVerifier` this module
@@ -58,7 +65,13 @@ const ZkCardsModule = buildModule("ZkCardsModule", (m) => {
     },
   })
   const hiLoWarRules = m.contract("HiLoWarRules", [revealVerifier, shuffleVerifier])
-  const holdemTableN = m.contract("HoldemTableN", [holdemTreasury, wrapperFactory])
+  // HoldemTableN link-references the EXTERNAL HoldemShowdownLib — see this module's header.
+  const holdemShowdownLib = m.library("HoldemShowdownLib")
+  const holdemTableN = m.contract("HoldemTableN", [holdemTreasury, wrapperFactory], {
+    libraries: {
+      "contracts/zk/HoldemShowdownLib.sol:HoldemShowdownLib": holdemShowdownLib,
+    },
+  })
 
   return {
     vk1,
@@ -70,6 +83,7 @@ const ZkCardsModule = buildModule("ZkCardsModule", (m) => {
     showdownDecodeLib,
     deckConstants,
     deckChallengeLib,
+    holdemShowdownLib,
     holdemTableN,
   }
 })
