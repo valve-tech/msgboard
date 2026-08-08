@@ -232,6 +232,23 @@ async function main(): Promise<void> {
   const zkAbi = HOLDEM_TABLE_N_ABI()
   const domain = makeDomainN(CHAIN_ID, HOLDEM_TABLE_N)
 
+  // HARDENING (games-live-revert-diagnosis, 2026-08-08): every OTHER write call in this file used
+  // to just `await waitForTransactionReceipt` without checking `.status` — a REVERTED tx (status
+  // 'reverted') was silently treated as success. This is exactly how a real live-943 bug (both
+  // `postShowdownReveals` calls actually reverted on-chain with "invalid opcode: MCOPY" inside the
+  // delegatecall to HoldemShowdownLib — a Cancun/MCOPY-vs-pre-Cancun-943 EVM-version mismatch from
+  // a missing hardhat.config.ts per-file override, NOT a harness bug) went undetected long enough
+  // to look like a mysterious `finalizeShowdownN` failure instead of the true, much earlier
+  // failure. Route every write through this so a reverted tx fails LOUD, at the call site that
+  // actually reverted, instead of masquerading as success three steps downstream.
+  async function mustSucceed(hash: viem.Hex, label: string) {
+    const receipt = await publicClient.waitForTransactionReceipt({ hash })
+    if (receipt.status !== 'success') {
+      throw new Error(`play-holdem-943: ${label} REVERTED on-chain (tx ${hash}, block ${receipt.blockNumber})`)
+    }
+    return receipt
+  }
+
   console.log('── play-holdem-943 ──')
   console.log('mode:', FORK ? 'ANVIL FORK (no live broadcast)' : 'LIVE 943')
   console.log('rpc:', RPC, '| chainId:', CHAIN_ID, '| seats:', SEATS)
@@ -282,7 +299,7 @@ async function main(): Promise<void> {
       console.log(`  ${label}: anvil_setBalance +${viem.formatEther(topUp)} PLS`)
     } else {
       const hash = await funderClient.sendTransaction({ to: who, value: topUp, gasPrice: fee.gasPrice, type: 'legacy' })
-      await publicClient.waitForTransactionReceipt({ hash })
+      await mustSucceed(hash, `fund ${label}`)
       console.log(`  ${label}: funded +${viem.formatEther(topUp)} PLS (tx ${hash})`)
     }
   }
@@ -298,7 +315,7 @@ async function main(): Promise<void> {
       address: X402PLS, abi: WRAPPER_ABI, functionName: 'wrap', args: [], value: shortfall,
       account: client.account!, chain, gas: 20_000_000n, gasPrice: fee.gasPrice, type: 'legacy',
     })
-    await publicClient.waitForTransactionReceipt({ hash })
+    await mustSucceed(hash, `wrap ${label}`)
     console.log(`  ${label}: wrapped +${viem.formatEther(shortfall)} PLS -> x402PLS (tx ${hash})`)
   }
 
@@ -348,7 +365,7 @@ async function main(): Promise<void> {
       args: [X402PLS, holdemRules, BUY_IN, BigInt(n), RAKE_BPS, RAKE_CAP, CLOCK_BLOCKS, seats[0]!.channel.address, dk0, createAuth],
       account: players[0]!, chain, gas: 20_000_000n, gasPrice: fee.gasPrice, type: 'legacy',
     })
-    const createReceipt = await publicClient.waitForTransactionReceipt({ hash: createHash })
+    const createReceipt = await mustSucceed(createHash, 'create()')
     const createdLogs = (await publicClient.getContractEvents({
       address: HOLDEM_TABLE_N, abi: zkAbi, eventName: 'TableCreated', fromBlock: createReceipt.blockNumber, toBlock: createReceipt.blockNumber,
     })) as unknown as Array<{ args: { tableId: viem.Hex }; transactionHash: viem.Hex }>
@@ -373,7 +390,7 @@ async function main(): Promise<void> {
         args: [tableId, seats[i]!.channel.address, dki, joinAuth],
         account: players[i]!, chain, gas: 20_000_000n, gasPrice: fee.gasPrice, type: 'legacy',
       })
-      await publicClient.waitForTransactionReceipt({ hash: joinHash })
+      await mustSucceed(joinHash, `join() seat ${i}`)
       console.log(`  join() tx (seat ${i}): ${joinHash}`)
     }
 
@@ -381,7 +398,7 @@ async function main(): Promise<void> {
       address: HOLDEM_TABLE_N, abi: zkAbi, functionName: 'start', args: [tableId],
       account: players[0]!, chain, gas: 20_000_000n, gasPrice: fee.gasPrice, type: 'legacy',
     })
-    await publicClient.waitForTransactionReceipt({ hash: startHash })
+    await mustSucceed(startHash, 'start()')
     console.log(`  start() tx: ${startHash}; table status: ${await tableStatus(tableId)} (expect 2 = Live)`)
     return tableId
   }
@@ -455,7 +472,7 @@ async function main(): Promise<void> {
       args: [tableId, showdownCheckpoint.state, showdownCheckpoint.sigs as viem.Hex[], showdownGameStateBytes],
       account: funder, chain, gas: 20_000_000n, gasPrice: fee.gasPrice, type: 'legacy',
     })
-    await publicClient.waitForTransactionReceipt({ hash: openHash })
+    await mustSucceed(openHash, 'openShowdownDispute()')
     console.log(`  openShowdownDispute() tx: ${openHash}; status: ${await tableStatus(tableId)} (expect 3 = Disputed)`)
 
     // 2. every seat posts its FULL reveal batch (one call each).
@@ -466,7 +483,7 @@ async function main(): Promise<void> {
         args: [tableId, s, deckWords, batch.slots, batch.shares, batch.proofs],
         account: players[s]!, chain, gas: 20_000_000n, gasPrice: fee.gasPrice, type: 'legacy',
       })
-      await publicClient.waitForTransactionReceipt({ hash: postHash })
+      await mustSucceed(postHash, `postShowdownReveals() seat ${s}`)
       console.log(`  postShowdownReveals() tx (seat ${s}, ${batch.slots.length} slots): ${postHash}`)
     }
 
@@ -486,6 +503,35 @@ async function main(): Promise<void> {
     const before = await Promise.all(players.map((p) => x402BalanceOf(p.address)))
     const treasury = (await publicClient.readContract({ address: HOLDEM_TABLE_N, abi: zkAbi, functionName: 'treasury', args: [] })) as viem.Hex
     const treBefore = await x402BalanceOf(treasury)
+
+    // ── DIAGNOSTIC INSTRUMENTATION (temporary — see games-live-revert-diagnosis task) ──────────
+    // 943's node returns NO revert data on eth_estimateGas (which writeContract would otherwise
+    // use), so a live revert normally surfaces only as "unknown reason". `simulateContract` uses
+    // eth_call instead, which DOES return revert data on this chain, and viem decodes it against
+    // the full HoldemTableN ABI (including every custom error) automatically.
+    console.log('  [diag] pre-flight simulateContract(finalizeShowdownN)…')
+    try {
+      await publicClient.simulateContract({
+        address: HOLDEM_TABLE_N, abi: zkAbi, functionName: 'finalizeShowdownN',
+        args: [tableId, deckWords, showdownGameStateBytes], account: funder,
+      })
+      console.log('  [diag] simulateContract: OK (would succeed)')
+    } catch (simErr: unknown) {
+      console.error('  [diag] simulateContract REVERTED — decoding…')
+      if (simErr instanceof viem.BaseError) {
+        const revertError = simErr.walk((e) => e instanceof viem.ContractFunctionRevertedError)
+        if (revertError instanceof viem.ContractFunctionRevertedError) {
+          console.error('  [diag] decoded error name:', revertError.data?.errorName)
+          console.error('  [diag] decoded error args:', revertError.data?.args)
+        } else {
+          console.error('  [diag] no ContractFunctionRevertedError found in cause chain; shortMessage:', simErr.shortMessage)
+        }
+        console.error('  [diag] full error:', simErr)
+      } else {
+        console.error('  [diag] non-viem error:', simErr)
+      }
+    }
+    // ── END DIAGNOSTIC INSTRUMENTATION ──────────────────────────────────────────────────────────
 
     const finalizeHash = await funderClient.writeContract({
       address: HOLDEM_TABLE_N, abi: zkAbi, functionName: 'finalizeShowdownN',
@@ -544,7 +590,7 @@ async function main(): Promise<void> {
       args: [tableId, showdownCheckpoint.state, showdownCheckpoint.sigs as viem.Hex[], showdownGameStateBytes],
       account: funder, chain, gas: 20_000_000n, gasPrice: fee.gasPrice, type: 'legacy',
     })
-    const openReceipt = await publicClient.waitForTransactionReceipt({ hash: openHash })
+    const openReceipt = await mustSucceed(openHash, 'openShowdownDispute()')
     console.log(`  openShowdownDispute() tx: ${openHash}`)
 
     for (let s = 0; s < SEATS; s++) {
@@ -555,7 +601,7 @@ async function main(): Promise<void> {
         args: [tableId, s, deckWords, batch.slots, batch.shares, batch.proofs],
         account: players[s]!, chain, gas: 20_000_000n, gasPrice: fee.gasPrice, type: 'legacy',
       })
-      await publicClient.waitForTransactionReceipt({ hash: postHash })
+      await mustSucceed(postHash, `postShowdownReveals() seat ${s}`)
       console.log(`  postShowdownReveals() tx (seat ${s}${s === withholder ? ', WITHHOLDING own hole slots' : ''}): ${postHash}`)
     }
 

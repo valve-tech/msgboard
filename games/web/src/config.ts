@@ -166,13 +166,17 @@ export const deployments: GameDeployment[] = [
     sudokuSchemaUid: '0x0de9a3bb2e72a1116f44d1a4a5e612d315143af9916e27572d073663e9877fc5',
     wordleSolveResolver: '0x603e32ddaf5f4b6ada77e04bb7c44c4603f59eee',
     wordleSchemaUid: '0x68880687b7c28fa1618ad4f612173b23aef8443fc5df354d2e6693f6df243f37',
-    // ZK card tables (redeployed 2026-08-08 — hardened C2 showdown-dispute stack;
-    // games/contracts/deployments/943-zkcards.json, block 25082049). Escrow denominated in
-    // x402Pls (already set above) — see zk-x402-escrow-conversion. Supersedes the 2026-08-07
-    // (block 25074838) addresses this redeploy retired.
-    zkTable: '0xe3fd86d70cee506bd21bb5be975ba21c51e3c18c',
-    hiLoWarRules: '0x443594355c4c74a6c4f59b5797f7c9efebe2789f',
-    holdemTableN: '0x096679394ec698550efdda42b64f5c90a8a39882',
+    // ZK card tables (redeployed 2026-08-08 — MCOPY-fix redeploy: HoldemShowdownLib/HoldemRules/
+    // CardTableSecp/DeckChallengeLib/DeckConstants/ChannelTableBase/SignedIntentBase/
+    // ShowdownDecodeLib were missing their Shanghai evmVersion override in hardhat.config.ts and
+    // fell through to cancun, emitting MCOPY (0x5e) — REVERT on pre-Cancun 943/369
+    // ("invalid opcode: MCOPY"), confirmed live on postShowdownReveals(). Fix + full redeploy;
+    // games/contracts/deployments/943-zkcards.json, block 25082616. Escrow denominated in
+    // x402Pls (already set above) — see zk-x402-escrow-conversion. Supersedes the 2026-08-08
+    // (block 25082049) addresses this redeploy retired.
+    zkTable: '0x8857779acb9529d583911b0dedc456dd1f0829c4',
+    hiLoWarRules: '0x567f431af18eb32c88e747eea1ccf84fe66dc865',
+    holdemTableN: '0x7da24fcc5b0754ca075c41fad594a5234c4f4f46',
   },
   // Deployed by the 2026-06-11 mainnet bring-up (gate run + ink-pools; e2e/scripts/369-deployment.json).
   // deployBlock = the web pools' ink block so the site and the cast watcher count heats
