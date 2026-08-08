@@ -259,6 +259,18 @@ skip = [
   'test/foundry/HoldemTableNX402.t.sol',
   'test/foundry/HoldemTableNX402Fork.t.sol',
   'test/foundry/SolveResolvers.t.sol',
+  # DeckBindingParity.t.sol directly imports DeckShuffleStep/DeckChallengeLib from
+  # contracts/zk/DeckChallengeLib.sol, which (same as the vendored uzkge PlonkVerifier)
+  # needs viaIR:true and hits solc stack-too-deep under this profile's legacy pipeline.
+  'test/foundry/DeckBindingParity.t.sol',
+  # CardTableSecp.t.sol / HoldemTableNShowdownC2.t.sol / HoldemTableNShowdownDispute.t.sol /
+  # HoldemTableNSize.t.sol are new decoy/showdown-adjudication suites that pull in
+  # CardTableSecp.sol/EllipticCurve.sol or HoldemTableN.sol (same viaIR:true requirement as
+  # the other Holdem/secp256k1 suites already skipped above).
+  'test/foundry/CardTableSecp.t.sol',
+  'test/foundry/HoldemTableNShowdownC2.t.sol',
+  'test/foundry/HoldemTableNShowdownDispute.t.sol',
+  'test/foundry/HoldemTableNSize.t.sol',
 ]
 
 [profile.zkverify.fuzz]
