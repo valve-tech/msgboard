@@ -286,19 +286,51 @@ contract HouseChannelTest is Test {
         ch.disputeFromOpen(TID);
     }
 
-    // ---- walk-away forfeiture: a player who abandons a table forfeits their escrow ----
+    // ---- walk-away reclaim: house frees its locked escrow WITHOUT expropriating the player's ----
+    // (audit finding, HIGH: claimForfeit used to post balancePlayer=0/balanceHouse=pot — a steal-by-
+    // default a nonce-0-only player could never override. Fixed to a conserved refund split, identical
+    // in shape to disputeFromOpen's synthetic state.)
 
     // Player opens, plays nothing, and walks away. After the abandonment period + the challenge
-    // window with no response, the house claims the forfeit: the player loses their whole escrow.
+    // window with no response, the house forces the split: BOTH sides get their own escrow back —
+    // the player is made whole (not stolen from) and the house recovers its locked escrowHouse.
     function test_claimForfeitPaysHouseWhenAbandoned() public {
         _open(); // player escrowed 200; balance now 800
         vm.roll(block.number + CLOCK);            // abandonment period elapses (openedAt + clockBlocks)
         vm.prank(house);
-        ch.claimForfeit(TID);                     // house opens the forfeit dispute
+        ch.claimForfeit(TID);                     // house forces the walk-away split
         vm.roll(block.number + CLOCK + 1);        // challenge window expires unanswered
         ch.resolveTimeout(TID);
-        assertEq(chips.balanceOf(playerWallet), 800);   // player forfeited their 200 escrow (no refund)
-        assertEq(ch.housePool(), 9_800 + 400);          // house reclaims its 200 + the player's 200
+        assertEq(chips.balanceOf(playerWallet), 1_000); // abandoning player still gets their 200 back
+        assertEq(ch.housePool(), 10_000);               // house recovers its own locked 200 (not the player's)
+    }
+
+    // Conservation: total paid out across both sides always equals the pot the table escrowed,
+    // regardless of the (uneven) escrow split at open.
+    function test_claimForfeitConservesPot() public {
+        OpenTerms memory t = _terms();
+        t.escrowPlayer = 350;
+        t.escrowHouse = 90;
+        bytes memory sig = _signHouseTerms(t);
+        vm.prank(playerWallet);
+        ch.open(t, sig);
+        uint256 poolBefore = ch.housePool();
+        uint256 playerBefore = chips.balanceOf(playerWallet);
+
+        vm.roll(block.number + CLOCK);
+        vm.prank(house);
+        ch.claimForfeit(TID);
+        vm.roll(block.number + CLOCK + 1);
+        ch.resolveTimeout(TID);
+
+        assertEq(chips.balanceOf(playerWallet), playerBefore + 350); // player's own escrow back
+        assertEq(ch.housePool(), poolBefore + 90);                   // house's own escrow back
+        // conservation: total tokens across the player and the contract (pool + any residual escrow)
+        // is unchanged by the round — nothing was minted, burned, or expropriated.
+        assertEq(chips.balanceOf(playerWallet) + chips.balanceOf(address(ch)), 1_000 + 10_000);
+        // and once settled, the contract's whole token balance is once again exactly the house pool
+        // (no locked escrow remains) — the accounting invariant the pool tracks.
+        assertEq(chips.balanceOf(address(ch)), ch.housePool());
     }
 
     // The house cannot forfeit a fresh table — the player gets a full abandonment period first.
