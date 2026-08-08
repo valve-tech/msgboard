@@ -42,13 +42,17 @@ import {
  *    a one-line change (see `walletClientToSigner` in useSession.ts) once batched/eager-signing or a
  *    real two-machine transport is wired.
  *  - BOT WALLET = ephemeral in-browser key (Player B), with a RANDOM strategy.
- *  - DOMAIN: built from the deployment chainId via zk-core's `makeDomain` (EIP-712 "ZkTable"), with a
- *    PLACEHOLDER `verifyingContract` — there is no on-chain channel settle wired yet. The deployed
- *    `HouseChannel` is the real anchor for later; only this address changes when it lands. Falls back
- *    to `TEST_DOMAIN` if no chainId is supplied.
+ *  - DOMAIN: built from the deployment chainId via zk-core's `makeDomain` (EIP-712 "ZkTable"). Callers
+ *    should pass `verifyingContract: deployment.zkTable` (config.ts) so co-signed states bind to the
+ *    deployed ZkTable contract; falls back to a PLACEHOLDER when a chain has no ZkTable deployed yet.
+ *    NOTE: even with the real address wired, this hook's `start`/`playFlip`/`settle` never send an
+ *    on-chain transaction — the whole session (open/flip/settle) is a purely off-chain two-peer
+ *    channel against an in-browser bot. The real `verifyingContract` only matters if/when a co-signed
+ *    state is later submitted on-chain (e.g. a dispute relay); it does not by itself make the table
+ *    playable for real funds. Falls back to `TEST_DOMAIN` if no chainId is supplied.
  */
 
-/** EIP-712 verifyingContract placeholder — no on-chain ZkTable/HouseChannel settle is wired yet. */
+/** EIP-712 verifyingContract placeholder — used only for chains with no ZkTable deployment yet. */
 const PLACEHOLDER_VERIFIER = '0x00000000000000000000000000000000005a6b54' as viem.Hex
 
 export type WarStatus = 'idle' | 'opening' | 'ready' | 'playing' | 'settling' | 'settled' | 'error'
@@ -117,7 +121,7 @@ export type WarSessionApi = {
 export type UseWarSessionConfig = {
   /** the chain whose id pins the EIP-712 domain; falls back to TEST_DOMAIN if absent. */
   chainId?: number
-  /** EIP-712 verifyingContract; defaults to a placeholder (no on-chain settle yet). */
+  /** EIP-712 verifyingContract — pass `deployment.zkTable`; defaults to a placeholder when unset. */
   verifyingContract?: viem.Hex
   /** ante per flip (wei). */
   ante?: bigint
