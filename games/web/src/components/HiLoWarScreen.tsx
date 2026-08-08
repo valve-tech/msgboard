@@ -94,7 +94,13 @@ export const HiLoWarScreen = ({
   const [bet, setBet] = useState<Bet>('HOLD')
   const [onRaise, setOnRaise] = useState<'CALL' | 'FOLD'>('CALL')
 
-  const session = useWarSession({ chainId: deployment.chainId, boardRpc: deployment.boardRpc })
+  const session = useWarSession({
+    chainId: deployment.chainId,
+    boardRpc: deployment.boardRpc,
+    // Bind the EIP-712 domain to the deployed ZkTable so client co-signatures verify on-chain
+    // (falls back to useWarSession's placeholder on chains where ZkTable isn't deployed yet).
+    verifyingContract: deployment.zkTable,
+  })
 
   const busy = session.status === 'opening' || session.status === 'playing' || session.status === 'settling'
   const canOpen = walletClient !== undefined && trustAcknowledged && !busy

@@ -78,6 +78,14 @@ export type GameDeployment = {
   wordleSolveResolver?: viem.Hex
   /** The registered wordle-solve schema UID on THIS chain's SchemaRegistry (revocable=false). */
   wordleSchemaUid?: viem.Hex
+  /** ZkTable contract — the two-peer masked-deck channel anchor (EIP-712 `verifyingContract` for
+   *  Hi-Lo War / Hold'em co-signed channel states; domain is `{name:"ZkTable",version:"1"}`, see
+   *  zk-core/stateSig.ts `makeDomain`). Escrow is denominated in the chain's `x402Pls` wrapper. */
+  zkTable?: viem.Hex
+  /** HiLoWarRules contract — the on-chain Hi-Lo War flip/showdown rules ZkTable defers to. */
+  hiLoWarRules?: viem.Hex
+  /** HoldemTableN contract — the N-party Hold'em table (separate channel contract from ZkTable). */
+  holdemTableN?: viem.Hex
 }
 
 /**
@@ -158,6 +166,11 @@ export const deployments: GameDeployment[] = [
     sudokuSchemaUid: '0x0de9a3bb2e72a1116f44d1a4a5e612d315143af9916e27572d073663e9877fc5',
     wordleSolveResolver: '0x603e32ddaf5f4b6ada77e04bb7c44c4603f59eee',
     wordleSchemaUid: '0x68880687b7c28fa1618ad4f612173b23aef8443fc5df354d2e6693f6df243f37',
+    // ZK card tables (deployed 2026-08-07; games/contracts/deployments/943-zkcards.json, block
+    // 25074838). Escrow denominated in x402Pls (already set above) — see zk-x402-escrow-conversion.
+    zkTable: '0x8c31a72709b030574c4d8f4142abdd504912442d',
+    hiLoWarRules: '0x0e383ad7efe7d8f4f0be0768126b9c7922cabc8e',
+    holdemTableN: '0xc6c7146f9f24d44d3dc181de36d78fda107d9ad5',
   },
   // Deployed by the 2026-06-11 mainnet bring-up (gate run + ink-pools; e2e/scripts/369-deployment.json).
   // deployBlock = the web pools' ink block so the site and the cast watcher count heats
