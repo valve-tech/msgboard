@@ -184,4 +184,52 @@ describe('deck-key-binding guard wired into hilo-war session (audit gap H-2)', (
     })
     expect(check).toEqual({ ok: true })
   }, 300_000)
+
+  it('reshuffle() THROWS on a decoy deal — the F3 guard is live at reshuffle, not just at setup', async () => {
+    // Simulates a discrepancy that only appears starting from the FIRST reshuffle: the reader
+    // answers HONESTLY through setup() (genesis co-signs fine on both sides), then starts
+    // returning a decoy for seat 2 once the game reaches its first reshuffle. Before the F3 fix,
+    // reshuffle() never re-ran verifyDealBinding, so this decoy would silently ride along past
+    // hand 1 with nothing to catch it; after the fix it must be rejected exactly like setup()'s
+    // identical decoy is (same reason: recomputed jointKeyCommit no longer matches Σ registered
+    // deck keys), proving the reshuffle-time guard is a REAL, live re-check — not dead code.
+    const [ta, tb] = LocalTransport.pair()
+    const wa = privateKeyToAccount(generatePrivateKey())
+    const wb = privateKeyToAccount(generatePrivateKey())
+    const deck = new ZypherDeckProvider()
+    const tableId = randomTableId()
+    const decoy = await deck.keygen() // an unrelated third key — stands in for a mismatched registration that only surfaces later
+    let aRef!: Player, bRef!: Player
+    let phase: 'setup' | 'reshuffle' = 'setup'
+    const reader: DeckKeyReader = async (tid, seat) => {
+      if (phase === 'reshuffle' && seat === 2) {
+        const { x, y } = uncompressPoint(decoy.pub)
+        return [x, y]
+      }
+      return honestReader(aRef, bRef)(tid, seat)
+    }
+    const a = new Player({ role: 'A', wallet: wa, peer: wb.address, transport: ta, deck, domain: TEST_DOMAIN, tableId, ante: ANTE, escrowEach: ESCROW_EACH, deckKeyReader: reader })
+    const b = new Player({ role: 'B', wallet: wb, peer: wa.address, transport: tb, deck, domain: TEST_DOMAIN, tableId, ante: ANTE, escrowEach: ESCROW_EACH, deckKeyReader: reader })
+    aRef = a; bRef = b
+
+    await openSession(a, b) // genesis: reader still honest, so this succeeds
+    const genesis = a.channel.latest!.state
+    phase = 'reshuffle' // flip the decoy on AFTER genesis has already honestly co-signed
+
+    // 26 flips exhaust the 52-card deck; the 26th flip's terminal co-sign triggers reshuffle()
+    // (see the timing note on the honest-reshuffle test above) — which must now throw, from
+    // BOTH sides, before either ever co-signs a post-reshuffle state built on the decoy.
+    let caught: Error | undefined
+    try {
+      for (let k = 0; k < 26; k++) {
+        await Promise.all([a.playFlip({ bet: 'HOLD', onRaise: 'CALL' }), b.playFlip({ bet: 'HOLD', onRaise: 'CALL' })])
+      }
+    } catch (err) {
+      caught = err as Error
+    }
+    expect(caught?.message).toMatch(/deal-binding validation failed on reshuffle/)
+    expect(caught?.message).toMatch(/jointKeyCommit/)
+    // Neither side ever advanced past the genesis co-sign onto a post-reshuffle state.
+    expect(a.channel.latest!.state.shuffleRoot).toBe(genesis.shuffleRoot)
+  }, 300_000)
 })
