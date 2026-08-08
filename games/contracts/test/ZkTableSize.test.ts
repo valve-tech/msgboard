@@ -23,8 +23,11 @@ import hre from 'hardhat'
 describe('ZkTable EIP-170 deployed-size regression guard', function () {
   const EIP170_LIMIT = 24_576
   // Safety-margin ceiling, comfortably below the hard limit (~276+ bytes headroom requested by
-  // the original fix; current measured size is ~23,308 bytes, well inside this). Bump this only
-  // alongside a deliberate, reviewed size-budget decision — never just to silence a failure.
+  // the original fix; current measured size is ~23,481 bytes, well inside this — see ZkTable.sol's
+  // import list for why the stale ~23,908/25,190 DeckConstants-import figures were removed:
+  // measured fresh against the decoy-deck-challenge code, ZkTable is smaller WITHOUT that import,
+  // not larger). Bump this only alongside a deliberate, reviewed size-budget decision — never just
+  // to silence a failure.
   const SAFE_MARGIN_CEILING = 24_300
 
   it('deployed bytecode stays under the EIP-170 limit with a safety margin', async function () {
