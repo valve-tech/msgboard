@@ -94,10 +94,10 @@ contract FlipBookXForkTest is Test {
             takerRevealWindow: 3600
         });
         bytes32 id = book.offerId(o);
+        bytes32 guessCommit = keccak256(abi.encode(taker, true, SALT2));
         bytes memory makerSig = _sign(makerKey, _receiveDigest(maker, STAKE + BOND, o.takeDeadline, id));
         bytes memory takerSig =
-            _sign(takerKey, _receiveDigest(taker, STAKE + BOND, o.takeDeadline, book.takerNonce(id, taker)));
-        bytes32 guessCommit = keccak256(abi.encode(taker, true, SALT2));
+            _sign(takerKey, _receiveDigest(taker, STAKE + BOND, o.takeDeadline, book.takerNonce(id, taker, guessCommit)));
 
         uint256 m0 = token.balanceOf(maker);
         uint256 t0 = token.balanceOf(taker);
@@ -125,10 +125,10 @@ contract FlipBookXForkTest is Test {
             takerRevealWindow: 3600
         });
         bytes32 id = book.offerId(o);
+        bytes32 gc = keccak256(abi.encode(taker, false, SALT2));
         bytes memory makerSig = _sign(makerKey, _receiveDigest(maker, STAKE + BOND, o.takeDeadline, id));
         bytes memory takerSig =
-            _sign(takerKey, _receiveDigest(taker, STAKE + BOND, o.takeDeadline, book.takerNonce(id, taker)));
-        bytes32 gc = keccak256(abi.encode(taker, false, SALT2));
+            _sign(takerKey, _receiveDigest(taker, STAKE + BOND, o.takeDeadline, book.takerNonce(id, taker, gc)));
 
         book.take(o, makerSig, taker, gc, takerSig);
         book.revealChoice(id, false, SALT);

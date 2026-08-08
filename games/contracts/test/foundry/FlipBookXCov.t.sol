@@ -85,13 +85,14 @@ contract FlipBookXCovTest is Test {
         bytes32 id = book.offerId(o);
         bytes memory makerSig = _sign(makerKey, _receiveDigest(maker, STAKE + MAKER_BOND, o.takeDeadline, id));
 
-        bytes32 takerNonce = book.takerNonce(id, address(wallet));
+        bytes32 gc = keccak256(abi.encode(address(wallet), true, SALT2));
+        bytes32 takerNonce = book.takerNonce(id, address(wallet), gc);
         bytes32 takerDigest = _receiveDigest(address(wallet), STAKE + TAKER_BOND, o.takeDeadline, takerNonce);
         wallet.approveDigest(takerDigest);
 
         bytes memory contractTakerSig = new bytes(64); // any non-65-length payload routes here
         vm.prank(crank);
-        book.take(o, makerSig, address(wallet), keccak256(abi.encode(address(wallet), true, SALT2)), contractTakerSig);
+        book.take(o, makerSig, address(wallet), gc, contractTakerSig);
 
         assertEq(token.balanceOf(address(book)), 2 * STAKE + MAKER_BOND + TAKER_BOND, "1271 taker escrowed");
     }
@@ -109,12 +110,13 @@ contract FlipBookXCovTest is Test {
         // Approve a DIFFERENT digest than the one `take` will actually present.
         wallet.approveDigest(keccak256("some-other-digest"));
 
-        bytes memory takerSig = _sign(makerKey, _receiveDigest(maker, STAKE + TAKER_BOND, o.takeDeadline, book.takerNonce(id, maker)));
+        bytes32 gc = keccak256(abi.encode(maker, true, SALT2));
+        bytes memory takerSig = _sign(makerKey, _receiveDigest(maker, STAKE + TAKER_BOND, o.takeDeadline, book.takerNonce(id, maker, gc)));
         bytes memory contractMakerSig = new bytes(64);
 
         vm.expectRevert(MockX402.InvalidSignature.selector);
         vm.prank(crank);
-        book.take(o, contractMakerSig, maker, keccak256(abi.encode(maker, true, SALT2)), takerSig);
+        book.take(o, contractMakerSig, maker, gc, takerSig);
     }
 
     /// A garbage-length signature (neither 65 bytes nor a meaningful ERC-1271 payload) still
@@ -128,11 +130,12 @@ contract FlipBookXCovTest is Test {
         FlipBookX.Offer memory o = _offer(true, maker);
         bytes32 id = book.offerId(o);
         bytes memory garbageSig = new bytes(3); // definitely not 65, not a valid 1271 payload either
+        bytes32 gc = keccak256(abi.encode(takerAddr, true, SALT2));
         bytes memory takerSig =
-            _sign(takerKey, _receiveDigest(takerAddr, STAKE + TAKER_BOND, o.takeDeadline, book.takerNonce(id, takerAddr)));
+            _sign(takerKey, _receiveDigest(takerAddr, STAKE + TAKER_BOND, o.takeDeadline, book.takerNonce(id, takerAddr, gc)));
 
         vm.expectRevert(MockX402.InvalidSignature.selector);
         vm.prank(crank);
-        book.take(o, garbageSig, takerAddr, keccak256(abi.encode(takerAddr, true, SALT2)), takerSig);
+        book.take(o, garbageSig, takerAddr, gc, takerSig);
     }
 }
