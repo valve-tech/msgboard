@@ -472,6 +472,36 @@ export class Player {
     // on the contract side needs to change.
     if (this.cfg.deck instanceof ZypherDeckProvider) {
       const binding = buildDealBinding(this.agg, rounds)
+      // VALIDATE-BEFORE-SIGN GUARD (F3, 2026-08) — setup()'s H-2 guard (audit gap H-2, spec §B3)
+      // only ever covered the GENESIS deal: a poisoner who behaves honestly through setup() (or
+      // whose decoy setup() already caught) could still inject a decoy shuffle chain at a LATER
+      // reshuffle, since nothing re-ran this check past hand 1. Every reshuffle rebuilds
+      // `shuffleRoot` from a fresh `rounds` transcript exactly like setup()'s genesis deal does,
+      // so it gets the identical re-check before that refreshed state is ever co-signed (the
+      // next co-sign happens in `syncFlipState`'s BET_COMMIT branch, AFTER this function
+      // returns — see this function's header). `jointKeyCommit`/the registered keys are
+      // unchanged (the agg is fixed post-setup, per this function's header); only
+      // `shuffleRoot`/`deckCommitment` are fresh — but a decoy injected at THIS shuffle chain is
+      // exactly as real a threat as one at genesis and deserves the same guard, not a weaker one.
+      const reader = this.cfg.deckKeyReader
+      if (!reader) {
+        throw new Error(
+          'session: ZypherDeckProvider requires a deckKeyReader (on-chain ZkTable.deckKeys getter) — refusing to co-sign a reshuffled deal binding with no on-chain-verified registered keys',
+        )
+      }
+      const [seat1, seat2] = await Promise.all([reader(this.cfg.tableId, 1), reader(this.cfg.tableId, 2)])
+      const registeredKeys: Hex[] = [compressPoint(seat1[0], seat1[1]), compressPoint(seat2[0], seat2[1])]
+      const check = await verifyDealBinding({
+        provider: this.cfg.deck,
+        registeredKeys,
+        jointKeyCommit: this.currentBinding.jointKeyCommit,
+        shuffleRoot: binding.shuffleRoot,
+        deckCommitment: deckCommitment(this.deckState),
+        rounds,
+      })
+      if (!check.ok) {
+        throw new Error(`session: deal-binding validation failed on reshuffle — refusing to co-sign a decoy deck (${check.reason})`)
+      }
       this.currentBinding = { jointKeyCommit: this.currentBinding.jointKeyCommit, shuffleRoot: binding.shuffleRoot }
     }
   }
