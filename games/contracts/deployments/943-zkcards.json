@@ -1,16 +1,17 @@
 {
   "chainId": 943,
-  "deployBlock": "25074838",
+  "deployBlock": "25082049",
   "wrapperFactory": "0xB10A088ea04B261371Edc9Fe9e6121B8355aDe70",
   "holdemTreasury": "0x5182574eE268ABD0A48f97DcfcdE65234E8422E2",
-  "vk1": "0xc6fd5038dfc1009d322e937c4df8143e820305fc",
-  "vk2": "0xff1f32d611b9034564b053e4a831fcd93248062b",
-  "shuffleVerifier": "0x41346004a3099c765e3d3cd1c84bb0330bf4adc1",
-  "revealVerifier": "0x205b80b5b0575fe9d1def28c1c13bf98f74cf760",
-  "showdownDecodeLib": "0xbc132c71ce6680a8edaabee9f951bc919870f795",
-  "deckConstants": "0x8e7a2ec50654772454d861ad6e8ca070b9cc9747",
-  "deckChallengeLib": "0xa417500e8ae44bf9b5da786e9e65f1c7ab58c77f",
-  "zkTable": "0x8c31a72709b030574c4d8f4142abdd504912442d",
-  "hiLoWarRules": "0x0e383ad7efe7d8f4f0be0768126b9c7922cabc8e",
-  "holdemTableN": "0xc6c7146f9f24d44d3dc181de36d78fda107d9ad5"
+  "vk1": "0x9c55036120a4f007baa657a20dacfc0faea7327c",
+  "vk2": "0x2d4858fea963afdaaecfb5f8b2656cdebb3c5990",
+  "shuffleVerifier": "0x28226719744618ed200c9a5587cae76ac8291d72",
+  "revealVerifier": "0x956237d847c950d7c14272044723a3263c3e83ee",
+  "showdownDecodeLib": "0x5cc480ad328e6c534e80fe7f2278551ca676f4da",
+  "deckConstants": "0xd58bfb77b692c5eee2d2218be70db34bc41bb1b8",
+  "deckChallengeLib": "0x9d8be6dec19cb0e3500effc1c1e459b61ea24e20",
+  "zkTable": "0xe3fd86d70cee506bd21bb5be975ba21c51e3c18c",
+  "hiLoWarRules": "0x443594355c4c74a6c4f59b5797f7c9efebe2789f",
+  "holdemShowdownLib": "0x83df6994ecb097a1a073144bdd1c15ba9581d263",
+  "holdemTableN": "0x096679394ec698550efdda42b64f5c90a8a39882"
 }
