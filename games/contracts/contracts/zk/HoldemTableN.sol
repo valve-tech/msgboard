@@ -6,10 +6,10 @@ import {SafeTransferLib} from "solady/src/utils/SafeTransferLib.sol";
 import {LibString} from "solady/src/utils/LibString.sol";
 import {ChannelStateN, ChannelStateNLib, SidePot} from "./ChannelStateN.sol";
 import {IGameRulesN} from "./IGameRulesN.sol";
-import {RevealShareDLEQ} from "./lib/RevealShareDLEQ.sol";
 import {EllipticCurve} from "./lib/EllipticCurve.sol";
 import {ChannelTableBase} from "./ChannelTableBase.sol";
 import {SignedIntentBase} from "./SignedIntentBase.sol";
+import {HoldemShowdownLib} from "./HoldemShowdownLib.sol";
 import {IX402Token} from "../games/FlipBookX.sol";
 
 /// A wrapper clone's own view of the underlying asset it wraps (ValveWrapperImpl.underlying()).
@@ -130,7 +130,6 @@ interface IWrapperFactory {
 contract HoldemTableN is EIP712, ChannelTableBase, SignedIntentBase {
     using SafeTransferLib for address;
     using ChannelStateNLib for ChannelStateN;
-    using RevealShareDLEQ for RevealShareDLEQ.Statement;
 
     // HoldemTableN-only errors: the shared 18 (WrongValue..BadDeck) are inherited from
     // ChannelTableBase.
@@ -147,6 +146,20 @@ contract HoldemTableN is EIP712, ChannelTableBase, SignedIntentBase {
     /// `create()`'s token argument does not round-trip through the wrapper factory
     /// (`factory.wrapperOf(token.underlying()) != token`) — not a genuine x402 wrapper clone.
     error BadToken();
+    /// C2 showdown-dispute errors (mirror ZkTable's identically-named DEMAND_SHOWDOWN errors).
+    error AlreadyRevealed();
+    error NotRequiredSlot();
+    error RevealsIncomplete();
+    error MustFinalize();
+    /// `resolveTimeout` cannot resolve a DEMAND_SHOWDOWN dispute (it needs deck bytes it doesn't
+    /// take) — use `resolveShowdownTimeout` instead. Exhaustive-dispatch (H1) sentinel, never a
+    /// silent fall-through.
+    error ShowdownDataRequired();
+    /// `postShowdownReveals` called after `t.disputeDeadline` has already passed — mirrors
+    /// ZkTable's `DecoyWindowExpired` gate on `_challengeDeck`. See `postShowdownReveals`'s own
+    /// header for why this makes it mutually exclusive with `resolveShowdownTimeout` (no
+    /// boundary race, and no front-running an honest post-expiry timeout with one more share).
+    error ShowdownWindowExpired();
 
     uint256 public constant MAX_SEATS = 9;
     uint256 public constant MAX_RAKE_BPS = 250; // 2.5%
@@ -192,6 +205,34 @@ contract HoldemTableN is EIP712, ChannelTableBase, SignedIntentBase {
     /// These are the SAME per-seat keys that aggregate into the off-chain joint deck key;
     /// registered while Forming and read by respondWithShare to check a contested share.
     mapping(bytes32 => mapping(uint256 => uint256[2])) internal _deckKey;
+
+    /// C2 (DEMAND_SHOWDOWN) dispute state — an epoch-keyed reveal accumulator, kept separate from
+    /// the `Table` struct so a fresh dispute cycle never has to zero out O(seats * slots) storage
+    /// (see `_showdownEpoch`'s header). `liveMask`/`requiredCount` are snapshotted once at
+    /// `openShowdownDispute` from the co-signed state's own game state; `answeredMask` (bit i =>
+    /// seat i has posted all `requiredCount` shares this cycle) and `deadlineCeil` (the hard cap a
+    /// reveal-triggered clock extension can never exceed, bounding the grief window) evolve as
+    /// `postShowdownReveals` is called.
+    struct ShowdownDisputeN {
+        uint256 liveMask;
+        uint16 answeredMask;
+        uint32 requiredCount;
+        uint64 deadlineCeil;
+    }
+    mapping(bytes32 => ShowdownDisputeN) internal _showdowns;
+    /// tableId => the CURRENT showdown-dispute cycle's epoch, bumped (never reset) on every
+    /// `openShowdownDispute`. `_showdownShare`/`_showdownPosted` below key every cell by
+    /// `(epoch, ...)`, so a new cycle's cells never alias a stale cycle's — no O(N*slots) delete
+    /// is ever needed; a prior cycle's cells simply become permanently unreachable once the
+    /// epoch moves on (see HoldemShowdownLib.sol's header for the exact key formulas).
+    mapping(bytes32 => uint64) internal _showdownEpoch;
+    /// tableId => key=(epoch<<24 | slot<<8 | seat) => that seat's posted decryption share (x,y)
+    /// for that slot, this epoch. (0,0) == not yet posted. Written ONLY by `postShowdownReveals`,
+    /// after its DLEQ proof passes — every stored share is behind a passing proof by construction.
+    mapping(bytes32 => mapping(uint256 => uint256[2])) internal _showdownShare;
+    /// tableId => key=(epoch<<8 | seat) => how many of `requiredCount` shares that seat has
+    /// posted this epoch.
+    mapping(bytes32 => mapping(uint256 => uint32)) internal _showdownPosted;
     /// The x402 wrapper token a table is denominated + escrowed in, set once at `create` and
     /// immutable thereafter. Separate mapping (not a Table field), mirroring ZkTable's
     /// `tableToken` — keeps the Table struct's shape (and every existing view getter) unchanged.
@@ -222,6 +263,12 @@ contract HoldemTableN is EIP712, ChannelTableBase, SignedIntentBase {
     event DeckKeyRegistered(bytes32 indexed tableId, uint8 seat);
     /// `forfeitedSeat` is the demandSeat that was force-folded on the chess clock — NOT a game winner.
     event ForcedFold(bytes32 indexed tableId, uint8 forfeitedSeat, uint256[] payouts, uint256 rake);
+    /// C1 (setup-freeze) dispute events — mirror ZkTable's identically-named pair.
+    event SetupDisputeOpened(bytes32 indexed tableId, uint8 demandSeat, uint64 deadline);
+    event SetupDisputeRefunded(bytes32 indexed tableId);
+    /// C2 (showdown-freeze) dispute events.
+    event ShowdownDisputeOpened(bytes32 indexed tableId, uint64 epoch, uint256 liveMask, uint32 requiredCount, uint64 deadline);
+    event ShowdownRevealStored(bytes32 indexed tableId, uint32 slot, uint8 seat, uint256 x, uint256 y);
 
     constructor(address treasury_, address factory_) {
         treasury = treasury_ == address(0) ? msg.sender : treasury_;
@@ -609,6 +656,10 @@ contract HoldemTableN is EIP712, ChannelTableBase, SignedIntentBase {
     /// Wallet-only (see `cancelFor`): the recovered signer must equal `t.seats[0]` directly, never
     /// resolved via `_seatOf` (a channel-signing key alone must not be able to cancel a table).
     bytes32 internal constant CANCEL_INTENT_TYPEHASH = keccak256("CancelIntent(bytes32 tableId,uint256 nonce,uint64 deadline)");
+    /// C1's relayed `disputeSetupFor` — binds only `tableId` (no other choice to pin: a setup
+    /// dispute names no demand kind/seat/slot, unlike `OpenDisputeIntent`).
+    bytes32 internal constant DISPUTE_SETUP_INTENT_TYPEHASH =
+        keccak256("DisputeSetupIntent(bytes32 tableId,uint256 nonce,uint64 deadline)");
     /// `stateHash` pins the EXACT contested `ChannelStateN` (via its existing
     /// `ChannelStateNLib.structHash`) the signer is opening a dispute against — tampering any
     /// field of the relayer-supplied `state` recomputes a different `stateHash`, which recovers a
@@ -649,6 +700,10 @@ contract HoldemTableN is EIP712, ChannelTableBase, SignedIntentBase {
 
     function _hashCancelIntent(bytes32 tableId, uint256 nonce, uint64 deadline) internal pure returns (bytes32) {
         return keccak256(abi.encode(CANCEL_INTENT_TYPEHASH, tableId, nonce, deadline));
+    }
+
+    function _hashDisputeSetupIntent(bytes32 tableId, uint256 nonce, uint64 deadline) internal pure returns (bytes32) {
+        return keccak256(abi.encode(DISPUTE_SETUP_INTENT_TYPEHASH, tableId, nonce, deadline));
     }
 
     function _hashOpenDisputeIntent(
@@ -696,6 +751,10 @@ contract HoldemTableN is EIP712, ChannelTableBase, SignedIntentBase {
         return _hashTypedData(_hashCancelIntent(tableId, nonce, deadline));
     }
 
+    function disputeSetupIntentDigest(bytes32 tableId, uint256 nonce, uint64 deadline) public view returns (bytes32) {
+        return _hashTypedData(_hashDisputeSetupIntent(tableId, nonce, deadline));
+    }
+
     function openDisputeIntentDigest(
         bytes32 tableId,
         bytes32 stateHash,
@@ -717,6 +776,48 @@ contract HoldemTableN is EIP712, ChannelTableBase, SignedIntentBase {
     }
 
     // ── dispute machine ───────────────────────────────────────────────────────
+
+    /// C1 — closes the "Live with no co-signed state yet" freeze (mirror ZkTable.disputeSetup
+    /// :750-773). A table can go Live the instant a second seat joins and `start()` is called,
+    /// before ANY ChannelStateN has ever been co-signed — so if a counterparty vanishes right
+    /// then, there is no state for `openDispute` to contest and no way to force a settlement.
+    /// `disputeSetup` opens a demandKind-0 dispute that ANY seat may call, with no demanded
+    /// action from anyone: if the table is genuinely live, a fresh co-signed state (any nonce,
+    /// including 0) submitted via `respondWithState` proves it and clears the dispute back to
+    /// Live (see that function's demandKind==0 carve-out); otherwise `resolveTimeout`'s kind==0
+    /// branch refunds every seat's escrow in full, permissionlessly, once the clock expires.
+    function disputeSetup(bytes32 tableId) external {
+        Table storage t = _tables[tableId];
+        uint8 seat = _seatOf(t, msg.sender);
+        _disputeSetup(t, tableId, seat);
+    }
+
+    /// Relayed variant of `disputeSetup`: seat resolved from the recovered signer via the same
+    /// `_seatOf` a direct call uses — see the contract header's signed-intent section.
+    function disputeSetupFor(bytes32 tableId, uint256 nonce, uint64 deadline, bytes calldata sig) external {
+        Table storage t = _tables[tableId];
+        address signer = _consumeIntent(_hashDisputeSetupIntent(tableId, nonce, deadline), nonce, deadline, sig);
+        uint8 seat = _seatOf(t, signer);
+        _disputeSetup(t, tableId, seat);
+    }
+
+    /// Guard: once `hasCheckpoint == true` (some state has been co-signed and accepted on-chain
+    /// — via `openDispute`/`openShowdownDispute`/`respondWithState`), a table has PROVEN itself
+    /// live at least once, so `disputeSetup` refuses (`BadDemand`) — the correct tool for a stall
+    /// after that point is `openDispute` (a real demand against a real owing seat) or
+    /// `openShowdownDispute`, not a blanket "nobody has ever signed anything" refund. This is
+    /// the mid-game-abuse guard: without it, a losing seat could open a bogus setup dispute deep
+    /// into a hand and force a refund at initial buy-ins instead of the actual, larger pot.
+    function _disputeSetup(Table storage t, bytes32 tableId, uint8 seat) internal {
+        if (t.status != Status.Live) revert BadStatus();
+        if (t.hasCheckpoint) revert BadDemand();
+        t.status = Status.Disputed;
+        t.demandSeat = seat;
+        t.demandKind = 0;
+        t.demandSlot = 0;
+        t.disputeDeadline = uint64(block.number) + t.clockBlocks;
+        emit SetupDisputeOpened(tableId, seat, t.disputeDeadline);
+    }
 
     /// Post your latest N-of-N co-signed state and demand the owed protocol action from
     /// exactly one seat. gameState must be the preimage of state.gameStateHash; the demand
@@ -820,6 +921,18 @@ contract HoldemTableN is EIP712, ChannelTableBase, SignedIntentBase {
                 revert BadDemand();
             }
         }
+        _openDisputeCommon(t, state, demandSeat, demandKind, demandSlot);
+        emit DisputeOpened(tableId, demandSeat, demandKind, demandSlot, t.disputeDeadline);
+    }
+
+    /// Shared tail of every dispute-opening path (`_openDispute` and `openShowdownDispute`):
+    /// pins the co-signed `state` as the table's contested checkpoint and moves it to Disputed.
+    /// Factored out because `t.disputeState = state` is a full `ChannelStateN` struct copy
+    /// (calldata -> storage, including its two dynamic arrays) — sizable codegen that would
+    /// otherwise be duplicated at both call sites.
+    function _openDisputeCommon(Table storage t, ChannelStateN calldata state, uint8 demandSeat, uint8 demandKind, uint32 demandSlot)
+        internal
+    {
         t.status = Status.Disputed;
         t.demandSeat = demandSeat;
         t.demandKind = demandKind;
@@ -828,7 +941,6 @@ contract HoldemTableN is EIP712, ChannelTableBase, SignedIntentBase {
         t.checkpointNonce = state.nonce;
         t.hasCheckpoint = true;
         t.disputeDeadline = uint64(block.number) + t.clockBlocks;
-        emit DisputeOpened(tableId, demandSeat, demandKind, demandSlot, t.disputeDeadline);
     }
 
     /// Universal answer: fully permissionless (no `_seatOf(msg.sender)` gate — see the contract
@@ -838,10 +950,14 @@ contract HoldemTableN is EIP712, ChannelTableBase, SignedIntentBase {
         Table storage t = _tables[tableId];
         if (t.status != Status.Disputed) revert BadStatus();
         _checkCoSigned(t, tableId, state, sigs);
-        if (state.nonce <= t.disputeState.nonce) revert StaleNonce();
+        // C1: a demandKind-0 (disputeSetup) dispute has NO prior contested state (t.disputeState
+        // is still its zero default) — any co-signed state at all, including nonce 0, proves
+        // liveness and clears it. Every other demand kind still requires strictly newer than the
+        // state that was actually contested.
+        if (t.demandKind != 0 && state.nonce <= t.disputeState.nonce) revert StaleNonce();
         t.checkpointNonce = state.nonce;
         t.hasCheckpoint = true;
-        _clearDispute(t);
+        _clearDispute(tableId, t);
         emit DisputeAnsweredWithState(tableId, state.nonce);
     }
 
@@ -888,7 +1004,7 @@ contract HoldemTableN is EIP712, ChannelTableBase, SignedIntentBase {
         if (seat != t.demandSeat) revert NotYourDispute();
         if (t.rules.hashGameState(gameState) != t.disputeState.gameStateHash) revert BadGameState();
         bytes memory newState = t.rules.applyMove(gameState, move);
-        _clearDispute(t);
+        _clearDispute(tableId, t);
         emit DisputeAnsweredWithMove(tableId, move, t.rules.hashGameState(newState));
     }
 
@@ -934,35 +1050,34 @@ contract HoldemTableN is EIP712, ChannelTableBase, SignedIntentBase {
         uint256[2] storage pk = _deckKey[tableId][seat];
         if (pk[0] == 0 && pk[1] == 0) revert DeckKeyNotSet(); // assert: create()/join() guarantee every seat has a registered key
 
-        RevealShareDLEQ.Statement memory s = RevealShareDLEQ.Statement({
-            pkX: pk[0], pkY: pk[1],
-            c1X: deck[base],     c1Y: deck[base + 1],
-            c2X: deck[base + 2], c2Y: deck[base + 3],
-            dX: share[0], dY: share[1],
-            t1X: proof[0], t1Y: proof[1],
-            t2X: proof[2], t2Y: proof[3],
-            z: proof[4]
-        });
-        if (!s.verify(_ctxFor(tableId, slot))) revert BadShareProof();
+        // EIP-170: the DLEQ verify (and the EllipticCurve.ecMul/ecAdd/invMod bodies it calls) is
+        // hosted in the EXTERNAL HoldemShowdownLib rather than called inline — see that library's
+        // `verifyShare` header. Raw scalar fields are passed directly (not first assembled into a
+        // local `RevealShareDLEQ.Statement`) so this function never has to build+then-re-encode
+        // that struct — one copy instead of two.
+        if (
+            !HoldemShowdownLib.verifyShare(
+                pk[0], pk[1],
+                deck[base],     deck[base + 1],
+                deck[base + 2], deck[base + 3],
+                share[0], share[1],
+                proof[0], proof[1], proof[2], proof[3], proof[4],
+                _ctxFor(tableId, slot)
+            )
+        ) revert BadShareProof();
 
-        _clearDispute(t);
+        _clearDispute(tableId, t);
         emit DisputeAnsweredWithShare(tableId, seat, slot);
     }
 
     /// keccak over the 33-byte COMPRESSED SEC1 encoding of every card's (c1, c2) in slot
     /// order — the on-chain mirror of zk-core `deckCommitment(deck)` (which hashes the same
     /// compressed wire points). Binds a passed affine deck to a co-signed bytes32 commitment.
+    /// EIP-170: the loop itself lives in the EXTERNAL `HoldemShowdownLib.deckHash` (see that
+    /// library's header) — this is a thin wrapper so the 3 call sites below read identically to
+    /// before the extraction.
     function _deckHash(uint256[] calldata deck) internal pure returns (bytes32) {
-        if (deck.length % 4 != 0) revert BadDeck();
-        bytes memory acc;
-        for (uint256 i = 0; i < deck.length; i += 4) {
-            acc = abi.encodePacked(
-                acc,
-                bytes1(uint8(2 + (deck[i + 1] & 1))), bytes32(deck[i]),     // compress c1
-                bytes1(uint8(2 + (deck[i + 3] & 1))), bytes32(deck[i + 2])  // compress c2
-            );
-        }
-        return keccak256(acc);
+        return HoldemShowdownLib.deckHash(deck);
     }
 
     /// Reconstruct the replay-binding ctx string exactly as zk-core `ctxFor(tableId, slot)`:
@@ -977,33 +1092,286 @@ contract HoldemTableN is EIP712, ChannelTableBase, SignedIntentBase {
         );
     }
 
-    /// Clock expired unanswered: FORCE-FOLD the demandSeat. It keeps its co-signed
-    /// `balances[demandSeat]` but forfeits its in-pot stake; the pot and every side-pot it was
-    /// eligible for are redistributed to the still-eligible non-forfeiting seats (equal split,
-    /// odd-chip to the lowest-index eligible seat), so the table settles among the honest seats
-    /// while the staller can never gain by stalling. Conservation (_checkCoSigned) guarantees
-    /// exactly Σ escrow is paid out.
+    // ── C2 — showdown dispute (binding on-chain N-party card-reveal settlement) ────────────────
+
+    /// Open a DEMAND_SHOWDOWN dispute: a dedicated entrypoint (NOT the generic `openDispute`,
+    /// which stays gated by `_validateDemandKind` — MOVE/SHARE only, exactly as before) so it can
+    /// bypass `whoseTurn == 0 at SHOWDOWN` (see HoldemRules.whoseTurn) — the co-signed SHOWDOWN
+    /// state's own N valid signatures self-authenticate the demand, so there is no `demandSeat`
+    /// and no `_seatOf(msg.sender)` gate: ANY relayer/watchtower holding the state may open this,
+    /// permissionlessly, the moment a counterparty stops co-signing at the moment of truth
+    /// (the forced-reveal-then-refuse-to-cosign deadlock this closes).
+    ///
+    /// `gameState` must hash to `state.gameStateHash` (the trust boundary every dispute uses) and
+    /// `t.rules.showdownEligible` must confirm it is a real SHOWDOWN-phase state whose
+    /// balances/pot/sidePots match the co-signed `state` structurally — see IGameRulesN's
+    /// `showdownEligible` header. `liveMask`/`requiredCount`/`answeredMask` are snapshotted once
+    /// here for the whole dispute cycle; `deadlineCeil` bounds how far `postShowdownReveals` can
+    /// ever push the clock out (grief-proofing the reveal window to at most `(nSeats+3)` chess
+    /// clocks total, regardless of how many reveal batches get posted).
+    function openShowdownDispute(bytes32 tableId, ChannelStateN calldata state, bytes[] calldata sigs, bytes calldata gameState)
+        external
+    {
+        Table storage t = _tables[tableId];
+        if (t.status != Status.Live) revert BadStatus();
+        _checkCoSigned(t, tableId, state, sigs);
+        if (t.hasCheckpoint && state.nonce < t.checkpointNonce) revert StaleNonce();
+        if (state.rakeAccrued > t.rakeCap) revert RakeTooHigh();
+        if (t.rules.hashGameState(gameState) != state.gameStateHash) revert BadGameState();
+        if (state.deckCommitment == bytes32(0)) revert BadDemand();
+        (bool eligible, uint8 nSeats, uint256 liveMask, bool stub) =
+            t.rules.showdownEligible(gameState, state.balances, state.pot, state.sidePots);
+        if (!eligible || nSeats != t.seats.length) revert BadDemand();
+
+        uint64 epoch = ++_showdownEpoch[tableId];
+        ShowdownDisputeN storage sd = _showdowns[tableId];
+        sd.liveMask = liveMask;
+        // Cycle parameters (requiredCount/answeredMask/deadlineCeil) computed in the EXTERNAL
+        // HoldemShowdownLib (EIP-170 — see that library's `computeCycle` header): the popcount +
+        // ternary arithmetic doesn't need to live in HoldemTableN's own bytecode.
+        (sd.requiredCount, sd.answeredMask, sd.deadlineCeil) =
+            HoldemShowdownLib.computeCycle(uint8(t.seats.length), liveMask, stub, t.clockBlocks);
+
+        _openDisputeCommon(t, state, 0, DEMAND_SHOWDOWN, 0);
+        emit ShowdownDisputeOpened(tableId, epoch, liveMask, sd.requiredCount, t.disputeDeadline);
+    }
+
+    /// Post seat `seat`'s OWN decryption shares for one or more required slots in a single call,
+    /// each individually DLEQ-verified against `_deckKey[tableId][seat]` (self-authenticating —
+    /// see the @dev PERMISSIONLESS note on `respondWithShare`; the exact same reasoning applies
+    /// here: a stranger relaying this call can only ever land `seat`'s own truthful shares, never
+    /// forge or redirect one). Per-slot required-slot gating, first-write-wins duplicate
+    /// rejection, and the DLEQ check itself all live in `HoldemShowdownLib.verifyAndStoreShare`
+    /// (EIP-170 — see that library's header); this function is thin orchestration. Once `seat`
+    /// has posted all `requiredCount` shares for the current epoch, its `answeredMask` bit is
+    /// set and `t.disputeDeadline` extends forward-only by a fresh `clockBlocks` window, capped
+    /// at `sd.deadlineCeil` (bounded grief — see `openShowdownDispute`'s header).
+    ///
+    /// TWO griefing closures on top of that pre-existing cap (2026-08, F2):
+    ///  1. Gated to strictly before the deadline (`ShowdownWindowExpired`), mirroring ZkTable's
+    ///     `_challengeDeck`/`DecoyWindowExpired` gate. Without this, a non-answering seat could
+    ///     watch for an honest post-expiry `resolveShowdownTimeout` and front-run it with one
+    ///     more share, recomputing `newDeadline` past the current block and reverting the honest
+    ///     caller's `_validateClockExpired` check — repeatable indefinitely up to `deadlineCeil`.
+    ///     Gating here makes the two terminals mutually exclusive by construction: before the
+    ///     deadline only a post can succeed; after it, only the timeout (`resolveShowdownTimeout`
+    ///     itself reverts `ClockNotExpired` on a non-expired clock) — no boundary race either way.
+    ///  2. The deadline only extends when THIS post makes `seat` newly `complete` (finishes its
+    ///     full `requiredCount` this epoch), not on every partial share. A withholding seat that
+    ///     never intends to finish could otherwise drip-feed single shares — each individually
+    ///     legitimate (DLEQ-proven, non-duplicate) but never completing — to ride the deadline all
+    ///     the way out to `deadlineCeil` purely to delay resolution, at zero cost (it still ends
+    ///     up an unanswered non-completer either way). Gating the extension on genuine completion
+    ///     denies a stalling seat any extension at all, while an honestly-answering seat — the
+    ///     documented single-call path (`postShowdownReveals`'s own "in a single call" framing
+    ///     above) — still gets the extension exactly when it finishes, refreshing the shared
+    ///     clock for any OTHER seat still working. Residual liveness note: a seat that legitimately
+    ///     needs to split its OWN batch across multiple transactions must still finish within the
+    ///     window active at the time of its first partial post (partial posts no longer buy it
+    ///     more room) — the intended, and always-sufficient, path is one call with the whole batch.
+    function postShowdownReveals(
+        bytes32 tableId,
+        uint8 seat,
+        uint256[] calldata deck,
+        uint32[] calldata slots,
+        uint256[2][] calldata shares,
+        uint256[5][] calldata proofs
+    ) external {
+        Table storage t = _tables[tableId];
+        if (t.status != Status.Disputed) revert BadStatus();
+        if (t.demandKind != DEMAND_SHOWDOWN) revert NotDemanded();
+        if (block.number > t.disputeDeadline) revert ShowdownWindowExpired();
+        if (seat >= t.seats.length) revert SeatRange();
+        if (_deckHash(deck) != t.disputeState.deckCommitment) revert BadDeck();
+
+        uint256[2] storage pk = _deckKey[tableId][seat];
+        if (pk[0] == 0 && pk[1] == 0) revert DeckKeyNotSet(); // assert: create()/join() guarantee a key
+
+        // The WHOLE batch — per-slot required-slot/duplicate/DLEQ checks, the storage writes,
+        // the posted-count bookkeeping, AND the ShowdownRevealStored events — lives in ONE
+        // external call to HoldemShowdownLib.postReveals (EIP-170 — see that library's header):
+        // `deck` (up to 208 words) previously got re-ABI-encoded into a fresh external call once
+        // PER SLOT in this batch; a single batched call encodes it exactly once.
+        ShowdownDisputeN storage sd = _showdowns[tableId];
+        bool complete = HoldemShowdownLib.postReveals(
+            _showdownShare[tableId], _showdownPosted[tableId], sd.liveMask, t.seats.length, sd.requiredCount,
+            _showdownEpoch[tableId], seat, pk[0], pk[1], deck, slots, shares, proofs, tableId
+        );
+        if (complete) {
+            sd.answeredMask |= uint16(uint256(1) << seat);
+            // Extend ONLY on genuine completion — see the F2 doc block above for why a partial
+            // post must never renew the clock.
+            uint64 newDeadline = uint64(block.number) + t.clockBlocks;
+            if (newDeadline > sd.deadlineCeil) newDeadline = sd.deadlineCeil;
+            if (newDeadline > t.disputeDeadline) t.disputeDeadline = newDeadline;
+        }
+    }
+
+    /// Finalize once EVERY seat has posted its full `requiredCount` of shares
+    /// (`answeredMask == full`) — the ONLY terminal that requires no clock expiry, since a fully
+    /// answered dispute has nothing left to wait for (mirrors ZkTable's `finalizeShowdown`: no
+    /// caller restriction, since it can only ever settle deterministically or split — never pay
+    /// an attacker more than its due). `RevealsIncomplete` short-circuits an early call.
+    function finalizeShowdownN(bytes32 tableId, uint256[] calldata deck, bytes calldata gameState) external {
+        Table storage t = _tables[tableId];
+        if (t.status != Status.Disputed) revert BadStatus();
+        if (t.demandKind != DEMAND_SHOWDOWN) revert NotDemanded();
+        ShowdownDisputeN storage sd = _showdowns[tableId];
+        if (sd.answeredMask != uint16((uint256(1) << t.seats.length) - 1)) revert RevealsIncomplete();
+        _pinShowdown(t, deck, gameState);
+        _settleShowdown(t, tableId, deck, gameState, 0);
+    }
+
+    /// Shared hash-pin guard for every C2 entrypoint that takes raw `deck`/`gameState` bytes
+    /// (`finalizeShowdownN` and `resolveShowdownTimeout`): both must hash to the values pinned in
+    /// `t.disputeState` at `openShowdownDispute` time, so any caller supplying the SAME real
+    /// deck/gameState reaches the SAME result regardless of who calls it.
+    function _pinShowdown(Table storage t, uint256[] calldata deck, bytes calldata gameState) internal view {
+        HoldemShowdownLib.pinShowdown(t.rules, deck, gameState, t.disputeState.deckCommitment, t.disputeState.gameStateHash);
+    }
+
+    /// Answer-aware timeout for a DEMAND_SHOWDOWN dispute that did NOT get every seat's full
+    /// reveal set before its deadline — the C2 counterpart of the MOVE/SHARE force-fold branch.
+    /// Needs `deck`/`gameState` (hash-pinned to the dispute exactly like every other showdown
+    /// entrypoint, so any caller supplying the SAME real deck/gameState reaches the SAME result —
+    /// this is why it is a separate entrypoint from `resolveTimeout`, which takes neither).
+    ///
+    /// Truth table (see HoldemShowdownLib.rankable's header for what "rankable" means):
+    ///   - `answeredMask == full`             -> `MustFinalize` (no free-roll; a fully-answered
+    ///     dispute must go through `finalizeShowdownN`, never a clock-race).
+    ///   - `answered != 0` AND rankable        -> settle among the answerers, forfeiting every
+    ///     non-answering seat's hand-ranking eligibility (`extraFold = full & ~answered`) — the
+    ///     A3-equivalent that prevents a disputant free-roll: withholding reveals costs you your
+    ///     OWN pot eligibility, it never wins you anyone else's.
+    ///   - otherwise (nobody answered, or a withheld share column makes ranking impossible for
+    ///     everyone under N-of-N joint decryption)                                    -> split
+    ///     each pot among its best-available tier of `answered` seats (see
+    ///     `_splitShowdownPots`) — refund-and-split, never a steal, never a freeze.
+    function resolveShowdownTimeout(bytes32 tableId, uint256[] calldata deck, bytes calldata gameState) external {
+        Table storage t = _tables[tableId];
+        if (t.status != Status.Disputed) revert BadStatus();
+        if (t.demandKind != DEMAND_SHOWDOWN) revert NotDemanded();
+        _validateClockExpired(t.disputeDeadline);
+        _pinShowdown(t, deck, gameState);
+
+        ShowdownDisputeN storage sd = _showdowns[tableId];
+        uint256 n = t.seats.length;
+        uint256 full = (uint256(1) << n) - 1;
+        uint256 answered = uint256(sd.answeredMask);
+        if (answered == full) revert MustFinalize();
+
+        uint256 extraFold = full & ~answered;
+        if (answered != 0 && HoldemShowdownLib.rankable(_showdownShare[tableId], _showdownEpoch[tableId], n, sd.liveMask & answered)) {
+            _settleShowdown(t, tableId, deck, gameState, extraFold);
+        } else {
+            _splitShowdownPots(t, tableId, answered);
+        }
+    }
+
+    /// The shared settle path for both C2 terminals (`finalizeShowdownN` with `extraFoldMask==0`,
+    /// and `resolveShowdownTimeout`'s rankable branch with the non-answerers masked out): decode
+    /// every needed slot from the epoch-keyed share accumulator, and — ONLY if every decode is
+    /// clean (a real, non-duplicate card) AND the rules contract's returned settlement conserves
+    /// the table's escrow — pay it out. ANY failure short-circuits to `_splitShowdownPots`,
+    /// which never reverts past this point: a bad/duplicate decode can only ever be caused by a
+    /// masking-side deviation (every reveal here is already DLEQ-proven honest per seat, so the
+    /// reveal side carries zero attribution information — mirrors ZkTable's deckkey-binding
+    /// theorem, generalized to N), so it is unattributable and settles as a split, never a steal.
+    function _settleShowdown(Table storage t, bytes32 tableId, uint256[] calldata deck, bytes calldata gameState, uint256 extraFoldMask)
+        internal
+    {
+        ShowdownDisputeN storage sd = _showdowns[tableId];
+        uint256 n = t.seats.length;
+        uint256 rankMask = sd.liveMask & ~extraFoldMask;
+
+        // The whole-showdown decode, the try/catch dispatch into the rules contract, AND the
+        // belt-and-braces conservation/shape re-check on its returned vector are ALL combined
+        // into one external call — HoldemShowdownLib.settleOrFail (EIP-170 — see that library's
+        // header): the decoded holes/board never have to round-trip back out through
+        // HoldemTableN's own bytecode just to be handed straight to the rules contract. The
+        // co-signed state's own conservation (checked once, at `openShowdownDispute`, via
+        // `_checkCoSigned`) guarantees the rules contract's vector conserves for an HONEST
+        // implementation, but a wrong/misbehaving one must never mint or burn funds through this
+        // path — `settleOrFail` re-derives Σ escrow fresh rather than trusting its arithmetic.
+        (bool ok, uint256[] memory payouts, uint256 rake) = HoldemShowdownLib.settleOrFail(
+            _showdownShare[tableId], deck, n, _showdownEpoch[tableId], sd.requiredCount, rankMask,
+            t.rules, gameState, extraFoldMask, t.escrow, t.rakeCap
+        );
+        if (ok) {
+            _payoutVector(t, tableId, payouts, rake, false, 0);
+            return;
+        }
+        _splitShowdownPots(t, tableId, rankMask);
+    }
+
+    /// The guaranteed-terminal, never-reverts-past-this-point fallback for an unattributable or
+    /// incomplete showdown: refund each seat its co-signed `disputeState.balances[i]`, then split
+    /// the main pot and every side pot among the BEST-AVAILABLE tier of contestants, trying in
+    /// order: (this pot's eligible seats) ∩ (live seats) ∩ `prefer`, then dropping `prefer`, then
+    /// dropping the live-intersection, finally falling back to literally every seat — a tier is
+    /// only skipped if it is EMPTY (see `HoldemShowdownLib.splitPots`'s tiering, which never
+    /// returns an empty mask). The main pot (a bare `uint256`, no `eligibleMask` of its own —
+    /// unlike `sidePots`) is treated as eligible to every seat, so its tiering reduces to
+    /// (live ∩ prefer, live, full). Rake is ONLY ever the co-signed `disputeState.rakeAccrued` —
+    /// already bounded to `<= rakeCap` at `openShowdownDispute` — never re-derived from a decode
+    /// this function doesn't trust. The tiering + per-pot split itself lives in the EXTERNAL
+    /// `HoldemShowdownLib.splitPots` (EIP-170 — see that library's header).
+    function _splitShowdownPots(Table storage t, bytes32 tableId, uint256 prefer) internal {
+        uint256 live = _showdowns[tableId].liveMask;
+        uint256[] memory payouts =
+            HoldemShowdownLib.splitPots(t.disputeState.balances, t.disputeState.pot, t.disputeState.sidePots, live, prefer);
+        _payoutVector(t, tableId, payouts, t.disputeState.rakeAccrued, false, 0);
+    }
+
+    /// EXHAUSTIVE DISPATCH (H1): every branch names an EXPLICIT `demandKind` — 0 (C1 setup
+    /// dispute), DEMAND_MOVE/DEMAND_SHARE (the original force-fold), or DEMAND_SHOWDOWN (C2,
+    /// which needs deck bytes this function doesn't take — routes to `resolveShowdownTimeout`
+    /// instead) — and the final `else` reverts `BadDemand`. There is no implicit fall-through
+    /// bucket a future demand kind could silently land in with the wrong payout rule.
+    /// `_disputeSetup`/`_openDispute`/`openShowdownDispute` are the only writers of
+    /// `t.demandKind`, and each writes a value this dispatch explicitly names.
     function resolveTimeout(bytes32 tableId) external {
         Table storage t = _tables[tableId];
         if (t.status != Status.Disputed) revert BadStatus();
         _validateClockExpired(t.disputeDeadline);
-        uint256 n = t.seats.length;
-        uint8 forfeit = t.demandSeat;
+        uint8 kind = t.demandKind;
+        if (kind == 0) {
+            // C1: nobody ever co-signed a state proving the table was actually played —
+            // permissionless full refund of the live escrow.
+            uint256 n0 = t.seats.length;
+            uint256[] memory refund = new uint256[](n0);
+            for (uint256 i = 0; i < n0; i++) refund[i] = t.escrow[i];
+            emit SetupDisputeRefunded(tableId);
+            _payoutVector(t, tableId, refund, 0, false, 0);
+        } else if (kind == DEMAND_MOVE || kind == DEMAND_SHARE) {
+            // Clock expired unanswered: FORCE-FOLD the demandSeat. It keeps its co-signed
+            // `balances[demandSeat]` but forfeits its in-pot stake; the pot and every side-pot it
+            // was eligible for are redistributed to the still-eligible non-forfeiting seats
+            // (equal split, odd-chip to the lowest-index eligible seat), so the table settles
+            // among the honest seats while the staller can never gain by stalling. Conservation
+            // (_checkCoSigned) guarantees exactly Σ escrow is paid out.
+            uint256 n = t.seats.length;
+            uint8 forfeit = t.demandSeat;
 
-        uint256[] memory payouts = new uint256[](n);
-        for (uint256 i = 0; i < n; i++) payouts[i] = t.disputeState.balances[i];
+            uint256[] memory payouts = new uint256[](n);
+            for (uint256 i = 0; i < n; i++) payouts[i] = t.disputeState.balances[i];
 
-        // main pot: eligible = everyone except the forfeiting seat
-        uint256 mainMask = ((uint256(1) << n) - 1) & ~(uint256(1) << forfeit);
-        _distribute(payouts, t.disputeState.pot, mainMask);
-        // side-pots: eligible = (sidePot.eligibleMask) minus the forfeiting seat
-        SidePot[] storage sps = t.disputeState.sidePots;
-        for (uint256 k = 0; k < sps.length; k++) {
-            uint256 mask = sps[k].eligibleMask & ~(uint256(1) << forfeit);
-            _distribute(payouts, sps[k].amount, mask);
+            // main pot: eligible = everyone except the forfeiting seat
+            uint256 mainMask = ((uint256(1) << n) - 1) & ~(uint256(1) << forfeit);
+            _distribute(payouts, t.disputeState.pot, mainMask);
+            // side-pots: eligible = (sidePot.eligibleMask) minus the forfeiting seat
+            SidePot[] storage sps = t.disputeState.sidePots;
+            for (uint256 k = 0; k < sps.length; k++) {
+                uint256 mask = sps[k].eligibleMask & ~(uint256(1) << forfeit);
+                _distribute(payouts, sps[k].amount, mask);
+            }
+
+            _payoutVector(t, tableId, payouts, t.disputeState.rakeAccrued, true, forfeit);
+        } else if (kind == DEMAND_SHOWDOWN) {
+            revert ShowdownDataRequired();
+        } else {
+            revert BadDemand();
         }
-
-        _payoutVector(t, tableId, payouts, t.disputeState.rakeAccrued, true, forfeit);
     }
 
     // ── internals ──────────────────────────────────────────────────────────────
@@ -1078,13 +1446,22 @@ contract HoldemTableN is EIP712, ChannelTableBase, SignedIntentBase {
         revert NotPlayer();
     }
 
-    function _clearDispute(Table storage t) internal {
+    /// `tableId` param (new): clearing back to Live also wipes any C2 showdown-dispute struct for
+    /// this table — a no-op for MOVE/SHARE/setup disputes (only `openShowdownDispute` ever
+    /// writes `_showdowns[tableId]`), but correct regardless of demand kind, and it means a newer
+    /// co-signed state (`respondWithState`) always resets showdown progress rather than letting a
+    /// stale cycle's `liveMask`/`answeredMask` leak into a later one. The epoch-keyed
+    /// `_showdownShare`/`_showdownPosted` cells are NOT deleted here — they don't need to be:
+    /// `_showdownEpoch` only ever increments, so a future `openShowdownDispute` call addresses an
+    /// epoch no prior cycle's cells alias (see HoldemShowdownLib.sol's header).
+    function _clearDispute(bytes32 tableId, Table storage t) internal {
         t.status = Status.Live;
         t.demandSeat = 0;
         t.demandKind = 0;
         t.demandSlot = 0;
         t.disputeDeadline = 0;
         delete t.disputeState;
+        delete _showdowns[tableId];
     }
 
     /// Pay each seat its `payouts[i]` and the accrued rake to the treasury, then mark settled.

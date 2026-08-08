@@ -202,8 +202,12 @@ export interface RunDealResult {
 /**
  * Verify a slot's shares FIRST (attributing any failure to the offending seat), THEN
  * combine. This is the single chokepoint enforcing the Task-2 safety contract.
+ *
+ * Exported (beyond this module's own `runDeal` use) so `dealBindingN.ts`'s `verifyDealBinding`
+ * — the C3 validate-before-co-sign guard — can reuse this EXACT attribution check rather than
+ * re-implementing it (holdem-hardening-blueprint.md §10).
  */
-async function verifyAttributed(
+export async function verifyAttributed(
   provider: MaskedDeckProvider,
   pubs: Hex[],
   deck: WireMasked[],
@@ -232,8 +236,11 @@ async function verifyAttributed(
  * Cross-slot WELL-FORMEDNESS check: assert no two dealt slots revealed the same card.
  * Iterating in ascending slot order makes the reported colliding pair `[earlier, later]`
  * deterministic (the earlier slot is the first occurrence the later one duplicates).
+ *
+ * Exported so `dealBindingN.ts`'s `verifyDealBinding` (the C3 guard) can reuse this exact
+ * check over its own decoded slot set, rather than re-implementing it.
  */
-function assertNoDuplicateCards(revealedBySlot: Map<number, number>): void {
+export function assertNoDuplicateCards(revealedBySlot: Map<number, number>): void {
   const firstSlotForCard = new Map<number, number>()
   for (const slot of [...revealedBySlot.keys()].sort((a, b) => a - b)) {
     const card = revealedBySlot.get(slot)!

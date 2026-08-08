@@ -66,7 +66,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -79,7 +79,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -90,7 +90,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -101,7 +101,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -112,11 +112,25 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
       // ZkTable family targets 943 like the other games contracts — Shanghai, no MCOPY.
+      //
+      // EIP-170 SIZE FIX (2026-08-08): every override below down through PetitionSignatures.sol
+      // shares this exact settings shape (0.8.25 / viaIR:true / shanghai / runs) — they mirror
+      // foundry.toml's [profile.default], per that file's header comment, and get compiled
+      // together. HoldemTableN.sol grew to 25,203 deployed bytes (627 over EIP-170's 24,576
+      // limit) after a full library-extraction pass (heavy dispute-machine logic already lives in
+      // the external HoldemShowdownLib — see that file's header); further calldata-struct
+      // externalization was proven net-negative. The only remaining lever was optimizer runs:
+      // lowered 1000 -> 700 for the whole shanghai family (empirically the highest value that
+      // gets HoldemTableN under the 24,300-byte safety-margin ceiling — see
+      // test/foundry/HoldemTableNSize.t.sol / test/ZkTableSize.test.ts). Tradeoff: slightly less
+      // inlining/aggressive optimization across this whole family = marginally higher gas on
+      // hot repeat-call paths, in exchange for both HoldemTableN and ZkTable staying deployable.
+      // Bump this back toward 1000 only alongside a fresh size-budget review of both contracts.
       'contracts/zk/ChannelState.sol': {
         version: '0.8.25',
         settings: {
@@ -124,7 +138,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -135,7 +149,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -146,7 +160,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -157,7 +171,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -168,7 +182,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -179,7 +193,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -190,7 +204,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -201,7 +215,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -216,7 +230,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -227,7 +241,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -238,7 +252,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -249,7 +263,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -260,7 +274,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -271,7 +285,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -282,7 +296,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -293,7 +307,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -304,7 +318,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -315,7 +329,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -327,7 +341,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -338,7 +352,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -349,7 +363,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -360,7 +374,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -371,7 +385,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -383,7 +397,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -394,7 +408,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -405,7 +419,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -416,7 +430,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -429,7 +443,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -441,7 +455,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -589,7 +603,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
