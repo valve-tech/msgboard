@@ -89,8 +89,10 @@ contract FlipBookXUnitTest is Test {
         makerSig = _sign(makerKey, _receiveDigest(maker, STAKE + MAKER_BOND, o.takeDeadline, id));
     }
 
-    function _takerSig(FlipBookX.Offer memory o, bytes32 id) internal view returns (bytes memory) {
-        return _sign(takerKey, _receiveDigest(taker, STAKE + TAKER_BOND, o.takeDeadline, book.takerNonce(id, taker)));
+    function _takerSig(FlipBookX.Offer memory o, bytes32 id, bytes32 guessCommit) internal view returns (bytes memory) {
+        return _sign(
+            takerKey, _receiveDigest(taker, STAKE + TAKER_BOND, o.takeDeadline, book.takerNonce(id, taker, guessCommit))
+        );
     }
 
     function _guessCommit(bool guess) internal view returns (bytes32) {
@@ -99,8 +101,9 @@ contract FlipBookXUnitTest is Test {
 
     function _take(bool choice, bool guess) internal returns (bytes32 id) {
         (FlipBookX.Offer memory o, bytes32 id_, bytes memory makerSig) = _signedOffer(choice);
+        bytes32 gc = _guessCommit(guess);
         vm.prank(crank);
-        book.take(o, makerSig, taker, _guessCommit(guess), _takerSig(o, id_));
+        book.take(o, makerSig, taker, gc, _takerSig(o, id_, gc));
         id = id_;
     }
 
@@ -150,7 +153,7 @@ contract FlipBookXUnitTest is Test {
         // test_settledOffer_cannotBeReplayed — this flip is still in flight, never settled).
         (FlipBookX.Offer memory o, bytes32 id, bytes memory makerSig) = _signedOffer(true);
         bytes32 gc = _guessCommit(true);
-        bytes memory ts = _takerSig(o, id);
+        bytes memory ts = _takerSig(o, id, gc);
         book.take(o, makerSig, taker, gc, ts);
 
         vm.expectRevert(FlipBookBase.AlreadyTaken.selector);
@@ -237,10 +240,10 @@ contract FlipBookXUnitTest is Test {
             takerRevealWindow: W2
         });
         bytes32 id = book.offerId(o);
+        bytes32 gc = keccak256(abi.encode(taker, guess, SALT2));
         bytes memory makerSig = _sign(makerKey, _receiveDigest(maker, stake + mBond, o.takeDeadline, id));
         bytes memory takerSig =
-            _sign(takerKey, _receiveDigest(taker, stake + tBond, o.takeDeadline, book.takerNonce(id, taker)));
-        bytes32 gc = keccak256(abi.encode(taker, guess, SALT2));
+            _sign(takerKey, _receiveDigest(taker, stake + tBond, o.takeDeadline, book.takerNonce(id, taker, gc)));
 
         book.take(o, makerSig, taker, gc, takerSig);
         book.revealChoice(id, choice, SALT);
@@ -281,11 +284,12 @@ contract FlipBookXUnitTest is Test {
             takerRevealWindow: W2
         });
         bytes32 id = book.offerId(o);
+        bytes32 gc = keccak256(abi.encode(taker, true, SALT2));
         bytes memory makerSig = _sign(makerKey, _receiveDigest(maker, stake + mBond, o.takeDeadline, id));
         bytes memory takerSig =
-            _sign(takerKey, _receiveDigest(taker, stake + tBond, o.takeDeadline, book.takerNonce(id, taker)));
+            _sign(takerKey, _receiveDigest(taker, stake + tBond, o.takeDeadline, book.takerNonce(id, taker, gc)));
 
-        book.take(o, makerSig, taker, keccak256(abi.encode(taker, true, SALT2)), takerSig);
+        book.take(o, makerSig, taker, gc, takerSig);
         vm.warp(block.timestamp + W1 + 1);
         book.claimMakerDefault(id);
 
@@ -317,11 +321,12 @@ contract FlipBookXUnitTest is Test {
             takerRevealWindow: W2
         });
         bytes32 id = book.offerId(o);
+        bytes32 gc = keccak256(abi.encode(taker, false, SALT2));
         bytes memory makerSig = _sign(makerKey, _receiveDigest(maker, stake + mBond, o.takeDeadline, id));
         bytes memory takerSig =
-            _sign(takerKey, _receiveDigest(taker, stake + tBond, o.takeDeadline, book.takerNonce(id, taker)));
+            _sign(takerKey, _receiveDigest(taker, stake + tBond, o.takeDeadline, book.takerNonce(id, taker, gc)));
 
-        book.take(o, makerSig, taker, keccak256(abi.encode(taker, false, SALT2)), takerSig);
+        book.take(o, makerSig, taker, gc, takerSig);
         book.revealChoice(id, true, SALT);
         vm.warp(block.timestamp + W2 + 1);
         book.claimTakerDefault(id);

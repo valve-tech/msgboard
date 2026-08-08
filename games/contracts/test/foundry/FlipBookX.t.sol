@@ -84,8 +84,10 @@ contract FlipBookXTest is Test {
         makerSig = _sign(makerKey, _receiveDigest(maker, STAKE + MAKER_BOND, o.takeDeadline, id));
     }
 
-    function _takerSig(FlipBookX.Offer memory o, bytes32 id) internal view returns (bytes memory) {
-        return _sign(takerKey, _receiveDigest(taker, STAKE + TAKER_BOND, o.takeDeadline, book.takerNonce(id, taker)));
+    function _takerSig(FlipBookX.Offer memory o, bytes32 id, bytes32 guessCommit) internal view returns (bytes memory) {
+        return _sign(
+            takerKey, _receiveDigest(taker, STAKE + TAKER_BOND, o.takeDeadline, book.takerNonce(id, taker, guessCommit))
+        );
     }
 
     function _guessCommit(bool guess) internal view returns (bytes32) {
@@ -95,8 +97,9 @@ contract FlipBookXTest is Test {
     /// Full take by a RELAYER (crank) — proves the flow is submitter-agnostic end to end.
     function _take(bool choice, bool guess) internal returns (bytes32 id) {
         (FlipBookX.Offer memory o, bytes32 id_, bytes memory makerSig) = _signedOffer(choice);
+        bytes32 gc = _guessCommit(guess);
         vm.prank(crank);
-        book.take(o, makerSig, taker, _guessCommit(guess), _takerSig(o, id_));
+        book.take(o, makerSig, taker, gc, _takerSig(o, id_, gc));
         id = id_;
     }
 
@@ -139,7 +142,7 @@ contract FlipBookXTest is Test {
         (FlipBookX.Offer memory o, bytes32 id, bytes memory makerSig) = _signedOffer(true);
         o.stake = STAKE + 1; // taker tries to sweeten the pot
         bytes32 gc = _guessCommit(true);
-        bytes memory ts = _takerSig(o, id);
+        bytes memory ts = _takerSig(o, id, gc);
         vm.expectRevert(MockX402.InvalidSignature.selector);
         book.take(o, makerSig, taker, gc, ts);
     }
@@ -148,9 +151,42 @@ contract FlipBookXTest is Test {
         (FlipBookX.Offer memory o, bytes32 id, bytes memory makerSig) = _signedOffer(true);
         // a different taker cannot ride Bob's authorization
         bytes32 gc = _guessCommit(true);
-        bytes memory ts = _takerSig(o, id);
+        bytes memory ts = _takerSig(o, id, gc);
         vm.expectRevert(MockX402.InvalidSignature.selector);
         book.take(o, makerSig, crank, gc, ts);
+    }
+
+    /// THE FIX: a relayer that swaps in a guessCommit the taker never signed over must NOT be able
+    /// to spend the taker's escrow authorization. Binding guessCommit into takerNonce means the
+    /// substituted commit recomputes a different nonce than the one the taker's signature covers,
+    /// so the wrapper's EIP-712 recovery fails and the whole take reverts — closing the hole where
+    /// a relayer could lock the taker's stake+takerBond under a guess only the relayer knows,
+    /// which the taker can never open, letting the maker sweep everything via claimTakerDefault.
+    function test_relayerSubstitutedGuessCommit_breaksTakerSignature() public {
+        (FlipBookX.Offer memory o, bytes32 id, bytes memory makerSig) = _signedOffer(true);
+        bytes32 honestGc = _guessCommit(true);
+        bytes memory ts = _takerSig(o, id, honestGc); // taker signs over THIS guessCommit
+        bytes32 substitutedGc = keccak256(abi.encode(taker, false, keccak256("relayer-chosen-salt")));
+
+        vm.prank(crank);
+        vm.expectRevert(MockX402.InvalidSignature.selector);
+        book.take(o, makerSig, taker, substitutedGc, ts); // relayer swaps the guessCommit in-flight
+    }
+
+    /// The counterpart: an honest take where guessCommit matches exactly what the taker signed
+    /// over still succeeds, AND the exact guessCommit the taker signed is what gets stored — the
+    /// taker's own (guess, salt2) opens it cleanly at reveal time, proving no substitution occurred.
+    function test_honestMatchingGuessCommit_stillSucceeds() public {
+        (FlipBookX.Offer memory o, bytes32 id, bytes memory makerSig) = _signedOffer(true);
+        bytes32 gc = _guessCommit(true);
+        bytes memory ts = _takerSig(o, id, gc);
+
+        vm.prank(crank);
+        bytes32 returnedId = book.take(o, makerSig, taker, gc, ts);
+        assertEq(returnedId, id, "take succeeds and returns the offer id");
+
+        book.revealChoice(id, true, SALT);
+        book.revealGuess(id, true, SALT2); // opens against the ACTUAL stored guessCommit — no BadReveal
     }
 
     // ── the free-option closure ─────────────────────────────────────────────────────────────────
@@ -168,7 +204,7 @@ contract FlipBookXTest is Test {
         token.cancelAuthorization(maker, id, v, r, s);
 
         bytes32 gc = _guessCommit(true);
-        bytes memory ts = _takerSig(o, id);
+        bytes memory ts = _takerSig(o, id, gc);
         vm.expectRevert(abi.encodeWithSelector(MockX402.AuthorizationAlreadyUsed.selector, maker, id));
         book.take(o, makerSig, taker, gc, ts);
     }
@@ -180,7 +216,7 @@ contract FlipBookXTest is Test {
         // Same offer, same signatures: the wrapper burned the maker's nonce at the first take.
         (FlipBookX.Offer memory o,, bytes memory makerSig) = _signedOffer(true);
         bytes32 gc = _guessCommit(true);
-        bytes memory ts = _takerSig(o, id);
+        bytes memory ts = _takerSig(o, id, gc);
         vm.expectRevert(abi.encodeWithSelector(MockX402.AuthorizationAlreadyUsed.selector, maker, id));
         book.take(o, makerSig, taker, gc, ts);
     }
@@ -244,7 +280,7 @@ contract FlipBookXTest is Test {
     function test_guards() public {
         (FlipBookX.Offer memory o, bytes32 id, bytes memory makerSig) = _signedOffer(true);
         bytes32 gc = _guessCommit(true);
-        bytes memory ts = _takerSig(o, id);
+        bytes memory ts = _takerSig(o, id, gc);
 
         vm.expectRevert(FlipBookBase.SelfTake.selector);
         book.take(o, makerSig, maker, gc, makerSig);
@@ -315,7 +351,7 @@ contract FlipBookXTest is Test {
         vm.warp(block.timestamp + 10); // fresh offer under a new deadline
         (FlipBookX.Offer memory o, bytes32 id2, bytes memory makerSig) = _signedOffer(true);
         vm.prank(crank);
-        book.take(o, makerSig, taker, _guessCommit(true), _takerSig(o, id2));
+        book.take(o, makerSig, taker, _guessCommit(true), _takerSig(o, id2, _guessCommit(true)));
         vm.warp(block.timestamp + W1 + 1);
         book.claimMakerDefault(id2);
         uint256 abandonLoss = m1 - token.balanceOf(maker);
@@ -338,7 +374,7 @@ contract FlipBookXTest is Test {
         vm.warp(block.timestamp + 10);
         (FlipBookX.Offer memory o, bytes32 id2, bytes memory makerSig) = _signedOffer(true);
         vm.prank(crank);
-        book.take(o, makerSig, taker, _guessCommit(false), _takerSig(o, id2));
+        book.take(o, makerSig, taker, _guessCommit(false), _takerSig(o, id2, _guessCommit(false)));
         book.revealChoice(id2, true, SALT);
         vm.warp(block.timestamp + W2 + 1);
         book.claimTakerDefault(id2);
@@ -382,7 +418,7 @@ contract FlipBookXTest is Test {
         // A 64-byte payload routes through the 7598 `bytes` overload → ERC-1271 verification.
         bytes memory contractSig = new bytes(64);
         vm.prank(crank);
-        book.take(o, contractSig, taker, _guessCommit(true), _takerSig(o, id));
+        book.take(o, contractSig, taker, _guessCommit(true), _takerSig(o, id, _guessCommit(true)));
         assertEq(token.balanceOf(address(book)), 2 * STAKE + MAKER_BOND + TAKER_BOND, "1271 maker escrowed");
     }
 }
