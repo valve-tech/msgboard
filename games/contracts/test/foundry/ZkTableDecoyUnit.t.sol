@@ -190,8 +190,12 @@ contract ZkTableDecoyUnitTest is Test {
         zk.challengeDeck(tableId, built.pkc, built.steps, built.afterDecks, built.proofs);
         assertEq(uint8(_status(zk, tableId)), uint8(ChannelTableBase.Status.Settled));
 
+        // F2's deadline gate (`block.number > t.disputeDeadline`) now fires before
+        // DeckChallengeLib.verify's own status check: `_clearDispute` zeroes `disputeDeadline` on
+        // settlement, so any post-terminal call trips DecoyWindowExpired first. Either way the
+        // one-shot invariant holds — the call reverts and the table stays Settled.
         vm.prank(a);
-        vm.expectRevert(ChannelTableBase.BadStatus.selector);
+        vm.expectRevert(ZkTable.DecoyWindowExpired.selector);
         zk.challengeDeck(tableId, built.pkc, built.steps, built.afterDecks, built.proofs);
     }
 
@@ -208,25 +212,63 @@ contract ZkTableDecoyUnitTest is Test {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // respondWithState aborts an open decoy window (M4)
+    // respondWithState MUST NOT abort an open decoy window (F1 fund-critical fix)
     // ═══════════════════════════════════════════════════════════════════════
 
-    function test_respondWithState_abortsOpenDecoyWindow() public {
+    /// F1: `respondWithState` used to let a strictly-newer co-signed state mutually abort an open
+    /// DEMAND_DECOY window back to Live, erasing the on-chain-proven garbage-decode attribution.
+    /// That path is now a hard revert — the window can ONLY resolve via `challengeDeck` (attributed
+    /// forfeit) or `resolveTimeout` -> `_resolveDecoyTimeout` (split), both of which pay out, so
+    /// blocking this mutual-abort cannot freeze funds.
+    function test_respondWithState_revertsWhileDecoyWindowOpen() public {
         Built memory built = _build(5);
-        bytes32 tableId = keccak256("abort");
+        bytes32 tableId = keccak256("no-abort");
         _open(zk, tableId, built);
         assertEq(_demandKind(zk, tableId), 4, "DEMAND_DECOY open");
 
         ChannelState memory newer = _state(tableId, built);
-        newer.nonce = 2; // strictly newer than the pinned disputeState's nonce (1)
+        newer.nonce = 2; // strictly newer than the pinned disputeState's nonce (1) — would have
+        // been accepted pre-fix; must now revert regardless of nonce freshness.
         bytes32 digest = zk.stateDigest(newer);
         (uint8 vA, bytes32 rA, bytes32 sA) = vm.sign(PK_A, digest);
         (uint8 vB, bytes32 rB, bytes32 sB) = vm.sign(PK_B, digest);
 
+        vm.expectRevert(ZkTable.DecoyWindowOpen.selector);
         zk.respondWithState(tableId, newer, abi.encodePacked(rA, sA, vA), abi.encodePacked(rB, sB, vB));
 
-        assertEq(uint8(_status(zk, tableId)), uint8(ChannelTableBase.Status.Live), "mutual abort clears back to Live");
-        assertEq(_demandKind(zk, tableId), 0, "decoy demand wiped");
+        // The window is still open and untouched — not silently no-op'd into some other state.
+        assertEq(uint8(_status(zk, tableId)), uint8(ChannelTableBase.Status.Disputed), "still disputed");
+        assertEq(_demandKind(zk, tableId), 4, "decoy demand still open");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // challengeDeck is gated to strictly before the deadline (F2 fund-critical fix)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// F2: post-deadline, `challengeDeck` (whole-pot attribution) and `resolveTimeout` (split) used
+    /// to both be live, letting a cheater front-run an honest late challenge with `resolveTimeout`
+    /// to force a split. `challengeDeck` now reverts once `block.number > disputeDeadline`, and
+    /// `resolveTimeout` -> `_resolveDecoyTimeout` becomes the ONLY reachable terminal from there.
+    function test_challengeDeck_revertsAfterDeadline_thenResolveTimeoutSplits() public {
+        Built memory built = _build(6);
+        bytes32 tableId = keccak256("late-challenge");
+        _open(zk, tableId, built);
+
+        vm.roll(block.number + CLOCK + 1); // strictly past disputeDeadline
+
+        vm.prank(a);
+        vm.expectRevert(ZkTable.DecoyWindowExpired.selector);
+        zk.challengeDeck(tableId, built.pkc, built.steps, built.afterDecks, built.proofs);
+
+        // resolveTimeout is now the only reachable terminal, and it splits (never a forfeit).
+        uint256 beforeA = token.balanceOf(a);
+        uint256 beforeB = token.balanceOf(b);
+        zk.resolveTimeout(tableId);
+
+        uint256 half = POT / 2;
+        assertEq(token.balanceOf(a) - beforeA, BAL_A + half + (POT - half * 2), "odd wei stays with A");
+        assertEq(token.balanceOf(b) - beforeB, BAL_B + half);
+        assertEq(uint8(_status(zk, tableId)), uint8(ChannelTableBase.Status.Settled));
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -238,16 +280,15 @@ contract ZkTableDecoyUnitTest is Test {
         Built memory builtA = _build(10);
         _open(zk, tableId, builtA);
 
-        // Cycle 1: abort back to Live via respondWithState (mutual).
-        ChannelState memory newer = _state(tableId, builtA);
-        newer.nonce = 2;
-        bytes32 digest = zk.stateDigest(newer);
-        (uint8 vA, bytes32 rA, bytes32 sA) = vm.sign(PK_A, digest);
-        (uint8 vB, bytes32 rB, bytes32 sB) = vm.sign(PK_B, digest);
-        zk.respondWithState(tableId, newer, abi.encodePacked(rA, sA, vA), abi.encodePacked(rB, sB, vB));
-        assertEq(uint8(_status(zk, tableId)), uint8(ChannelTableBase.Status.Live));
+        // Cycle 1: settle via a successful challenge (respondWithState can no longer mutually
+        // abort an open decoy window post-F1 — see test_respondWithState_revertsWhileDecoyWindowOpen
+        // — so exercise `_clearDispute`'s wipe through challengeDeck's own terminal instead).
+        vm.prank(a);
+        zk.challengeDeck(tableId, builtA.pkc, builtA.steps, builtA.afterDecks, builtA.proofs);
+        assertEq(uint8(_status(zk, tableId)), uint8(ChannelTableBase.Status.Settled));
 
-        // Cycle 2: a FRESH decoy dispute on the SAME table, with a DIFFERENT transcript/commitment.
+        // Cycle 2: a FRESH decoy dispute on the SAME table (the harness writes `tables[tableId]`
+        // directly, bypassing the real status machine), with a DIFFERENT transcript/commitment.
         Built memory builtB = _build(20);
         _open(zk, tableId, builtB);
 

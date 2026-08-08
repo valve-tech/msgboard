@@ -8,13 +8,6 @@ import {IGameRules} from "./IGameRules.sol";
 import {ChannelTableBase} from "./ChannelTableBase.sol";
 import {SignedIntentBase} from "./SignedIntentBase.sol";
 import {ShowdownDecodeLib} from "../vendor/uzkge/ShowdownDecodeLib.sol";
-// DO NOT REMOVE as "unused" — ZkTable no longer calls DeckConstants directly (that moved into
-// DeckChallengeLib), but empirically (verified via repeated clean `hardhat compile` runs)
-// removing this import shifts solc's viaIR/optimizer-runs:1000 codegen for THIS contract from
-// 23,908 deployed bytes to 25,190 — over EIP-170's 24,576-byte limit. Whatever whole-compilation-
-// unit effect causes this, keeping the import is what keeps ZkTable deployable; DeckChallengeLib
-// itself is the one that actually calls `DeckConstants.initialDeckAndAgg`.
-import {DeckConstants} from "./DeckConstants.sol";
 import {DeckShuffleStep, DeckChallengeLib, IShuffleVerifier52DCL as IShuffleVerifier52} from "./DeckChallengeLib.sol";
 import {IX402Token} from "../games/FlipBookX.sol";
 
@@ -118,6 +111,12 @@ contract ZkTable is EIP712, ChannelTableBase, SignedIntentBase {
     /// and the remedy is identical regardless of which specific pin didn't match (resubmit the
     /// correct transcript, or let the window lapse to the guaranteed split terminal).
     error BadTranscript();
+    /// `respondWithState` called while a DEMAND_DECOY challenge window is open — see that
+    /// function's header for why a newer co-signed state must not be allowed to abort it.
+    error DecoyWindowOpen();
+    /// `challengeDeck` called after `t.disputeDeadline` has passed — see `_challengeDeck`'s
+    /// header for why the challenge must be gated to strictly before the deadline.
+    error DecoyWindowExpired();
     // An undecodable card is NOT an error path: CardTable52.decode returns (bool ok, uint8)
     // rather than reverting. Pre-Wave-2 this routed a bad-decode or duplicate-card deck straight
     // to a pot-split fallback (see _showdownOutcome); Wave-2 (deckkey-binding-spec.md) instead
@@ -902,21 +901,24 @@ contract ZkTable is EIP712, ChannelTableBase, SignedIntentBase {
     function respondWithState(bytes32 tableId, ChannelState calldata state, bytes calldata sigA, bytes calldata sigB) external {
         Table storage t = tables[tableId];
         if (t.status != Status.Disputed) revert BadStatus();
+        // DEMAND_DECOY (M4): once a garbage/duplicate decode has opened the decoy window, a
+        // strictly-newer co-signed state must NOT be allowed to abort it back to Live. A cheater
+        // who legitimately holds such a state (openDispute permits opening at an OLDER BET_COMMIT
+        // state than the latest one both seats actually co-signed, so a higher-nonce state existing
+        // is not impossible) could otherwise front-run the window closed, erasing the on-chain-
+        // proven attribution of the garbage decode. The "recover via a fresh DEMAND_MOVE" idea is
+        // UNSOUND as a backstop: the cheater simply answers that demand via respondWithMove (which
+        // needs no honest deck key at all), clearing the dispute and permanently losing
+        // attribution. So this path must be a hard revert, not a silent no-op, and not something we
+        // rely on a second dispute to undo. This is fund-safe to block: the decoy window ALWAYS
+        // terminates within clockBlocks either via `challengeDeck` (attributed whole-pot forfeit)
+        // or `resolveTimeout` -> `_resolveDecoyTimeout` (unattributed split) — both pay out — so
+        // disallowing this mutual-abort here can never freeze funds; it only removes a way to erase
+        // a proven-on-chain garbage decode.
+        if (t.demandKind == DEMAND_DECOY) revert DecoyWindowOpen();
         _checkCoSigned(t, tableId, state, sigA, sigB);
         // setup dispute (demandKind 0): any co-signed state proves liveness;
-        // move/share/showdown/decoy disputes need strictly newer than the contested state.
-        // DEMAND_DECOY (M4): this is a deliberate mutual abort of an open decoy-challenge
-        // window — but note "strictly newer" is measured against the DISPUTED state's nonce, and
-        // `openDispute` allows opening at an OLDER BET_COMMIT state than the latest one both seats
-        // actually co-signed. So a cheater who legitimately holds a higher-nonce co-signed state
-        // CAN produce a strictly-newer one here and front-run the decoy window back to Live — a
-        // newer co-signed state existing is NOT impossible. This abort path is reachable, but
-        // still safe: the honest victim is never forced to accept it as final, because it can
-        // simply open a FRESH DEMAND_MOVE dispute against that same cheater and grind it to the
-        // MOVE-timeout backstop (forfeit-to-disputant on an unanswered clock), rather than relying
-        // on the decoy window's split-only outcome ever being the last word. `_clearDispute` below
-        // wipes the DEMAND_DECOY phase exactly like any other demand kind — no special-casing
-        // needed.
+        // move/share/showdown disputes need strictly newer than the contested state.
         if (t.demandKind != 0 && state.nonce <= t.disputeState.nonce) revert StaleNonce();
         t.checkpointNonce = state.nonce;
         t.hasCheckpoint = true;
@@ -1287,6 +1289,17 @@ contract ZkTable is EIP712, ChannelTableBase, SignedIntentBase {
         uint256[][] calldata afterDecks,
         bytes[] calldata proofs
     ) internal {
+        // Gate to strictly before the deadline. DEMAND_DECOY differs from MOVE/SHARE/SHOWDOWN
+        // disputes here: their `resolveTimeout` terminal is a forfeit-to-disputant, so an unanswered
+        // clock and a late-but-valid answer both ultimately favor the same side and racing them is
+        // harmless; DEMAND_DECOY's `resolveTimeout` terminal (`_resolveDecoyTimeout`) is a SPLIT
+        // instead. Without this gate, `challengeDeck` (whole-pot attribution) and `resolveTimeout`
+        // (split) would BOTH be callable post-deadline, letting a cheater front-run an honest late
+        // challenge with `resolveTimeout` to force a split instead of the forfeit it earned. Gating
+        // here makes the two terminals mutually exclusive by construction: before the deadline only
+        // `challengeDeck` can succeed (`resolveTimeout` reverts via `_validateClockExpired` on a
+        // non-expired clock); after it, only the split.
+        if (block.number > t.disputeDeadline) revert DecoyWindowExpired();
         uint256 balA = t.disputeState.balanceA;
         uint256 balB = t.disputeState.balanceB;
         uint256[2] memory k1 = deckKeys[tableId][1];
@@ -1336,9 +1349,7 @@ contract ZkTable is EIP712, ChannelTableBase, SignedIntentBase {
         if (culprit != 0) {
             if (culprit == 1) toB += pot; else toA += pot;
         } else {
-            uint256 half = pot / 2;
-            toA += half + (pot - half * 2); // odd wei stays with A
-            toB += half;
+            (toA, toB) = _splitPotInto(pot, toA, toB);
         }
         emit DeckChallengeResolved(tableId, challenger, culprit, badStep, toA, toB);
         _clearDispute(tableId, t);
@@ -1452,9 +1463,7 @@ contract ZkTable is EIP712, ChannelTableBase, SignedIntentBase {
         } else if (potTo == 2) {
             toB += pot;
         } else {
-            uint256 half = pot / 2;
-            toA += half + (pot - half * 2); // odd wei stays with A
-            toB += half;
+            (toA, toB) = _splitPotInto(pot, toA, toB);
         }
 
         delete showdowns[tableId];
@@ -1469,15 +1478,21 @@ contract ZkTable is EIP712, ChannelTableBase, SignedIntentBase {
     /// timeout terminal. `winner == 0` in the emitted event means SPLIT here, same convention as
     /// `_resolveShowdownTimeout`'s own no-real-winner case.
     function _resolveDecoyTimeout(bytes32 tableId, Table storage t) internal {
-        uint256 toA = t.disputeState.balanceA;
-        uint256 toB = t.disputeState.balanceB;
         uint256 pot = t.disputeState.pot;
-        uint256 half = pot / 2;
-        toA += half + (pot - half * 2); // odd wei stays with A
-        toB += half;
+        (uint256 toA, uint256 toB) = _splitPotInto(pot, t.disputeState.balanceA, t.disputeState.balanceB);
         delete showdowns[tableId]; // mirrors _resolveShowdownTimeout — harmless no-op if unset
         emit DisputeForfeited(tableId, 0, toA, toB);
         _payout(t, tableId, toA, toB);
+    }
+
+    /// Shared odd-wei pot split: `pot` is halved onto the running `toA`/`toB` accumulators, with
+    /// any odd remainder wei staying with A — an arbitrary but consistent tie-break used by every
+    /// unattributable-split terminal (`_adjudicateDecoy`'s unattributable branch,
+    /// `_resolveShowdownTimeout`'s mutual-no-show branch, `_resolveDecoyTimeout`). Extracted so
+    /// this invariant lives in exactly one place instead of three copies.
+    function _splitPotInto(uint256 pot, uint256 toA, uint256 toB) internal pure returns (uint256, uint256) {
+        uint256 half = pot / 2;
+        return (toA + half + (pot - half * 2), toB + half);
     }
 
     /// Clears a table's dispute fields back to Live AND wipes any showdown reveal accumulator —
