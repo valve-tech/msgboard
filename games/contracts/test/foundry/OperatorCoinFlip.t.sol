@@ -46,6 +46,7 @@ contract OperatorCoinFlipTest is Test {
         // player approves the ESCROW (custodian), not the game
         tok.mint(player, 100 ether);
         vm.prank(player); tok.approve(address(esc), type(uint256).max);
+        vm.prank(op); esc.authorizeGame(address(game), true);
     }
 
     function _open(uint8 side) internal returns (bytes32 roundId, bytes32 key) {

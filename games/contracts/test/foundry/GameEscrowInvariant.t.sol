@@ -12,6 +12,11 @@ import {EscrowHandler} from "../../contracts/test/EscrowHandler.sol";
 ///        summed across that token's buckets — the escrow can always pay what it owes.
 ///   (I2) ISOLATION: a hostile/fee-on-transfer token in one bucket never reduces another bucket's
 ///        recorded balance below what its own token backs.
+///   (C1) AUTHORIZATION: no unauthorized game ever moves an operator's funds via lockExposure. Bare
+///        solvency/isolation are BLIND to this — a rogue caller stealing bankroll via lockExposure +
+///        settleWin still leaves every bucket individually solvent (it's a legitimate-looking bet from
+///        the ledger's point of view), so this needs its own dedicated invariant fed by a handler path
+///        that actually attempts the drain (see EscrowHandler.rogueLock).
 contract GameEscrowInvariantTest is Test {
     GameEscrow internal esc;
     OperatorRegistry internal reg;
@@ -66,5 +71,13 @@ contract GameEscrowInvariantTest is Test {
             esc.bankrollOf(opX, address(tokB)) + esc.lockedOf(opX, address(tokB)) + esc.rakeOf(opX, address(tokB)) +
             esc.bankrollOf(opY, address(tokB)) + esc.lockedOf(opY, address(tokB)) + esc.rakeOf(opY, address(tokB));
         assertLe(claimsB, tokB.balanceOf(address(esc)));
+    }
+
+    /// C1 — the handler's `rogueLock` action drives an unauthorized identity (never opted-in by
+    /// either operator) at `lockExposure` every run. This must never succeed: if it ever does, the
+    /// ghost flag latches true and this invariant fails, proving the authorization gate is load-bearing
+    /// (not merely incidentally-never-hit by the fuzzer).
+    function invariant_noUnauthorizedBankrollMovement() public view {
+        assertFalse(handler.rogueDrainSucceeded());
     }
 }

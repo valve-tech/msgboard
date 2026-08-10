@@ -120,6 +120,7 @@ contract GameEscrowLockTest is Test {
         vm.prank(op); esc.depositBankroll(op, address(tok), 1000 ether);
         tok.mint(player, 100 ether);
         vm.prank(player); tok.approve(address(esc), type(uint256).max);
+        vm.prank(op); esc.authorizeGame(game, true);
     }
 
     function test_lock_pullsStake_debitsExposure_holdsPayout() public {
@@ -142,6 +143,38 @@ contract GameEscrowLockTest is Test {
         esc.lockExposure(betId, op, address(tok), player, 10 ether, 19 ether);
         vm.expectRevert(GameEscrow.BetExists.selector);
         esc.lockExposure(betId, op, address(tok), player, 10 ether, 19 ether);
+    }
+
+    /// C1 regression: an UNAUTHORIZED caller must never be able to lock (and thereby drain) an
+    /// operator's bankroll by simply naming that operator in the call. The victim's bankroll must be
+    /// completely unchanged after the reverted attempt.
+    function test_lock_revertsForUnauthorizedGame() public {
+        address attacker = address(0xBAD);
+        uint256 bankrollBefore = esc.bankrollOf(op, address(tok));
+        bytes32 betId = keccak256("attack");
+        vm.prank(attacker);
+        vm.expectRevert(GameEscrow.UnauthorizedGame.selector);
+        esc.lockExposure(betId, op, address(tok), attacker, 1, bankrollBefore + 1);
+        assertEq(esc.bankrollOf(op, address(tok)), bankrollBefore); // untouched
+        (, , , , , , bool open) = esc.bets(betId);
+        assertFalse(open); // never recorded
+    }
+
+    /// C1 regression: revoking a previously-authorized game must block it immediately — the operator
+    /// keeps sovereign control of who may draw on its bankroll at all times.
+    function test_lock_authorizeGame_toggleOff_blocksPreviouslyAuthorized() public {
+        // `game` (address(this)) is authorized in setUp and can lock successfully...
+        bytes32 betId1 = keccak256("before-revoke");
+        esc.lockExposure(betId1, op, address(tok), player, 10 ether, 19 ether);
+
+        // ...until the operator revokes it.
+        vm.prank(op); esc.authorizeGame(game, false);
+
+        uint256 bankrollBefore = esc.bankrollOf(op, address(tok));
+        bytes32 betId2 = keccak256("after-revoke");
+        vm.expectRevert(GameEscrow.UnauthorizedGame.selector);
+        esc.lockExposure(betId2, op, address(tok), player, 10 ether, 19 ether);
+        assertEq(esc.bankrollOf(op, address(tok)), bankrollBefore); // unchanged by the blocked attempt
     }
 
     /// CEI regression: a hostile token re-entering lockExposure with the SAME betId mid-`transferFrom`
@@ -202,6 +235,7 @@ contract GameEscrowSettleTest is Test {
         vm.prank(op); esc.depositBankroll(op, address(tok), 1000 ether);
         tok.mint(player, 100 ether);
         vm.prank(player); tok.approve(address(esc), type(uint256).max);
+        vm.prank(op); esc.authorizeGame(address(this), true); // this contract acts as the game
     }
 
     function _lock(bytes32 id) internal {
@@ -270,6 +304,7 @@ contract GameEscrowReentrancyTest is Test {
         vm.prank(op); esc.depositBankroll(op, address(rtok), 1000 ether);
         rtok.mint(player, 100 ether);
         vm.prank(player); rtok.approve(address(esc), type(uint256).max);
+        vm.prank(op); esc.authorizeGame(address(rtok), true); // game of record is the token itself
     }
 
     /// CEI proof: settleWin flips the bet closed and zeroes the ledger's `locked` BEFORE the payout
