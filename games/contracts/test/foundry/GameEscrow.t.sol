@@ -6,6 +6,7 @@ import {EscrowLib} from "../../contracts/games/operator/EscrowLib.sol";
 import {GameEscrow} from "../../contracts/games/operator/GameEscrow.sol";
 import {OperatorRegistry} from "../../contracts/games/operator/OperatorRegistry.sol";
 import {ERC20} from "../../contracts/test/ERC20.sol";
+import {ReenteringToken} from "../../contracts/test/ReenteringToken.sol";
 
 contract EscrowLibTest is Test {
     using EscrowLib for EscrowLib.Ledger;
@@ -141,5 +142,44 @@ contract GameEscrowLockTest is Test {
         esc.lockExposure(betId, op, address(tok), player, 10 ether, 19 ether);
         vm.expectRevert(GameEscrow.BetExists.selector);
         esc.lockExposure(betId, op, address(tok), player, 10 ether, 19 ether);
+    }
+
+    /// CEI regression: a hostile token re-entering lockExposure with the SAME betId mid-`transferFrom`
+    /// (the stake pull) must hit BetExists, not double-lock exposure / double-pull the stake. This
+    /// only holds because the Bet is recorded (open=true) BEFORE the external _pullVerified call.
+    function test_lock_sameBetIdReentrancy_cannotDoubleLock() public {
+        ReenteringToken rtok = new ReenteringToken();
+        rtok.mint(op, 1000 ether);
+        vm.prank(op); rtok.approve(address(esc), type(uint256).max);
+        vm.prank(op); esc.depositBankroll(op, address(rtok), 1000 ether);
+        rtok.mint(player, 100 ether);
+        vm.prank(player); rtok.approve(address(esc), type(uint256).max);
+
+        bytes32 betId = keccak256("reentry");
+        uint256 stake = 10 ether;
+        uint256 payout = 19 ether; // exposure 9 ether
+
+        // Arm the token to re-enter lockExposure with the SAME betId/args during its transferFrom
+        // (i.e. during the stake pull triggered inside the FIRST, legitimate lockExposure call).
+        rtok.arm(
+            address(esc),
+            abi.encodeWithSelector(GameEscrow.lockExposure.selector, betId, op, address(rtok), player, stake, payout)
+        );
+
+        esc.lockExposure(betId, op, address(rtok), player, stake, payout);
+
+        // The reentrant inner call fired exactly once and reverted (BetExists).
+        assertEq(rtok.reentryCalls(), 1);
+        assertTrue(rtok.lastReentryReverted());
+
+        // Exactly ONE lock happened: exposure debited once, payout locked once.
+        assertEq(esc.bankrollOf(op, address(rtok)), 991 ether); // 1000 - 9, not 1000 - 18
+        assertEq(esc.lockedOf(op, address(rtok)), 19 ether);    // not 38
+        assertEq(rtok.balanceOf(address(esc)), 1010 ether);     // 1000 deposit + 10 stake, pulled once
+
+        (,,,, uint256 recordedPayout, uint256 recordedStake, bool open) = esc.bets(betId);
+        assertTrue(open);
+        assertEq(recordedPayout, payout);
+        assertEq(recordedStake, stake);
     }
 }

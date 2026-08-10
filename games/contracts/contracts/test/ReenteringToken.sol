@@ -24,6 +24,7 @@ contract ReenteringToken {
     );
 
     mapping(address => uint256) public balanceOf;
+    mapping(address => mapping(address => uint256)) public allowance;
     mapping(address => mapping(bytes32 => bool)) public authorizationState;
 
     address public reenterTarget;
@@ -93,6 +94,29 @@ contract ReenteringToken {
             lastReentryReverted = !ok;
         }
         _transfer(msg.sender, to, value);
+        return true;
+    }
+
+    function approve(address spender, uint256 value) external returns (bool) {
+        allowance[msg.sender][spender] = value;
+        return true;
+    }
+
+    /// Same one-shot armed-reentry behavior as `transfer`, but on the PULL leg (`transferFrom`) —
+    /// the vector a caller like GameEscrow's `_pullVerified` (which pulls via `safeTransferFrom`)
+    /// actually exercises.
+    function transferFrom(address from, address to, uint256 value) external returns (bool) {
+        if (armed) {
+            armed = false; // single-shot: never recurse indefinitely
+            reentryCalls += 1;
+            (bool ok,) = reenterTarget.call(reenterData);
+            lastReentryReverted = !ok;
+        }
+        uint256 allowed = allowance[from][msg.sender];
+        if (allowed != type(uint256).max) {
+            allowance[from][msg.sender] = allowed - value;
+        }
+        _transfer(from, to, value);
         return true;
     }
 

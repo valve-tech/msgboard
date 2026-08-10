@@ -100,9 +100,10 @@ contract GameEscrow {
 
         ledgers[_ledgerKey(operator, token)].lock(exposure, payout);
 
-        uint256 received = _pullVerified(token, player, stake);
-        if (received < stake) revert StakeUnderDelivered();
-
+        // Effects BEFORE the external interaction: reserve the betId now, so a hostile token that
+        // re-enters lockExposure with the SAME betId mid-transferFrom hits BetExists instead of
+        // double-locking exposure and double-pulling the stake. A failed pull below still unwinds
+        // this write atomically via Solidity's revert semantics — nothing is left dangling.
         bets[betId] = Bet({
             game: msg.sender,
             operator: operator,
@@ -112,6 +113,10 @@ contract GameEscrow {
             stake: stake,
             open: true
         });
+
+        uint256 received = _pullVerified(token, player, stake);
+        if (received < stake) revert StakeUnderDelivered();
+
         emit ExposureLocked(betId, operator, token, player, stake, payout);
     }
 }
