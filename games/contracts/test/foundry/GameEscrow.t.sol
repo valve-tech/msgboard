@@ -99,3 +99,47 @@ contract GameEscrowDepositTest is Test {
         assertEq(tok.balanceOf(op), 40 ether);
     }
 }
+
+contract GameEscrowLockTest is Test {
+    GameEscrow internal esc;
+    OperatorRegistry internal reg;
+    ERC20 internal tok;
+    address internal op = address(0x0B);
+    address internal player = address(0x9E7);
+    address internal game;
+
+    function setUp() public {
+        reg = new OperatorRegistry();
+        esc = new GameEscrow(address(reg));
+        tok = new ERC20(false);
+        vm.prank(op); reg.register();
+        game = address(this); // this test acts as the game
+        tok.mint(op, 1000 ether);
+        vm.prank(op); tok.approve(address(esc), type(uint256).max);
+        vm.prank(op); esc.depositBankroll(op, address(tok), 1000 ether);
+        tok.mint(player, 100 ether);
+        vm.prank(player); tok.approve(address(esc), type(uint256).max);
+    }
+
+    function test_lock_pullsStake_debitsExposure_holdsPayout() public {
+        bytes32 betId = keccak256("b1");
+        esc.lockExposure(betId, op, address(tok), player, 10 ether, 19 ether); // exposure 9
+        assertEq(esc.bankrollOf(op, address(tok)), 991 ether); // 1000 - 9
+        assertEq(esc.lockedOf(op, address(tok)), 19 ether);
+        // escrow physically holds bankroll(991) + locked(19) = 1010 = 1000 deposit + 10 stake
+        assertEq(tok.balanceOf(address(esc)), 1010 ether);
+    }
+
+    function test_lock_revertsWhenBankrollBelowExposure() public {
+        bytes32 betId = keccak256("b2");
+        vm.expectRevert(EscrowLib.InsufficientBankroll.selector);
+        esc.lockExposure(betId, op, address(tok), player, 10 ether, 2000 ether); // exposure 1990 > 1000
+    }
+
+    function test_lock_rejectsDuplicateBetId() public {
+        bytes32 betId = keccak256("b3");
+        esc.lockExposure(betId, op, address(tok), player, 10 ether, 19 ether);
+        vm.expectRevert(GameEscrow.BetExists.selector);
+        esc.lockExposure(betId, op, address(tok), player, 10 ether, 19 ether);
+    }
+}
