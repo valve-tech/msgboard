@@ -3,6 +3,9 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {EscrowLib} from "../../contracts/games/operator/EscrowLib.sol";
+import {GameEscrow} from "../../contracts/games/operator/GameEscrow.sol";
+import {OperatorRegistry} from "../../contracts/games/operator/OperatorRegistry.sol";
+import {ERC20} from "../../contracts/test/ERC20.sol";
 
 contract EscrowLibTest is Test {
     using EscrowLib for EscrowLib.Ledger;
@@ -51,5 +54,48 @@ contract EscrowLibTest is Test {
         l.refundExposure(50, 30); // stake returns to player externally
         assertEq(l.locked, 0);
         assertEq(l.bankroll, 100 - 30 + 30); // net: exposure back, stake NOT credited (goes to player)
+    }
+}
+
+contract GameEscrowDepositTest is Test {
+    GameEscrow internal esc;
+    OperatorRegistry internal reg;
+    ERC20 internal tok;      // plain (no burn)
+    ERC20 internal feeTok;   // fee-on-transfer (burns 1%)
+    address internal op = address(0x0B);
+
+    function setUp() public {
+        reg = new OperatorRegistry();
+        esc = new GameEscrow(address(reg));
+        tok = new ERC20(false);
+        feeTok = new ERC20(true);
+        vm.prank(op); reg.register();
+    }
+
+    function test_deposit_creditsFullAmount_forPlainToken() public {
+        tok.mint(address(this), 100 ether);
+        tok.approve(address(esc), type(uint256).max);
+        esc.depositBankroll(op, address(tok), 100 ether);
+        assertEq(esc.bankrollOf(op, address(tok)), 100 ether);
+        assertEq(tok.balanceOf(address(esc)), 100 ether);
+    }
+
+    function test_deposit_creditsMeasuredDelta_forFeeOnTransfer() public {
+        feeTok.mint(address(this), 100 ether);
+        feeTok.approve(address(esc), type(uint256).max);
+        esc.depositBankroll(op, address(feeTok), 100 ether);
+        // 1% burned in transfer → escrow received 99 ether → ledger credits 99, not 100
+        assertEq(feeTok.balanceOf(address(esc)), 99 ether);
+        assertEq(esc.bankrollOf(op, address(feeTok)), 99 ether);
+    }
+
+    function test_withdraw_onlyOperatorsOwnBucket() public {
+        tok.mint(address(this), 100 ether);
+        tok.approve(address(esc), type(uint256).max);
+        esc.depositBankroll(op, address(tok), 100 ether);
+        vm.prank(op);
+        esc.withdrawBankroll(address(tok), 40 ether);
+        assertEq(esc.bankrollOf(op, address(tok)), 60 ether);
+        assertEq(tok.balanceOf(op), 40 ether);
     }
 }
