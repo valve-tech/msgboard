@@ -117,6 +117,16 @@ contract EscrowHandler is Test {
         } catch {}
     }
 
+    /// @dev withdrawRake sweeps msg.sender's own accrued rake, so the operator itself must call it —
+    /// exercises the rake-drain path (ledger rake -> 0, escrow token balance -> down) that the
+    /// strengthened solvency/isolation invariants must still hold across.
+    function withdrawRake(uint256 opSel, uint256 tokSel) public {
+        address op = _op(opSel);
+        ERC20 tok = _tok(tokSel);
+        vm.prank(op);
+        try esc.withdrawRake(address(tok)) {} catch {}
+    }
+
     function refund(uint256 idxSeed) public {
         if (openBetIds.length == 0) return;
         uint256 i = bound(idxSeed, 0, openBetIds.length - 1);
