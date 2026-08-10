@@ -276,21 +276,36 @@ contract GameEscrowReentrancyTest is Test {
     /// `safeTransfer` (a plain ERC-20 `transfer`, the push leg). Arm the token to re-enter settleWin
     /// on the SAME betId mid-transfer; the reentrant call must hit UnknownBet (bet already closed),
     /// so no double payout is possible.
+    ///
+    /// De-confounding note: the recorded game must be `address(rtok)` itself. When the token
+    /// re-enters during its own `transfer`, the call to GameEscrow originates from the token
+    /// contract's code, so `msg.sender == address(rtok)`. If the recorded `bets[betId].game` were
+    /// this test contract instead, `_openBet`'s `b.game != msg.sender` check would ALSO reject the
+    /// reentry (as `NotBetGame`) regardless of whether `open` had been flipped — masking the CEI
+    /// property under test entirely (a broken settleWin that transfers before flipping `open` would
+    /// still make this test pass). Pranking both the lock and the settle as `address(rtok)` makes the
+    /// `NotBetGame` gate always satisfied, so `UnknownBet` is the ONLY thing that can stop the
+    /// reentry — which is exactly the CEI property being proven.
     function test_settleWin_isReentrancySafe() public {
         bytes32 betId = keccak256("re-settle");
         uint256 stake = 10 ether;
         uint256 payout = 19 ether;
-        esc.lockExposure(betId, op, address(rtok), player, stake, payout); // game = address(this)
+        vm.prank(address(rtok));
+        esc.lockExposure(betId, op, address(rtok), player, stake, payout); // game = address(rtok)
 
         // Arm re-entry to fire during the payout `transfer` call, targeting the SAME betId —
         // settleWin has already flipped `open = false` by the time this fires.
         rtok.arm(address(esc), abi.encodeWithSelector(GameEscrow.settleWin.selector, betId));
 
+        vm.prank(address(rtok));
         esc.settleWin(betId);
 
-        // The reentrant settleWin fired exactly once and reverted (UnknownBet — bet already closed).
+        // The reentrant settleWin fired exactly once and reverted with the SPECIFIC selector
+        // UnknownBet — not NotBetGame, not an unrelated revert — proving the `open` flag (flipped
+        // before the transfer) is what stopped it.
         assertEq(rtok.reentryCalls(), 1);
         assertTrue(rtok.lastReentryReverted());
+        assertEq(bytes4(rtok.lastReentryReturnData()), GameEscrow.UnknownBet.selector);
 
         // Exactly ONE payout left the escrow: locked is drained once, player receives one payout.
         assertEq(esc.lockedOf(op, address(rtok)), 0);
@@ -301,19 +316,24 @@ contract GameEscrowReentrancyTest is Test {
 
     /// Same CEI proof on the refund path: `refund` flips the bet closed and restores exposure to the
     /// operator's bankroll BEFORE the stake `transfer` back to the player. Arm re-entry into `refund`
-    /// on the SAME betId; it must hit UnknownBet too, so the stake can't be returned twice.
+    /// on the SAME betId; it must hit UnknownBet too, so the stake can't be returned twice. Same
+    /// de-confounding as settleWin: game = address(rtok) so `NotBetGame` can never fire, isolating
+    /// `open` as the only guard.
     function test_refund_isReentrancySafe() public {
         bytes32 betId = keccak256("re-refund");
         uint256 stake = 10 ether;
         uint256 payout = 19 ether;
+        vm.prank(address(rtok));
         esc.lockExposure(betId, op, address(rtok), player, stake, payout);
 
         rtok.arm(address(esc), abi.encodeWithSelector(GameEscrow.refund.selector, betId));
 
+        vm.prank(address(rtok));
         esc.refund(betId);
 
         assertEq(rtok.reentryCalls(), 1);
         assertTrue(rtok.lastReentryReverted());
+        assertEq(bytes4(rtok.lastReentryReturnData()), GameEscrow.UnknownBet.selector);
 
         assertEq(esc.lockedOf(op, address(rtok)), 0);
         assertEq(rtok.balanceOf(player), 100 ether); // stake returned exactly once
