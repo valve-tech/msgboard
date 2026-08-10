@@ -25,6 +25,12 @@ contract EscrowHandler is Test {
     bytes32[] public openBetIds;
     uint256 internal nextSalt;
 
+    /// @dev Fixed identity for the C1 "rogue game" path — never authorized by either operator. If
+    /// `rogueLock` ever manages to actually lock exposure (i.e. `lockExposure` doesn't revert), this
+    /// flips true and stays true, tripping invariant_noUnauthorizedBankrollMovement.
+    address internal constant ROGUE = address(0xBEEF00000000000000000000000000000000AD);
+    bool public rogueDrainSucceeded;
+
     constructor(GameEscrow _esc, OperatorRegistry _reg, ERC20 _tokA, ERC20 _tokB, address _opX, address _opY) {
         esc = _esc;
         reg = _reg;
@@ -40,6 +46,20 @@ contract EscrowHandler is Test {
         tokB.mint(address(this), 1_000_000_000 ether);
         tokA.approve(address(esc), type(uint256).max);
         tokB.approve(address(esc), type(uint256).max);
+
+        // This contract is the sole "game" of record for every legit lock the handler drives — both
+        // operators must authorize it, or the C1 gate would block every `lock` action outright.
+        vm.prank(opX); esc.authorizeGame(address(this), true);
+        vm.prank(opY); esc.authorizeGame(address(this), true);
+
+        // Fund + approve the rogue identity too, so that if the C1 gate is ever missing/broken,
+        // `rogueLock`'s stake pull can actually complete and the drain fully succeeds (rather than
+        // failing for the unrelated reason of an unfunded/unapproved caller) — the mutation-check
+        // must be able to observe a real failure of invariant_noUnauthorizedBankrollMovement.
+        tokA.mint(ROGUE, 1_000_000_000 ether);
+        tokB.mint(ROGUE, 1_000_000_000 ether);
+        vm.prank(ROGUE); tokA.approve(address(esc), type(uint256).max);
+        vm.prank(ROGUE); tokB.approve(address(esc), type(uint256).max);
     }
 
     function openBetIdsLength() external view returns (uint256) {
@@ -96,6 +116,25 @@ contract EscrowHandler is Test {
         bytes32 betId = keccak256(abi.encode(address(this), nextSalt++));
         try esc.lockExposure(betId, op, address(tok), address(this), stake, payout) {
             openBetIds.push(betId);
+        } catch {}
+    }
+
+    /// @dev C1 attack simulation: ROGUE is never authorized by either operator, so this must ALWAYS
+    /// revert (UnauthorizedGame). Named operator/token/payout are chosen exactly like the legit `lock`
+    /// path — including a payout multiplier that creates real exposure against the operator's bankroll
+    /// — so a passing call here would be a genuine, fund-draining exploit of the same shape the finding
+    /// describes, not a toy no-op. try/catch absorbs the (expected) revert; `rogueDrainSucceeded` only
+    /// flips if `lockExposure` ever actually returns.
+    function rogueLock(uint256 opSel, uint256 tokSel, uint256 amount) public {
+        address op = _op(opSel);
+        ERC20 tok = _tok(tokSel);
+        uint256 stake = bound(amount, 1, 1_000 ether);
+        uint256 mult = bound(amount, 100, 300);
+        uint256 payout = (stake * mult) / 100;
+        bytes32 betId = keccak256(abi.encode(ROGUE, nextSalt++));
+        vm.prank(ROGUE);
+        try esc.lockExposure(betId, op, address(tok), ROGUE, stake, payout) {
+            rogueDrainSucceeded = true;
         } catch {}
     }
 

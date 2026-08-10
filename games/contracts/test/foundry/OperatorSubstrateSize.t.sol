@@ -6,6 +6,7 @@ import {OperatorRegistry} from "../../contracts/games/operator/OperatorRegistry.
 import {GameEscrow} from "../../contracts/games/operator/GameEscrow.sol";
 import {OperatorBond} from "../../contracts/games/operator/OperatorBond.sol";
 import {OperatorVault} from "../../contracts/games/operator/OperatorVault.sol";
+import {OperatorVaultFactory} from "../../contracts/games/operator/OperatorVaultFactory.sol";
 import {OperatorCoinFlip} from "../../contracts/games/operator/OperatorCoinFlip.sol";
 
 /// @notice EIP-170 deployability guard for the table-maintainer substrate (mirrors
@@ -40,10 +41,19 @@ contract OperatorSubstrateSizeTest is Test {
             "OperatorBond deployed bytecode exceeds the 24,300-byte safety margin"
         );
 
+        OperatorVault vaultImpl = new OperatorVault();
+
         assertLt(
-            address(new OperatorVault()).code.length,
+            address(vaultImpl).code.length,
             SIZE_CEILING,
             "OperatorVault deployed bytecode exceeds the 24,300-byte safety margin"
+        );
+
+        GameEscrow escForFactory = new GameEscrow(address(reg));
+        assertLt(
+            address(new OperatorVaultFactory(address(vaultImpl), address(escForFactory))).code.length,
+            SIZE_CEILING,
+            "OperatorVaultFactory deployed bytecode exceeds the 24,300-byte safety margin"
         );
 
         assertLt(
