@@ -2,9 +2,9 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
-import {GameEscrow} from "../games/operator/GameEscrow.sol";
-import {OperatorRegistry} from "../games/operator/OperatorRegistry.sol";
-import {ERC20} from "./ERC20.sol";
+import {GameEscrow} from "../../contracts/games/operator/GameEscrow.sol";
+import {OperatorRegistry} from "../../contracts/games/operator/OperatorRegistry.sol";
+import {ERC20} from "../../contracts/test/ERC20.sol";
 
 /// @notice Bounded, stateful driver for the GameEscrow invariant suite. This one contract plays all
 /// three external roles at once — the permissionless bankroll funder, the sole "game" that calls

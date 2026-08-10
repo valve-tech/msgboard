@@ -214,6 +214,39 @@ const config: HardhatUserConfig = {
         version: '0.8.25',
         settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
       },
+      // Table-maintainer substrate (Slice A) — deploys to 943 like the other games contracts, so it
+      // MUST target Shanghai (943/369 are pre-Cancun; the default cancun block above emits MCOPY,
+      // which reverts on-chain as "invalid opcode: MCOPY"). Same 0.8.25/viaIR/shanghai/runs-700
+      // shape as the games family. Foundry (foundry.toml) already pins shanghai globally; these
+      // mirror it so the HARDHAT artifacts the deploy script broadcasts are equally MCOPY-free.
+      'contracts/games/operator/EscrowLib.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/games/operator/OperatorRegistry.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/games/operator/GameEscrow.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/games/operator/OperatorBond.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/games/operator/OperatorVault.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/games/operator/OperatorVaultFactory.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/games/operator/OperatorCoinFlip.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
       'contracts/games/SessionState.sol': {
         version: '0.8.25',
         settings: {
