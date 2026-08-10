@@ -7,7 +7,7 @@ import {
   msgboardContentSource,
   postgresArchiveSink,
   postgresStore,
-  sendValueAction,
+  sendValueRepricingAction,
 } from '@msgboard/relayer'
 
 const main = async () => {
@@ -39,11 +39,15 @@ const main = async () => {
     key: (message) => message.hash.toLowerCase(),
     store,
     sink: archive,
-    action: sendValueAction<RPCMessage>({
+    action: sendValueRepricingAction<RPCMessage>({
       account,
       recipient: (message) => message.data.toLowerCase() as Hex,
       amount: 10n * 10n ** 18n,
       gas: 25_200n,
+      // Dynamic fee from real baseFee (never the 943 node quote) + replace-by-fee if a
+      // grant doesn't mine within staleMs — this is what stops the nonce-wedge outage.
+      staleMs: 20_000,
+      maxAttempts: 8,
     }),
   })
   relayer.start()

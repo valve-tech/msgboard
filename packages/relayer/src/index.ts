@@ -33,6 +33,11 @@ export { generatedSource } from './sources/generated.js'
 export { submitMessageAction } from './actions/submit-message.js'
 export { forwardMessageAction } from './actions/forward-message.js'
 export { sendValueAction } from './actions/send-value.js'
+export {
+  sendValueRepricingAction,
+  type SendValueRepricingActionOptions,
+} from './actions/send-value-repricing.js'
+export { estimateFees, type FeeEstimateOptions } from './fees.js'
 export { mintChipsAction, type MintChipsActionOptions } from './actions/mint-chips.js'
 export { webhookAction } from './actions/webhook.js'
 export { noopAction } from './actions/noop.js'
