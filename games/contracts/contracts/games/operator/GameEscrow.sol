@@ -21,6 +21,8 @@ contract GameEscrow {
     error BetExists();
     error BadPayout();
     error StakeUnderDelivered();
+    error UnknownBet();
+    error NotBetGame();
 
     struct Bet {
         address game;
@@ -37,6 +39,9 @@ contract GameEscrow {
     event BankrollDeposited(address indexed operator, address indexed token, address indexed from, uint256 credited);
     event BankrollWithdrawn(address indexed operator, address indexed token, uint256 amount);
     event ExposureLocked(bytes32 indexed betId, address indexed operator, address token, address player, uint256 stake, uint256 payout);
+    event Settled(bytes32 indexed betId, bool playerWon, uint256 paidToPlayer, uint256 rake);
+    event Refunded(bytes32 indexed betId, address indexed player, uint256 stake);
+    event RakeWithdrawn(address indexed operator, address indexed token, address recipient, uint256 amount);
 
     constructor(address registry_) {
         registry = registry_;
@@ -118,5 +123,54 @@ contract GameEscrow {
         if (received < stake) revert StakeUnderDelivered();
 
         emit ExposureLocked(betId, operator, token, player, stake, payout);
+    }
+
+    /// @notice Look up an open bet and enforce that only the game which locked it may act on it.
+    function _openBet(bytes32 betId) internal view returns (Bet storage b) {
+        b = bets[betId];
+        if (!b.open) revert UnknownBet();
+        if (b.game != msg.sender) revert NotBetGame();
+    }
+
+    /// @notice Player won: pay the full payout out of `locked`. CEI — the bet is closed BEFORE the
+    /// token leaves the contract, so a hostile token cannot re-enter and settle the same bet twice.
+    function settleWin(bytes32 betId) external {
+        Bet storage b = _openBet(betId);
+        b.open = false;
+        ledgers[_ledgerKey(b.operator, b.token)].settleWin(b.payout);
+        b.token.safeTransfer(b.player, b.payout);
+        emit Settled(betId, true, b.payout, 0);
+    }
+
+    /// @notice Player lost: rake is taken on the forfeited stake, the remainder of the reservation
+    /// returns to the operator's bankroll. No external transfer — funds simply stay in escrow.
+    function settleLoss(bytes32 betId) external {
+        Bet storage b = _openBet(betId);
+        b.open = false;
+        uint16 bps = OperatorRegistry(registry).rakeBps(b.operator, b.game);
+        uint256 rakeAmt = uint256(b.stake) * bps / 10000;
+        ledgers[_ledgerKey(b.operator, b.token)].settleLoss(b.payout, rakeAmt);
+        emit Settled(betId, false, 0, rakeAmt);
+    }
+
+    /// @notice Abort/timeout: the operator's exposure returns to bankroll, the player reclaims their
+    /// own stake. CEI — closed BEFORE the stake transfer.
+    function refund(bytes32 betId) external {
+        Bet storage b = _openBet(betId);
+        b.open = false;
+        uint256 exposure;
+        unchecked { exposure = b.payout - b.stake; }
+        ledgers[_ledgerKey(b.operator, b.token)].refundExposure(b.payout, exposure);
+        b.token.safeTransfer(b.player, b.stake);
+        emit Refunded(betId, b.player, b.stake);
+    }
+
+    /// @notice Operator sweeps its accrued rake for one token to its configured recipient (defaults
+    /// to the operator itself).
+    function withdrawRake(address token) external {
+        uint256 amt = ledgers[_ledgerKey(msg.sender, token)].takeRake();
+        address recipient = OperatorRegistry(registry).rakeRecipientOf(msg.sender, token);
+        token.safeTransfer(recipient, amt);
+        emit RakeWithdrawn(msg.sender, token, recipient, amt);
     }
 }
