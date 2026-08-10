@@ -183,3 +183,66 @@ contract GameEscrowLockTest is Test {
         assertEq(recordedStake, stake);
     }
 }
+
+contract GameEscrowSettleTest is Test {
+    GameEscrow internal esc;
+    OperatorRegistry internal reg;
+    ERC20 internal tok;
+    address internal op = address(0x0B);
+    address internal player = address(0x9E7);
+
+    function setUp() public {
+        reg = new OperatorRegistry();
+        esc = new GameEscrow(address(reg));
+        tok = new ERC20(false);
+        vm.prank(op); reg.register();
+        vm.prank(op); reg.setRakeBps(address(this), 200); // 2% rake, this contract is the game
+        tok.mint(op, 1000 ether);
+        vm.prank(op); tok.approve(address(esc), type(uint256).max);
+        vm.prank(op); esc.depositBankroll(op, address(tok), 1000 ether);
+        tok.mint(player, 100 ether);
+        vm.prank(player); tok.approve(address(esc), type(uint256).max);
+    }
+
+    function _lock(bytes32 id) internal {
+        esc.lockExposure(id, op, address(tok), player, 10 ether, 19 ether); // exposure 9
+    }
+
+    function test_settleWin_paysPlayerFullPayout() public {
+        bytes32 id = keccak256("w");
+        _lock(id);
+        esc.settleWin(id);
+        assertEq(tok.balanceOf(player), 90 ether + 19 ether); // had 100, staked 10, won 19
+        assertEq(esc.lockedOf(op, address(tok)), 0);
+        assertEq(esc.bankrollOf(op, address(tok)), 991 ether); // exposure gone
+    }
+
+    function test_settleLoss_accruesRake_returnsRemainderToBankroll() public {
+        bytes32 id = keccak256("l");
+        _lock(id);
+        esc.settleLoss(id);
+        // rake = 2% of stake(10) = 0.2; bankroll = 991 + (19 - 0.2) = 1009.8
+        assertEq(esc.bankrollOf(op, address(tok)), 1009.8 ether);
+        assertEq(esc.lockedOf(op, address(tok)), 0);
+        vm.prank(op);
+        esc.withdrawRake(address(tok));
+        assertEq(tok.balanceOf(op), 0.2 ether); // rake swept to operator (default recipient)
+    }
+
+    function test_refund_returnsStakeToPlayer_exposureToBankroll() public {
+        bytes32 id = keccak256("r");
+        _lock(id);
+        esc.refund(id);
+        assertEq(tok.balanceOf(player), 100 ether); // stake fully back
+        assertEq(esc.bankrollOf(op, address(tok)), 1000 ether); // exposure restored
+        assertEq(esc.lockedOf(op, address(tok)), 0);
+    }
+
+    function test_settle_onlyRecordedGame() public {
+        bytes32 id = keccak256("g");
+        _lock(id);
+        vm.prank(address(0xBAD));
+        vm.expectRevert(GameEscrow.NotBetGame.selector);
+        esc.settleWin(id);
+    }
+}
