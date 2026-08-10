@@ -13,15 +13,18 @@ contract OperatorBond {
 
     error BondLocked();
     error InsufficientBond();
+    error Unauthorized();
 
     address public immutable registry;
 
     struct Bond { uint256 total; uint256 locked; }
     mapping(bytes32 key => Bond) internal bonds;
+    mapping(address operator => mapping(address game => bool)) public authorizedGame;
 
     event BondPosted(address indexed operator, address indexed token, address indexed from, uint256 credited);
     event BondWithdrawn(address indexed operator, address indexed token, uint256 amount);
     event BondSlashed(address indexed operator, address indexed token, address game, address player, uint256 amount);
+    event GameAuthorized(address indexed operator, address indexed game, bool allowed);
 
     constructor(address registry_) { registry = registry_; }
 
@@ -42,6 +45,13 @@ contract OperatorBond {
         emit BondPosted(operator, token, msg.sender, credited);
     }
 
+    /// @notice Operator authorizes (or revokes) a game contract to slash its own bond on adjudication.
+    /// Permissionless and self-sovereign: only the operator can authorize slashers of its bond.
+    function authorizeGame(address game, bool allowed) external {
+        authorizedGame[msg.sender][game] = allowed;
+        emit GameAuthorized(msg.sender, game, allowed);
+    }
+
     function withdrawBond(address token, uint256 amount) external {
         Bond storage b = bonds[_key(msg.sender, token)];
         uint256 free = b.total - b.locked;
@@ -52,6 +62,7 @@ contract OperatorBond {
     }
 
     function slashToPlayer(address operator, address token, address player, uint256 amount) external {
+        if (!authorizedGame[operator][msg.sender]) revert Unauthorized();
         Bond storage b = bonds[_key(operator, token)];
         uint256 free = b.total - b.locked;
         if (amount > free) revert InsufficientBond();

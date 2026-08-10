@@ -32,6 +32,8 @@ contract OperatorBondTest is Test {
 
     function test_slashToPlayer_paysPlayer_reducesTotal() public {
         bond.postBond(op, address(tok), 50 ether);
+        vm.prank(op);
+        bond.authorizeGame(address(this), true);
         bond.slashToPlayer(op, address(tok), player, 15 ether); // this contract is the "game"
         (uint256 total,) = bond.bondOf(op, address(tok));
         assertEq(total, 35 ether);
@@ -40,7 +42,27 @@ contract OperatorBondTest is Test {
 
     function test_slash_cappedAtFreeBond() public {
         bond.postBond(op, address(tok), 10 ether);
+        vm.prank(op);
+        bond.authorizeGame(address(this), true);
         vm.expectRevert(OperatorBond.InsufficientBond.selector);
         bond.slashToPlayer(op, address(tok), player, 11 ether);
+    }
+
+    function test_slash_revertsWhenGameNotAuthorized() public {
+        bond.postBond(op, address(tok), 50 ether);
+        vm.expectRevert(OperatorBond.Unauthorized.selector);
+        bond.slashToPlayer(op, address(tok), player, 15 ether);
+        (uint256 total,) = bond.bondOf(op, address(tok));
+        assertEq(total, 50 ether);
+        assertEq(tok.balanceOf(player), 0);
+    }
+
+    function test_authorizeGame_isOperatorScoped() public {
+        address opB = address(0x0C);
+        bond.postBond(opB, address(tok), 50 ether);
+        vm.prank(op);
+        bond.authorizeGame(address(this), true); // op authorizes this contract, NOT opB
+        vm.expectRevert(OperatorBond.Unauthorized.selector);
+        bond.slashToPlayer(opB, address(tok), player, 15 ether);
     }
 }
