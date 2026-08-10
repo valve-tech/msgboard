@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {GameEscrow} from "../../contracts/games/operator/GameEscrow.sol";
 import {OperatorRegistry} from "../../contracts/games/operator/OperatorRegistry.sol";
 import {ERC20} from "../../contracts/test/ERC20.sol";
-import {EscrowHandler} from "../../contracts/test/EscrowHandler.sol";
+import {EscrowHandler} from "./EscrowHandler.sol";
 
 /// @notice The load-bearing substrate invariants:
 ///   (I1) SOLVENCY: for every (operator, token), bankroll + locked + rake <= token.balanceOf(escrow)
