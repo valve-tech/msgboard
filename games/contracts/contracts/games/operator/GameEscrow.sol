@@ -59,6 +59,10 @@ contract GameEscrow {
         return ledgers[_ledgerKey(operator, token)].locked;
     }
 
+    function rakeOf(address operator, address token) external view returns (uint256) {
+        return ledgers[_ledgerKey(operator, token)].rake;
+    }
+
     /// @notice Pull `amount` of `token` from `from` and return the MEASURED delta actually received.
     /// Crediting the delta (not the requested amount) keeps the books exact for fee-on-transfer and
     /// rebasing tokens, and contains any such token to its own bucket.

@@ -34,23 +34,37 @@ contract GameEscrowInvariantTest is Test {
     }
 
     /// I1 — per (operator, token) the escrow physically holds at least what the ledger claims.
+    /// bankroll + locked + rake together are the FULL claim on this bucket — rake is real money
+    /// (later drained via withdrawRake), so leaving it out of the solvency statement would let a
+    /// phantom-rake accounting bug slip through undetected.
     function invariant_solvencyPerBucket() public view {
         assertLe(
-            esc.bankrollOf(opX, address(tokA)) + esc.lockedOf(opX, address(tokA)),
+            esc.bankrollOf(opX, address(tokA)) + esc.lockedOf(opX, address(tokA)) + esc.rakeOf(opX, address(tokA)),
             tokA.balanceOf(address(esc))
         );
         assertLe(
-            esc.bankrollOf(opY, address(tokB)) + esc.lockedOf(opY, address(tokB)),
+            esc.bankrollOf(opY, address(tokB)) + esc.lockedOf(opY, address(tokB)) + esc.rakeOf(opY, address(tokB)),
             tokB.balanceOf(address(esc))
         );
     }
 
-    /// I2 — the sum of all tokA ledger claims never exceeds the escrow's tokA balance, regardless of
-    /// what happens in tokB buckets (cross-token isolation).
+    /// I2 — the sum of all tokA ledger claims (bankroll+locked+rake, across BOTH operators) never
+    /// exceeds the escrow's tokA balance, regardless of what happens in tokB buckets (cross-token
+    /// isolation).
     function invariant_tokenIsolation() public view {
         uint256 claimsA =
-            esc.bankrollOf(opX, address(tokA)) + esc.lockedOf(opX, address(tokA)) +
-            esc.bankrollOf(opY, address(tokA)) + esc.lockedOf(opY, address(tokA));
+            esc.bankrollOf(opX, address(tokA)) + esc.lockedOf(opX, address(tokA)) + esc.rakeOf(opX, address(tokA)) +
+            esc.bankrollOf(opY, address(tokA)) + esc.lockedOf(opY, address(tokA)) + esc.rakeOf(opY, address(tokA));
         assertLe(claimsA, tokA.balanceOf(address(esc)));
+    }
+
+    /// I2b — mirror of invariant_tokenIsolation for tokB, closing the (opX, tokB) blind spot that
+    /// neither I1 (which only checks opX/tokA and opY/tokB) nor the tokA-only isolation check above
+    /// would otherwise cover.
+    function invariant_tokenIsolationB() public view {
+        uint256 claimsB =
+            esc.bankrollOf(opX, address(tokB)) + esc.lockedOf(opX, address(tokB)) + esc.rakeOf(opX, address(tokB)) +
+            esc.bankrollOf(opY, address(tokB)) + esc.lockedOf(opY, address(tokB)) + esc.rakeOf(opY, address(tokB));
+        assertLe(claimsB, tokB.balanceOf(address(esc)));
     }
 }
