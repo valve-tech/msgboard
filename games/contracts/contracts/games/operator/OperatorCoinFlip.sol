@@ -19,6 +19,7 @@ contract OperatorCoinFlip is GameBase {
     error BadMultiplier();
     error TableClosed();
     error WrongSide();
+    error DustStake();
     error ZeroStake();
     error StakeTooHigh();
     error AlreadyResolved();
@@ -102,18 +103,26 @@ contract OperatorCoinFlip is GameBase {
         _validateSubset(validatorSubset);
 
         uint256 payout = stake * t.maxMultiplierX100 / 100;
+        // Guard the dust case: at tiny stakes the multiplier truncates to break-even (payout == stake,
+        // zero operator exposure), a degenerate round where a "win" pays nothing. Reject it so the
+        // advertised 1.5x-2x odds always hold.
+        if (payout == stake) revert DustStake();
         bytes32 key = _heatBound(validatorSubset, validatorLocations);
         roundId = keccak256(abi.encode(address(this), ++_roundNonce, tableId, msg.sender));
 
-        // custody lives in the escrow: it pulls the player's stake (player approves the escrow) and
-        // debits the operator's exposure from its bankroll — reverting if the operator is short.
-        GameEscrow(escrow).lockExposure(roundId, t.operator, t.token, msg.sender, stake, payout);
-
+        // Effects before interaction: record the round + reverse index BEFORE the escrow call. A revert
+        // in lockExposure (insufficient bankroll, player not consented, …) unwinds these writes
+        // atomically, so nothing dangles; and no external call sits between the id derivation and its
+        // local record.
         rounds[roundId] = Round({
             tableId: tableId, player: msg.sender, side: side, stake: stake, payout: payout,
             key: key, openedAtBlock: block.number, status: Status.Pending
         });
         instanceByKey[key] = roundId;
+
+        // custody lives in the escrow: it pulls the player's stake (player approves the escrow) and
+        // debits the operator's exposure from its bankroll — reverting if the operator is short.
+        GameEscrow(escrow).lockExposure(roundId, t.operator, t.token, msg.sender, stake, payout);
         emit RoundOpened(roundId, tableId, msg.sender, side, stake, payout, key, block.number);
     }
 

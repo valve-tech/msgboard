@@ -53,6 +53,12 @@ contract OperatorRegistry {
         return r == address(0) ? operator : r;
     }
 
+    /// @notice ADVISORY ONLY. The substrate uses an internal pre-funded bankroll ledger in GameEscrow
+    /// (operators call `depositBankroll`), NOT a per-bet pull from this pointer — no on-chain code reads
+    /// `fundingSourceOf`. It exists as an off-chain hint (which address an operator funds from) for
+    /// discovery/tooling. This deviates from the spec's original "pull-per-bet from the funding source"
+    /// model; the deviation is deliberate (all collateral sits in escrow before any bet opens, so escrow
+    /// solvency is a local invariant). Wire an on-chain pull here only if that model is revived.
     function setFundingSource(address token, address src) external onlyRegistered {
         _fundingSource[msg.sender][token] = src;
         emit FundingSourceSet(msg.sender, token, src);

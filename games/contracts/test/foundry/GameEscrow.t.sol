@@ -158,8 +158,7 @@ contract GameEscrowLockTest is Test {
         vm.expectRevert(GameEscrow.UnauthorizedGame.selector);
         esc.lockExposure(betId, op, address(tok), attacker, 1, bankrollBefore + 1);
         assertEq(esc.bankrollOf(op, address(tok)), bankrollBefore); // untouched
-        (, , , , , , bool open) = esc.bets(betId);
-        assertFalse(open); // never recorded
+        assertFalse(esc.betOf(attacker, betId).open); // never recorded
     }
 
     /// HIGH regression (shared-escrow approval drain): a game the OPERATOR authorized still cannot pull
@@ -226,10 +225,10 @@ contract GameEscrowLockTest is Test {
         assertEq(esc.lockedOf(op, address(rtok)), 19 ether);    // not 38
         assertEq(rtok.balanceOf(address(esc)), 1010 ether);     // 1000 deposit + 10 stake, pulled once
 
-        (,,,, uint256 recordedPayout, uint256 recordedStake, bool open) = esc.bets(betId);
-        assertTrue(open);
-        assertEq(recordedPayout, payout);
-        assertEq(recordedStake, stake);
+        GameEscrow.Bet memory b = esc.betOf(address(this), betId);
+        assertTrue(b.open);
+        assertEq(b.payout, payout);
+        assertEq(b.stake, stake);
     }
 }
 
@@ -289,11 +288,13 @@ contract GameEscrowSettleTest is Test {
         assertEq(esc.lockedOf(op, address(tok)), 0);
     }
 
+    /// Only the recording game may settle: bets are namespaced by (game, betId), so a different caller
+    /// finds no open bet under its own namespace — UnknownBet, structurally.
     function test_settle_onlyRecordedGame() public {
         bytes32 id = keccak256("g");
         _lock(id);
         vm.prank(address(0xBAD));
-        vm.expectRevert(GameEscrow.NotBetGame.selector);
+        vm.expectRevert(GameEscrow.UnknownBet.selector);
         esc.settleWin(id);
     }
 }
@@ -363,7 +364,7 @@ contract GameEscrowReentrancyTest is Test {
         // Exactly ONE payout left the escrow: locked is drained once, player receives one payout.
         assertEq(esc.lockedOf(op, address(rtok)), 0);
         assertEq(rtok.balanceOf(player), 100 ether - stake + payout);
-        (, , , , , , bool open) = esc.bets(betId);
+        bool open = esc.betOf(address(rtok), betId).open;
         assertFalse(open);
     }
 
@@ -390,7 +391,7 @@ contract GameEscrowReentrancyTest is Test {
 
         assertEq(esc.lockedOf(op, address(rtok)), 0);
         assertEq(rtok.balanceOf(player), 100 ether); // stake returned exactly once
-        (, , , , , , bool open) = esc.bets(betId);
+        bool open = esc.betOf(address(rtok), betId).open;
         assertFalse(open);
     }
 
