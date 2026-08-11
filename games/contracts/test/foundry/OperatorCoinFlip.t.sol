@@ -43,9 +43,11 @@ contract OperatorCoinFlipTest is Test {
         tok.mint(op, 1000 ether);
         vm.prank(op); tok.approve(address(esc), type(uint256).max);
         vm.prank(op); esc.depositBankroll(op, address(tok), 1000 ether);
-        // player approves the ESCROW (custodian), not the game
+        // player approves the ESCROW (custodian) for the token, then consents to THIS game pulling
+        // that allowance — the player-side gate that closes the shared-escrow approval drain.
         tok.mint(player, 100 ether);
         vm.prank(player); tok.approve(address(esc), type(uint256).max);
+        vm.prank(player); esc.setPlayerGame(address(game), true);
         vm.prank(op); esc.authorizeGame(address(game), true);
     }
 

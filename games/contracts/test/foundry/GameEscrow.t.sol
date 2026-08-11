@@ -122,6 +122,7 @@ contract GameEscrowLockTest is Test {
         tok.mint(player, 100 ether);
         vm.prank(player); tok.approve(address(esc), type(uint256).max);
         vm.prank(op); esc.authorizeGame(game, true);
+        vm.prank(player); esc.setPlayerGame(game, true);
     }
 
     function test_lock_pullsStake_debitsExposure_holdsPayout() public {
@@ -159,6 +160,20 @@ contract GameEscrowLockTest is Test {
         assertEq(esc.bankrollOf(op, address(tok)), bankrollBefore); // untouched
         (, , , , , , bool open) = esc.bets(betId);
         assertFalse(open); // never recorded
+    }
+
+    /// HIGH regression (shared-escrow approval drain): a game the OPERATOR authorized still cannot pull
+    /// a player's standing escrow allowance unless the PLAYER opted that game in. A victim who merely
+    /// approved the shared escrow for the token — but never consented to this game — must be untouchable.
+    function test_lock_revertsWhenPlayerDidNotConsent() public {
+        address victim = address(0xBEEF);
+        tok.mint(victim, 100 ether);
+        vm.prank(victim); tok.approve(address(esc), type(uint256).max); // approved the shared escrow...
+        // ...but never called setPlayerGame(game): the drain vehicle is blocked here.
+        bytes32 betId = keccak256("no-consent");
+        vm.expectRevert(GameEscrow.PlayerNotConsented.selector);
+        esc.lockExposure(betId, op, address(tok), victim, 10 ether, 19 ether);
+        assertEq(tok.balanceOf(victim), 100 ether); // not a wei moved
     }
 
     /// C1 regression: revoking a previously-authorized game must block it immediately — the operator
@@ -237,6 +252,7 @@ contract GameEscrowSettleTest is Test {
         tok.mint(player, 100 ether);
         vm.prank(player); tok.approve(address(esc), type(uint256).max);
         vm.prank(op); esc.authorizeGame(address(this), true); // this contract acts as the game
+        vm.prank(player); esc.setPlayerGame(address(this), true);
     }
 
     function _lock(bytes32 id) internal {
@@ -306,6 +322,7 @@ contract GameEscrowReentrancyTest is Test {
         rtok.mint(player, 100 ether);
         vm.prank(player); rtok.approve(address(esc), type(uint256).max);
         vm.prank(op); esc.authorizeGame(address(rtok), true); // game of record is the token itself
+        vm.prank(player); esc.setPlayerGame(address(rtok), true);
     }
 
     /// CEI proof: settleWin flips the bet closed and zeroes the ledger's `locked` BEFORE the payout

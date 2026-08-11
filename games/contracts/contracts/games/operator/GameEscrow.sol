@@ -31,6 +31,7 @@ contract GameEscrow is ReentrancyGuard {
     error UnknownBet();
     error NotBetGame();
     error UnauthorizedGame();
+    error PlayerNotConsented();
 
     struct Bet {
         address game;
@@ -49,6 +50,14 @@ contract GameEscrow is ReentrancyGuard {
     /// exposure against its own (operator, token) buckets. There is no admin override.
     mapping(address operator => mapping(address game => bool)) public authorizedGame;
 
+    /// @notice Player-scoped game consent. A player approves the SHARED escrow for a token once, so a
+    /// standing allowance is otherwise spendable by ANY authorized game of ANY operator — a malicious
+    /// operator could authorize its own game and pull a victim's allowance into a zero-exposure bet it
+    /// then banks. This mapping closes that: `lockExposure` only pulls a player's stake for a game the
+    /// PLAYER has opted into. Symmetric with the operator side — the player, like the operator, chooses
+    /// which games may draw on its funds. The canonical game calls this in onboarding, once per player.
+    mapping(address player => mapping(address game => bool)) public playerAllowsGame;
+
     event BankrollDeposited(address indexed operator, address indexed token, address indexed from, uint256 credited);
     event BankrollWithdrawn(address indexed operator, address indexed token, uint256 amount);
     event ExposureLocked(bytes32 indexed betId, address indexed operator, address token, address player, uint256 stake, uint256 payout);
@@ -56,6 +65,7 @@ contract GameEscrow is ReentrancyGuard {
     event Refunded(bytes32 indexed betId, address indexed player, uint256 stake);
     event RakeWithdrawn(address indexed operator, address indexed token, address recipient, uint256 amount);
     event GameAuthorized(address indexed operator, address indexed game, bool allowed);
+    event PlayerGameSet(address indexed player, address indexed game, bool allowed);
 
     constructor(address registry_) {
         registry = registry_;
@@ -111,6 +121,15 @@ contract GameEscrow is ReentrancyGuard {
         emit GameAuthorized(msg.sender, game, allowed);
     }
 
+    /// @notice Player opts a game in/out of pulling its stake from the player's standing escrow
+    /// allowance. Self-sovereign: only the player (msg.sender) controls which games may draw its
+    /// funds. Without this a malicious game could name any approver as the `player` in lockExposure
+    /// and drain their allowance. Set once for the game(s) a player actually plays.
+    function setPlayerGame(address game, bool allowed) external {
+        playerAllowsGame[msg.sender][game] = allowed;
+        emit PlayerGameSet(msg.sender, game, allowed);
+    }
+
     /// @notice Pre-collateralize a bet. The game calls this at bet-accept: exposure (payout - stake)
     /// is debited from the operator's bankroll (reverting if short — graceful bankruptcy), and the
     /// player's stake is pulled in fresh, balance-delta checked. After this returns, the escrow holds
@@ -127,6 +146,7 @@ contract GameEscrow is ReentrancyGuard {
         uint256 payout
     ) external nonReentrant {
         if (!authorizedGame[operator][msg.sender]) revert UnauthorizedGame();
+        if (!playerAllowsGame[player][msg.sender]) revert PlayerNotConsented();
         if (bets[betId].open) revert BetExists();
         if (payout < stake) revert BadPayout();
         uint256 exposure;
