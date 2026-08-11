@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {EscrowLib} from "../../contracts/games/operator/EscrowLib.sol";
 import {GameEscrow} from "../../contracts/games/operator/GameEscrow.sol";
+import {ReentrancyGuard} from "../../contracts/games/operator/ReentrancyGuard.sol";
 import {OperatorRegistry} from "../../contracts/games/operator/OperatorRegistry.sol";
 import {ERC20} from "../../contracts/test/ERC20.sol";
 import {ReenteringToken} from "../../contracts/test/ReenteringToken.sol";
@@ -340,7 +341,7 @@ contract GameEscrowReentrancyTest is Test {
         // before the transfer) is what stopped it.
         assertEq(rtok.reentryCalls(), 1);
         assertTrue(rtok.lastReentryReverted());
-        assertEq(bytes4(rtok.lastReentryReturnData()), GameEscrow.UnknownBet.selector);
+        assertEq(bytes4(rtok.lastReentryReturnData()), ReentrancyGuard.Reentrancy.selector); // guard is the primary defense; CEI (open flipped) is the second line
 
         // Exactly ONE payout left the escrow: locked is drained once, player receives one payout.
         assertEq(esc.lockedOf(op, address(rtok)), 0);
@@ -368,11 +369,39 @@ contract GameEscrowReentrancyTest is Test {
 
         assertEq(rtok.reentryCalls(), 1);
         assertTrue(rtok.lastReentryReverted());
-        assertEq(bytes4(rtok.lastReentryReturnData()), GameEscrow.UnknownBet.selector);
+        assertEq(bytes4(rtok.lastReentryReturnData()), ReentrancyGuard.Reentrancy.selector); // guard is the primary defense; CEI (open flipped) is the second line
 
         assertEq(esc.lockedOf(op, address(rtok)), 0);
         assertEq(rtok.balanceOf(player), 100 ether); // stake returned exactly once
         (, , , , , , bool open) = esc.bets(betId);
         assertFalse(open);
+    }
+
+    // Re-entry target: a nested deposit into the same (operator, token) bucket.
+    function reenterDeposit() external {
+        esc.depositBankroll(op, address(rtok), 100 ether);
+    }
+
+    /// CRITICAL regression (PoC-confirmed pre-fix): the balance-delta credit must not be inflatable by
+    /// a nested reentrant deposit. Without the guard, the OUTER deposit's balanceOf delta spans the
+    /// INNER transfer, crediting 300 for 200 real tokens — inflating the ledger past the escrow's real
+    /// balance and letting the bucket drain co-tenants of that token. The guard makes the reentrant
+    /// deposit revert, so only the genuine outer transfer is ever measured.
+    function test_nestedDeposit_cannotDoubleCount() public {
+        rtok.mint(address(this), 1000 ether);
+        rtok.approve(address(esc), type(uint256).max);
+        uint256 bankBefore = esc.bankrollOf(op, address(rtok));
+        uint256 escBefore = rtok.balanceOf(address(esc));
+
+        rtok.arm(address(this), abi.encodeWithSelector(this.reenterDeposit.selector));
+        esc.depositBankroll(op, address(rtok), 200 ether);
+
+        // the nested deposit fired once and was rejected by the guard
+        assertEq(rtok.reentryCalls(), 1);
+        assertTrue(rtok.lastReentryReverted());
+        assertEq(bytes4(rtok.lastReentryReturnData()), ReentrancyGuard.Reentrancy.selector);
+        // exactly the outer 200 credited AND escrowed — the ledger never exceeds the real balance
+        assertEq(esc.bankrollOf(op, address(rtok)) - bankBefore, 200 ether);
+        assertEq(rtok.balanceOf(address(esc)) - escBefore, 200 ether);
     }
 }

@@ -4,13 +4,20 @@ pragma solidity ^0.8.24;
 import {SafeTransferLib} from "solady/src/utils/SafeTransferLib.sol";
 import {EscrowLib} from "./EscrowLib.sol";
 import {OperatorRegistry} from "./OperatorRegistry.sol";
+import {ReentrancyGuard} from "./ReentrancyGuard.sol";
 
 /// @notice The standardized settlement seam — the safety-critical core of the table-maintainer
 /// substrate. Holds ALL player and operator funds in per-(operator, token) isolated ledgers, pulls
 /// every deposit with balance-delta verification (fee-on-transfer / rebasing safe), and pays out
-/// deterministically. It is token-agnostic (any ERC-20, no whitelist, no oracle). Bet lifecycle
-/// (lockExposure / settle / refund / rake) is added in Tasks 4–6.
-contract GameEscrow {
+/// deterministically. It is token-agnostic (any ERC-20, no whitelist, no oracle).
+///
+/// Every token-moving entrypoint is `nonReentrant`. The balance-delta credit is only sound if no
+/// nested transfer runs inside the measured window: a hooked/ERC-777 token that re-entered
+/// `depositBankroll` (or `lockExposure`'s stake pull) mid-`transferFrom` would otherwise make the
+/// outer delta span the inner transfer and over-credit the ledger, breaking per-bucket solvency. The
+/// shared mutex (see ReentrancyGuard) also blocks cross-function re-entry — a payout transfer cannot
+/// re-enter deposit/withdraw. The CEI ordering on settle/refund is kept as a second line of defence.
+contract GameEscrow is ReentrancyGuard {
     using SafeTransferLib for address;
     using EscrowLib for EscrowLib.Ledger;
 
@@ -82,7 +89,7 @@ contract GameEscrow {
     /// @notice Fund an operator's (operator, token) bankroll from msg.sender — the BYO funding source
     /// (EOA, Safe, OperatorVault clone). Anyone may fund any operator; only the measured delta is
     /// credited.
-    function depositBankroll(address operator, address token, uint256 amount) external {
+    function depositBankroll(address operator, address token, uint256 amount) external nonReentrant {
         uint256 credited = _pullVerified(token, msg.sender, amount);
         ledgers[_ledgerKey(operator, token)].creditBankroll(credited);
         emit BankrollDeposited(operator, token, msg.sender, credited);
@@ -90,7 +97,7 @@ contract GameEscrow {
 
     /// @notice Operator withdraws its own idle bankroll. Debits its (operator, token) ledger only —
     /// locked and rake are untouchable here.
-    function withdrawBankroll(address token, uint256 amount) external {
+    function withdrawBankroll(address token, uint256 amount) external nonReentrant {
         ledgers[_ledgerKey(msg.sender, token)].debitBankroll(amount);
         token.safeTransfer(msg.sender, amount);
         emit BankrollWithdrawn(msg.sender, token, amount);
@@ -118,7 +125,7 @@ contract GameEscrow {
         address player,
         uint256 stake,
         uint256 payout
-    ) external {
+    ) external nonReentrant {
         if (!authorizedGame[operator][msg.sender]) revert UnauthorizedGame();
         if (bets[betId].open) revert BetExists();
         if (payout < stake) revert BadPayout();
@@ -156,7 +163,7 @@ contract GameEscrow {
 
     /// @notice Player won: pay the full payout out of `locked`. CEI — the bet is closed BEFORE the
     /// token leaves the contract, so a hostile token cannot re-enter and settle the same bet twice.
-    function settleWin(bytes32 betId) external {
+    function settleWin(bytes32 betId) external nonReentrant {
         Bet storage b = _openBet(betId);
         b.open = false;
         ledgers[_ledgerKey(b.operator, b.token)].settleWin(b.payout);
@@ -166,7 +173,7 @@ contract GameEscrow {
 
     /// @notice Player lost: rake is taken on the forfeited stake, the remainder of the reservation
     /// returns to the operator's bankroll. No external transfer — funds simply stay in escrow.
-    function settleLoss(bytes32 betId) external {
+    function settleLoss(bytes32 betId) external nonReentrant {
         Bet storage b = _openBet(betId);
         b.open = false;
         uint16 bps = OperatorRegistry(registry).rakeBps(b.operator, b.game);
@@ -177,7 +184,7 @@ contract GameEscrow {
 
     /// @notice Abort/timeout: the operator's exposure returns to bankroll, the player reclaims their
     /// own stake. CEI — closed BEFORE the stake transfer.
-    function refund(bytes32 betId) external {
+    function refund(bytes32 betId) external nonReentrant {
         Bet storage b = _openBet(betId);
         b.open = false;
         uint256 exposure;
@@ -189,7 +196,7 @@ contract GameEscrow {
 
     /// @notice Operator sweeps its accrued rake for one token to its configured recipient (defaults
     /// to the operator itself).
-    function withdrawRake(address token) external {
+    function withdrawRake(address token) external nonReentrant {
         uint256 amt = ledgers[_ledgerKey(msg.sender, token)].takeRake();
         address recipient = OperatorRegistry(registry).rakeRecipientOf(msg.sender, token);
         token.safeTransfer(recipient, amt);
