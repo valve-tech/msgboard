@@ -19,5 +19,6 @@
   "coinFlipTablesRetired": [
     "0xe10be94d21b0ddcefadf5ed997b892b9bf4a15f0",
     "0x659602cE3e7F8046F4c0602de039228398d1DbEB"
-  ]
+  ],
+  "operatorCoinFlip": "0x48f6f9e15ad2b01cc60612c29dfed064a6353b4e"
 }

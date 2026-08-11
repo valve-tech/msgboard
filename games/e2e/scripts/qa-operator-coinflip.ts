@@ -61,6 +61,9 @@ async function main() {
   const gameAbi = loadAbi('OperatorCoinFlip')
   const escrowAbi = loadAbi('GameEscrow')
   const registryAbi = loadAbi('OperatorRegistry')
+  // Reverts bubble up from GameEscrow/EscrowLib through the game call, so decode against all three ABIs
+  // (InsufficientBankroll/NotBetGame/UnauthorizedGame live on the escrow side, not the game ABI).
+  const xabi = [...gameAbi, ...escrowAbi, ...registryAbi] as viem.Abi
 
   const pc = viem.createPublicClient({ chain, transport: viem.http(RPC) })
   const wc = viem.createWalletClient({ account, chain, transport: viem.http(RPC) })
@@ -74,8 +77,8 @@ async function main() {
     const { request } = await pc.simulateContract({ ...call, account, gasPrice })
     return pc.waitForTransactionReceipt({ hash: await wc.writeContract(request) })
   }
-  const expectRevert = async (name: string, call: { address: viem.Hex; abi: viem.Abi; functionName: string; args: readonly unknown[] }, wantErr: string) => {
-    try { await pc.simulateContract({ ...call, account, gasPrice }); check(name, false, 'did NOT revert') }
+  const expectRevert = async (name: string, call: { address: viem.Hex; functionName: string; args: readonly unknown[] }, wantErr: string) => {
+    try { await pc.simulateContract({ ...call, abi: xabi, account, gasPrice }); check(name, false, 'did NOT revert') }
     catch (e) { const m = (e as Error).message; check(name, m.includes(wantErr), `reverted (${(m.split('\n').find((l) => l.includes(wantErr)) ?? m.split('\n')[0]).slice(0, 90)})`) }
   }
   const heatLocations = async (): Promise<Info[]> => {
@@ -161,7 +164,7 @@ async function main() {
     const FRESH_TOKEN = '0x000000000000000000000000000000000000dEaD' as viem.Hex
     const zeroTable = await createTable(FRESH_TOKEN, 196, E(100))
     await expectRevert('open on empty bankroll → InsufficientBankroll', {
-      address: GAME, abi: gameAbi, functionName: 'open', args: [zeroTable, 0, E(1), cfg.canonicalSubset, await heatLocations()],
+      address: GAME, functionName: 'open', args: [zeroTable, 0, E(1), cfg.canonicalSubset, await heatLocations()],
     }, 'InsufficientBankroll')
 
     // (2) NotBetGame: only the recording game may settle. Open a real round, then try to settle it
@@ -169,7 +172,7 @@ async function main() {
     const t = await createTable(CHIPS, 196, E(100))
     const { roundId } = await openRound(t, 1 /* TAILS */, E(1))
     await expectRevert('escrow.settleWin by non-game → NotBetGame', {
-      address: ESCROW, abi: escrowAbi, functionName: 'settleWin', args: [roundId],
+      address: ESCROW, functionName: 'settleWin', args: [roundId],
     }, 'NotBetGame')
 
     // (3) UnauthorizedGame (the C1 fix, live): revoke the game's authorization, prove open() now reverts
@@ -177,7 +180,7 @@ async function main() {
     await send({ address: ESCROW, abi: escrowAbi, functionName: 'authorizeGame', args: [GAME, false] })
     const t2 = await createTable(CHIPS, 196, E(100))
     await expectRevert('open after deauthorizeGame → UnauthorizedGame', {
-      address: GAME, abi: gameAbi, functionName: 'open', args: [t2, 0, E(1), cfg.canonicalSubset, await heatLocations()],
+      address: GAME, functionName: 'open', args: [t2, 0, E(1), cfg.canonicalSubset, await heatLocations()],
     }, 'UnauthorizedGame')
     await send({ address: ESCROW, abi: escrowAbi, functionName: 'authorizeGame', args: [GAME, true] })
     check('re-authorized game after test', (await pc.readContract({ address: ESCROW, abi: escrowAbi, functionName: 'authorizedGame', args: [account.address, GAME] })) as boolean)
