@@ -107,6 +107,8 @@ async function main() {
   if (!registered) { console.log(' registry.register()…'); await send({ address: REGISTRY, abi: registryAbi, functionName: 'register', args: [] }) }
   check('operator registered', (await pc.readContract({ address: REGISTRY, abi: registryAbi, functionName: 'registered', args: [account.address] })) as boolean)
   console.log(' escrow.authorizeGame(game, true)…'); await send({ address: ESCROW, abi: escrowAbi, functionName: 'authorizeGame', args: [GAME, true] })
+  // player consents to the game pulling its escrow allowance (closes the shared-escrow approval drain)
+  console.log(' escrow.setPlayerGame(game, true)…'); await send({ address: ESCROW, abi: escrowAbi, functionName: 'setPlayerGame', args: [GAME, true] })
   const bal = (await pc.readContract({ address: CHIPS, abi: chipsAbi, functionName: 'balanceOf', args: [account.address] })) as bigint
   if (bal < E(5000)) { console.log(' minting 100000 Chips…'); await send({ address: CHIPS, abi: chipsAbi, functionName: 'mint', args: [account.address, E(100000)] }) }
   await send({ address: CHIPS, abi: chipsAbi, functionName: 'approve', args: [ESCROW, E(10_000_000)] })
