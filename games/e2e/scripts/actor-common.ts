@@ -16,6 +16,25 @@ import {
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 
+/** OperatorCoinFlip.RoundOpened — its own signature (no subsetHash, unlike CoinFlipTables), so
+ *  heatsSince decodes its heats with this rather than reusing coinFlipTablesAbi. Only `key` is read. */
+const operatorCoinFlipRoundOpenedAbi = [
+  {
+    type: 'event',
+    name: 'RoundOpened',
+    inputs: [
+      { name: 'roundId', type: 'bytes32', indexed: true },
+      { name: 'tableId', type: 'bytes32', indexed: true },
+      { name: 'player', type: 'address', indexed: true },
+      { name: 'side', type: 'uint8', indexed: false },
+      { name: 'stake', type: 'uint256', indexed: false },
+      { name: 'payout', type: 'uint256', indexed: false },
+      { name: 'key', type: 'bytes32', indexed: false },
+      { name: 'openedAtBlock', type: 'uint256', indexed: false },
+    ],
+  },
+] as const satisfies viem.Abi
+
 export type Deployment = {
   chainId: number
   coinFlip: viem.Hex
@@ -29,6 +48,14 @@ export type Deployment = {
    *  counter drops by that many on the swap → SecretMismatch. Append the old address here whenever
    *  coinFlipTables is repointed to a fresh deployment. */
   coinFlipTablesRetired?: viem.Hex[]
+  /** OperatorCoinFlip (table-maintainer substrate reference game). Also validator-settled and heats the
+   *  SAME shared validator pools (one slot per open, emits RoundOpened{key,...}), so heatsSince MUST
+   *  include it or the chronological slot counter desyncs → SecretMismatch for ALL shared-pool games.
+   *  Its RoundOpened signature differs from CoinFlipTables' (no subsetHash), so it decodes with its own
+   *  event ABI below. Optional: absent on chains where the substrate isn't deployed. */
+  operatorCoinFlip?: viem.Hex
+  /** RETIRED OperatorCoinFlip addresses — same slot-permanence rule as coinFlipTablesRetired. */
+  operatorCoinFlipRetired?: viem.Hex[]
   random: viem.Hex
   canonicalSubset: viem.Hex[]
   /** BASE offsets; pools chain at base + n*poolSize (core poolLocationFor). */
@@ -136,14 +163,22 @@ export const heatsSince = async (
     ...(config.coinFlipTables ? [config.coinFlipTables] : []),
     ...(config.coinFlipTablesRetired ?? []),
   ]
-  const [heated, armed, ...tableOpens] = await Promise.all([
+  // OperatorCoinFlip shares the same pools too, but its RoundOpened decodes with a different ABI.
+  const operatorAddresses = [
+    ...(config.operatorCoinFlip ? [config.operatorCoinFlip] : []),
+    ...(config.operatorCoinFlipRetired ?? []),
+  ]
+  const [heated, armed, ...rest] = await Promise.all([
     chunkedEvents(publicClient, { address: config.coinFlip, abi: coinFlipAbi as viem.Abi, eventName: 'Heated', fromBlock: from }),
     chunkedEvents(publicClient, { address: config.raffle, abi: raffleAbi as viem.Abi, eventName: 'Armed', fromBlock: from }),
     ...tableAddresses.map((address) =>
       chunkedEvents(publicClient, { address, abi: coinFlipTablesAbi as viem.Abi, eventName: 'RoundOpened', fromBlock: from }),
     ),
+    ...operatorAddresses.map((address) =>
+      chunkedEvents(publicClient, { address, abi: operatorCoinFlipRoundOpenedAbi as viem.Abi, eventName: 'RoundOpened', fromBlock: from }),
+    ),
   ])
-  return [...heated, ...armed, ...tableOpens.flat()]
+  return [...heated, ...armed, ...rest.flat()]
     .map((log) => ({ key: (log.args as { key: viem.Hex }).key, blockNumber: log.blockNumber, logIndex: log.logIndex }))
     .sort((a, b) => (a.blockNumber === b.blockNumber ? a.logIndex - b.logIndex : a.blockNumber < b.blockNumber ? -1 : 1))
     .map(({ key, blockNumber }) => ({ key, blockNumber }))
