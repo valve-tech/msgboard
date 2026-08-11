@@ -169,13 +169,13 @@ async function main() {
       address: GAME, functionName: 'open', args: [zeroTable, 0, E(1), cfg.canonicalSubset, await heatLocations()],
     }, 'InsufficientBankroll')
 
-    // (2) NotBetGame: only the recording game may settle. Open a real round, then try to settle it
-    // directly from the deployer (not the game contract) → NotBetGame.
+    // (2) Only the recording game may settle. Bets are namespaced by (game, betId), so a settle from
+    // the deployer (not the game contract) finds no bet in its own namespace and reverts UnknownBet.
     const t = await createTable(CHIPS, 196, E(100))
     const { roundId } = await openRound(t, 1 /* TAILS */, E(1))
-    await expectRevert('escrow.settleWin by non-game → NotBetGame', {
+    await expectRevert('escrow.settleWin by non-game → UnknownBet', {
       address: ESCROW, functionName: 'settleWin', args: [roundId],
-    }, 'NotBetGame')
+    }, 'UnknownBet')
 
     // (3) UnauthorizedGame (the C1 fix, live): revoke the game's authorization, prove open() now reverts
     // in the escrow, then restore it.

@@ -98,4 +98,13 @@ contract OperatorCoinFlipTest is Test {
         vm.expectRevert(OperatorCoinFlip.NotRegisteredOperator.selector);
         game.createTable(address(tok), MULT, MAX_STAKE);
     }
+
+    /// A stake so small that payout truncates to break-even (payout == stake, zero exposure) is a
+    /// degenerate no-win round — rejected before any validator heat is consumed.
+    function test_open_revertsOnDustStake() public {
+        bytes32 tableId = _table();
+        vm.prank(player);
+        vm.expectRevert(OperatorCoinFlip.DustStake.selector);
+        game.open(tableId, 0, 1, subset, locs); // 1 wei * 196 / 100 == 1 == stake
+    }
 }

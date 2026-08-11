@@ -20,6 +20,15 @@ contract OperatorVault {
     event Funded(address indexed token, uint256 amount);
     event Swept(address indexed token, uint256 amount);
 
+    /// @notice Locks the IMPLEMENTATION (master copy) so it can never be initialized: owner is set
+    /// non-zero here, so `initialize` reverts AlreadyInit on the bare impl. EIP-1167 clones run no
+    /// constructor, so their `owner` starts at 0 and they initialize normally — this only inert-locks
+    /// the shared code the clones delegatecall into (an un-init'd impl is otherwise anyone's to seize
+    /// and, if tokens ever land on it by mistake, sweep).
+    constructor() {
+        owner = address(this);
+    }
+
     function initialize(address owner_, address escrow_) external {
         if (owner != address(0)) revert AlreadyInit();
         owner = owner_;
@@ -34,7 +43,9 @@ contract OperatorVault {
     /// @notice Move `amount` of the vault's own `token` balance into the escrow's bankroll under the
     /// owner's (owner, token) bucket. The escrow pulls via transferFrom, so approve it first.
     function fund(address token, uint256 amount) external onlyOwner {
-        token.safeApprove(escrow, amount);
+        // safeApproveWithRetry (not safeApprove): USDT-style tokens revert on a non-zero→non-zero
+        // approval, and any residual allowance left by a partial pull would brick a later fund().
+        token.safeApproveWithRetry(escrow, amount);
         GameEscrow(escrow).depositBankroll(owner, token, amount);
         emit Funded(token, amount);
     }
