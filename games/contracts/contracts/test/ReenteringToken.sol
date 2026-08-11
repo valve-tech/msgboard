@@ -24,6 +24,7 @@ contract ReenteringToken {
     );
 
     mapping(address => uint256) public balanceOf;
+    mapping(address => mapping(address => uint256)) public allowance;
     mapping(address => mapping(bytes32 => bool)) public authorizationState;
 
     address public reenterTarget;
@@ -31,6 +32,11 @@ contract ReenteringToken {
     bool public armed;
     uint256 public reentryCalls;
     bool public lastReentryReverted;
+    /// @notice Raw returndata (or revert reason) from the last armed re-entry call, so callers can
+    /// assert on the SPECIFIC revert selector (e.g. GameEscrow.UnknownBet) rather than just the
+    /// success/failure boolean — a boolean alone can't distinguish "blocked for the right reason"
+    /// from "blocked for an unrelated, confounding reason".
+    bytes public lastReentryReturnData;
 
     error InvalidSignature();
     error AuthorizationAlreadyUsed();
@@ -89,10 +95,35 @@ contract ReenteringToken {
         if (armed) {
             armed = false; // single-shot: never recurse indefinitely
             reentryCalls += 1;
-            (bool ok,) = reenterTarget.call(reenterData);
+            (bool ok, bytes memory ret) = reenterTarget.call(reenterData);
             lastReentryReverted = !ok;
+            lastReentryReturnData = ret;
         }
         _transfer(msg.sender, to, value);
+        return true;
+    }
+
+    function approve(address spender, uint256 value) external returns (bool) {
+        allowance[msg.sender][spender] = value;
+        return true;
+    }
+
+    /// Same one-shot armed-reentry behavior as `transfer`, but on the PULL leg (`transferFrom`) —
+    /// the vector a caller like GameEscrow's `_pullVerified` (which pulls via `safeTransferFrom`)
+    /// actually exercises.
+    function transferFrom(address from, address to, uint256 value) external returns (bool) {
+        if (armed) {
+            armed = false; // single-shot: never recurse indefinitely
+            reentryCalls += 1;
+            (bool ok, bytes memory ret) = reenterTarget.call(reenterData);
+            lastReentryReverted = !ok;
+            lastReentryReturnData = ret;
+        }
+        uint256 allowed = allowance[from][msg.sender];
+        if (allowed != type(uint256).max) {
+            allowance[from][msg.sender] = allowed - value;
+        }
+        _transfer(from, to, value);
         return true;
     }
 
