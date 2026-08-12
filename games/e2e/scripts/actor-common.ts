@@ -17,7 +17,12 @@ import {
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 
 /** OperatorCoinFlip.RoundOpened — its own signature (no subsetHash, unlike CoinFlipTables), so
- *  heatsSince decodes its heats with this rather than reusing coinFlipTablesAbi. Only `key` is read. */
+ *  heatsSincePriced decodes its heats with this rather than reusing coinFlipTablesAbi. Since
+ *  validator-forfeit (tiers + fee metering), the event also carries `tierPrice` — the round's
+ *  (token, price) pool is `tierPrice` plus the table's token (read separately, see
+ *  operatorCoinFlipTablesAbi below). This MUST list every non-indexed field in on-chain order:
+ *  a missing/misordered field silently shifts the decode of every field after it, corrupting
+ *  `key` — that bug is exactly why this file previously miscounted operator heats. */
 const operatorCoinFlipRoundOpenedAbi = [
   {
     type: 'event',
@@ -29,8 +34,30 @@ const operatorCoinFlipRoundOpenedAbi = [
       { name: 'side', type: 'uint8', indexed: false },
       { name: 'stake', type: 'uint256', indexed: false },
       { name: 'payout', type: 'uint256', indexed: false },
+      { name: 'tierPrice', type: 'uint256', indexed: false },
       { name: 'key', type: 'bytes32', indexed: false },
       { name: 'openedAtBlock', type: 'uint256', indexed: false },
+    ],
+  },
+] as const satisfies viem.Abi
+
+/** OperatorCoinFlip.tables(tableId) — the auto-generated getter for the Table struct. Only `token`
+ *  (index 1) is read here, to pair with a round's `tierPrice` and resolve the (token, price) pool a
+ *  heat consumed. Field order MUST match the Table struct exactly (operator, token, maxMultiplierX100,
+ *  minStake, maxStake, open) — readContract decodes this as a positional tuple, not by name. */
+const operatorCoinFlipTablesAbi = [
+  {
+    type: 'function',
+    name: 'tables',
+    stateMutability: 'view',
+    inputs: [{ name: 'tableId', type: 'bytes32' }],
+    outputs: [
+      { name: 'operator', type: 'address' },
+      { name: 'token', type: 'address' },
+      { name: 'maxMultiplierX100', type: 'uint16' },
+      { name: 'minStake', type: 'uint256' },
+      { name: 'maxStake', type: 'uint256' },
+      { name: 'open', type: 'bool' },
     ],
   },
 ] as const satisfies viem.Abi
@@ -48,13 +75,16 @@ export type Deployment = {
    *  counter drops by that many on the swap → SecretMismatch. Append the old address here whenever
    *  coinFlipTables is repointed to a fresh deployment. */
   coinFlipTablesRetired?: viem.Hex[]
-  /** OperatorCoinFlip (table-maintainer substrate reference game). Also validator-settled and heats the
-   *  SAME shared validator pools (one slot per open, emits RoundOpened{key,...}), so heatsSince MUST
-   *  include it or the chronological slot counter desyncs → SecretMismatch for ALL shared-pool games.
-   *  Its RoundOpened signature differs from CoinFlipTables' (no subsetHash), so it decodes with its own
-   *  event ABI below. Optional: absent on chains where the substrate isn't deployed. */
+  /** OperatorCoinFlip (table-maintainer substrate reference game, validator-forfeit build). Validator-
+   *  settled, but it heats its OWN pool ladder keyed by (table.token, round.tierPrice) — NOT the shared
+   *  native/price-0 pools that CoinFlip/Raffle/CoinFlipTables use. REGRESSION RISK: heatsSince MUST NOT
+   *  include these heats — doing so once desynced the shared price-0 slot counter (every operator open
+   *  stole a slot from CoinFlip/Raffle/CoinFlipTables) → SecretMismatch for ALL shared-pool games. Use
+   *  heatsSincePriced(token, price) to count these on their own ladder instead. Optional: absent on
+   *  chains where the substrate isn't deployed. */
   operatorCoinFlip?: viem.Hex
-  /** RETIRED OperatorCoinFlip addresses — same slot-permanence rule as coinFlipTablesRetired. */
+  /** RETIRED OperatorCoinFlip addresses — same slot-permanence rule as coinFlipTablesRetired, but on the
+   *  operator game's own priced ladders (see heatsSincePriced), never the shared price-0 counter. */
   operatorCoinFlipRetired?: viem.Hex[]
   random: viem.Hex
   canonicalSubset: viem.Hex[]
@@ -147,7 +177,16 @@ export const chunkedEvents = async (
   return cached.logs
 }
 
-/** All heats since the deployment origin, chronological — the k-th consumed pool slot k. */
+/**
+ * All heats on the SHARED native/price-0 pool ladder since the deployment origin, chronological — the
+ * k-th entry consumed pool slot k.
+ *
+ * REGRESSION NOTE (desync risk): only consumers of the price-0 ladder belong here — CoinFlip, Raffle,
+ * CoinFlipTables. OperatorCoinFlip (validator-forfeit build) heats a SEPARATE ladder keyed by
+ * (table.token, round.tierPrice); it is deliberately excluded. Adding it back here — or adding any
+ * future consumer of a non-price-0 pool — would desync this counter for every game that shares it,
+ * producing SecretMismatch. Count a priced consumer with heatsSincePriced instead.
+ */
 export const heatsSince = async (
   publicClient: ReturnType<typeof makePublicClient>,
   config: Deployment,
@@ -163,23 +202,78 @@ export const heatsSince = async (
     ...(config.coinFlipTables ? [config.coinFlipTables] : []),
     ...(config.coinFlipTablesRetired ?? []),
   ]
-  // OperatorCoinFlip shares the same pools too, but its RoundOpened decodes with a different ABI.
-  const operatorAddresses = [
-    ...(config.operatorCoinFlip ? [config.operatorCoinFlip] : []),
-    ...(config.operatorCoinFlipRetired ?? []),
-  ]
   const [heated, armed, ...rest] = await Promise.all([
     chunkedEvents(publicClient, { address: config.coinFlip, abi: coinFlipAbi as viem.Abi, eventName: 'Heated', fromBlock: from }),
     chunkedEvents(publicClient, { address: config.raffle, abi: raffleAbi as viem.Abi, eventName: 'Armed', fromBlock: from }),
     ...tableAddresses.map((address) =>
       chunkedEvents(publicClient, { address, abi: coinFlipTablesAbi as viem.Abi, eventName: 'RoundOpened', fromBlock: from }),
     ),
-    ...operatorAddresses.map((address) =>
-      chunkedEvents(publicClient, { address, abi: operatorCoinFlipRoundOpenedAbi as viem.Abi, eventName: 'RoundOpened', fromBlock: from }),
-    ),
   ])
   return [...heated, ...armed, ...rest.flat()]
     .map((log) => ({ key: (log.args as { key: viem.Hex }).key, blockNumber: log.blockNumber, logIndex: log.logIndex }))
+    .sort((a, b) => (a.blockNumber === b.blockNumber ? a.logIndex - b.logIndex : a.blockNumber < b.blockNumber ? -1 : 1))
+    .map(({ key, blockNumber }) => ({ key, blockNumber }))
+}
+
+/**
+ * All OperatorCoinFlip heats on its OWN `(token, price)` pool ladder since the deployment origin,
+ * chronological — the k-th entry consumed that ladder's pool slot k. This is a SEPARATE counter from
+ * heatsSince: OperatorCoinFlip (validator-forfeit build) heats `(table.token, round.tierPrice)`, not the
+ * shared native/price-0 pools, so its heats must never be merged into heatsSince (see the regression
+ * note there).
+ *
+ * `RoundOpened` carries `tierPrice` directly; `token` lives on the table, so each round's tableId is
+ * resolved to a token with one `tables()` read per distinct (contract address, tableId) pair.
+ */
+export const heatsSincePriced = async (
+  publicClient: ReturnType<typeof makePublicClient>,
+  config: Deployment,
+  token: viem.Hex,
+  price: bigint,
+): Promise<{ key: viem.Hex; blockNumber: bigint }[]> => {
+  const from = BigInt(config.deployBlock)
+  const operatorAddresses = [
+    ...(config.operatorCoinFlip ? [config.operatorCoinFlip] : []),
+    ...(config.operatorCoinFlipRetired ?? []),
+  ]
+  const perAddress = await Promise.all(
+    operatorAddresses.map((address) =>
+      chunkedEvents(publicClient, { address, abi: operatorCoinFlipRoundOpenedAbi as viem.Abi, eventName: 'RoundOpened', fromBlock: from }),
+    ),
+  )
+  const logs = perAddress.flat() as {
+    address: viem.Hex
+    args: { tableId: viem.Hex; tierPrice: bigint; key: viem.Hex }
+    blockNumber: bigint
+    logIndex: number
+  }[]
+
+  // Cheap filter first (no RPC): only resolve `token` for rounds whose tierPrice already matches.
+  const priced = logs.filter((log) => log.args.tierPrice === price)
+
+  const tableTokenCache = new Map<string, viem.Hex>()
+  const tokenOf = async (address: viem.Hex, tableId: viem.Hex): Promise<viem.Hex> => {
+    const cacheKey = `${address.toLowerCase()}:${tableId}`
+    const cached = tableTokenCache.get(cacheKey)
+    if (cached) return cached
+    const table = (await publicClient.readContract({
+      address,
+      abi: operatorCoinFlipTablesAbi as viem.Abi,
+      functionName: 'tables',
+      args: [tableId],
+    })) as readonly [viem.Hex, viem.Hex, number, bigint, bigint, boolean]
+    const resolved = table[1] // Table.token
+    tableTokenCache.set(cacheKey, resolved)
+    return resolved
+  }
+
+  const matched: { key: viem.Hex; blockNumber: bigint; logIndex: number }[] = []
+  for (const log of priced) {
+    const logToken = await tokenOf(log.address, log.args.tableId)
+    if (logToken.toLowerCase() !== token.toLowerCase()) continue
+    matched.push({ key: log.args.key, blockNumber: log.blockNumber, logIndex: log.logIndex })
+  }
+  return matched
     .sort((a, b) => (a.blockNumber === b.blockNumber ? a.logIndex - b.logIndex : a.blockNumber < b.blockNumber ? -1 : 1))
     .map(({ key, blockNumber }) => ({ key, blockNumber }))
 }
