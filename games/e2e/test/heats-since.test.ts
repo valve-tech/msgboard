@@ -18,10 +18,16 @@ import type { makePublicClient } from '@msgboard/games-core'
 const COIN_FLIP = '0x1111111111111111111111111111111111111111' as viem.Hex
 const RAFFLE = '0x2222222222222222222222222222222222222222' as viem.Hex
 const OPERATOR = '0x3333333333333333333333333333333333333333' as viem.Hex
-const TABLE_A = '0xaaaa000000000000000000000000000000000000000000000000000000aa' as viem.Hex
-const TABLE_B = '0xbbbb000000000000000000000000000000000000000000000000000000bb' as viem.Hex
+// bytes32 table ids — derived via keccak256 rather than hand-padded hex, so they are always valid
+// 32-byte values (a hand-padded literal here previously silently ran 2 bytes short).
+const TABLE_A = viem.keccak256(viem.toHex('table-a'))
+const TABLE_B = viem.keccak256(viem.toHex('table-b'))
+// TABLE_C shares TABLE_A's tierPrice but sits on a DIFFERENT token — the fixture case that exercises
+// the token half of the (token, price) filter, not just the price half.
+const TABLE_C = viem.keccak256(viem.toHex('table-c'))
 const TOKEN_A = '0x4444444444444444444444444444444444444444' as viem.Hex
 const TOKEN_B = '0x5555555555555555555555555555555555555555' as viem.Hex
+const TOKEN_C = '0x7777777777777777777777777777777777777777' as viem.Hex
 const PRICE_A = viem.parseEther('1')
 const PRICE_B = viem.parseEther('2')
 
@@ -30,6 +36,7 @@ const K2 = viem.keccak256(viem.toHex('k2'))
 const K3 = viem.keccak256(viem.toHex('k3'))
 const K4 = viem.keccak256(viem.toHex('k4'))
 const K5 = viem.keccak256(viem.toHex('k5'))
+const K6 = viem.keccak256(viem.toHex('k6'))
 
 const heatedLog = (key: viem.Hex, blockNumber: bigint, logIndex: number) => ({
   address: COIN_FLIP,
@@ -102,8 +109,11 @@ describe('heatsSince / heatsSincePriced — slot-counter separation', () => {
     roundOpenedLog(K3, TABLE_A, PRICE_A, 12n, 0),
     roundOpenedLog(K4, TABLE_B, PRICE_B, 13n, 0),
     roundOpenedLog(K5, TABLE_A, PRICE_A, 14n, 0),
+    // Same tierPrice as TABLE_A (PRICE_A), but a DIFFERENT token — only the token filter, not the price
+    // filter, keeps this out of TOKEN_A's counter.
+    roundOpenedLog(K6, TABLE_C, PRICE_A, 15n, 0),
   ]
-  const tables = { [TABLE_A]: TOKEN_A, [TABLE_B]: TOKEN_B }
+  const tables = { [TABLE_A]: TOKEN_A, [TABLE_B]: TOKEN_B, [TABLE_C]: TOKEN_C }
   const client = fakePublicClient({ coinFlipHeated, operatorRoundOpened, tables })
 
   it('heatsSince counts ONLY the shared price-0 CoinFlip heats, never the operator priced heats', async () => {
@@ -122,5 +132,14 @@ describe('heatsSince / heatsSincePriced — slot-counter separation', () => {
   it('heatsSincePriced returns nothing for a (token, price) tier no round used', async () => {
     const none = await heatsSincePriced(client, deployment, TOKEN_A, viem.parseEther('99'))
     expect(none).toEqual([])
+  })
+
+  it('heatsSincePriced discriminates by TOKEN, not just price: a different-token table at the same tierPrice is excluded', async () => {
+    const tierA = await heatsSincePriced(client, deployment, TOKEN_A, PRICE_A)
+    expect(tierA.map((h) => h.key)).toEqual([K3, K5]) // NOT K6 — K6 is TABLE_C's heat, same price, different token
+    expect(tierA.map((h) => h.key)).not.toContain(K6)
+
+    const tierC = await heatsSincePriced(client, deployment, TOKEN_C, PRICE_A)
+    expect(tierC.map((h) => h.key)).toEqual([K6])
   })
 })
