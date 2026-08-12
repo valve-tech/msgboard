@@ -1,6 +1,6 @@
 {
   "chainId": 943,
-  "deployBlock": "25109132",
+  "deployBlock": "25115844",
   "deployer": "0x5182574eE268ABD0A48f97DcfcdE65234E8422E2",
   "random": "0x775AF72d62c85d2F7f0Bcc05BAa4Be0830087217",
   "contracts": {
@@ -9,11 +9,16 @@
     "OperatorBond": "0x2ee244c00bf4c3b882fc244d0f39c3d0f2d4b20f",
     "OperatorVault": "0x7b1c0fbb44a22c4c2e83ce4b6bb1c41bf442b3db",
     "OperatorVaultFactory": "0x49d7f611098703d76a3e905a599e9435cdaf6822",
-    "OperatorCoinFlip": "0x360f22c4b6b0a31cbff91226f20f557dbd0a6353"
+    "OperatorCoinFlip": "0x30b855799990fa9c2d0dff461bfb905a269efe8e"
   },
   "validators": [
     "0xAe96b0748f933914867d59486251043790cB2896",
     "0x2a638D7135966a5cA1973c930bD0317cd7d6874c",
     "0x0D3148A85608708Fe944EE71E13B4C9181b7cc83"
+  ],
+  "operatorCoinFlipRetired": [
+    "0x360f22c4b6b0a31cbff91226f20f557dbd0a6353",
+    "0xbb9bc6851998bc979889a6d31c1994160a219d04",
+    "0xb22ad173ee0ca5f9a3d36dc647d67bafa0e49e87"
   ]
 }
