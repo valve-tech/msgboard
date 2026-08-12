@@ -258,7 +258,9 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
     /// Random, so a third party can front-run this game's chopAndRoute; capturing the credit here (rather
     /// than by a custody snapshot around our own chop call) makes the forfeit routing work no matter who
     /// called chop. Guarded by onlyRandom in GameBase, so the amount can't be forged. Recorded only while
-    /// the round is still Pending; a resolved round ignores it.
+    /// the round is still Pending; a resolved round ignores it. DEPENDS on the request carrying
+    /// callAtChange = true (GameBase._heatBoundStaked sets it) so Random fires onReverse on every chop —
+    /// without it a front-run chop would strand the forfeit.
     function _onReverse(bytes32 roundId, address, uint256 amount) internal override {
         Round storage r = rounds[roundId];
         if (r.status == Status.Pending) r.chopCredit = amount;
@@ -285,17 +287,20 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
         address operator = t.operator;
 
         uint256 fee = r.feeCharged; // Random refunds exactly this into custody on chop
-        feeBalance[operator][token] += fee;
-
         // chopCredit == fee + Σ withheld stakes; the excess over the fee is the punitive forfeit.
         uint256 forfeit = r.chopCredit - fee;
+
+        // Effects before interactions: resolve the round and restore the fee BEFORE the external
+        // handoff/deposit/refund. nonReentrant already guards the entrypoints; this is the second line.
+        r.status = Status.Refunded;
+        feeBalance[operator][token] += fee;
+
+        // Interactions.
         if (forfeit > 0) {
             IRandomStaking(random).handoff(address(this), token, int256(forfeit));
             token.safeApproveWithRetry(escrow, forfeit);
             GameEscrow(escrow).depositBankroll(operator, token, forfeit);
         }
-
-        r.status = Status.Refunded;
         GameEscrow(escrow).refund(roundId);
         emit RoundRefunded(roundId, r.tableId, r.player, r.stake);
         emit ForfeitRouted(roundId, operator, token, forfeit);
