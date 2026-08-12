@@ -12,7 +12,7 @@
  * are built from heatsSince().length (true consumed slot across ALL games sharing the validator pools).
  *
  * Onboarding is exercised live: registry.register() → escrow.authorizeGame(game,true) → depositBankroll.
- * The matrix proves the substrate's invariant spine on-chain: UnauthorizedGame (the C1 fix), NotBetGame
+ * The matrix proves the substrate's invariant spine on-chain: UnauthorizedGame (the C1 fix), UnknownBet
  * (only the recording game may settle), and InsufficientBankroll (graceful bankruptcy).
  */
 import { readFileSync } from 'node:fs'
@@ -31,9 +31,9 @@ const SETTLE_TIMEOUT_MS = Number(process.env.SETTLE_TIMEOUT_MS ?? 180_000)
 const chain = { id: 943, name: 'pulse-943', nativeCurrency: { name: 'PLS', symbol: 'PLS', decimals: 18 }, rpcUrls: { default: { http: [RPC] } } } as const
 
 // Deployed 943 substrate (deployments/943-operator-substrate.json), overridable via env.
-const REGISTRY = (process.env.REGISTRY ?? '0x175ca811e3180dfe8b47af1cebcac39f3c0ae4bc') as viem.Hex
-const ESCROW = (process.env.ESCROW ?? '0xac6ec2a13afd2afa708ab2c57fbd69163cee39f2') as viem.Hex
-const GAME = (process.env.GAME ?? '0x48f6f9e15ad2b01cc60612c29dfed064a6353b4e') as viem.Hex
+const REGISTRY = (process.env.REGISTRY ?? '0xb202144ed8f2ae1c8a6262c241714c171b039cbc') as viem.Hex
+const ESCROW = (process.env.ESCROW ?? '0xb572481635904fe2e3957bc45d81be07337e0838') as viem.Hex
+const GAME = (process.env.GAME ?? '0x360f22c4b6b0a31cbff91226f20f557dbd0a6353') as viem.Hex
 
 const chipsAbi = [
   { name: 'mint', type: 'function', inputs: [{ name: 'to', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [], stateMutability: 'nonpayable' },
@@ -62,7 +62,7 @@ async function main() {
   const escrowAbi = loadAbi('GameEscrow')
   const registryAbi = loadAbi('OperatorRegistry')
   // Reverts bubble up from GameEscrow/EscrowLib through the game call, so decode against all three ABIs
-  // (InsufficientBankroll/NotBetGame/UnauthorizedGame live on the escrow side, not the game ABI).
+  // (InsufficientBankroll/UnknownBet/UnauthorizedGame live on the escrow side, not the game ABI).
   const xabi = [...gameAbi, ...escrowAbi, ...registryAbi] as viem.Abi
 
   const pc = viem.createPublicClient({ chain, transport: viem.http(RPC) })
@@ -107,6 +107,8 @@ async function main() {
   if (!registered) { console.log(' registry.register()…'); await send({ address: REGISTRY, abi: registryAbi, functionName: 'register', args: [] }) }
   check('operator registered', (await pc.readContract({ address: REGISTRY, abi: registryAbi, functionName: 'registered', args: [account.address] })) as boolean)
   console.log(' escrow.authorizeGame(game, true)…'); await send({ address: ESCROW, abi: escrowAbi, functionName: 'authorizeGame', args: [GAME, true] })
+  // player consents to the game pulling its escrow allowance (closes the shared-escrow approval drain)
+  console.log(' escrow.setPlayerGame(game, true)…'); await send({ address: ESCROW, abi: escrowAbi, functionName: 'setPlayerGame', args: [GAME, true] })
   const bal = (await pc.readContract({ address: CHIPS, abi: chipsAbi, functionName: 'balanceOf', args: [account.address] })) as bigint
   if (bal < E(5000)) { console.log(' minting 100000 Chips…'); await send({ address: CHIPS, abi: chipsAbi, functionName: 'mint', args: [account.address, E(100000)] }) }
   await send({ address: CHIPS, abi: chipsAbi, functionName: 'approve', args: [ESCROW, E(10_000_000)] })
@@ -167,13 +169,13 @@ async function main() {
       address: GAME, functionName: 'open', args: [zeroTable, 0, E(1), cfg.canonicalSubset, await heatLocations()],
     }, 'InsufficientBankroll')
 
-    // (2) NotBetGame: only the recording game may settle. Open a real round, then try to settle it
-    // directly from the deployer (not the game contract) → NotBetGame.
+    // (2) Only the recording game may settle. Bets are namespaced by (game, betId), so a settle from
+    // the deployer (not the game contract) finds no bet in its own namespace and reverts UnknownBet.
     const t = await createTable(CHIPS, 196, E(100))
     const { roundId } = await openRound(t, 1 /* TAILS */, E(1))
-    await expectRevert('escrow.settleWin by non-game → NotBetGame', {
+    await expectRevert('escrow.settleWin by non-game → UnknownBet', {
       address: ESCROW, functionName: 'settleWin', args: [roundId],
-    }, 'NotBetGame')
+    }, 'UnknownBet')
 
     // (3) UnauthorizedGame (the C1 fix, live): revoke the game's authorization, prove open() now reverts
     // in the escrow, then restore it.
