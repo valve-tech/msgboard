@@ -131,9 +131,14 @@ contract MockRandomStaking is IRandom {
             custodied[msg.sender][token] -= send;
             token.safeTransfer(recipient, send);
         } else if (amount < 0) {
-            uint256 pull = uint256(-amount);
-            token.safeTransferFrom(msg.sender, address(this), pull);
-            custodied[recipient][token] += pull;
+            // Pull -amount from msg.sender into recipient's custody, crediting the MEASURED receipt
+            // (mirrors real Random's _receiveTokens). Measuring the delta — not the requested face
+            // amount — is what makes a fee-on-transfer token's second-leg tax observable, so a game
+            // that credits the face amount over-counts custody and breaks the custody invariant.
+            uint256 before = token.balanceOf(address(this));
+            token.safeTransferFrom(msg.sender, address(this), uint256(-amount));
+            uint256 received = token.balanceOf(address(this)) - before;
+            custodied[recipient][token] += received;
         }
     }
 
