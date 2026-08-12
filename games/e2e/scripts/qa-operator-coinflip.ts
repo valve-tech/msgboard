@@ -31,9 +31,9 @@ const SETTLE_TIMEOUT_MS = Number(process.env.SETTLE_TIMEOUT_MS ?? 180_000)
 const chain = { id: 943, name: 'pulse-943', nativeCurrency: { name: 'PLS', symbol: 'PLS', decimals: 18 }, rpcUrls: { default: { http: [RPC] } } } as const
 
 // Deployed 943 substrate (deployments/943-operator-substrate.json), overridable via env.
-const REGISTRY = (process.env.REGISTRY ?? '0x175ca811e3180dfe8b47af1cebcac39f3c0ae4bc') as viem.Hex
-const ESCROW = (process.env.ESCROW ?? '0xac6ec2a13afd2afa708ab2c57fbd69163cee39f2') as viem.Hex
-const GAME = (process.env.GAME ?? '0x48f6f9e15ad2b01cc60612c29dfed064a6353b4e') as viem.Hex
+const REGISTRY = (process.env.REGISTRY ?? '0xb202144ed8f2ae1c8a6262c241714c171b039cbc') as viem.Hex
+const ESCROW = (process.env.ESCROW ?? '0xb572481635904fe2e3957bc45d81be07337e0838') as viem.Hex
+const GAME = (process.env.GAME ?? '0x360f22c4b6b0a31cbff91226f20f557dbd0a6353') as viem.Hex
 
 const chipsAbi = [
   { name: 'mint', type: 'function', inputs: [{ name: 'to', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [], stateMutability: 'nonpayable' },

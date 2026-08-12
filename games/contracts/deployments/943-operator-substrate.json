@@ -1,15 +1,15 @@
 {
   "chainId": 943,
-  "deployBlock": "25096063",
+  "deployBlock": "25109132",
   "deployer": "0x5182574eE268ABD0A48f97DcfcdE65234E8422E2",
   "random": "0x775AF72d62c85d2F7f0Bcc05BAa4Be0830087217",
   "contracts": {
-    "OperatorRegistry": "0x175ca811e3180dfe8b47af1cebcac39f3c0ae4bc",
-    "GameEscrow": "0xac6ec2a13afd2afa708ab2c57fbd69163cee39f2",
-    "OperatorBond": "0x9727b12dfc9ef5cdc4474d246c83ce15cd8fcd3f",
-    "OperatorVault": "0x8f78c22f80652cba5af342b96208cb4b1e93a0e5",
-    "OperatorVaultFactory": "0x0ed7e1428f323d8c60107e8b864450d52e3a130a",
-    "OperatorCoinFlip": "0x48f6f9e15ad2b01cc60612c29dfed064a6353b4e"
+    "OperatorRegistry": "0xb202144ed8f2ae1c8a6262c241714c171b039cbc",
+    "GameEscrow": "0xb572481635904fe2e3957bc45d81be07337e0838",
+    "OperatorBond": "0x2ee244c00bf4c3b882fc244d0f39c3d0f2d4b20f",
+    "OperatorVault": "0x7b1c0fbb44a22c4c2e83ce4b6bb1c41bf442b3db",
+    "OperatorVaultFactory": "0x49d7f611098703d76a3e905a599e9435cdaf6822",
+    "OperatorCoinFlip": "0x360f22c4b6b0a31cbff91226f20f557dbd0a6353"
   },
   "validators": [
     "0xAe96b0748f933914867d59486251043790cB2896",
