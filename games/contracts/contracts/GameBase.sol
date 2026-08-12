@@ -20,6 +20,7 @@ abstract contract GameBase is ConsumerReceiver {
     error BadSubset();
     error SubsetMismatch();
     error StakeMismatch();
+    error PriceMismatch();
 
     event OwnerTransferred(address indexed previousOwner, address indexed newOwner);
     event ValidatorAdded(address indexed validator);
@@ -137,10 +138,25 @@ abstract contract GameBase is ConsumerReceiver {
         internal
         returns (bytes32 key)
     {
+        return _heatBoundPriced(subset, locations, 0);
+    }
+
+    /// @notice Like _heatBound, but binds each location to an expected preimage `price`. At price 0
+    /// this is the legacy behaviour (no validator stake). At price > 0 each provider's preimage is
+    /// staked with that price, so a provider that WITHHOLDS its reveal forfeits the stake on chop
+    /// (Random's `chop` pays the non-revealer's staked price to the request owner = this game). Binding
+    /// the price is essential: without it a player could pass price-0 locations and heat a
+    /// forfeit-free round, re-opening the selective-abort free-roll. The provider must have inked a
+    /// pool at exactly this (token, price), which is what puts the provider's OWN capital at stake.
+    function _heatBoundPriced(address[] memory subset, PreimageLocation.Info[] calldata locations, uint256 price)
+        internal
+        returns (bytes32 key)
+    {
         uint256 n = subset.length;
         if (locations.length != n) revert SubsetMismatch();
         for (uint256 i = 0; i < n; ++i) {
             if (locations[i].provider != subset[i]) revert SubsetMismatch();
+            if (locations[i].price != price) revert PriceMismatch();
             if (!_isAllowlisted(subset[i])) revert NotAllowlisted();
         }
         PreimageLocation.Info memory settings = PreimageLocation.Info({
