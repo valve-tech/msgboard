@@ -147,6 +147,38 @@ contract OperatorCoinFlipTest is Test {
         assertEq(rnd.balanceOf(address(game), address(tok)), FEES);
     }
 
+    /// A fee-on-transfer token is taxed on BOTH legs of depositFees (funder→game and game→Random).
+    /// Crediting the measured Random-custody delta (not the face amount) keeps the custody invariant
+    /// exact — otherwise the pool over-counts custody and one operator could drain shared custody.
+    function test_depositFees_feeOnTransfer_invariantHolds() public {
+        ERC20 fot = new ERC20(true); // 1% fee-on-transfer
+        uint256 amount = 100 ether;
+        fot.mint(op, amount);
+        vm.startPrank(op);
+        fot.approve(address(game), type(uint256).max);
+        game.depositFees(op, address(fot), amount);
+        vm.stopPrank();
+        uint256 pool = game.feeBalance(op, address(fot));
+        assertLt(pool, amount); // taxed below the face amount
+        assertEq(rnd.balanceOf(address(game), address(fot)), pool); // invariant holds
+    }
+
+    function test_withdrawFees_returnsFee_keepsInvariant() public {
+        uint256 poolBefore = game.feeBalance(op, address(tok)); // FEES from setUp
+        uint256 opBalBefore = tok.balanceOf(op);
+        vm.prank(op);
+        game.withdrawFees(address(tok), 40 ether);
+        assertEq(game.feeBalance(op, address(tok)), poolBefore - 40 ether);
+        assertEq(tok.balanceOf(op), opBalBefore + 40 ether);
+        assertEq(rnd.balanceOf(address(game), address(tok)), game.feeBalance(op, address(tok)));
+    }
+
+    function test_withdrawFees_overWithdraw_reverts() public {
+        vm.prank(op);
+        vm.expectRevert(OperatorCoinFlip.InsufficientFees.selector);
+        game.withdrawFees(address(tok), FEES + 1);
+    }
+
     function test_open_insufficientFees_reverts() public {
         // Drain the pool by opening the largest tier repeatedly is complex; instead onboard a fresh
         // operator with a tiny pool and prove the charge underflow reverts.
@@ -285,6 +317,9 @@ contract OperatorCoinFlipTest is Test {
         }
     }
 
+    /// The custody invariant `balanceOf(game, token) == Σ feeBalance` holds across mixed settle/abort
+    /// rounds — absent real Random's late-cast half-refund (a seed forming after HEAT_DURATION strands
+    /// the operator's own spent fee harmlessly). The mock has no late-cast path, so the equality is exact.
     function test_custody_invariant_holds_across_settle_and_abort() public {
         address opB = address(0xB2);
         _onboardOperator(opB);
