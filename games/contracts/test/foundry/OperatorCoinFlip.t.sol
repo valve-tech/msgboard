@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {OperatorCoinFlip} from "../../contracts/games/operator/OperatorCoinFlip.sol";
+import {GameBase} from "../../contracts/GameBase.sol";
 import {GameEscrow} from "../../contracts/games/operator/GameEscrow.sol";
 import {OperatorRegistry} from "../../contracts/games/operator/OperatorRegistry.sol";
 import {PreimageLocation} from "../../contracts/PreimageLocation.sol";
@@ -93,15 +94,15 @@ contract OperatorCoinFlipTest is Test {
     }
 
     function _key(bytes32 roundId) internal view returns (bytes32 k) {
-        (,,,,,, k,,) = game.rounds(roundId);
+        (,,,,,, k,,,,) = game.rounds(roundId);
     }
 
     function _tierPriceOfRound(bytes32 roundId) internal view returns (uint256 tp) {
-        (,,,,, tp,,,) = game.rounds(roundId);
+        (,,,,, tp,,,,,) = game.rounds(roundId);
     }
 
     function _status(bytes32 roundId) internal view returns (uint8 s) {
-        (,,,,,,,, OperatorCoinFlip.Status st) = game.rounds(roundId);
+        (,,,,,,,, OperatorCoinFlip.Status st,,) = game.rounds(roundId);
         s = uint8(st);
     }
 
@@ -283,6 +284,61 @@ contract OperatorCoinFlipTest is Test {
         assertEq(_status(roundId), uint8(OperatorCoinFlip.Status.Refunded));
         // custody invariant restored.
         assertEq(rnd.balanceOf(address(game), address(tok)), game.feeBalance(op, address(tok)));
+    }
+
+    /// A third party front-runs the game by calling the PUBLIC Random.chop directly. chopAndRoute must
+    /// still route the forfeit (from the onReverse-recorded credit) instead of reverting and freezing the
+    /// operator's fee + forfeit. This is the whole-branch audit's HIGH finding.
+    function test_chopAndRoute_afterExternalChop_stillRoutes() public {
+        bytes32 tid = _table();
+        (bytes32 roundId, bytes32 key, PreimageLocation.Info[] memory locs) = _open(tid, 0, 4 ether);
+        rnd.setRevealed(key, 0x3); // bit 2 withheld
+
+        // ATTACKER front-runs: direct public chop. onReverse records the credit; round stays Pending.
+        vm.prank(address(0xBEEF));
+        rnd.chop(key, locs);
+        assertEq(_status(roundId), uint8(OperatorCoinFlip.Status.Pending));
+
+        // chopAndRoute routes from the recorded credit — no re-chop, no revert.
+        vm.expectEmit(true, true, true, true);
+        emit OperatorCoinFlip.ForfeitRouted(roundId, op, address(tok), 4 ether);
+        game.chopAndRoute(roundId, locs);
+
+        assertEq(tok.balanceOf(player), 100 ether);
+        assertEq(esc.bankrollOf(op, address(tok)), BANKROLL + 4 ether);
+        assertEq(game.feeBalance(op, address(tok)), FEES);
+        assertEq(_status(roundId), uint8(OperatorCoinFlip.Status.Refunded));
+        assertEq(rnd.balanceOf(address(game), address(tok)), game.feeBalance(op, address(tok)));
+    }
+
+    /// Same front-run, but the round is closed by refundStale instead — it too must route the forfeit,
+    /// so a stray refundStale after an external chop cannot strand the fee + forfeit.
+    function test_refundStale_afterExternalChop_routesForfeit() public {
+        bytes32 tid = _table();
+        (bytes32 roundId, bytes32 key, PreimageLocation.Info[] memory locs) = _open(tid, 0, 4 ether);
+        rnd.setRevealed(key, 0x3);
+
+        vm.prank(address(0xBEEF));
+        rnd.chop(key, locs); // external chop → onChop sets choppedInstance, onReverse records credit
+
+        game.refundStale(roundId);
+
+        assertEq(tok.balanceOf(player), 100 ether);
+        assertEq(esc.bankrollOf(op, address(tok)), BANKROLL + 4 ether);
+        assertEq(game.feeBalance(op, address(tok)), FEES);
+        assertEq(_status(roundId), uint8(OperatorCoinFlip.Status.Refunded));
+        assertEq(rnd.balanceOf(address(game), address(tok)), game.feeBalance(op, address(tok)));
+    }
+
+    /// onReverse must be onlyRandom: a forged credit would let a caller route custody the game never
+    /// received. A non-Random caller reverts and cannot set chopCredit.
+    function test_onReverse_onlyRandom_reverts() public {
+        bytes32 tid = _table();
+        (bytes32 roundId, bytes32 key,) = _open(tid, 0, 4 ether);
+        vm.prank(address(0xBAD));
+        vm.expectRevert(GameBase.OnlyRandom.selector);
+        game.onReverse(key, address(tok), 1_000_000 ether);
+        assertEq(_status(roundId), uint8(OperatorCoinFlip.Status.Pending));
     }
 
     /// A round whose seed finalized settles via onCast/claim and is value-decided — it can never be

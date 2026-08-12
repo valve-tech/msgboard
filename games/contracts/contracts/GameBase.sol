@@ -196,7 +196,18 @@ abstract contract GameBase is ConsumerReceiver {
         _onChop(instanceId);
     }
 
-    function onReverse(bytes32, address, uint256) external override {}
+    /// @notice Core Random calls this when it reverses charges into this game's custody — notably on
+    /// `chop`, where it credits the request owner (this game) the withheld stakes plus the fee refund and
+    /// passes the EXACT amount. Routed to a guarded hook so a game can capture the credit no matter WHO
+    /// called the public `chop` (a third party can front-run it). onlyRandom is essential: without it
+    /// anyone could forge a credit and trick the game into routing custody it never received.
+    function onReverse(bytes32 key, address token, uint256 amount) external override {
+        if (msg.sender != random) revert OnlyRandom();
+        _onReverse(instanceByKey[key], token, amount);
+    }
+
+    /// @notice Optional hook for a game to record a reverse-charge credit (e.g. a chop forfeit).
+    function _onReverse(bytes32 instanceId, address token, uint256 amount) internal virtual {}
 
     /// @notice The game-specific settlement, invoked by onCast (push) and the game's pull fallback.
     function _settle(bytes32 instanceId, bytes32 seed) internal virtual;

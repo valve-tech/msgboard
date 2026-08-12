@@ -64,6 +64,9 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
         bytes32 key;
         uint256 openedAtBlock;
         Status  status;
+        // appended (indices 9,10) so the earlier tuple layout the caster/QA read stays stable:
+        uint256 feeCharged; // n*tierPrice metered out of the operator's fee pool at open
+        uint256 chopCredit; // fee refund + withheld stakes, recorded by onReverse on chop (any caller)
     }
 
     address public immutable escrow;
@@ -204,6 +207,7 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
         if (payout == stake) revert DustStake();
 
         // Meter the operator's fee BEFORE heat charges its Random custody the same amount.
+        uint256 feeCharged = validatorSubset.length * tierPrice;
         _chargeFee(t.operator, t.token, validatorSubset.length, tierPrice);
         // Heat the table token at the tier price: each provider's preimage is STAKED with (token, price),
         // so a withheld reveal forfeits that stake on chop. Binding both token and price closes the
@@ -217,7 +221,8 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
         // local record.
         rounds[roundId] = Round({
             tableId: tableId, player: msg.sender, side: side, stake: stake, payout: payout,
-            tierPrice: tierPrice, key: key, openedAtBlock: block.number, status: Status.Pending
+            tierPrice: tierPrice, key: key, openedAtBlock: block.number, status: Status.Pending,
+            feeCharged: feeCharged, chopCredit: 0
         });
         instanceByKey[key] = roundId;
 
@@ -248,31 +253,42 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
         _settle(roundId, seed);
     }
 
-    /// @notice Abort a stalled round and route the validator forfeit. Permissionless — `info` must hash
-    /// to the round key inside `chop`, so it can't be forged. Chops the cohort (Random refunds this
-    /// game's fee and credits the withheld validators' staked price to this game's custody), restores
-    /// the operator's fee pool, deposits the punitive forfeit into the operator's bankroll, and refunds
-    /// the player their stake plus the operator its exposure.
+    /// @notice Record the credit Random reverses into this game's custody on a chop — the withheld
+    /// validators' staked price PLUS the fee refund, delivered EXACTLY by Random. `chop` is PUBLIC on
+    /// Random, so a third party can front-run this game's chopAndRoute; capturing the credit here (rather
+    /// than by a custody snapshot around our own chop call) makes the forfeit routing work no matter who
+    /// called chop. Guarded by onlyRandom in GameBase, so the amount can't be forged. Recorded only while
+    /// the round is still Pending; a resolved round ignores it.
+    function _onReverse(bytes32 roundId, address, uint256 amount) internal override {
+        Round storage r = rounds[roundId];
+        if (r.status == Status.Pending) r.chopCredit = amount;
+    }
+
+    /// @notice Abort a stalled round and route the validator forfeit. Permissionless. If no one has chopped
+    /// yet, chop now (`info` must hash to the round key inside Random.chop, so it can't be forged); if a
+    /// third party already chopped, the credit is already recorded via onReverse and we route it directly.
     function chopAndRoute(bytes32 roundId, PreimageLocation.Info[] calldata info) external nonReentrant {
         Round storage r = rounds[roundId];
         if (r.status != Status.Pending) revert AlreadyResolved();
         if (_seed(r.key) != bytes32(0)) revert TooEarly(); // a finalized round settles via claim, never chops
+        if (r.chopCredit == 0) IRandomStaking(random).chop(r.key, info); // onReverse records r.chopCredit
+        _routeForfeit(roundId);
+    }
+
+    /// @notice Restore the operator's fee, bank the withheld stakes (the forfeit) into its bankroll, and
+    /// refund the player. Drives from r.chopCredit (fee refund + withheld stakes) recorded by onReverse —
+    /// so it is identical whether this game chopped or a third party did.
+    function _routeForfeit(bytes32 roundId) internal {
+        Round storage r = rounds[roundId];
         Table storage t = tables[r.tableId];
         address token = t.token;
         address operator = t.operator;
 
-        // Measure the forfeit as a custody DELTA — no recount, no oracle. chop credits (fee refund +
-        // withheld stake) to this game's custody; the delta is exactly that sum.
-        uint256 balBefore = IRandomStaking(random).balanceOf(address(this), token);
-        IRandomStaking(random).chop(r.key, info);
-        uint256 credited = IRandomStaking(random).balanceOf(address(this), token) - balBefore;
-
-        // Restore the operator's fee — chop refunded it into custody.
-        uint256 fee = info.length * r.tierPrice;
+        uint256 fee = r.feeCharged; // Random refunds exactly this into custody on chop
         feeBalance[operator][token] += fee;
 
-        // The rest is the punitive forfeit: pull it out of Random and bank it for the operator.
-        uint256 forfeit = credited - fee;
+        // chopCredit == fee + Σ withheld stakes; the excess over the fee is the punitive forfeit.
+        uint256 forfeit = r.chopCredit - fee;
         if (forfeit > 0) {
             IRandomStaking(random).handoff(address(this), token, int256(forfeit));
             token.safeApproveWithRetry(escrow, forfeit);
@@ -285,11 +301,15 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
         emit ForfeitRouted(roundId, operator, token, forfeit);
     }
 
-    function refundStale(bytes32 roundId) external {
+    /// @notice Liveness fallback. If a chop already happened (credit recorded), route the forfeit exactly
+    /// as chopAndRoute would — so a stray refundStale can never strand the operator's fee or the forfeit.
+    /// Otherwise (a pure timeout with no chop) refund the player; the validators' stakes are untouched.
+    function refundStale(bytes32 roundId) external nonReentrant {
         Round storage r = rounds[roundId];
         if (r.status != Status.Pending) revert AlreadyResolved();
         if (_seed(r.key) != bytes32(0)) revert TooEarly();
         if (!_refundableNow(roundId, r.openedAtBlock)) revert TooEarly();
+        if (r.chopCredit != 0) { _routeForfeit(roundId); return; }
         r.status = Status.Refunded;
         GameEscrow(escrow).refund(roundId);
         emit RoundRefunded(roundId, r.tableId, r.player, r.stake);

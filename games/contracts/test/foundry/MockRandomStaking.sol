@@ -110,10 +110,14 @@ contract MockRandomStaking is IRandom {
         address token = _cohortToken[key];
         address owner = _owner[key];
 
-        custodied[owner][token] += _cohortFee[key] + forfeit;
+        uint256 payout = _cohortFee[key] + forfeit;
+        custodied[owner][token] += payout;
 
         _finalized[key] = true;
 
+        // Mirror real Random: _reverseCharges credits the owner then delivers onReverse with the EXACT
+        // payout (fee refund + withheld stakes), and chop then delivers onChop. Both are swallow-on-revert.
+        _notifyReverse(owner, key, token, payout);
         _notifyChop(owner, key);
     }
 
@@ -172,6 +176,13 @@ contract MockRandomStaking is IRandom {
     function _notifyChop(address owner, bytes32 key) internal {
         (bool ok, ) = owner.call(abi.encodeWithSelector(ConsumerReceiver.onChop.selector, key));
         if (!ok) emit FailedToCall(key, owner, ConsumerReceiver.onChop.selector);
+    }
+
+    /// @dev See `_notifyCast`; delivers `onReverse(key, token, amount)` with the exact reversed credit,
+    /// swallow-on-revert like real Random's _reverseCharges callback.
+    function _notifyReverse(address owner, bytes32 key, address token, uint256 amount) internal {
+        (bool ok, ) = owner.call(abi.encodeWithSelector(ConsumerReceiver.onReverse.selector, key, token, amount));
+        if (!ok) emit FailedToCall(key, owner, ConsumerReceiver.onReverse.selector);
     }
 
     function _popcount(uint256 mask) internal pure returns (uint256 count) {
