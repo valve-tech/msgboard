@@ -26,6 +26,16 @@ contract MockRandomStaking is IRandom {
     mapping(bytes32 key => uint256 mask) internal _revealed;
     mapping(bytes32 key => uint256 required) internal _n;
     mapping(bytes32 key => uint256 price) internal _price;
+    /// @dev One-shot settlement guard: real Random can't settle a cohort twice — `chop` marks
+    /// the key chopped and a later `cast` reverts, and a second `cast` on an already-seeded key
+    /// is a no-op. This flag reproduces that for both `pushCast` and `chop` so neither can credit
+    /// (or pay the fee) more than once for the same key.
+    mapping(bytes32 key => bool done) internal _finalized;
+
+    /// @notice Emitted when a settlement callback to the request owner reverts. Mirrors real
+    /// Random's behavior of swallowing a broken consumer's revert instead of unwinding the
+    /// custody credit that was already booked.
+    event FailedToCall(bytes32 indexed key, address indexed owner, bytes4 selector);
 
     /// @dev recipient of the per-round fee on successful finalization; settable for tests.
     address internal _bonusTo = address(0xB0117);
@@ -45,6 +55,10 @@ contract MockRandomStaking is IRandom {
         custodied[msg.sender][token] += amount;
     }
 
+    /// @dev The mock only supports this codebase's fixed calling convention: `settings.provider
+    /// == msg.sender`, `callAtChange == true`, and a uniform per-validator price within a
+    /// cohort — `chop` relies on that uniformity via `_price[key] = info[0].price`, which
+    /// GameBase itself enforces (see PriceMismatch) before ever calling `heat`.
     function heat(
         uint256 required,
         PreimageLocation.Info calldata,
@@ -72,6 +86,9 @@ contract MockRandomStaking is IRandom {
     /// @notice Drive a finalized seed: mark every validator revealed, pay the fee to the bonus
     /// recipient, then deliver the push callback (what Random does in `cast`).
     function pushCast(bytes32 key, bytes32 seed) external {
+        require(!_finalized[key], "MockRandomStaking: already finalized");
+        _finalized[key] = true;
+
         _revealed[key] = (1 << _n[key]) - 1;
         _seed[key] = seed;
 
@@ -84,6 +101,7 @@ contract MockRandomStaking is IRandom {
     /// @notice Chop an unfinalized cohort: validators who did not reveal forfeit their stake to
     /// the request owner, on top of the owner's fee refund, then deliver `onChop`.
     function chop(bytes32 key, PreimageLocation.Info[] calldata info) external {
+        require(!_finalized[key], "MockRandomStaking: already finalized");
         require(_seed[key] == bytes32(0), "MockRandomStaking: already finalized");
         require(keccak256(abi.encode(info)) == key, "MockRandomStaking: info mismatch");
 
@@ -94,6 +112,8 @@ contract MockRandomStaking is IRandom {
 
         custodied[owner][token] += _cohortFee[key] + forfeit;
 
+        _finalized[key] = true;
+
         _notifyChop(owner, key);
     }
 
@@ -103,6 +123,7 @@ contract MockRandomStaking is IRandom {
     }
 
     function handoff(address recipient, address token, int256 amount) external {
+        if (recipient == address(0)) recipient = msg.sender;
         if (amount > 0) {
             uint256 want = uint256(amount);
             uint256 bal = custodied[msg.sender][token];
@@ -133,17 +154,19 @@ contract MockRandomStaking is IRandom {
         r.seed = _seed[key];
     }
 
-    /// @dev Deliver `onCast` through the real interface when `owner` has code (so a genuine
-    /// ConsumerReceiver reverts propagate), and skip the call for a plain test address with no
-    /// code (a Solidity interface call always reverts against an address with no code, even
-    /// though a raw EVM call to an EOA succeeds trivially).
+    /// @dev Deliver `onCast` via a raw low-level call, matching real Random: a broken consumer's
+    /// revert is swallowed, not bubbled, so it can never claw back the custody credit Random
+    /// already booked. A raw call to an address with no code (e.g. a bare test address) trivially
+    /// succeeds, so this needs no code-length branch.
     function _notifyCast(address owner, bytes32 key, bytes32 seed) internal {
-        if (owner.code.length > 0) ConsumerReceiver(owner).onCast(key, seed);
+        (bool ok, ) = owner.call(abi.encodeWithSelector(ConsumerReceiver.onCast.selector, key, seed));
+        if (!ok) emit FailedToCall(key, owner, ConsumerReceiver.onCast.selector);
     }
 
-    /// @dev See `_notifyCast`; same leniency for `onChop`.
+    /// @dev See `_notifyCast`; same swallow-on-revert semantics for `onChop`.
     function _notifyChop(address owner, bytes32 key) internal {
-        if (owner.code.length > 0) ConsumerReceiver(owner).onChop(key);
+        (bool ok, ) = owner.call(abi.encodeWithSelector(ConsumerReceiver.onChop.selector, key));
+        if (!ok) emit FailedToCall(key, owner, ConsumerReceiver.onChop.selector);
     }
 
     function _popcount(uint256 mask) internal pure returns (uint256 count) {
