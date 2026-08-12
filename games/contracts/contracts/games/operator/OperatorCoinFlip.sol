@@ -7,6 +7,7 @@ import {PreimageLocation} from "../../PreimageLocation.sol";
 import {GameEscrow} from "./GameEscrow.sol";
 import {OperatorRegistry} from "./OperatorRegistry.sol";
 import {IRandomStaking} from "./IRandomStaking.sol";
+import {ReentrancyGuard} from "./ReentrancyGuard.sol";
 
 /// @notice Escrow-backed coin flip — the slice-A reference game. Identical parity mechanics to
 /// CoinFlipTables, but every chip lives in GameEscrow (token-agnostic, pre-collateralized) and every
@@ -23,7 +24,7 @@ import {IRandomStaking} from "./IRandomStaking.sol";
 /// The forfeit is measured as a custody delta, so it needs no oracle: it is denominated in the bet
 /// token and always at least the stake (tierPrice >= stake by construction), making a selective abort
 /// negative-EV for the validator instead of a free-roll against the player.
-contract OperatorCoinFlip is GameBase {
+contract OperatorCoinFlip is GameBase, ReentrancyGuard {
     using SafeTransferLib for address;
 
     error NotRegisteredOperator();
@@ -71,8 +72,14 @@ contract OperatorCoinFlip is GameBase {
     mapping(bytes32 tableId => Table) public tables;
     mapping(bytes32 roundId => Round) public rounds;
     /// @notice Per-operator, per-token fee pool. Funded by depositFees (which also parks the tokens in
-    /// this game's Random custody), drawn down by _chargeFee at open, and restored by chopAndRoute.
-    /// Invariant at rest: Random.balanceOf(this, token) == Σ_operator feeBalance[operator][token].
+    /// this game's Random custody), drawn down by _chargeFee at open, restored by chopAndRoute, and
+    /// reclaimable via withdrawFees.
+    /// Invariant at rest: Random.balanceOf(this, token) == Σ_operator feeBalance[operator][token],
+    /// ABSENT real Random's late-cast half-refund. When a seed forms AFTER the HEAT_DURATION window,
+    /// real Random returns half the round fee to this game's custody while the round still settles
+    /// normally; feeBalance stays fully debited, so custody exceeds Σ feeBalance by that half. This is
+    /// harmless — it strands the operator's OWN already-spent fee (no theft, and no effect on any chop
+    /// forfeit, which is measured locally as a custody delta). The mock has no late-cast path.
     mapping(address operator => mapping(address token => uint256)) public feeBalance;
     uint256 internal _tableNonce;
     uint256 internal _roundNonce;
@@ -80,6 +87,7 @@ contract OperatorCoinFlip is GameBase {
     event TableCreated(bytes32 indexed tableId, address indexed operator, address indexed token, uint16 maxMultiplierX100, uint256 minStake, uint256 maxStake);
     event OpenSet(bytes32 indexed tableId, bool open);
     event FeesDeposited(address indexed operator, address indexed token, uint256 credited);
+    event FeesWithdrawn(address indexed operator, address indexed token, uint256 amount);
     event RoundOpened(bytes32 indexed roundId, bytes32 indexed tableId, address indexed player, uint8 side, uint256 stake, uint256 payout, uint256 tierPrice, bytes32 key, uint256 openedAtBlock);
     event RoundSettled(bytes32 indexed roundId, bytes32 indexed tableId, address indexed player, bool won, uint256 payout, bytes32 seed);
     event RoundRefunded(bytes32 indexed roundId, bytes32 indexed tableId, address indexed player, uint256 stake);
@@ -139,13 +147,29 @@ contract OperatorCoinFlip is GameBase {
 
     /// @notice Fund `operator`'s fee pool for `token`. Pulls the tokens from msg.sender, parks them in
     /// this game's Random custody (so `heat` can charge them), and meters them to the operator's pool.
-    /// Anyone may fund any operator; only the measured delta is credited.
-    function depositFees(address operator, address token, uint256 amount) external {
+    /// Anyone may fund any operator. The pool is credited by the MEASURED Random-custody delta of the
+    /// handoff, NOT the face amount: a fee-on-transfer token loses a cut on the game→Random leg too, so
+    /// crediting `credited` (the funder→game delta) would over-count custody and let one operator charge
+    /// more than it funded — draining co-operators' shared custody. Crediting the custody delta keeps
+    /// Random.balanceOf(this, token) == Σ feeBalance exact.
+    function depositFees(address operator, address token, uint256 amount) external nonReentrant {
         uint256 credited = _pullVerified(token, msg.sender, amount);
+        uint256 balBefore = IRandomStaking(random).balanceOf(address(this), token);
         token.safeApproveWithRetry(random, credited);
         IRandomStaking(random).handoff(address(this), token, -int256(credited));
-        feeBalance[operator][token] += credited;
-        emit FeesDeposited(operator, token, credited);
+        uint256 delta = IRandomStaking(random).balanceOf(address(this), token) - balBefore;
+        feeBalance[operator][token] += delta;
+        emit FeesDeposited(operator, token, delta);
+    }
+
+    /// @notice Operator reclaims its own idle fee pool for `token`, pulling it back out of this game's
+    /// Random custody. Both sides drop by `amount`, so the custody invariant holds.
+    function withdrawFees(address token, uint256 amount) external nonReentrant {
+        uint256 bal = feeBalance[msg.sender][token];
+        if (bal < amount) revert InsufficientFees();
+        unchecked { feeBalance[msg.sender][token] = bal - amount; }
+        IRandomStaking(random).handoff(msg.sender, token, int256(amount));
+        emit FeesWithdrawn(msg.sender, token, amount);
     }
 
     /// @notice Meter `n * tierPrice` out of the operator's fee pool. The matching Random custody debit
@@ -229,7 +253,7 @@ contract OperatorCoinFlip is GameBase {
     /// game's fee and credits the withheld validators' staked price to this game's custody), restores
     /// the operator's fee pool, deposits the punitive forfeit into the operator's bankroll, and refunds
     /// the player their stake plus the operator its exposure.
-    function chopAndRoute(bytes32 roundId, PreimageLocation.Info[] calldata info) external {
+    function chopAndRoute(bytes32 roundId, PreimageLocation.Info[] calldata info) external nonReentrant {
         Round storage r = rounds[roundId];
         if (r.status != Status.Pending) revert AlreadyResolved();
         if (_seed(r.key) != bytes32(0)) revert TooEarly(); // a finalized round settles via claim, never chops
