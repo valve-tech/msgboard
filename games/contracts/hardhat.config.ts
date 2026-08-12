@@ -219,6 +219,10 @@ const config: HardhatUserConfig = {
       // which reverts on-chain as "invalid opcode: MCOPY"). Same 0.8.25/viaIR/shanghai/runs-700
       // shape as the games family. Foundry (foundry.toml) already pins shanghai globally; these
       // mirror it so the HARDHAT artifacts the deploy script broadcasts are equally MCOPY-free.
+      'contracts/games/operator/ReentrancyGuard.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
       'contracts/games/operator/EscrowLib.sol': {
         version: '0.8.25',
         settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
