@@ -27,7 +27,19 @@ import * as viem from 'viem'
 import { MsgBoardClient } from '@msgboard/sdk'
 import { randomAbi, poolLocationFor, type GamesChainId, type Info } from '@msgboard/games-core'
 import { seeds0Secret, SECRET_STRIDE } from './seeds0'
-import { loadDeployment, makeActor, sendAs, heatsSince, flooredFees } from './actor-common'
+import {
+  loadDeployment,
+  makeActor,
+  sendAs,
+  heatsSince,
+  heatsSincePriced,
+  flooredFees,
+  tierLadder,
+  operatorTables,
+  operatorSecret,
+  operatorLocationsAt,
+  inkValidatorStakedPool,
+} from './actor-common'
 
 const env = process.env
 const CHAIN = (env.CHAIN ? Number(env.CHAIN) : 943) as GamesChainId
@@ -44,6 +56,41 @@ const INK_AHEAD = 8n
 const OPS_INDEX = env.OPS_INDEX ? Number(env.OPS_INDEX) : 10
 const OPS_TOP_UP_BELOW = viem.parseEther('20')
 const OPS_TOP_UP_TO = viem.parseEther('100')
+
+// The operator game's validators are the canonicalSubset, derived from the SAME mnemonic at
+// addressIndex VALIDATOR_INDEX_BASE + i (matches ink-pools.ts / deploy.ts). The caster holds the
+// mnemonic so it can sign the stake deposit + ink AS each validator, staking each validator's OWN
+// capital in the table token.
+const VALIDATOR_INDEX_BASE = env.VALIDATOR_INDEX_BASE ? Number(env.VALIDATOR_INDEX_BASE) : 1
+
+/** Minimal OperatorCoinFlip surface the watcher needs beyond Random: map a heat key to its round, and
+ *  wrap Random.chop with the forfeit routing. instanceByKey is inherited from GameBase. */
+const operatorGameAbi = [
+  { type: 'function', name: 'instanceByKey', stateMutability: 'view', inputs: [{ name: '', type: 'bytes32' }], outputs: [{ type: 'bytes32' }] },
+  {
+    type: 'function',
+    name: 'chopAndRoute',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'roundId', type: 'bytes32' },
+      {
+        name: 'info',
+        type: 'tuple[]',
+        components: [
+          { name: 'provider', type: 'address' },
+          { name: 'callAtChange', type: 'bool' },
+          { name: 'durationIsTimestamp', type: 'bool' },
+          { name: 'duration', type: 'uint256' },
+          { name: 'token', type: 'address' },
+          { name: 'price', type: 'uint256' },
+          { name: 'offset', type: 'uint256' },
+          { name: 'index', type: 'uint256' },
+        ],
+      },
+    ],
+    outputs: [],
+  },
+] as const satisfies viem.Abi
 
 const main = async () => {
   if (!env.MNEMONIC) throw new Error('MNEMONIC (funded treasury) required')
@@ -159,10 +206,95 @@ const main = async () => {
   // still-in-flight rounds. Process-lifetime cache; a restart re-scans once (harmless).
   const resolved = new Set<string>()
 
+  // The validator wallets for the operator game, derived from the mnemonic. The caster signs the stake
+  // deposit + ink AS each validator so the staked capital is the validator's own.
+  const validatorWallets = config.operatorCoinFlip
+    ? config.canonicalSubset.map((addr, i) => {
+        const v = makeActor(CHAIN, env.MNEMONIC!, VALIDATOR_INDEX_BASE + i, env.RPC)
+        if (v.account.address.toLowerCase() !== addr.toLowerCase()) {
+          console.warn(`validator ${i} mnemonic index ${VALIDATOR_INDEX_BASE + i} = ${v.account.address} != canonicalSubset ${addr}`)
+        }
+        return v.wallet
+      })
+    : []
+
+  /**
+   * The operator game runs on its OWN staked (token, tierPrice) pool ladders (heatsSincePriced), NEVER
+   * the shared price-0 counter. Each pass: (1) keeps each validator's staked pool inked for every open
+   * table tier (self-inked from the validator's key, so the stake is the validator's own capital); (2)
+   * casts live operator rounds on their priced ladder; (3) chops any round left unfinalized past its cast
+   * window — first casting whatever secrets exist (flicking honest stakes back), then chopAndRoute, which
+   * wraps Random.chop and routes the withholder's forfeited stake into the operator's bankroll.
+   */
+  const operatorPass = async () => {
+    if (!config.operatorCoinFlip) return
+    const game = config.operatorCoinFlip
+    const tables = await operatorTables(publicClient, config)
+    // The distinct (token, price) tiers in play across all OPEN tables.
+    const tiers = new Map<string, { token: viem.Hex; price: bigint }>()
+    for (const t of tables) {
+      if (!t.open) continue
+      for (const price of tierLadder(t.minStake, t.maxStake)) tiers.set(`${t.token.toLowerCase()}:${price}`, { token: t.token, price })
+    }
+
+    for (const { token, price } of tiers.values()) {
+      // (1) keep each validator's staked pool inked ahead of the ladder boundary.
+      const heats = await heatsSincePriced(publicClient, config, token, price)
+      const k = BigInt(heats.length)
+      const remaining = poolSize - (k % poolSize)
+      const poolStarts = [(k / poolSize) * poolSize]
+      if (remaining <= INK_AHEAD) poolStarts.push(((k / poolSize) + 1n) * poolSize)
+      for (const poolStart of poolStarts) {
+        for (let i = 0; i < config.canonicalSubset.length; i++) {
+          try {
+            const result = await inkValidatorStakedPool(
+              publicClient, validatorWallets[i]!, config.random, env.SEEDS0!, i, token, price, poolStart, Number(poolSize),
+            )
+            if (result === 'inked') console.log(`validator ${i} inked staked pool ${token}@${price} slot ${poolStart}`)
+            else if (result === 'underfunded') console.warn(`validator ${i} underfunded for ${token}@${price} — pool not inked`)
+          } catch (error) {
+            console.error(`ink ${token}@${price} slot ${poolStart} validator ${i} failed: ${(error as Error).message?.split('\n').slice(0, 2).join(' ¦ ')}`)
+          }
+        }
+      }
+
+      // (2)+(3) cast live rounds, chop the stalled ones.
+      for (let idx = 0; idx < heats.length; idx++) {
+        const heat = heats[idx]!
+        if (resolved.has(heat.key)) continue
+        const randomness = (await publicClient.readContract({ address: config.random, abi: randomAbi, functionName: 'randomness', args: [heat.key] })) as { seed: viem.Hex; timeline: bigint }
+        if (randomness.seed !== ZERO32) { resolved.add(heat.key); continue }
+        const slot = BigInt(idx)
+        const locations = operatorLocationsAt(config.canonicalSubset, slot, poolSize, token, price)
+        const secrets = config.canonicalSubset.map((_v, i) => operatorSecret(env.SEEDS0!, i, token, price, slot))
+        const isExpired = (await publicClient.readContract({ address: config.random, abi: randomAbi, functionName: 'expired', args: [randomness.timeline] })) as boolean
+        // Best-effort cast: settles a live round, or flicks the honest stakes back on a stalled one.
+        try {
+          await sendAs(publicClient, wallet, { address: config.random, abi: randomAbi, functionName: 'cast', args: [heat.key, locations, secrets] })
+        } catch (error) {
+          if (!isExpired) console.error(`operator cast ${heat.key} slot ${slot} failed: ${(error as Error).message?.split('\n').slice(0, 2).join(' ¦ ')}`)
+        }
+        const after = (await publicClient.readContract({ address: config.random, abi: randomAbi, functionName: 'randomness', args: [heat.key] })) as { seed: viem.Hex }
+        if (after.seed !== ZERO32) { resolved.add(heat.key); console.log(`operator round settled ${heat.key} slot ${slot}`); continue }
+        if (!isExpired) continue // still castable next tick
+        // Stalled past its window: route the forfeit through the game (chop + bank the withheld stake).
+        try {
+          const roundId = (await publicClient.readContract({ address: game, abi: operatorGameAbi, functionName: 'instanceByKey', args: [heat.key] })) as viem.Hex
+          await sendAs(publicClient, wallet, { address: game, abi: operatorGameAbi, functionName: 'chopAndRoute', args: [roundId, locations] })
+          resolved.add(heat.key)
+          console.log(`operator round chopped + forfeit routed ${heat.key} slot ${slot}`)
+        } catch (error) {
+          console.error(`chopAndRoute ${heat.key} slot ${slot} failed: ${(error as Error).message?.split('\n').slice(0, 2).join(' ¦ ')}`)
+        }
+      }
+    }
+  }
+
   const pass = async () => {
     await topUpOps()
     const heats = await heatsSince(publicClient, config)
     await maintainPools(BigInt(heats.length))
+    await operatorPass()
     // Decide which heats are castable this tick — unfinalized AND with the cast window still open.
     // These reads are independent, so fan them out: a serial per-heat scan of a long backlog is
     // itself slow enough to let fresh heats expire before the caster reaches them.
