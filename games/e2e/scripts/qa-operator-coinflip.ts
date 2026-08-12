@@ -12,7 +12,7 @@
  * are built from heatsSince().length (true consumed slot across ALL games sharing the validator pools).
  *
  * Onboarding is exercised live: registry.register() → escrow.authorizeGame(game,true) → depositBankroll.
- * The matrix proves the substrate's invariant spine on-chain: UnauthorizedGame (the C1 fix), NotBetGame
+ * The matrix proves the substrate's invariant spine on-chain: UnauthorizedGame (the C1 fix), UnknownBet
  * (only the recording game may settle), and InsufficientBankroll (graceful bankruptcy).
  */
 import { readFileSync } from 'node:fs'
@@ -62,7 +62,7 @@ async function main() {
   const escrowAbi = loadAbi('GameEscrow')
   const registryAbi = loadAbi('OperatorRegistry')
   // Reverts bubble up from GameEscrow/EscrowLib through the game call, so decode against all three ABIs
-  // (InsufficientBankroll/NotBetGame/UnauthorizedGame live on the escrow side, not the game ABI).
+  // (InsufficientBankroll/UnknownBet/UnauthorizedGame live on the escrow side, not the game ABI).
   const xabi = [...gameAbi, ...escrowAbi, ...registryAbi] as viem.Abi
 
   const pc = viem.createPublicClient({ chain, transport: viem.http(RPC) })
