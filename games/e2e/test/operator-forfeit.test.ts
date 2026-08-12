@@ -288,4 +288,33 @@ describe('OperatorCoinFlip validator forfeit — real Random on anvil', () => {
     // (d) the operator's fee pool is whole again (open debited n*tierPrice, chop restored it)
     expect(await feeBalanceOf(), 'fee pool restored').toBe(feeBefore)
   })
+
+  it('FRONT-RUN: a third party calls the public Random.chop first → chopAndRoute still routes the forfeit (no freeze)', async () => {
+    const bankrollBefore = await bankrollOf()
+    const feeBefore = await feeBalanceOf()
+    const playerBefore = await tokenBal(player.address)
+
+    const { roundId, key } = await openRound(1 /* TAILS */, 2n)
+
+    // validators 0,1 reveal; validator 2 withholds → seed never forms
+    const locations = operatorLocationsAt(subset, 2n, BigInt(POOL_SIZE), token, PRICE)
+    const withheldSecrets = [operatorSecret(SEEDS0, 0, token, PRICE, 2n), operatorSecret(SEEDS0, 1, token, PRICE, 2n), viem.padHex('0x0', { size: 32 })]
+    await send(deployer, { address: random, abi: RandomArtifact.abi as viem.Abi, functionName: 'cast', args: [key, locations, withheldSecrets] })
+    await pc.request({ method: 'anvil_mine' as never, params: ['0x120' as never] }) // past the window
+
+    // ATTACKER (the operator account, standing in for any third party) front-runs by calling the PUBLIC
+    // Random.chop directly. This credits the game's custody and fires onReverse; the round stays Pending.
+    await send(operator, { address: random, abi: RandomArtifact.abi as viem.Abi, functionName: 'chop', args: [key, locations] })
+    expect(await roundStatus(roundId), 'round still pending after external chop').toBe(1) // Status.Pending
+
+    // chopAndRoute must NOT revert (it sees the recorded credit and skips its own chop) and must route.
+    const chopReceipt = await send(deployer, { address: game, abi: GameArtifact.abi as viem.Abi, functionName: 'chopAndRoute', args: [roundId, locations] })
+    const forfeitEv = viem.parseEventLogs({ abi: GameArtifact.abi as viem.Abi, eventName: 'ForfeitRouted', logs: chopReceipt.logs })[0]
+      ?.args as { forfeit: bigint } | undefined
+    expect(forfeitEv?.forfeit, 'forfeit routed despite the front-run').toBe(PRICE)
+    expect(await roundStatus(roundId), 'round refunded').toBe(3)
+    expect((await bankrollOf()) - bankrollBefore, 'forfeit banked to operator bankroll').toBe(PRICE)
+    expect(await tokenBal(player.address), 'player refunded').toBe(playerBefore)
+    expect(await feeBalanceOf(), 'fee pool restored').toBe(feeBefore)
+  })
 })
