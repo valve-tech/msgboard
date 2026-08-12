@@ -51,6 +51,9 @@ contract EscrowHandler is Test {
         // operators must authorize it, or the C1 gate would block every `lock` action outright.
         vm.prank(opX); esc.authorizeGame(address(this), true);
         vm.prank(opY); esc.authorizeGame(address(this), true);
+        // This contract is also the "player" of record for every legit lock, so it must consent to
+        // itself as a game (the player-side gate that closes the shared-escrow approval drain).
+        esc.setPlayerGame(address(this), true);
 
         // Fund + approve the rogue identity too, so that if the C1 gate is ever missing/broken,
         // `rogueLock`'s stake pull can actually complete and the drain fully succeeds (rather than

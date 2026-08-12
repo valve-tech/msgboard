@@ -43,9 +43,11 @@ contract OperatorCoinFlipTest is Test {
         tok.mint(op, 1000 ether);
         vm.prank(op); tok.approve(address(esc), type(uint256).max);
         vm.prank(op); esc.depositBankroll(op, address(tok), 1000 ether);
-        // player approves the ESCROW (custodian), not the game
+        // player approves the ESCROW (custodian) for the token, then consents to THIS game pulling
+        // that allowance — the player-side gate that closes the shared-escrow approval drain.
         tok.mint(player, 100 ether);
         vm.prank(player); tok.approve(address(esc), type(uint256).max);
+        vm.prank(player); esc.setPlayerGame(address(game), true);
         vm.prank(op); esc.authorizeGame(address(game), true);
     }
 
@@ -95,5 +97,14 @@ contract OperatorCoinFlipTest is Test {
         vm.prank(address(0xBAD));
         vm.expectRevert(OperatorCoinFlip.NotRegisteredOperator.selector);
         game.createTable(address(tok), MULT, MAX_STAKE);
+    }
+
+    /// A stake so small that payout truncates to break-even (payout == stake, zero exposure) is a
+    /// degenerate no-win round — rejected before any validator heat is consumed.
+    function test_open_revertsOnDustStake() public {
+        bytes32 tableId = _table();
+        vm.prank(player);
+        vm.expectRevert(OperatorCoinFlip.DustStake.selector);
+        game.open(tableId, 0, 1, subset, locs); // 1 wei * 196 / 100 == 1 == stake
     }
 }

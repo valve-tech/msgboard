@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {EscrowLib} from "../../contracts/games/operator/EscrowLib.sol";
 import {GameEscrow} from "../../contracts/games/operator/GameEscrow.sol";
+import {ReentrancyGuard} from "../../contracts/games/operator/ReentrancyGuard.sol";
 import {OperatorRegistry} from "../../contracts/games/operator/OperatorRegistry.sol";
 import {ERC20} from "../../contracts/test/ERC20.sol";
 import {ReenteringToken} from "../../contracts/test/ReenteringToken.sol";
@@ -121,6 +122,7 @@ contract GameEscrowLockTest is Test {
         tok.mint(player, 100 ether);
         vm.prank(player); tok.approve(address(esc), type(uint256).max);
         vm.prank(op); esc.authorizeGame(game, true);
+        vm.prank(player); esc.setPlayerGame(game, true);
     }
 
     function test_lock_pullsStake_debitsExposure_holdsPayout() public {
@@ -156,8 +158,21 @@ contract GameEscrowLockTest is Test {
         vm.expectRevert(GameEscrow.UnauthorizedGame.selector);
         esc.lockExposure(betId, op, address(tok), attacker, 1, bankrollBefore + 1);
         assertEq(esc.bankrollOf(op, address(tok)), bankrollBefore); // untouched
-        (, , , , , , bool open) = esc.bets(betId);
-        assertFalse(open); // never recorded
+        assertFalse(esc.betOf(attacker, betId).open); // never recorded
+    }
+
+    /// HIGH regression (shared-escrow approval drain): a game the OPERATOR authorized still cannot pull
+    /// a player's standing escrow allowance unless the PLAYER opted that game in. A victim who merely
+    /// approved the shared escrow for the token — but never consented to this game — must be untouchable.
+    function test_lock_revertsWhenPlayerDidNotConsent() public {
+        address victim = address(0xBEEF);
+        tok.mint(victim, 100 ether);
+        vm.prank(victim); tok.approve(address(esc), type(uint256).max); // approved the shared escrow...
+        // ...but never called setPlayerGame(game): the drain vehicle is blocked here.
+        bytes32 betId = keccak256("no-consent");
+        vm.expectRevert(GameEscrow.PlayerNotConsented.selector);
+        esc.lockExposure(betId, op, address(tok), victim, 10 ether, 19 ether);
+        assertEq(tok.balanceOf(victim), 100 ether); // not a wei moved
     }
 
     /// C1 regression: revoking a previously-authorized game must block it immediately — the operator
@@ -210,10 +225,10 @@ contract GameEscrowLockTest is Test {
         assertEq(esc.lockedOf(op, address(rtok)), 19 ether);    // not 38
         assertEq(rtok.balanceOf(address(esc)), 1010 ether);     // 1000 deposit + 10 stake, pulled once
 
-        (,,,, uint256 recordedPayout, uint256 recordedStake, bool open) = esc.bets(betId);
-        assertTrue(open);
-        assertEq(recordedPayout, payout);
-        assertEq(recordedStake, stake);
+        GameEscrow.Bet memory b = esc.betOf(address(this), betId);
+        assertTrue(b.open);
+        assertEq(b.payout, payout);
+        assertEq(b.stake, stake);
     }
 }
 
@@ -236,6 +251,7 @@ contract GameEscrowSettleTest is Test {
         tok.mint(player, 100 ether);
         vm.prank(player); tok.approve(address(esc), type(uint256).max);
         vm.prank(op); esc.authorizeGame(address(this), true); // this contract acts as the game
+        vm.prank(player); esc.setPlayerGame(address(this), true);
     }
 
     function _lock(bytes32 id) internal {
@@ -272,11 +288,13 @@ contract GameEscrowSettleTest is Test {
         assertEq(esc.lockedOf(op, address(tok)), 0);
     }
 
+    /// Only the recording game may settle: bets are namespaced by (game, betId), so a different caller
+    /// finds no open bet under its own namespace — UnknownBet, structurally.
     function test_settle_onlyRecordedGame() public {
         bytes32 id = keccak256("g");
         _lock(id);
         vm.prank(address(0xBAD));
-        vm.expectRevert(GameEscrow.NotBetGame.selector);
+        vm.expectRevert(GameEscrow.UnknownBet.selector);
         esc.settleWin(id);
     }
 }
@@ -305,6 +323,7 @@ contract GameEscrowReentrancyTest is Test {
         rtok.mint(player, 100 ether);
         vm.prank(player); rtok.approve(address(esc), type(uint256).max);
         vm.prank(op); esc.authorizeGame(address(rtok), true); // game of record is the token itself
+        vm.prank(player); esc.setPlayerGame(address(rtok), true);
     }
 
     /// CEI proof: settleWin flips the bet closed and zeroes the ledger's `locked` BEFORE the payout
@@ -340,12 +359,12 @@ contract GameEscrowReentrancyTest is Test {
         // before the transfer) is what stopped it.
         assertEq(rtok.reentryCalls(), 1);
         assertTrue(rtok.lastReentryReverted());
-        assertEq(bytes4(rtok.lastReentryReturnData()), GameEscrow.UnknownBet.selector);
+        assertEq(bytes4(rtok.lastReentryReturnData()), ReentrancyGuard.Reentrancy.selector); // guard is the primary defense; CEI (open flipped) is the second line
 
         // Exactly ONE payout left the escrow: locked is drained once, player receives one payout.
         assertEq(esc.lockedOf(op, address(rtok)), 0);
         assertEq(rtok.balanceOf(player), 100 ether - stake + payout);
-        (, , , , , , bool open) = esc.bets(betId);
+        bool open = esc.betOf(address(rtok), betId).open;
         assertFalse(open);
     }
 
@@ -368,11 +387,39 @@ contract GameEscrowReentrancyTest is Test {
 
         assertEq(rtok.reentryCalls(), 1);
         assertTrue(rtok.lastReentryReverted());
-        assertEq(bytes4(rtok.lastReentryReturnData()), GameEscrow.UnknownBet.selector);
+        assertEq(bytes4(rtok.lastReentryReturnData()), ReentrancyGuard.Reentrancy.selector); // guard is the primary defense; CEI (open flipped) is the second line
 
         assertEq(esc.lockedOf(op, address(rtok)), 0);
         assertEq(rtok.balanceOf(player), 100 ether); // stake returned exactly once
-        (, , , , , , bool open) = esc.bets(betId);
+        bool open = esc.betOf(address(rtok), betId).open;
         assertFalse(open);
+    }
+
+    // Re-entry target: a nested deposit into the same (operator, token) bucket.
+    function reenterDeposit() external {
+        esc.depositBankroll(op, address(rtok), 100 ether);
+    }
+
+    /// CRITICAL regression (PoC-confirmed pre-fix): the balance-delta credit must not be inflatable by
+    /// a nested reentrant deposit. Without the guard, the OUTER deposit's balanceOf delta spans the
+    /// INNER transfer, crediting 300 for 200 real tokens — inflating the ledger past the escrow's real
+    /// balance and letting the bucket drain co-tenants of that token. The guard makes the reentrant
+    /// deposit revert, so only the genuine outer transfer is ever measured.
+    function test_nestedDeposit_cannotDoubleCount() public {
+        rtok.mint(address(this), 1000 ether);
+        rtok.approve(address(esc), type(uint256).max);
+        uint256 bankBefore = esc.bankrollOf(op, address(rtok));
+        uint256 escBefore = rtok.balanceOf(address(esc));
+
+        rtok.arm(address(this), abi.encodeWithSelector(this.reenterDeposit.selector));
+        esc.depositBankroll(op, address(rtok), 200 ether);
+
+        // the nested deposit fired once and was rejected by the guard
+        assertEq(rtok.reentryCalls(), 1);
+        assertTrue(rtok.lastReentryReverted());
+        assertEq(bytes4(rtok.lastReentryReturnData()), ReentrancyGuard.Reentrancy.selector);
+        // exactly the outer 200 credited AND escrowed — the ledger never exceeds the real balance
+        assertEq(esc.bankrollOf(op, address(rtok)) - bankBefore, 200 ether);
+        assertEq(rtok.balanceOf(address(esc)) - escBefore, 200 ether);
     }
 }
