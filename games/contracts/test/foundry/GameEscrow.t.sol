@@ -288,6 +288,45 @@ contract GameEscrowSettleTest is Test {
         assertEq(esc.lockedOf(op, address(tok)), 0);
     }
 
+    /// Backroom-A no-pause proof: an operator can top up AND withdraw its bankroll while a round's
+    /// exposure is locked, but can never withdraw the funds backing that round, and the round still
+    /// resolves throughout. In THIS ledger the exposure already left `bankroll` into `locked` at lock
+    /// time (see EscrowLib.lock), so `bankroll` IS the unlocked balance: `withdrawBankroll` only touches
+    /// `bankroll`, `locked` is untouchable. The unlocked amount is therefore `bankrollOf` itself — NOT
+    /// `bankrollOf - lockedOf`. (The plan's pseudo-code used `bankrollOf - lockedOf` and expected a
+    /// further 1-wei withdraw to revert; against this ledger that leaves `bankroll` at `lockedOf` with
+    /// room to spare, so it would not revert — the faithful bound is drawn from `bankrollOf`.)
+    function test_withdraw_boundedToUnlocked_whileRoundLocked() public {
+        bytes32 id = keccak256("nopause");
+        _lock(id); // exposure 9, payout 19 locked → bankroll 991, locked 19
+
+        uint256 unlocked = esc.bankrollOf(op, address(tok)); // locked is already segregated out of bankroll
+        assertEq(unlocked, 991 ether);
+        assertEq(esc.lockedOf(op, address(tok)), 19 ether);
+
+        // 1. deposit succeeds mid-round (no pause).
+        tok.mint(op, 1 ether);
+        vm.prank(op); esc.depositBankroll(op, address(tok), 1 ether);
+        assertEq(esc.bankrollOf(op, address(tok)), unlocked + 1 ether);
+
+        // 2. withdraw of the full unlocked balance succeeds; bankroll drops to the locked floor (0 idle),
+        //    while the round's reservation stays escrowed.
+        vm.prank(op); esc.withdrawBankroll(address(tok), unlocked + 1 ether);
+        assertEq(esc.bankrollOf(op, address(tok)), 0);
+        assertEq(esc.lockedOf(op, address(tok)), 19 ether); // round funds untouched
+        assertEq(tok.balanceOf(address(esc)), 19 ether);    // escrow still physically holds the reservation
+
+        // 3. a withdraw past the floor reverts — the operator can never pull funds backing the live round.
+        vm.prank(op);
+        vm.expectRevert(EscrowLib.InsufficientBankroll.selector);
+        esc.withdrawBankroll(address(tok), 1);
+
+        // 4. the in-flight round still resolves normally — play continued throughout.
+        esc.settleWin(id);
+        assertEq(esc.lockedOf(op, address(tok)), 0);
+        assertEq(tok.balanceOf(player), 90 ether + 19 ether); // staked 10, won 19
+    }
+
     /// Only the recording game may settle: bets are namespaced by (game, betId), so a different caller
     /// finds no open bet under its own namespace — UnknownBet, structurally.
     function test_settle_onlyRecordedGame() public {
