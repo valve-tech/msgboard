@@ -40,6 +40,7 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
     error AlreadyResolved();
     error TooEarly();
     error PolicyRejected();
+    error TableCapExceeded();
 
     uint16 internal constant MULT_MIN = 150;
     uint16 internal constant MULT_MAX = 200;
@@ -87,12 +88,21 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
     /// harmless — it strands the operator's OWN already-spent fee (no theft, and no effect on any chop
     /// forfeit, which is measured locally as a custody delta). The mock has no late-cast path.
     mapping(address operator => mapping(address token => uint256)) public feeBalance;
+    /// @notice Per-table risk policy. `tableCap` is the operator-set maximum concurrent locked exposure
+    /// on a table (0 = unlimited, backward compatible); `tableLocked` is the running sum of open-round
+    /// exposure (payout - stake) on that table. The cap only gates `open()`; it never touches
+    /// settle/forfeit/custody or another table. `tableLocked` is incremented by exactly `exposure` once
+    /// per successful open and decremented by exactly that once per terminal transition, so it can never
+    /// drift from the true sum of open-round exposure.
+    mapping(bytes32 tableId => uint256) public tableCap;
+    mapping(bytes32 tableId => uint256) public tableLocked;
     uint256 internal _tableNonce;
     uint256 internal _roundNonce;
 
     event TableCreated(bytes32 indexed tableId, address indexed operator, address indexed token, uint16 maxMultiplierX100, uint256 minStake, uint256 maxStake);
     event OpenSet(bytes32 indexed tableId, bool open);
     event ValidatorPolicySet(bytes32 indexed tableId, address indexed policy);
+    event TableCapSet(bytes32 indexed tableId, uint256 cap);
     event FeesDeposited(address indexed operator, address indexed token, uint256 credited);
     event FeesWithdrawn(address indexed operator, address indexed token, uint256 amount);
     event RoundOpened(bytes32 indexed roundId, bytes32 indexed tableId, address indexed player, uint8 side, uint256 stake, uint256 payout, uint256 tierPrice, bytes32 key, uint256 openedAtBlock);
@@ -137,6 +147,13 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
     function setValidatorPolicy(bytes32 tableId, address policy) external onlyOperator(tableId) {
         tables[tableId].validatorPolicy = policy;
         emit ValidatorPolicySet(tableId, policy);
+    }
+
+    /// @notice Set the per-table exposure cap (0 = unlimited). Lowering it below the current
+    /// `tableLocked` is allowed — it only blocks NEW opens; it never claws back in-flight rounds.
+    function setTableCap(bytes32 tableId, uint256 cap) external onlyOperator(tableId) {
+        tableCap[tableId] = cap;
+        emit TableCapSet(tableId, cap);
     }
 
     /// @notice The smallest ladder tier >= `stake`, in [minStake, maxStake]. Reverts if out of range.
@@ -223,6 +240,14 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
         // advertised 1.5x-2x odds always hold.
         if (payout == stake) revert DustStake();
 
+        // Per-table exposure cap: gate this open against the table's running locked exposure. A revert
+        // in the subsequent lockExposure unwinds the increment below atomically. `tableCap` is a
+        // standalone mapping (not a Table field), so it is read as tableCap[tableId].
+        uint256 exposure = payout - stake;
+        uint256 cap = tableCap[tableId];
+        if (cap != 0 && tableLocked[tableId] + exposure > cap) revert TableCapExceeded();
+        tableLocked[tableId] += exposure;
+
         // Meter the operator's fee BEFORE heat charges its Random custody the same amount.
         uint256 feeCharged = validatorSubset.length * tierPrice;
         _chargeFee(t.operator, t.token, validatorSubset.length, tierPrice);
@@ -249,10 +274,19 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
         emit RoundOpened(roundId, tableId, msg.sender, side, stake, payout, tierPrice, key, block.number);
     }
 
+    /// @notice Release a round's exposure from its table's running total on a terminal transition.
+    /// Reads the round's stored payout/stake, so the amount released always equals the amount locked at
+    /// open. Called exactly once per round, on each of the three terminal paths (_settle, _routeForfeit,
+    /// refundStale's plain-timeout branch), so tableLocked can never drift or double-decrement.
+    function _releaseTableExposure(bytes32 tableId, uint256 payout, uint256 stake) internal {
+        tableLocked[tableId] -= (payout - stake);
+    }
+
     function _settle(bytes32 roundId, bytes32 seed) internal override {
         Round storage r = rounds[roundId];
         if (r.status != Status.Pending) revert AlreadyResolved();
         r.status = Status.Settled;
+        _releaseTableExposure(r.tableId, r.payout, r.stake);
         bool won = uint8(uint256(seed) & 1) == r.side;
         if (won) {
             GameEscrow(escrow).settleWin(roundId);
@@ -310,6 +344,7 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
         // Effects before interactions: resolve the round and restore the fee BEFORE the external
         // handoff/deposit/refund. nonReentrant already guards the entrypoints; this is the second line.
         r.status = Status.Refunded;
+        _releaseTableExposure(r.tableId, r.payout, r.stake);
         feeBalance[operator][token] += fee;
 
         // Interactions.
@@ -331,8 +366,9 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
         if (r.status != Status.Pending) revert AlreadyResolved();
         if (_seed(r.key) != bytes32(0)) revert TooEarly();
         if (!_refundableNow(roundId, r.openedAtBlock)) revert TooEarly();
-        if (r.chopCredit != 0) { _routeForfeit(roundId); return; }
+        if (r.chopCredit != 0) { _routeForfeit(roundId); return; } // _routeForfeit already releases exposure
         r.status = Status.Refunded;
+        _releaseTableExposure(r.tableId, r.payout, r.stake);
         GameEscrow(escrow).refund(roundId);
         emit RoundRefunded(roundId, r.tableId, r.player, r.stake);
     }
