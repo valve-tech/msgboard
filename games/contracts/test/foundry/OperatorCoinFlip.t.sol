@@ -9,6 +9,7 @@ import {OperatorRegistry} from "../../contracts/games/operator/OperatorRegistry.
 import {PreimageLocation} from "../../contracts/PreimageLocation.sol";
 import {ERC20} from "../../contracts/test/ERC20.sol";
 import {MockRandomStaking} from "./MockRandomStaking.sol";
+import {IValidatorPolicy} from "../../contracts/games/operator/IValidatorPolicy.sol";
 
 /// @notice Staking-model suite for OperatorCoinFlip: stake-tier ladder, per-operator fee metering,
 /// table-token heat at the tier price, and the chopAndRoute validator-forfeit path. Uses the faithful
@@ -404,4 +405,90 @@ contract OperatorCoinFlipTest is Test {
         uint256 sum = game.feeBalance(op, address(tok)) + game.feeBalance(opB, address(tok));
         assertEq(rnd.balanceOf(address(game), address(tok)), sum);
     }
+
+    // --- Task 1: validator-inclusion policy hook ---
+
+    function test_setValidatorPolicy_onlyOperator() public {
+        bytes32 tid = _table();
+        AllowAllPolicy p = new AllowAllPolicy();
+        vm.prank(address(0xBAD));
+        vm.expectRevert(OperatorCoinFlip.NotOperator.selector);
+        game.setValidatorPolicy(tid, address(p));
+        vm.prank(op);
+        game.setValidatorPolicy(tid, address(p)); // operator OK
+        ( , , , , , , address pol) = game.tables(tid);
+        assertEq(pol, address(p));
+    }
+
+    function test_open_policyRejects_reverts() public {
+        bytes32 tid = _table();
+        RejectAllPolicy p = new RejectAllPolicy();
+        vm.prank(op); game.setValidatorPolicy(tid, address(p));
+        // Build locs BEFORE expectRevert: the inline tierPriceOf staticcall would otherwise be the
+        // "next call" expectRevert catches, masking the open() revert.
+        PreimageLocation.Info[] memory locs = _locsAt(game.tierPriceOf(tid, 4 ether));
+        vm.prank(player);
+        vm.expectRevert(OperatorCoinFlip.PolicyRejected.selector);
+        game.open(tid, 0, 4 ether, subset, locs);
+    }
+
+    function test_open_policyAccepts_succeeds() public {
+        bytes32 tid = _table();
+        AllowAllPolicy p = new AllowAllPolicy();
+        vm.prank(op); game.setValidatorPolicy(tid, address(p));
+        (bytes32 roundId,,) = _open(tid, 0, 4 ether); // must not revert
+        assertEq(_status(roundId), uint8(OperatorCoinFlip.Status.Pending));
+    }
+
+    function test_open_floor_cannot_be_weakened_by_hook() public {
+        bytes32 tid = _table();
+        TwoIsFinePolicy p = new TwoIsFinePolicy();
+        vm.prank(op); game.setValidatorPolicy(tid, address(p));
+        address[] memory two = new address[](2);
+        two[0] = subset[0]; two[1] = subset[1];
+        PreimageLocation.Info[] memory locs = _locsAt(game.tierPriceOf(tid, 4 ether));
+        vm.prank(player);
+        vm.expectRevert(GameBase.BadSubset.selector); // the floor rejects before/despite the permissive hook
+        game.open(tid, 0, 4 ether, two, locs);
+    }
+
+    function test_open_revertingHook_bricksOnlyThatTable() public {
+        bytes32 bad = _table();
+        RevertingPolicy p = new RevertingPolicy();
+        vm.prank(op); game.setValidatorPolicy(bad, address(p));
+        PreimageLocation.Info[] memory locs = _locsAt(game.tierPriceOf(bad, 4 ether));
+        vm.prank(player);
+        vm.expectRevert(); // hook revert bubbles → open reverts
+        game.open(bad, 0, 4 ether, subset, locs);
+        // a different table with no policy still works
+        bytes32 ok = _table();
+        (bytes32 roundId,,) = _open(ok, 0, 4 ether);
+        assertEq(_status(roundId), uint8(OperatorCoinFlip.Status.Pending));
+    }
+
+    function test_settle_and_forfeit_unaffected_with_policy() public {
+        bytes32 tid = _table();
+        AllowAllPolicy p = new AllowAllPolicy();
+        vm.prank(op); game.setValidatorPolicy(tid, address(p));
+        (bytes32 roundId, bytes32 key, PreimageLocation.Info[] memory locs) = _open(tid, 0, 4 ether);
+        rnd.setRevealed(key, 0x3);
+        game.chopAndRoute(roundId, locs);
+        assertEq(_status(roundId), uint8(OperatorCoinFlip.Status.Refunded));
+        assertEq(esc.bankrollOf(op, address(tok)), BANKROLL + 4 ether);
+    }
+}
+
+// --- minimal policies for hook tests ---
+contract AllowAllPolicy is IValidatorPolicy {
+    function validate(address, bytes32, address, address[] calldata) external pure returns (bool) { return true; }
+}
+contract RejectAllPolicy is IValidatorPolicy {
+    function validate(address, bytes32, address, address[] calldata) external pure returns (bool) { return false; }
+}
+contract RevertingPolicy is IValidatorPolicy {
+    function validate(address, bytes32, address, address[] calldata) external pure returns (bool) { revert("policy boom"); }
+}
+// Accepts even a too-small subset — proves the game floor still rejects regardless of the hook.
+contract TwoIsFinePolicy is IValidatorPolicy {
+    function validate(address, bytes32, address, address[] calldata s) external pure returns (bool) { return s.length >= 2; }
 }
