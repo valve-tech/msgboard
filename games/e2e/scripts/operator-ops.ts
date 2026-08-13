@@ -178,7 +178,10 @@ async function main() {
       for (const t of tables) {
         const cap = await tableCapOf(t.tableId)
         const tLocked = await tableLockedOf(t.tableId)
-        const idle = bankroll - locked
+        // bankrollOf is already net of locked exposure (exposure moves OUT of bankroll into locked
+        // at lock time — see EscrowLib.lock and the withdraw command above), so the idle/withdrawable
+        // balance IS bankroll. Subtracting locked here would double-count it and understate headroom.
+        const idle = bankroll
         const available = cap === 0n ? idle : (cap - tLocked < idle ? cap - tLocked : idle)
         const row = await readTable(t.tableId)
         const validatorPolicy = row[6] as viem.Hex
