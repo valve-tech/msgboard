@@ -476,6 +476,83 @@ contract OperatorCoinFlipTest is Test {
         assertEq(_status(roundId), uint8(OperatorCoinFlip.Status.Refunded));
         assertEq(esc.bankrollOf(op, address(tok)), BANKROLL + 4 ether);
     }
+
+    // --- Task 1 (bankroll): per-table exposure caps ---
+
+    function test_setTableCap_onlyOperator() public {
+        bytes32 tid = _table();
+        vm.prank(address(0xBAD));
+        vm.expectRevert(OperatorCoinFlip.NotOperator.selector);
+        game.setTableCap(tid, 5 ether);
+        vm.prank(op); game.setTableCap(tid, 5 ether);
+        assertEq(game.tableCap(tid), 5 ether);
+    }
+
+    function test_tableCap_blocksOverExposure_and_tracksLocked() public {
+        bytes32 tid = _table();
+        uint256 exposure = 4 ether * MULT / 100 - 4 ether; // payout - stake for a 4e18 stake
+        vm.prank(op); game.setTableCap(tid, exposure); // room for exactly one such round
+        ( , , PreimageLocation.Info[] memory locs) = _open(tid, 0, 4 ether); // fills the cap
+        assertEq(game.tableLocked(tid), exposure);
+        // a second open would push tableLocked to 2*exposure > cap → revert. Reuse the already-built
+        // locs so no external tierPriceOf staticcall sits inside the expectRevert window.
+        vm.prank(player);
+        vm.expectRevert(OperatorCoinFlip.TableCapExceeded.selector);
+        game.open(tid, 0, 4 ether, subset, locs);
+    }
+
+    function test_tableCap_freesOnSettle() public {
+        bytes32 tid = _table();
+        uint256 exposure = 4 ether * MULT / 100 - 4 ether;
+        vm.prank(op); game.setTableCap(tid, exposure);
+        (, bytes32 key,) = _open(tid, 0, 4 ether);
+        rnd.pushCast(key, bytes32(uint256(0))); // settle → releases exposure
+        assertEq(game.tableLocked(tid), 0);
+        (bytes32 r2,,) = _open(tid, 0, 4 ether); // now fits again
+        assertEq(_status(r2), uint8(OperatorCoinFlip.Status.Pending));
+    }
+
+    function test_tableCap_zeroIsUnlimited() public {
+        bytes32 tid = _table(); // default cap 0
+        for (uint256 i = 0; i < 3; i++) _open(tid, 0, 4 ether); // many rounds, no cap revert
+        assertEq(game.tableLocked(tid), 3 * (4 ether * MULT / 100 - 4 ether));
+    }
+
+    function test_tableCap_freesOnForfeit_onceOnly() public {
+        bytes32 tid = _table();
+        uint256 exposure = 4 ether * MULT / 100 - 4 ether;
+        vm.prank(op); game.setTableCap(tid, exposure);
+        (bytes32 roundId, bytes32 key, PreimageLocation.Info[] memory locs) = _open(tid, 0, 4 ether);
+        rnd.setRevealed(key, 0x3);
+        game.chopAndRoute(roundId, locs); // forfeit path → releases exposure exactly once
+        assertEq(game.tableLocked(tid), 0);
+        // a fresh open fits again (proves it wasn't double-decremented into underflow-revert or left stuck)
+        (bytes32 r2,,) = _open(tid, 0, 4 ether);
+        assertEq(_status(r2), uint8(OperatorCoinFlip.Status.Pending));
+    }
+
+    function test_tableCap_freesOnRefundStale() public {
+        bytes32 tid = _table();
+        uint256 exposure = 4 ether * MULT / 100 - 4 ether;
+        vm.prank(op); game.setTableCap(tid, exposure);
+        (bytes32 roundId,,) = _open(tid, 0, 4 ether);
+        vm.roll(block.number + 201); // past STALE_BLOCKS, no chop → plain refund branch
+        game.refundStale(roundId);
+        assertEq(game.tableLocked(tid), 0);
+    }
+
+    function test_lowerCap_blocksNewButResolvesInflight() public {
+        bytes32 tid = _table();
+        (bytes32 roundId, bytes32 key, PreimageLocation.Info[] memory locs) = _open(tid, 0, 4 ether); // uncapped open
+        vm.prank(op); game.setTableCap(tid, 1); // now below tableLocked
+        // Reuse the already-built locs so no external tierPriceOf staticcall sits inside expectRevert.
+        vm.prank(player);
+        vm.expectRevert(OperatorCoinFlip.TableCapExceeded.selector);
+        game.open(tid, 0, 4 ether, subset, locs);
+        rnd.pushCast(key, bytes32(uint256(0))); // in-flight round still settles
+        assertEq(_status(roundId), uint8(OperatorCoinFlip.Status.Settled));
+        assertEq(game.tableLocked(tid), 0);
+    }
 }
 
 // --- minimal policies for hook tests ---
