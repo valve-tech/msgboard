@@ -7,7 +7,7 @@ import { onchainTable } from 'ponder'
 export const gameEvent = onchainTable('game_event', (t) => ({
   id: t.text().primaryKey(), // `${chainId}-${txHash}-${logIndex}` — unique per log; re-indexing is idempotent
   chainId: t.integer().notNull(), // games are indexed on both chains now — the frontend filters by this
-  game: t.text().notNull(), // 'coinflip' | 'raffle' | 'flipbook'
+  game: t.text().notNull(), // 'coinflip' | 'raffle' | 'flipbook' | 'operator'
   name: t.text().notNull(), // event name: Entered, Paired, Settled, RoundOpened, Drawn, OfferPosted, …
   args: t.json().notNull(), // decoded args; bigints as decimal strings
   blockNumber: t.bigint().notNull(),
