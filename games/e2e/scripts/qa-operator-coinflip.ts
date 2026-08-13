@@ -212,6 +212,7 @@ async function main() {
   if (MODE === 'smoke' || MODE === 'all') await runSettle()
   if (MODE === 'forfeit' || MODE === 'all') await runForfeit()
   if (MODE === 'policy' || MODE === 'all') await runPolicy()
+  if (MODE === 'caps' || MODE === 'all') await runCaps()
   if (MODE === 'matrix' || MODE === 'all') await runMatrix()
 
   console.log(`\n=== QA complete: ${PASS} passed, ${FAIL} failed ===`)
@@ -312,6 +313,30 @@ async function main() {
     await expectRevert('policy REJECTS (requireOperator, operator absent) → PolicyRejected', {
       address: GAME, functionName: 'open', args: [tableId, 0, TIER, subset, locs],
     }, 'PolicyRejected')
+  }
+
+  // --- caps: a per-table exposure cap blocks an over-cap open and frees as rounds resolve ---
+  async function runCaps() {
+    console.log('— CAPS: per-table exposure cap blocks over-cap open, frees on settle —')
+    const tableId = await createTable(CHIPS, MULT, TIER, TIER)
+    const exposure = (TIER * BigInt(MULT)) / 100n - TIER // payout - stake for one round
+    await send({ address: GAME, abi: gameAbi, functionName: 'setTableCap', args: [tableId, exposure] })
+
+    const { roundId, key, k, locations } = await openRound(tableId, 0 /* HEADS */, TIER) // fills the cap
+    check('open within cap → tableLocked == exposure', (await pc.readContract({ address: GAME, abi: gameAbi, functionName: 'tableLocked', args: [tableId] })) === exposure)
+
+    // a second open would push tableLocked to 2*exposure > cap → revert before heat (no slot consumed)
+    const k2 = BigInt((await heatsSincePriced(pc, cfg, CHIPS, TIER)).length)
+    const locs2 = operatorLocationsAt(subset, k2, poolSize, CHIPS, TIER)
+    await expectRevert('second open over cap → TableCapExceeded', {
+      address: GAME, functionName: 'open', args: [tableId, 0, TIER, subset, locs2],
+    }, 'TableCapExceeded')
+
+    // settle the first round → exposure frees → cap has room again
+    const secrets = subset.map((_a, i) => operatorSecret(seeds0!, i, CHIPS, TIER, k))
+    await send({ address: RANDOM, abi: randomAbi, functionName: 'cast', args: [key, locations, secrets] })
+    check('after settle → round resolved', (await roundStatus(roundId)) !== 1)
+    check('after settle → tableLocked freed to 0', (await pc.readContract({ address: GAME, abi: gameAbi, functionName: 'tableLocked', args: [tableId] })) === 0n)
   }
 
   // --- matrix: the invariant spine, live ---
