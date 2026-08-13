@@ -122,6 +122,16 @@ async function main(): Promise<void> {
   console.log('  OperatorCoinFlip (new):', coinflip)
   const deployBlock = await publicClient.getBlockNumber()
 
+  // Deploy a fresh DefaultValidatorPolicy alongside the game (its per-table config is keyed by the game
+  // address, so a new game needs a policy that will be configured against it). Operators opt in per table
+  // via game.setValidatorPolicy + policy.setConfig; tables default to the floor-only (no policy).
+  const policyArtifact = loadArtifact('DefaultValidatorPolicy')
+  const validatorPolicy = await deployContractLegacy({
+    walletClient, publicClient, abi: policyArtifact.abi, bytecode: policyArtifact.bytecode, args: [], fee,
+    label: 'DefaultValidatorPolicy',
+  })
+  console.log('  DefaultValidatorPolicy:', validatorPolicy)
+
   for (const v of VALIDATORS) {
     const already = (await publicClient.readContract({
       address: coinflip, abi: GAMEBASE_ABI, functionName: 'isValidator', args: [v],
@@ -151,7 +161,7 @@ async function main(): Promise<void> {
     ...prior,
     deployBlock: deployBlock.toString(),
     deployer: deployer.address,
-    contracts: { ...prior.contracts, OperatorCoinFlip: coinflip },
+    contracts: { ...prior.contracts, OperatorCoinFlip: coinflip, DefaultValidatorPolicy: validatorPolicy },
     operatorCoinFlipRetired: retired,
   }
   fs.writeFileSync(outPath, JSON.stringify(record, null, 2) + '\n')

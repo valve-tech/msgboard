@@ -16,6 +16,7 @@ import GameArtifact from '@msgboard/games-contracts/artifacts/contracts/games/op
 import BondArtifact from '@msgboard/games-contracts/artifacts/contracts/games/operator/OperatorBond.sol/OperatorBond.json'
 import VaultArtifact from '@msgboard/games-contracts/artifacts/contracts/games/operator/OperatorVault.sol/OperatorVault.json'
 import FactoryArtifact from '@msgboard/games-contracts/artifacts/contracts/games/operator/OperatorVaultFactory.sol/OperatorVaultFactory.json'
+import DefaultPolicyArtifact from '@msgboard/games-contracts/artifacts/contracts/games/operator/DefaultValidatorPolicy.sol/DefaultValidatorPolicy.json'
 import ERC20Artifact from '@msgboard/games-contracts/artifacts/contracts/test/ERC20.sol/ERC20.json'
 
 /**
@@ -185,6 +186,13 @@ describe('OperatorCoinFlip validator forfeit — real Random on anvil', () => {
     })
     tableId = (viem.parseEventLogs({ abi: GameArtifact.abi as viem.Abi, eventName: 'TableCreated', logs: tableReceipt.logs })[0]
       ?.args as unknown as { tableId: viem.Hex }).tableId
+
+    // Attach a real validator policy to the table: whitelist = the canonical subset, minCount 3. Every
+    // round below uses that subset, so the hook passes — proving settle/forfeit are unchanged when a
+    // policy gates open() (the policy runs pre-heat, after the hard floor). See the validator-policy plan.
+    const policy = await deploy(DefaultPolicyArtifact as { abi: unknown; bytecode: string })
+    await send(operator, { address: policy, abi: DefaultPolicyArtifact.abi as viem.Abi, functionName: 'setConfig', args: [game, tableId, 3n, false, subset] })
+    await send(operator, { address: game, abi: GameArtifact.abi as viem.Abi, functionName: 'setValidatorPolicy', args: [tableId, policy] })
 
     config = {
       chainId: 31337,

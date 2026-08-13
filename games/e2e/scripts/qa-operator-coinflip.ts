@@ -80,6 +80,7 @@ async function main() {
   const REGISTRY = (process.env.REGISTRY ?? sub.contracts.OperatorRegistry) as viem.Hex
   const ESCROW = (process.env.ESCROW ?? sub.contracts.GameEscrow) as viem.Hex
   const GAME = (process.env.GAME ?? sub.contracts.OperatorCoinFlip) as viem.Hex
+  const POLICY = (process.env.POLICY ?? sub.contracts.DefaultValidatorPolicy) as viem.Hex | undefined
 
   const cfg = loadDeployment(CHAIN)
   // GAME comes from the substrate file, cfg.operatorCoinFlip (which heatsSincePriced counts on) from the
@@ -210,6 +211,7 @@ async function main() {
   if (MODE === 'ladder' || MODE === 'all') await runLadder()
   if (MODE === 'smoke' || MODE === 'all') await runSettle()
   if (MODE === 'forfeit' || MODE === 'all') await runForfeit()
+  if (MODE === 'policy' || MODE === 'all') await runPolicy()
   if (MODE === 'matrix' || MODE === 'all') await runMatrix()
 
   console.log(`\n=== QA complete: ${PASS} passed, ${FAIL} failed ===`)
@@ -287,6 +289,29 @@ async function main() {
     check('validator 2 stake returned', custodyAfter[1]! - custodyBefore[1]! === TIER)
     check('withholder (#3) stake forfeited', custodyAfter[2]! - custodyBefore[2]! === 0n)
     check('operator fee pool restored', (await feeBalanceOf()) === feeBefore)
+  }
+
+  // --- policy: a table gated by DefaultValidatorPolicy accepts a valid subset and rejects an invalid one ---
+  async function runPolicy() {
+    console.log('— POLICY: DefaultValidatorPolicy gates open (accept valid subset, reject invalid) —')
+    if (!POLICY) { check('DefaultValidatorPolicy deployed', false, 'absent in 943-operator-substrate.json'); return }
+    const policyAbi = loadAbi('DefaultValidatorPolicy')
+    const tableId = await createTable(CHIPS, MULT, TIER, TIER)
+    await send({ address: GAME, abi: gameAbi, functionName: 'setValidatorPolicy', args: [tableId, POLICY] })
+
+    // ACCEPT: whitelist = the canonical subset, requireOperator false → the subset passes the hook.
+    await send({ address: POLICY, abi: policyAbi, functionName: 'setConfig', args: [GAME, tableId, 3n, false, subset] })
+    const { roundId } = await openRound(tableId, 0 /* HEADS */, TIER)
+    check('policy ACCEPTS canonical subset → round opened', /^0x[0-9a-f]{64}$/i.test(roundId), roundId.slice(0, 12) + '…')
+
+    // REJECT: requireOperator true; the operator (deployer) is not in the validator subset → PolicyRejected.
+    // The hook runs after the hard floor and before heat, so this reverts without consuming a pool slot.
+    await send({ address: POLICY, abi: policyAbi, functionName: 'setConfig', args: [GAME, tableId, 3n, true, []] })
+    const k = BigInt((await heatsSincePriced(pc, cfg, CHIPS, TIER)).length)
+    const locs = operatorLocationsAt(subset, k, poolSize, CHIPS, TIER)
+    await expectRevert('policy REJECTS (requireOperator, operator absent) → PolicyRejected', {
+      address: GAME, functionName: 'open', args: [tableId, 0, TIER, subset, locs],
+    }, 'PolicyRejected')
   }
 
   // --- matrix: the invariant spine, live ---

@@ -8,6 +8,7 @@ import {GameEscrow} from "./GameEscrow.sol";
 import {OperatorRegistry} from "./OperatorRegistry.sol";
 import {IRandomStaking} from "./IRandomStaking.sol";
 import {ReentrancyGuard} from "./ReentrancyGuard.sol";
+import {IValidatorPolicy} from "./IValidatorPolicy.sol";
 
 /// @notice Escrow-backed coin flip — the slice-A reference game. Identical parity mechanics to
 /// CoinFlipTables, but every chip lives in GameEscrow (token-agnostic, pre-collateralized) and every
@@ -38,6 +39,7 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
     error InsufficientFees();
     error AlreadyResolved();
     error TooEarly();
+    error PolicyRejected();
 
     uint16 internal constant MULT_MIN = 150;
     uint16 internal constant MULT_MAX = 200;
@@ -52,6 +54,7 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
         uint256 minStake;
         uint256 maxStake;
         bool    open;
+        address validatorPolicy; // 0 = floor only; else a stricter-only IValidatorPolicy hook
     }
 
     struct Round {
@@ -89,6 +92,7 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
 
     event TableCreated(bytes32 indexed tableId, address indexed operator, address indexed token, uint16 maxMultiplierX100, uint256 minStake, uint256 maxStake);
     event OpenSet(bytes32 indexed tableId, bool open);
+    event ValidatorPolicySet(bytes32 indexed tableId, address indexed policy);
     event FeesDeposited(address indexed operator, address indexed token, uint256 credited);
     event FeesWithdrawn(address indexed operator, address indexed token, uint256 amount);
     event RoundOpened(bytes32 indexed roundId, bytes32 indexed tableId, address indexed player, uint8 side, uint256 stake, uint256 payout, uint256 tierPrice, bytes32 key, uint256 openedAtBlock);
@@ -117,13 +121,22 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
         uint256 r = maxStake / minStake;
         if ((r & (r - 1)) != 0) revert BadTier(); // r is a power of two (r != 0 guaranteed above)
         tableId = keccak256(abi.encode(address(this), msg.sender, ++_tableNonce));
-        tables[tableId] = Table({operator: msg.sender, token: token, maxMultiplierX100: maxMultiplierX100, minStake: minStake, maxStake: maxStake, open: true});
+        tables[tableId] = Table({operator: msg.sender, token: token, maxMultiplierX100: maxMultiplierX100, minStake: minStake, maxStake: maxStake, open: true, validatorPolicy: address(0)});
         emit TableCreated(tableId, msg.sender, token, maxMultiplierX100, minStake, maxStake);
     }
 
     function setOpen(bytes32 tableId, bool isOpen) external onlyOperator(tableId) {
         tables[tableId].open = isOpen;
         emit OpenSet(tableId, isOpen);
+    }
+
+    function operatorOf(bytes32 tableId) external view returns (address) {
+        return tables[tableId].operator;
+    }
+
+    function setValidatorPolicy(bytes32 tableId, address policy) external onlyOperator(tableId) {
+        tables[tableId].validatorPolicy = policy;
+        emit ValidatorPolicySet(tableId, policy);
     }
 
     /// @notice The smallest ladder tier >= `stake`, in [minStake, maxStake]. Reverts if out of range.
@@ -195,7 +208,11 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
         if (t.operator == address(0)) revert TableClosed();
         if (!t.open) revert TableClosed();
         if (side > TAILS) revert WrongSide();
-        _validateSubset(validatorSubset);
+        _validateSubset(validatorSubset); // hard floor first — a hook can only tighten it
+        address policy = t.validatorPolicy;
+        if (policy != address(0)) {
+            if (!IValidatorPolicy(policy).validate(t.operator, tableId, msg.sender, validatorSubset)) revert PolicyRejected();
+        }
 
         // Round the stake up to its ladder tier — the price each validator stakes on this round.
         uint256 tierPrice = _tierPrice(t.minStake, t.maxStake, stake);
