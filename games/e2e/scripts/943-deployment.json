@@ -20,11 +20,12 @@
     "0xe10be94d21b0ddcefadf5ed997b892b9bf4a15f0",
     "0x659602cE3e7F8046F4c0602de039228398d1DbEB"
   ],
-  "operatorCoinFlip": "0x30b855799990fa9c2d0dff461bfb905a269efe8e",
+  "operatorCoinFlip": "0xc3a4edb9601b55df3e25893a4e28971883a4b475",
   "operatorCoinFlipRetired": [
     "0x48f6f9e15ad2b01cc60612c29dfed064a6353b4e",
     "0x360f22c4b6b0a31cbff91226f20f557dbd0a6353",
     "0xbb9bc6851998bc979889a6d31c1994160a219d04",
-    "0xb22ad173ee0ca5f9a3d36dc647d67bafa0e49e87"
+    "0xb22ad173ee0ca5f9a3d36dc647d67bafa0e49e87",
+    "0x30b855799990fa9c2d0dff461bfb905a269efe8e"
   ]
 }
