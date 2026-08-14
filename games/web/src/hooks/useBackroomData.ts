@@ -9,6 +9,7 @@ import {
   type PitRound,
   type TapeEntry,
   type Treasury,
+  type TreasuryEvent,
 } from '../lib/backroomIndex'
 import { publicClientFor } from '../wallet'
 import { deployments, type GameDeployment } from '../config'
@@ -72,9 +73,16 @@ export type BackroomData = {
   pit: PitRound[]
   tape: TapeEntry[]
   treasury: Treasury[]
+  /** Deposit/withdraw/rake-withdraw lines (spec §4.2's history lane), newest first. */
+  treasuryHistory: TreasuryEvent[]
   reconciliation: Reconciliation
   status: 'live' | 'degraded' | 'loading'
   lastBlock: bigint
+  /** Rounds whose seed has finalized (irreversible, spec §5 rule 3 — "decided — settling") but that
+   *  have not yet posted a terminal event. A COUNT only, not round detail: the pit board still shows
+   *  positions only pre-terminal, and a per-round breakdown of this set isn't worth the extra plumbing
+   *  for an alert whose whole job is "is anything stuck between decided and settled". */
+  decidedUnsettled: number
   refresh: () => void
 }
 
@@ -84,9 +92,11 @@ const emptyState: Omit<BackroomData, 'refresh'> = {
   pit: [],
   tape: [],
   treasury: [],
+  treasuryHistory: [],
   reconciliation: emptyReconciliation,
   status: 'loading',
   lastBlock: 0n,
+  decidedUnsettled: 0,
 }
 
 /** Decimal-string args re-hydrated to bigint — same rule as useChainData's `rehydrate` (hex strings,
@@ -283,6 +293,9 @@ export const useBackroomData = (operator: Address): BackroomData => {
       const tableIds = new Set<Hex>()
       const tokens = new Set<Address>()
       const openRounds = new Map<Hex, Hex>()
+      // roundId -> tableId for every currently-open round, so `decidedUnsettled` below can be scoped to
+      // this operator's tables the same way `tables`/`pit`/`tape` are (see the scoping note further down).
+      const openRoundTable = new Map<Hex, Hex>()
       for (const e of events) {
         const a = e.args as Record<string, any>
         switch (e.name) {
@@ -297,6 +310,7 @@ export const useBackroomData = (operator: Address): BackroomData => {
             break
           case 'RoundOpened':
             openRounds.set(a.roundId as Hex, a.key as Hex)
+            openRoundTable.set(a.roundId as Hex, a.tableId as Hex)
             break
           case 'RoundSettled':
           case 'RoundRefunded':
@@ -344,7 +358,10 @@ export const useBackroomData = (operator: Address): BackroomData => {
       const randomBalanceOf = new Map<Address, bigint>()
       const viewTableCap = new Map<Hex, bigint>()
       const viewTableLocked = new Map<Hex, bigint>()
-      const viewTableMeta = new Map<Hex, { operator: Address; token: Address; open: boolean; validatorPolicy: Address }>()
+      const viewTableMeta = new Map<
+        Hex,
+        { operator: Address; token: Address; open: boolean; validatorPolicy: Address; minStake: bigint; maxStake: bigint; maxMultiplierX100: number }
+      >()
       // A round's seed-finality reduces to a boolean the instant it's read — never store the seed itself.
       const seedFinalized = new Set<Hex>()
 
@@ -374,10 +391,15 @@ export const useBackroomData = (operator: Address): BackroomData => {
             viewTableLocked.set(m.tableId, r.result as bigint)
             break
           case 'tableView': {
+            // Table struct order (OperatorCoinFlip.sol): operator, token, maxMultiplierX100, minStake,
+            // maxStake, open, validatorPolicy.
             const t = r.result as readonly unknown[]
             viewTableMeta.set(m.tableId, {
               operator: t[0] as Address,
               token: t[1] as Address,
+              maxMultiplierX100: Number(t[2] as number),
+              minStake: t[3] as bigint,
+              maxStake: t[4] as bigint,
               open: t[5] as boolean,
               validatorPolicy: t[6] as Address,
             })
@@ -393,6 +415,28 @@ export const useBackroomData = (operator: Address): BackroomData => {
 
       const reduced = reduceBackroom(events, { seedFinalized: (roundId) => seedFinalized.has(roundId) })
 
+      // The operator substrate is shared: `events` (and therefore `reduced.tables`/`pit`/`tape`) carries
+      // EVERY operator's tables and rounds, not just this one's — GameEscrow/OperatorCoinFlip emit no
+      // per-operator-scoped log topic the fetch layer could filter on upstream. Backroom-B is single-
+      // operator by design (spec §3 "Scope"), so scope down here, once, rather than in every panel: a
+      // table's `operator` field is set the instant its `TableCreated` event folds (reduceBackroom), so
+      // this filter is reliable even before the per-poll view read below confirms it.
+      const myTableIds = new Set(
+        reduced.tables.filter((t) => t.operator.toLowerCase() === operator.toLowerCase()).map((t) => t.tableId),
+      )
+
+      // A round leaves `reduced.pit` the instant its seed finalizes (spec §5 rule 3), even before it
+      // posts a terminal event — that gap is exactly what the "seed finalized but unsettled" alert
+      // watches for. `openRounds` is this poll's set of not-yet-terminal rounds (per the event stream);
+      // intersect with `seedFinalized`, scoped to this operator's tables via `openRoundTable`, for the
+      // count. A count only — no round detail leaves this hook for this set (see `decidedUnsettled` on
+      // `BackroomData`).
+      let decidedUnsettled = 0
+      for (const roundId of openRounds.keys()) {
+        const tableId = openRoundTable.get(roundId)
+        if (seedFinalized.has(roundId) && tableId && myTableIds.has(tableId)) decidedUnsettled += 1
+      }
+
       // Views are truth: overwrite the reducer's event-derived cap/locked/open/validatorPolicy with the
       // live reads, and record the pre-overwrite event-derived figure as the reconciliation baseline.
       const tableReconciliation: TableReconciliation[] = []
@@ -406,6 +450,9 @@ export const useBackroomData = (operator: Address): BackroomData => {
         if (vMeta) {
           t.open = vMeta.open
           t.validatorPolicy = vMeta.validatorPolicy
+          t.minStake = vMeta.minStake
+          t.maxStake = vMeta.maxStake
+          t.maxMultiplierX100 = vMeta.maxMultiplierX100
           if (vMeta.operator !== viem.zeroAddress) t.operator = vMeta.operator
           if (vMeta.token !== viem.zeroAddress) t.token = vMeta.token
         }
@@ -433,13 +480,23 @@ export const useBackroomData = (operator: Address): BackroomData => {
         return { token, eventLedger, viewLedger, ledgerDelta: eventLedger - viewLedger, randomBalance, feeBalance, feeDelta: randomBalance - feeBalance }
       })
 
+      // Scope the reduced projection down to this operator's tables (see the scoping note above).
+      const tables = reduced.tables.filter((t) => myTableIds.has(t.tableId))
+      const pit = reduced.pit.filter((r) => myTableIds.has(r.tableId))
+      const tape = reduced.tape.filter((e) => myTableIds.has(e.tableId))
+      const treasuryHistory = reduced.treasuryHistory
+        .filter((h) => h.operator.toLowerCase() === operator.toLowerCase())
+        .sort((a, b) => (a.blockNumber > b.blockNumber ? -1 : a.blockNumber < b.blockNumber ? 1 : 0))
+      const scopedTableReconciliation = tableReconciliation.filter((r) => myTableIds.has(r.tableId))
+
       setData({
-        tables: reduced.tables,
-        pit: reduced.pit,
-        tape: reduced.tape,
+        tables,
+        pit,
+        tape,
         treasury,
+        treasuryHistory,
         reconciliation: {
-          tables: tableReconciliation,
+          tables: scopedTableReconciliation,
           tokens: tokenReconciliation,
           indexerHead,
           rpcHead: head,
@@ -447,6 +504,7 @@ export const useBackroomData = (operator: Address): BackroomData => {
         },
         status: degraded ? 'degraded' : 'live',
         lastBlock: head,
+        decidedUnsettled,
       })
     } catch {
       // RPC hiccup or total indexer+getLogs failure: keep the last-good cache on screen (spec §6) and
