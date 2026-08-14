@@ -389,6 +389,27 @@ contract OperatorCoinFlipTest is Test {
         assertEq(burnPolicy.burned(address(tok)), 4 ether);
     }
 
+    /// I5: the forfeit-policy pointer can only ever move within the constructor-fixed menu, and only the
+    /// owner may move it — an operator (or anyone else) can never redirect the forfeit sink.
+    function test_setForfeitPolicy_rejectsOffMenuAddress() public {
+        address offMenu = address(0xBAD);
+        vm.expectRevert(OperatorCoinFlip.PolicyRejected.selector);
+        game.setForfeitPolicy(offMenu);
+        assertEq(game.forfeitPolicy(), address(burnPolicy)); // unchanged
+    }
+
+    function test_setForfeitPolicy_revertsForNonOwner() public {
+        vm.prank(op);
+        vm.expectRevert(GameBase.OnlyOwner.selector);
+        game.setForfeitPolicy(address(revertingPolicy));
+        assertEq(game.forfeitPolicy(), address(burnPolicy)); // unchanged
+    }
+
+    function test_setForfeitPolicy_acceptsMenuMember_emitsAndUpdates() public {
+        game.setForfeitPolicy(address(revertingPolicy));
+        assertEq(game.forfeitPolicy(), address(revertingPolicy));
+    }
+
     /// Tier-boundary case (F4): stake == minStake so tierPrice == stake. The forfeit routed to the sink
     /// equals exactly tierPrice, and the operator bankroll is unchanged.
     function test_forfeit_tier_boundary() public {
