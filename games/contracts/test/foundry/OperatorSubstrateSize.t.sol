@@ -33,6 +33,13 @@ import {BackingPool} from "../../contracts/games/operator/BackingPool.sol";
 /// P2, atomic mint-and-fund, game kill-switch, createSeries validation) the stripped runtimes are
 /// BonusChips1155 5,024 bytes and BackingPool 6,243 bytes — both far under the EIP-170 hard limit and
 /// this file's safety margin.
+///
+/// System 2 slice S2b (openBoosted game integration, 2026-08-14): OperatorCoinFlip gained the boosted
+/// paired-bet flow (openBoosted + boosted branches in _settle/_routeForfeit/refundStale, setBonusInfra/
+/// setBonusSeries, claimParkedCharge, the 1155 receiver, 3 appended Round fields). Re-scanned the same
+/// way: zero MCOPY(0x5e) and TSTORE(0x5d); stripped runtime 16,604 bytes (full deployed 16,657) — up
+/// from Slice 0's 11,482 but still ~7.9KB under the 24,576 hard limit and under this file's margin. No
+/// series-resolution helper extraction was needed.
 contract OperatorSubstrateSizeTest is Test {
     uint256 internal constant SIZE_CEILING = 24_300;
 
