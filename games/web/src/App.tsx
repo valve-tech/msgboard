@@ -42,6 +42,7 @@ import { WordleScreen } from './components/WordleScreen'
 import { LiveFeed } from './components/LiveFeed'
 import { StandingsScreen } from './components/StandingsScreen'
 import { CasinoFloor } from './components/CasinoFloor'
+import { BackroomScreen } from './components/BackroomScreen'
 import { Menu } from './components/Menu'
 import { AppShell } from './components/shell/AppShell'
 import { HowItWorksProvider, HowItWorksModal } from './components/HowItWorks'
@@ -91,18 +92,20 @@ const GAMES = [
   { id: 'wordle', label: '🟩 ZK Wordle' },
   { id: 'standings', label: '🏆 Standings' },
   { id: 'live', label: '🟢 Live' },
+  { id: 'backroom', label: '🎥 Backroom' },
 ] as const
 type Tab = (typeof GAMES)[number]['id']
 
 // The fairness assumption each table actually rests on. Only the numbers still draws from the
 // validator set; the coin flip is now the P2P guessing duel (FlipBook — no randomness anywhere);
 // the tables are commit-before-bet + co-signed recompute; the ZK games trust only the proof.
-// 'live' is a feed, not a game, so it shows no trust strip.
+// 'live' is a feed, not a game, so it shows no trust strip. 'backroom' is the operator's own
+// read-only dashboard, not a wagered table, so it carries no player trust model either.
 const VALIDATOR_GAMES = new Set<Tab>(['raffle', 'tables'])
 const P2P_GAMES = new Set<Tab>(['coinflip', 'flipx'])
 const ZK_GAMES = new Set<Tab>(['sudoku', 'wordle'])
 const trustModelFor = (tab: Tab): TrustModel | null =>
-  tab === 'live' || tab === 'standings' || tab === 'lobby'
+  tab === 'live' || tab === 'standings' || tab === 'lobby' || tab === 'backroom'
     ? null
     : VALIDATOR_GAMES.has(tab)
       ? 'validator'
@@ -217,7 +220,7 @@ export const App = () => {
       {tab === 'lobby' ? (
         <CasinoFloor
           deployment={deployment}
-          games={GAMES.filter((g) => !['lobby', 'standings', 'live'].includes(g.id))}
+          games={GAMES.filter((g) => !['lobby', 'standings', 'live', 'backroom'].includes(g.id))}
           trustFor={(id) => trustModelFor(id as Tab)}
           onPick={(id) => setTab(id as Tab)}
           topRight={topRight}
@@ -225,7 +228,9 @@ export const App = () => {
       ) : (
       <AppShell
         deployment={deployment}
-        games={[...GAMES]}
+        // Hide the `backroom` tab entirely on a chain with no operator substrate (Global Constraints:
+        // 943 only) rather than showing it and rendering nothing.
+        games={GAMES.filter((g) => g.id !== 'backroom' || !!deployment.operator)}
         active={tab}
         onPick={(id) => setTab(id as Tab)}
         topRight={topRight}
@@ -550,6 +555,7 @@ export const App = () => {
       )}
       {tab === 'standings' && <StandingsScreen deployment={deployment} myAddress={wallet.address} />}
       {tab === 'live' && <LiveFeed deployment={deployment} />}
+      {tab === 'backroom' && deployment.operator && <BackroomScreen deployment={deployment} operator={wallet.address} />}
       </AppShell>
       )}
     </HowItWorksProvider>

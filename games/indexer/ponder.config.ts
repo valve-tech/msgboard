@@ -7,6 +7,12 @@ import { PETITION_SIGNATURES_ABI } from '@msgboard/petition'
 // same source games-core uses for CoinFlip/Raffle (`Artifact.abi as viem.Abi`).
 import SudokuLogArtifact from '../contracts/artifacts/contracts/games/SudokuLog.sol/SudokuLog.json'
 import FlipBookArtifact from '../contracts/artifacts/contracts/games/FlipBook.sol/FlipBook.json'
+import {
+  operatorCoinFlipAbi,
+  gameEscrowAbi,
+  operatorRegistryAbi,
+  defaultValidatorPolicyAbi,
+} from './src/contracts/abis'
 
 const sudokuLogAbi = SudokuLogArtifact.abi as Abi
 const flipBookAbi = FlipBookArtifact.abi as Abi
@@ -35,6 +41,28 @@ const SUDOKU_LOG_943 = '0xf700e0c1fd235719738cca1cdef6f41bfaef163c'
 const SUDOKU_LOG_369 = '0x939cbb0f10b5f9e76861a179fbe666e1cae50ba7'
 const SUDOKU_START_BLOCK_943 = 24_898_763
 const SUDOKU_START_BLOCK_369 = 27_063_003
+
+// The operator substrate (casino-operator tables: OperatorCoinFlip + its shared GameEscrow,
+// OperatorRegistry, DefaultValidatorPolicy) — 943 ONLY. 369 has no operator substrate deployed yet
+// (see 943-operator-substrate.json); do not add a `pulsechain` network entry here until it does.
+const OP_COINFLIP_943 = '0x0c80607ec07999cdab97d4374d6b7a3b5a6f1833'
+const OP_ESCROW_943 = '0xb572481635904fe2e3957bc45d81be07337e0838'
+const OP_REGISTRY_943 = '0xb202144ed8f2ae1c8a6262c241714c171b039cbc'
+const OP_POLICY_943 = '0xe821380fee740210a51503ec086c4ba3074cb63e'
+const OP_START_943 = 25_121_394
+// Retired OperatorCoinFlip addresses hold real settlement history (spec G7,
+// 943-operator-substrate.json `operatorCoinFlipRetired`) and share the live ABI. No view exposes
+// each one's exact deploy block, so this uses a documented floor below the earliest redeploy rather
+// than an exact per-address startBlock — a few thousand empty blocks of backfill is a much cheaper
+// mistake than silently starting the tape/P&L at the latest redeploy.
+const OP_COINFLIP_RETIRED_943 = [
+  '0x360f22c4b6b0a31cbff91226f20f557dbd0a6353',
+  '0xbb9bc6851998bc979889a6d31c1994160a219d04',
+  '0xb22ad173ee0ca5f9a3d36dc647d67bafa0e49e87',
+  '0x30b855799990fa9c2d0dff461bfb905a269efe8e',
+  '0xc3a4edb9601b55df3e25893a4e28971883a4b475',
+] as const
+const OP_RETIRED_START_943 = 25_000_000 // documented floor below the first retired deploy, not genesis
 
 // PetitionSignatures — unlike the contracts above, this one is NOT deployed yet
 // (`@msgboard/petition`'s `deployments` map is still `{}`), so there's no address to pin at build
@@ -121,6 +149,29 @@ export default createConfig({
           startBlock: SUDOKU_START_BLOCK_369,
         },
       },
+    },
+    // The operator substrate — 943 only (see the address block above). Two OperatorCoinFlip entries
+    // so the live table starts at its exact deploy block while the retired tables start at the
+    // documented floor; both share the ABI and both feed `store('operator', ...)` in src/index.ts.
+    OperatorCoinFlip: {
+      abi: operatorCoinFlipAbi,
+      network: { pulsechainV4: { address: OP_COINFLIP_943, startBlock: OP_START_943 } },
+    },
+    OperatorCoinFlipRetired: {
+      abi: operatorCoinFlipAbi,
+      network: { pulsechainV4: { address: [...OP_COINFLIP_RETIRED_943], startBlock: OP_RETIRED_START_943 } },
+    },
+    GameEscrow: {
+      abi: gameEscrowAbi,
+      network: { pulsechainV4: { address: OP_ESCROW_943, startBlock: OP_START_943 } },
+    },
+    OperatorRegistry: {
+      abi: operatorRegistryAbi,
+      network: { pulsechainV4: { address: OP_REGISTRY_943, startBlock: OP_START_943 } },
+    },
+    DefaultValidatorPolicy: {
+      abi: defaultValidatorPolicyAbi,
+      network: { pulsechainV4: { address: OP_POLICY_943, startBlock: OP_START_943 } },
     },
     // Registered only when at least one PETITION_ADDR_{943,369} env var is set (see petitionNetwork
     // above) — pre-deploy, this contract simply isn't part of the config.
