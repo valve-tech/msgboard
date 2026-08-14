@@ -79,12 +79,21 @@ rule), and `_releaseTableExposure` reads the same field it incremented.
   forfeit measured → routed/parked) PLUS `refund(B)` returns d to pool, pool
   `credit[op] += w`, and **BURN the charge** (never return — removes the tier-
   boundary selective-abort profit, F4). supply −1.
-- **T7 EXPIRY:** `openBoosted` reverts once `now≥expiry`. `releaseExpired(s)`
-  (permissionless, re-callable): `earmark[s] → holderPot[s]`. `redeemExpired(s,n)`:
-  burn n → pay `n·w` from the pot (exact `w`/unit — pot == circ·w, no snapshot). After
-  a claim window (default 30d) `sweepExpired(s)`: `holderPot → credit[op]`.
-  **Decision: always-redeem-by-burn** (holders always get first claim at w/unit for
-  the window) — objective, needs no "unspendable" predicate, closes the F5 rug.
+- **T7 EXPIRY (immediate settlement — revised per owner, supersedes the window
+  model).** `openBoosted` reverts once `now ≥ expiry`. The backing `w` is the
+  OPERATOR's capital (deposited at mint, never used on an unopened round), so it
+  returns to the operator IMMEDIATELY with no window: `expireCharges(s, holder, n)`
+  (permissionless — any keeper) burns n expired units held by `holder` and moves
+  `n·w` from `earmark[s]` to `credit[op]` in the same call. `circ` shrinks by n; P2
+  holds (Δearmark = −n·w = Δcirc·w). **No `holderPot`, no claim window, no
+  `redeemExpired`.** Holder protection is on the PURCHASE PRICE, not the backing —
+  see O4: the price lives in the mint-sale vesting escrow, the operator vests it only
+  as charges are USED, and an expired-unused charge refunds the price to the holder.
+  So an operator that makes charges unspendable collects nothing and holders are made
+  whole, without ever handing the operator's backing to holders. (Plan-level: the
+  price refund and the backing return are separate flows on the same expired charge —
+  the mint-sale burns-for-refund and the pool returns backing; sequence them so the
+  charge is burned exactly once. The S2a/S2c plans pin the exact call decomposition.)
 - **T8 WITHDRAW-CREDIT:** `pool.withdrawCredit(τ,a)` by the operator, `a ≤
   credit[op][τ]` → `escrow.withdrawBankroll` (pool is bucket owner) → operator. The
   ONLY door out of the pool; opens only for released credit.
@@ -130,7 +139,9 @@ creation with a 0-value probe + measured mint; state in disclosure UI.
 Residual = hold-until-terminal, VARIABLE stake (reject fixed-stake: it fragments
 liquidity and still needs the hold machinery). Operator owns `d` after settle-loss
 (via credit). Adopt paired-bet (F-A). `w = ceil` (F-B). Series pins token + no-clamp
-attach (F-C). `d > 0` dust guard. Always-redeem-by-burn expiry. Guard `claim`.
+attach (F-C). `d > 0` dust guard. Immediate expiry settlement — backing → operator on
+burn (`expireCharges`), holder price refund via vesting (O3/O4, revised per owner).
+Guard `claim`. Caps count base exposure only (O2).
 
 ## Open decisions for the owner (defaults in force unless changed)
 
@@ -138,10 +149,17 @@ attach (F-C). `d > 0` dust guard. Always-redeem-by-burn expiry. Guard `claim`.
   intent (tokens in escrow before lock; win fully liquid; GameEscrow byte-identical)
   and is the only sound construction. Default: ADOPT. Owner sign-off requested.
 - **O2 — `tableCap` basis:** base exposure only (default) vs total exposure.
-- **O3 — expiry claim window** (default 30d) and whether the unredeemed remainder
-  sweeps to the operator (default) or the sink.
-- **O4 — purchase-price credit risk** stays outside this ledger (spec I4's honest
-  claim); the mint-sale vesting (§5.3 F5) covers it and needs its own accounting pass.
+- **O3 — RESOLVED (owner): immediate expiry settlement, no window.** Backing returns
+  to the operator the moment an expired charge is burned (`expireCharges`, permissionless);
+  there is no claim window and no holderPot. Holder protection is the purchase-price
+  refund (O4), not the backing.
+- **O4 — purchase-price refund is now LOAD-BEARING (the sole holder protection).** The
+  mint-sale vesting escrow holds each buyer's price; the operator vests it only as
+  charges are USED (burned via a round), and an expired-unused charge REFUNDS the
+  unvested price to the holder. This closes the F5 rug (an operator who makes charges
+  unspendable collects nothing; holders get their money back). Needs its own accounting
+  pass in the S2c mint-sale plan; the S2a backing pool must expose the burn/return hook
+  it composes with.
 - **O5 — charge-holder liveness (C6):** a fee-starved operator still blocks boosted
   opens with backing present; expiry now gives holders a `w`/unit floor. Full fix
   deferred to the bonus-economy plan.
