@@ -50,6 +50,12 @@ contract BackingPool is IBackingPool, ReentrancyGuard {
     }
 
     mapping(uint256 seriesId => uint256) public earmark;
+    /// @notice Circulating charge count per series (`circ = minted - burned - game-held`). The pool
+    /// maintains this explicitly so P2 (`earmark == circ * w`) is a POOL-ENFORCED invariant, not just a
+    /// test assumption. The pool never reads a 1155 balance; it moves this counter in lockstep with the
+    /// earmark on every hook (mint +n, consume -1, plain-refund +1, win/loss/chop net 0 — the charge
+    /// only moves game-held -> burned, expire -n).
+    mapping(uint256 seriesId => uint256) public circ;
     mapping(bytes32 roundId => uint256) public hold; // residual r = w - d
     mapping(address operator => mapping(address token => uint256)) public credit;
     mapping(uint256 seriesId => address) public seriesOperator;
@@ -67,6 +73,9 @@ contract BackingPool is IBackingPool, ReentrancyGuard {
     error DepositMismatch();
     error BeforeExpiry();
     error InsufficientCredit();
+    error HolderIsGame();
+    error CircShort();
+    error InvariantBroken();
 
     event OwnerSet(address indexed owner);
     event MinterSet(address indexed minter);
@@ -118,13 +127,21 @@ contract BackingPool is IBackingPool, ReentrancyGuard {
         return _rounds[roundId];
     }
 
+    /// @dev Pool-enforced P2: after every mutating hook, the series earmark must exactly back its
+    /// circulating charges. Reverts the whole tx if the two ledgers ever disagree — a corrupt state can
+    /// never be committed.
+    function _assertBacked(uint256 seriesId) internal view {
+        if (earmark[seriesId] != circ[seriesId] * chips.w(seriesId)) revert InvariantBroken();
+    }
+
     // ── T1 MINT — fund the earmark ───────────────────────────────────────────────────────────────
 
     /// @notice Deposit exactly `n * w` backing for `seriesId` into the pool's escrow bucket and earmark
     /// it. Minter-gated (the mint-sale). Pulls the backing from `from` (the operator's funding source),
     /// which is recorded as the series operator and is where released credit later accrues. The pull is
     /// MEASURED and must be exact: FOT/rebasing/zero-revert tokens are rejected here (O6). The amount
-    /// earmarked is tied to the escrow bucket's measured credit, so P1 stays exact.
+    /// earmarked is tied to the escrow bucket's measured credit, so P1 stays exact. `circ` rises by `n`
+    /// so the pool-enforced P2 (`earmark == circ * w`) holds from genesis.
     function fundEarmark(uint256 seriesId, uint256 n, address from) external nonReentrant {
         if (msg.sender != minter) revert NotMinter();
 
@@ -152,6 +169,8 @@ contract BackingPool is IBackingPool, ReentrancyGuard {
         if (credited != amount) revert DepositMismatch();
 
         earmark[seriesId] += credited;
+        circ[seriesId] += n;
+        _assertBacked(seriesId);
         emit EarmarkFunded(seriesId, from, n, credited);
     }
 
@@ -168,6 +187,7 @@ contract BackingPool is IBackingPool, ReentrancyGuard {
         if (earmark[seriesId] < w) revert BackingShort(); // L2: earmark >= w must hold
 
         earmark[seriesId] -= w;
+        circ[seriesId] -= 1; // the game now holds this charge; it leaves circulation
         uint256 r;
         unchecked { r = w - d; }
         hold[roundId] = r;
@@ -181,6 +201,7 @@ contract BackingPool is IBackingPool, ReentrancyGuard {
             d: d,
             open: true
         });
+        _assertBacked(seriesId);
         emit Consumed(roundId, seriesId, d, r);
     }
 
@@ -188,20 +209,25 @@ contract BackingPool is IBackingPool, ReentrancyGuard {
 
     /// @notice T3 WIN: the player was paid `d` from bet B (escrow). Release only the residual `r` to
     /// the operator's credit.
+    /// @dev circ is UNCHANGED: the charge only moves game-held -> burned (burned +1, game-held -1),
+    /// which nets to zero in `circ = minted - burned - game-held`. earmark is untouched, so P2 holds.
     function onSettleWin(bytes32 roundId) external onlyGame {
         Round storage rd = _closeRound(roundId);
         uint256 r = hold[roundId];
         hold[roundId] = 0;
         credit[rd.operator][rd.token] += r;
+        _assertBacked(rd.seriesId);
         emit WinReleased(roundId, rd.operator, rd.token, r);
     }
 
     /// @notice T4 LOSS: bet B returned `d` to the pool bucket. The operator OWNS `d` after a settled
     /// loss, so release the full `w` (= d + r) to credit.
+    /// @dev circ UNCHANGED (game-held -> burned nets zero); earmark untouched. P2 holds.
     function onSettleLoss(bytes32 roundId) external onlyGame {
         Round storage rd = _closeRound(roundId);
         hold[roundId] = 0;
         credit[rd.operator][rd.token] += rd.w;
+        _assertBacked(rd.seriesId);
         emit LossReleased(roundId, rd.operator, rd.token, rd.w);
     }
 
@@ -212,15 +238,19 @@ contract BackingPool is IBackingPool, ReentrancyGuard {
         Round storage rd = _closeRound(roundId);
         hold[roundId] = 0;
         earmark[rd.seriesId] += rd.w;
+        circ[rd.seriesId] += 1; // the charge returns to the player -> back into circulation
+        _assertBacked(rd.seriesId);
         emit PlainRefunded(roundId, rd.seriesId, rd.w);
     }
 
     /// @notice T6 CHOP-REFUND: bet B returned `d` to the pool bucket and the charge is BURNED (never
     /// returned — removes the tier-boundary selective-abort profit, F4). Release `w` to the operator.
+    /// @dev circ UNCHANGED (game-held -> burned nets zero); earmark untouched. P2 holds.
     function onChopRefund(bytes32 roundId) external onlyGame {
         Round storage rd = _closeRound(roundId);
         hold[roundId] = 0;
         credit[rd.operator][rd.token] += rd.w;
+        _assertBacked(rd.seriesId);
         emit ChopRefunded(roundId, rd.operator, rd.token, rd.w);
     }
 
@@ -240,17 +270,37 @@ contract BackingPool is IBackingPool, ReentrancyGuard {
     /// operator the moment an expired charge is burned. Permissionless: any keeper may call. Burning
     /// first validates that the holder truly had `n` units before the ledger moves (CEI; the 1155 burn
     /// has no receiver callback).
+    ///
+    /// CRITICAL-1 — `holder` MUST NOT be the game. A consumed charge lives ONLY in the game's balance
+    /// while its round is live, and its `w` has already moved from `earmark` into `hold` at `consume`.
+    /// Expiring the game's charge would burn that in-flight charge (stranding the open round, whose
+    /// terminal then reverts because the game no longer holds it) AND de-earmark another `n * w` that
+    /// the earmark no longer backs — a permissionless double-release that breaks P2 and under-backs
+    /// every other holder. Two independent guards stop it: (1) `holder != game` directly, and (2)
+    /// `n <= circ[seriesId]` — the game's in-flight charges are excluded from `circ`, so even a future
+    /// refactor cannot de-earmark more than the circulating supply. Both are belt-and-suspenders.
+    ///
+    /// MEDIUM-3 (S2c constraint, NOT solved here): this call BURNS the expired charge, which is the
+    /// same charge O4's purchase-price refund needs. The S2c mint-sale must sequence its price refund
+    /// so a racing `expireCharges` cannot strand it — burn the charge in exactly one place, or have the
+    /// price refund read a pre-burn snapshot. Do not rely on the charge still existing after expiry.
     function expireCharges(uint256 seriesId, address holder, uint256 n) external nonReentrant {
+        if (holder == game) revert HolderIsGame(); // never burn an in-flight (consumed) charge
         (,, uint64 expiry,) = chips.seriesOf(seriesId);
         if (block.timestamp < expiry) revert BeforeExpiry();
+        if (n > circ[seriesId]) revert CircShort(); // cannot de-earmark more than the circulating supply
 
         uint256 amount = n * chips.w(seriesId);
         chips.burn(holder, seriesId, n); // reverts if holder lacks n units
 
-        earmark[seriesId] -= amount; // reverts on underflow if the backing books ever disagreed
+        // De-earmark strictly against circ. `earmark == circ * w` and `n <= circ` together guarantee
+        // `amount <= earmark`, so this subtraction can never underflow when the books agree.
+        earmark[seriesId] -= amount;
+        circ[seriesId] -= n;
         address op = seriesOperator[seriesId];
         (,,, address token) = chips.seriesOf(seriesId);
         credit[op][token] += amount;
+        _assertBacked(seriesId);
         emit ChargesExpired(seriesId, op, n, amount);
     }
 
