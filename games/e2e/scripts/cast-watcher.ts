@@ -269,8 +269,12 @@ const main = async () => {
         const secrets = config.canonicalSubset.map((_v, i) => operatorSecret(env.SEEDS0!, i, token, price, slot))
         const isExpired = (await publicClient.readContract({ address: config.random, abi: randomAbi, functionName: 'expired', args: [randomness.timeline] })) as boolean
         // Best-effort cast: settles a live round, or flicks the honest stakes back on a stalled one.
+        // Explicit gas: Random._call swallows an onCast revert, so eth_estimateGas can under-provision
+        // the push-settlement sub-call (starved by EIP-150 63/64), leaving the round Pending after a
+        // "successful" cast that the receipt.status guard won't catch. A generous limit funds onCast;
+        // you pay for gas USED, not the limit. claim() is still the backstop if a cast is ever short.
         try {
-          await sendAs(publicClient, wallet, { address: config.random, abi: randomAbi, functionName: 'cast', args: [heat.key, locations, secrets] })
+          await sendAs(publicClient, wallet, { address: config.random, abi: randomAbi, functionName: 'cast', args: [heat.key, locations, secrets], gas: 1_500_000n })
         } catch (error) {
           if (!isExpired) console.error(`operator cast ${heat.key} slot ${slot} failed: ${(error as Error).message?.split('\n').slice(0, 2).join(' ¦ ')}`)
         }
@@ -353,6 +357,7 @@ const main = async () => {
               args: [c.key, locationsAt(c.k), c.secrets],
               account,
               ...fees,
+              gas: 1_500_000n, // fund the swallowed onCast sub-call (see the operator-cast note above)
             })
             return { c, request }
           } catch (error) {
