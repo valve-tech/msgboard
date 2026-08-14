@@ -79,6 +79,7 @@ contract BackingPool is IBackingPool, ReentrancyGuard {
 
     event OwnerSet(address indexed owner);
     event MinterSet(address indexed minter);
+    event GameAuthorizationSet(bool allowed);
     event EarmarkFunded(uint256 indexed seriesId, address indexed operator, uint256 units, uint256 amount);
     event Consumed(bytes32 indexed roundId, uint256 indexed seriesId, uint256 d, uint256 residual);
     event WinReleased(bytes32 indexed roundId, address indexed operator, address token, uint256 residual);
@@ -123,6 +124,17 @@ contract BackingPool is IBackingPool, ReentrancyGuard {
         emit MinterSet(m);
     }
 
+    /// @notice Emergency kill-switch on the boosted game. The pool authorizes `game` against its own
+    /// escrow bucket in the constructor; this lets the owner REVOKE (or restore) that authorization if
+    /// S2b is ever found exploitable. Deauthorizing blocks any new `lockExposure(pool, ...)` — so no new
+    /// boosted round can open — without touching earmark/hold/credit, so existing rounds still settle
+    /// and operators still withdraw released credit. This gates ONLY the pool's own bucket
+    /// (`authorizedGame[pool][game]`); it cannot affect any other operator's authorization.
+    function setGameAuthorized(bool allowed) external onlyOwner {
+        escrow.authorizeGame(game, allowed);
+        emit GameAuthorizationSet(allowed);
+    }
+
     function roundOf(bytes32 roundId) external view returns (Round memory) {
         return _rounds[roundId];
     }
@@ -136,19 +148,28 @@ contract BackingPool is IBackingPool, ReentrancyGuard {
 
     // ── T1 MINT — fund the earmark ───────────────────────────────────────────────────────────────
 
-    /// @notice Deposit exactly `n * w` backing for `seriesId` into the pool's escrow bucket and earmark
-    /// it. Minter-gated (the mint-sale). Pulls the backing from `from` (the operator's funding source),
-    /// which is recorded as the series operator and is where released credit later accrues. The pull is
-    /// MEASURED and must be exact: FOT/rebasing/zero-revert tokens are rejected here (O6). The amount
-    /// earmarked is tied to the escrow bucket's measured credit, so P1 stays exact. `circ` rises by `n`
-    /// so the pool-enforced P2 (`earmark == circ * w`) holds from genesis.
-    function fundEarmark(uint256 seriesId, uint256 n, address from) external nonReentrant {
+    /// @notice Fund AND mint `n` charges for `seriesId` in one atomic step: deposit exactly `n * w`
+    /// backing into the pool's escrow bucket, earmark it, raise `circ`, and mint the `n` charges to
+    /// `recipient`. Minter-gated (the mint-sale). Because the pool is the sole 1155 minter, minted
+    /// charges can NEVER exceed funded backing — the two move together, so P2 (`earmark == circ * w`)
+    /// holds at genesis and a buggy/hostile minter cannot mint under-backed supply. The backing is
+    /// pulled from `fundingSource` (recorded as the series operator, where released credit later
+    /// accrues). The pull is MEASURED and must be exact: FOT/rebasing/zero-revert tokens are rejected
+    /// here (O6). The chips mint happens LAST (CEI; the 1155 mint may call back into a contract
+    /// recipient, and by then every ledger for this series is already terminal and re-checked).
+    ///
+    /// S2c note: the mint-sale collects the buyer's PURCHASE PRICE separately (the vesting escrow, O4).
+    /// That price flow is out of scope here — this call only funds backing and mints charges.
+    function fundEarmark(uint256 seriesId, uint256 n, address fundingSource, address recipient)
+        external
+        nonReentrant
+    {
         if (msg.sender != minter) revert NotMinter();
 
         address recorded = seriesOperator[seriesId];
         if (recorded == address(0)) {
-            seriesOperator[seriesId] = from;
-        } else if (recorded != from) {
+            seriesOperator[seriesId] = fundingSource;
+        } else if (recorded != fundingSource) {
             revert OperatorMismatch();
         }
 
@@ -157,7 +178,7 @@ contract BackingPool is IBackingPool, ReentrancyGuard {
 
         // Measured, exact pull into the pool: reject any token that does not deliver the full amount.
         uint256 balBefore = token.balanceOf(address(this));
-        token.safeTransferFrom(from, address(this), amount);
+        token.safeTransferFrom(fundingSource, address(this), amount);
         if (token.balanceOf(address(this)) - balBefore != amount) revert DepositMismatch();
 
         // Deposit into the pool's own (pool, token) escrow bucket; earmark the ESCROW-credited delta so
@@ -171,7 +192,10 @@ contract BackingPool is IBackingPool, ReentrancyGuard {
         earmark[seriesId] += credited;
         circ[seriesId] += n;
         _assertBacked(seriesId);
-        emit EarmarkFunded(seriesId, from, n, credited);
+
+        // Mint LAST: minted supply now equals funded backing, always.
+        chips.mint(recipient, seriesId, n);
+        emit EarmarkFunded(seriesId, fundingSource, n, credited);
     }
 
     // ── T2 OPEN — consume backing for one round ──────────────────────────────────────────────────

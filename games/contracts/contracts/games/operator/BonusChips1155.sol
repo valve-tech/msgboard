@@ -42,6 +42,14 @@ contract BonusChips1155 is ERC1155 {
     error NotMinter();
     error NotBurner();
     error UnknownSeries();
+    error InvalidBonusPoints();
+    error InvalidMaxStake();
+    error InvalidExpiry();
+
+    /// @notice Ceiling on `maxStake`. Keeps `w = ceil(maxStake * bonusPoints / 100)` far from any
+    /// uint256 overflow (`maxStake * bonusPoints` with `bonusPoints <= type(uint16).max` stays tiny
+    /// against 2^256) and is orders of magnitude above any real token stake. Defense-in-depth only.
+    uint256 public constant MAX_STAKE = 1e36;
 
     event OwnerSet(address indexed owner);
     event CreatorSet(address indexed creator);
@@ -91,6 +99,11 @@ contract BonusChips1155 is ERC1155 {
         returns (uint256 id)
     {
         if (msg.sender != creator) revert NotCreator();
+        // Cheap defense-in-depth on the series parameters (LOW). A zero bonus/stake mints charges that
+        // back nothing; a past expiry is already dead; an oversized stake risks `w()` overflow.
+        if (bonusPoints == 0) revert InvalidBonusPoints();
+        if (maxStake == 0 || maxStake > MAX_STAKE) revert InvalidMaxStake();
+        if (expiry <= block.timestamp) revert InvalidExpiry();
         id = nextSeriesId++;
         _series[id] = Series({
             bonusPoints: bonusPoints,

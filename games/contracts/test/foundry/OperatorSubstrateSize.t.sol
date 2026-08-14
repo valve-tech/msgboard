@@ -29,8 +29,10 @@ import {BackingPool} from "../../contracts/games/operator/BackingPool.sol";
 ///
 /// System 2 slice S2a (bonus economy, 2026-08-14): BonusChips1155 + BackingPool re-scanned the same
 /// way (CBOR-stripped, opcode-aligned, cross-checked against `cast disassemble`). Both zero
-/// MCOPY(0x5e) and TSTORE(0x5d): BonusChips1155 stripped runtime 4,871 bytes, BackingPool stripped
-/// runtime 5,263 bytes — both far under the EIP-170 hard limit and this file's safety margin.
+/// MCOPY(0x5e) and TSTORE(0x5d). After the S2a fund-safety hardening (circ counter + pool-enforced
+/// P2, atomic mint-and-fund, game kill-switch, createSeries validation) the stripped runtimes are
+/// BonusChips1155 5,024 bytes and BackingPool 6,243 bytes — both far under the EIP-170 hard limit and
+/// this file's safety margin.
 contract OperatorSubstrateSizeTest is Test {
     uint256 internal constant SIZE_CEILING = 24_300;
 

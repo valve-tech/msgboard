@@ -131,13 +131,14 @@ contract BackingPoolTest is Test {
         pool = new BackingPool(address(esc), address(chips), address(game));
         game.setPool(pool);
 
-        // Chips roles: minter mints, game + pool may burn.
+        // Chips roles: the POOL is the sole 1155 minter now (MEDIUM-2 — mint and fund are atomic);
+        // game + pool may burn.
         chips.setCreator(address(this));
-        chips.setMinter(minter);
+        chips.setMinter(address(pool));
         chips.setBurner(address(game), true);
         chips.setBurner(address(pool), true);
 
-        // Pool minter (the mint-sale) may fund earmarks.
+        // Pool minter (the mint-sale) is the only caller that may fund+mint earmarks.
         pool.setMinter(minter);
 
         vm.prank(operator);
@@ -163,12 +164,11 @@ contract BackingPoolTest is Test {
         seriesIds.push(id);
     }
 
-    /// T1 MINT: fund the earmark AND mint the charges together (one economic transition).
+    /// T1 MINT: fund the earmark AND mint the charges together in ONE atomic call (MEDIUM-2). The pool
+    /// pulls `n * w` from the operator and mints `n` charges to the player — minted always equals funded.
     function _mint(uint256 seriesId, uint256 n) internal {
         vm.prank(minter);
-        pool.fundEarmark(seriesId, n, operator);
-        vm.prank(minter);
-        chips.mint(player, seriesId, n);
+        pool.fundEarmark(seriesId, n, operator, player);
         mintedOf[seriesId] += n;
     }
 
@@ -363,7 +363,7 @@ contract BackingPoolTest is Test {
         uint256 id = _createSeries(25, 999);
         vm.prank(address(0xBAD));
         vm.expectRevert(BackingPool.NotMinter.selector);
-        pool.fundEarmark(id, 1, operator);
+        pool.fundEarmark(id, 1, operator, player);
     }
 
     // ── CRITICAL-1: expireCharges must never burn the game's in-flight (consumed) charge ────────────
@@ -408,6 +408,72 @@ contract BackingPoolTest is Test {
         assertEq(pool.hold(rid), 0);
         assertEq(pool.credit(operator, address(tok)), holdBefore); // residual released on the win
         _assertInvariants();
+    }
+
+    // ── MEDIUM-1: owner kill-switch on the game authorization ──────────────────────────────────────
+
+    function test_setGameAuthorized_deauthorizeBlocksOpen() public {
+        uint256 id = _createSeries(25, 999);
+        _mint(id, 2);
+
+        // Owner (the test contract deployed the pool) revokes the game's escrow authorization.
+        pool.setGameAuthorized(false);
+
+        // A new boosted open now reverts: bet B's lockExposure hits UnauthorizedGame in the escrow.
+        bytes32 rid = keccak256("blocked-round");
+        vm.expectRevert(GameEscrow.UnauthorizedGame.selector);
+        game.open(rid, id, 100, player);
+
+        // Re-authorize and the same open succeeds; the ledger is intact.
+        pool.setGameAuthorized(true);
+        _open(rid, id, 100);
+        _assertInvariants();
+    }
+
+    function test_setGameAuthorized_onlyOwner() public {
+        vm.prank(address(0xBAD));
+        vm.expectRevert(BackingPool.NotOwner.selector);
+        pool.setGameAuthorized(false);
+    }
+
+    // ── MEDIUM-2: mint and fund are atomic (minted always equals funded) ───────────────────────────
+
+    function test_fundEarmark_mintsExactlyFunded() public {
+        uint256 id = _createSeries(25, 999); // w = 250
+        uint256 w = chips.w(id);
+        uint256 n = 7;
+
+        uint256 opBefore = tok.balanceOf(operator);
+        vm.prank(minter);
+        pool.fundEarmark(id, n, operator, player);
+
+        assertEq(chips.balanceOf(player, id), n, "minted != n");
+        assertEq(pool.earmark(id), n * w, "earmark != n*w");
+        assertEq(pool.circ(id), n, "circ != n");
+        assertEq(esc.bankrollOf(address(pool), address(tok)), n * w, "bankroll != n*w");
+        assertEq(opBefore - tok.balanceOf(operator), n * w, "pulled != n*w");
+        // Genesis P2: minted supply is exactly backed.
+        assertEq(pool.earmark(id), pool.circ(id) * w);
+    }
+
+    /// A fee-on-transfer funding token under-delivers the measured pull, so the atomic fund+mint
+    /// reverts as a whole — no under-backed charge is ever minted (MEDIUM-2 / O6).
+    function test_fundEarmark_fundingShortfallReverts() public {
+        ERC20 fot = new ERC20(true); // 1% transfer tax
+        uint256 id = chips.createSeries(25, 999, uint64(block.timestamp + 7 days), address(fot));
+
+        fot.mint(operator, 1_000_000 ether);
+        vm.prank(operator);
+        fot.approve(address(pool), type(uint256).max);
+
+        vm.prank(minter);
+        vm.expectRevert(BackingPool.DepositMismatch.selector);
+        pool.fundEarmark(id, 4, operator, player);
+
+        // Nothing minted, nothing earmarked — the whole transition rolled back.
+        assertEq(chips.balanceOf(player, id), 0);
+        assertEq(pool.earmark(id), 0);
+        assertEq(pool.circ(id), 0);
     }
 
     // ── randomized invariant sequence ────────────────────────────────────────────────────────────
