@@ -191,7 +191,10 @@ contract BackingPoolTest is Test {
         for (uint256 i = 0; i < seriesIds.length; i++) {
             uint256 s = seriesIds[i];
             sumEarmark += pool.earmark(s);
-            assertEq(pool.earmark(s), _circ(s) * chips.w(s), "P2: earmark != circ * w");
+            // The pool-maintained circ counter must match the test's independent circ = minted - burned
+            // - gameHeld, and the earmark must exactly back it (P2 as a pool-enforced invariant).
+            assertEq(pool.circ(s), _circ(s), "pool.circ != minted - burned - gameHeld");
+            assertEq(pool.earmark(s), pool.circ(s) * chips.w(s), "P2: earmark != circ * w");
         }
         uint256 sumHold;
         for (uint256 i = 0; i < roundIds.length; i++) {
@@ -363,6 +366,50 @@ contract BackingPoolTest is Test {
         pool.fundEarmark(id, 1, operator);
     }
 
+    // ── CRITICAL-1: expireCharges must never burn the game's in-flight (consumed) charge ────────────
+
+    /// The reviewer's attack: with a round open, the game holds one consumed charge whose `w` already
+    /// moved earmark -> hold. A keeper calls `expireCharges(s, game, 1)` after expiry, trying to burn
+    /// that in-flight charge and de-earmark a SECOND `w` — a permissionless double-release that would
+    /// break P2 and strand the open round. Both guards must stop it, and the round must still settle.
+    function test_expireCharges_cannotBurnGameHeldCharge() public {
+        uint256 id = _createSeries(25, 999); // w = 250
+        _mint(id, 2);
+
+        uint256 d = 100;
+        bytes32 rid = keccak256("attack-round");
+        _open(rid, id, d); // game now holds one consumed charge
+        _assertInvariants();
+
+        uint256 earmarkBefore = pool.earmark(id); // 1 * w (one charge still circulating with player)
+        uint256 circBefore = pool.circ(id);       // 1
+        uint256 holdBefore = pool.hold(rid);      // w - d
+
+        vm.warp(block.timestamp + 8 days); // past expiry
+
+        // Guard 1 — direct `holder == game` rejection.
+        vm.expectRevert(BackingPool.HolderIsGame.selector);
+        pool.expireCharges(id, address(game), 1);
+
+        // Guard 2 — cannot de-earmark more than the circulating supply (the game-held charge is
+        // excluded from circ), so even from a legit holder, n > circ reverts before any state moves.
+        vm.expectRevert(BackingPool.CircShort.selector);
+        pool.expireCharges(id, player, circBefore + 1);
+
+        // The failed attack left every ledger untouched; P2 still holds.
+        assertEq(pool.earmark(id), earmarkBefore, "earmark moved");
+        assertEq(pool.circ(id), circBefore, "circ moved");
+        assertEq(pool.hold(rid), holdBefore, "hold moved");
+        _assertInvariants();
+
+        // And the open round still terminates normally afterward.
+        game.win(rid);
+        burnedOf[id] += 1;
+        assertEq(pool.hold(rid), 0);
+        assertEq(pool.credit(operator, address(tok)), holdBefore); // residual released on the win
+        _assertInvariants();
+    }
+
     // ── randomized invariant sequence ────────────────────────────────────────────────────────────
 
     /// The core deliverable: a bounded random legal sequence of every transition, asserting P1 + P2
@@ -382,6 +429,15 @@ contract BackingPoolTest is Test {
         for (uint256 step = 0; step < 48; step++) {
             seed = uint256(keccak256(abi.encode(seed, step)));
             uint256 action = seed % 7;
+
+            // CRITICAL-1 probe: expiring the game's in-flight charges must ALWAYS revert — never
+            // corrupt state — whoever the holder and whatever the round/expiry state. The direct
+            // `holder == game` guard fires before the expiry check, so this reverts mid-loop too.
+            if (seed % 5 == 0) {
+                vm.expectRevert(BackingPool.HolderIsGame.selector);
+                pool.expireCharges(id, address(game), 1);
+                _assertInvariants(); // the failed attack left every ledger untouched
+            }
 
             if (action == 0) {
                 // MINT a random small batch.
