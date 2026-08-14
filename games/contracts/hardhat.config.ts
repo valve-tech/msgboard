@@ -251,6 +251,32 @@ const config: HardhatUserConfig = {
         version: '0.8.25',
         settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
       },
+      // Slice 0 fee-policy seam (I7): same 0.8.25/viaIR/shanghai/runs-700 shape as the rest of the
+      // operator family, so both new contracts deploy on pre-Cancun 943 (no MCOPY/TSTORE).
+      'contracts/games/operator/IFeePolicy.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/games/operator/BurnFeePolicy.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      // System 2 slice S2a (bonus economy foundation, I7): the consumable charge token, the
+      // co-operator collateral pool, and its hook interface — same 0.8.25/viaIR/shanghai/runs-700
+      // shape as the rest of the operator family, so all three deploy on pre-Cancun 943 (no
+      // MCOPY/TSTORE). BackingPool holds the collateralization; it MUST stay shanghai.
+      'contracts/games/operator/BonusChips1155.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/games/operator/IBackingPool.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/games/operator/BackingPool.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
       'contracts/games/SessionState.sol': {
         version: '0.8.25',
         settings: {

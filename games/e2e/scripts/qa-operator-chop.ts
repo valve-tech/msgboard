@@ -3,8 +3,8 @@
  * verify the forfeit. qa-operator-coinflip.ts's forfeit path can leave a round Pending-with-seed-withheld if
  * the chopAndRoute submission hits a transient RPC hiccup (one.valve.city "all upstream attempts failed").
  * This retries the chop against that exact round — no wasted round — and asserts the same invariants the
- * anvil test proves: forfeit == tierPrice banked to the operator bankroll, player refunded, honest
- * validators keep stakes, fee pool restored.
+ * anvil test proves: forfeit == tierPrice routed to the neutral BurnFeePolicy sink (operator bankroll
+ * unchanged), player refunded, honest validators keep stakes, fee pool restored.
  *
  *   ROUND=0x… [K=1] PRIVATE_KEY=… MNEMONIC=… SEEDS0=… RPC_URL=<valve rpc> npx tsx scripts/qa-operator-chop.ts
  */
@@ -39,11 +39,16 @@ async function main() {
   const GAME = sub.contracts.OperatorCoinFlip as viem.Hex
   const ESCROW = sub.contracts.GameEscrow as viem.Hex
   const RANDOM = sub.random as viem.Hex
+  // BurnFeePolicy is the neutral forfeit sink (Slice 0). Task 5 adds it to the deployment JSON; until
+  // then this stays undefined and the burned() assertion is skipped with a clear log, never a throw.
+  const BURN_POLICY = sub.contracts.BurnFeePolicy as viem.Hex | undefined
   const cfg = loadDeployment(CHAIN)
   const subset = cfg.canonicalSubset
   const poolSize = BigInt(cfg.poolSize)
   const gameAbi = loadAbi('OperatorCoinFlip')
   const escrowAbi = loadAbi('GameEscrow')
+  // Minimal ABI for the neutral sink's QA counter — BurnFeePolicy isn't in the substrate JSON yet.
+  const burnPolicyAbi = [{ type: 'function', name: 'burned', stateMutability: 'view', inputs: [{ name: '', type: 'address' }], outputs: [{ type: 'uint256' }] }] as const satisfies viem.Abi
 
   const pc = viem.createPublicClient({ chain, transport: viem.http(RPC) })
   const wallet = viem.createWalletClient({ account, chain, transport: viem.http(RPC) })
@@ -63,10 +68,12 @@ async function main() {
   const lockedOf = () => pc.readContract({ address: ESCROW, abi: escrowAbi, functionName: 'lockedOf', args: [account.address, token] }) as Promise<bigint>
   const feeBalanceOf = () => pc.readContract({ address: GAME, abi: gameAbi, functionName: 'feeBalance', args: [account.address, token] }) as Promise<bigint>
   const custodyOf = (a: viem.Hex) => pc.readContract({ address: RANDOM, abi: randomAbi, functionName: 'balanceOf', args: [a, token] }) as Promise<bigint>
+  const burnedOf = () => pc.readContract({ address: BURN_POLICY!, abi: burnPolicyAbi, functionName: 'burned', args: [token] }) as Promise<bigint>
 
   const bankrollBefore = await bankrollOf()
   const lockedBefore = await lockedOf()
   const feeBefore = await feeBalanceOf()
+  const burnedBefore = BURN_POLICY ? await burnedOf() : 0n
   // Note: honest validators' stakes were already flicked back by the partial cast in the interrupted run,
   // so their custody returns can't be re-observed here — the SETTLE path already proved stake return. This
   // resume proves the FORFEIT ROUTING: the withheld stake becomes the forfeit and lands in the bankroll.
@@ -89,10 +96,16 @@ async function main() {
 
   const forfeitEv = (viem.parseEventLogs({ abi: gameAbi, logs: chopReceipt.logs, eventName: 'ForfeitRouted' })[0] as any)?.args as { forfeit: bigint } | undefined
   console.log(`  chop tx ${chopReceipt.transactionHash}`)
-  check('ForfeitRouted forfeit == tierPrice', forfeitEv?.forfeit === tierPrice, forfeitEv ? viem.formatEther(forfeitEv.forfeit) : 'no event')
+  check('ForfeitRouted forfeit (routed to sink) == tierPrice', forfeitEv?.forfeit === tierPrice, forfeitEv ? viem.formatEther(forfeitEv.forfeit) : 'no event')
   check('round REFUNDED', Number(((await pc.readContract({ address: GAME, abi: gameAbi, functionName: 'rounds', args: [ROUND] })) as unknown[])[8]) === 3)
-  // resume baseline is mid-round (post-open): chop both banks the forfeit AND returns the locked exposure.
-  check('bankroll += exposure + forfeit', (await bankrollOf()) - bankrollBefore === exposure + tierPrice, viem.formatEther((await bankrollOf()) - bankrollBefore))
+  // Slice 0: the forfeit no longer credits the operator bankroll — it burns via BurnFeePolicy (H1).
+  // The resume baseline is mid-round (post-open), so chop only returns the locked exposure.
+  check('bankroll += exposure (forfeit no longer banked)', (await bankrollOf()) - bankrollBefore === exposure, viem.formatEther((await bankrollOf()) - bankrollBefore))
+  if (BURN_POLICY) {
+    check('BurnFeePolicy.burned(token) increased by tierPrice', (await burnedOf()) - burnedBefore === tierPrice, viem.formatEther((await burnedOf()) - burnedBefore))
+  } else {
+    console.log('  ⏭️  BurnFeePolicy.burned() skipped — sink address not yet deployed — run after Task 5')
+  }
   check('exposure released (locked -= payout)', lockedBefore - (await lockedOf()) === payout, viem.formatEther(lockedBefore - (await lockedOf())))
   // the withholder's committed slot stake leaves the system as the forfeit (it was never flicked back to it)
   check('withholder (#3) stake not returned to it', (await custodyOf(withholder)) - withholderBefore === 0n)

@@ -187,8 +187,14 @@ contract GameBaseUnitTest is Test {
         assertTrue(gb.choppedInstance(instanceId));
     }
 
-    function test_onReverse_isANoOpAndDoesNotRevert() public {
-        // onReverse has no OnlyRandom gate in GameBase; any caller can call it, and it does nothing.
+    function test_onReverse_onlyRandom_defaultHookIsNoOp() public {
+        // onReverse is onlyRandom-guarded (a forged reverse credit could trick the game into routing
+        // custody it never received — see GameBase.onReverse). A non-Random caller reverts; called AS
+        // Random, the base _onReverse hook does nothing and does not revert.
+        vm.expectRevert(GameBase.OnlyRandom.selector);
+        gb.onReverse(bytes32(uint256(1)), address(0), 0);
+
+        vm.prank(address(rnd));
         gb.onReverse(bytes32(uint256(1)), address(0), 0);
     }
 

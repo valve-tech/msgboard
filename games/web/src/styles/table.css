@@ -40,6 +40,34 @@
   --green: #33c07a;
   --blue: #4a7fd0;
   --purple: #8a6bd0;
+
+  /* ── theming-engine skin-point hooks (System 1a) ──────────────────────────────────────────────
+     Additive only: every var below defaults to today's hard-coded value, so an UNTHEMED stage
+     renders byte-identically to before this block existed. A theme can override these ONLY through
+     ThemeProvider's validated `palette` (declarative skin points), which is scoped to the `.stage`
+     subtree — trust chrome (the ◈ seal, the fairness strip, all amounts/odds/multipliers) lives
+     outside that subtree or reads its own hard-coded colors, never one of these vars. See
+     `lib/theme/skinPoints.ts`. `--felt-*` / `--wood-*` above already double as the felt / woodRail
+     skin points (already scoped to `.felt` / `.rail-ring` only), so they need no new names here.
+
+     Deliberately NOT reused for accentPalette: `--gold` / `--gold-live` / `--gold-dim` above are
+     shared by the "Provably fair" pill and other trust-adjacent chrome elsewhere in this file, so
+     letting a theme's palette touch them would risk retheming chrome it must never reach. `--accent`
+     below is a dedicated, independently-scoped stand-in for the felt's own decorative accents. */
+  --backdrop-hi: #16281e; /* skin point: backdrop — .stage radial base, inner stop */
+  --backdrop-lo: #080f0b; /* skin point: backdrop — .stage radial base, outer stop */
+  --ambient-glow: #ffe9a81f; /* skin point: ambientLayer — .stage::before atmosphere glow */
+  --cardback-1: #2c2350; /* skin point: cardBack — .playcard.back pattern, stripe A */
+  --cardback-2: #241a44; /* skin point: cardBack — .playcard.back pattern, stripe B / base low */
+  --cardback-3: #3a2f5e; /* skin point: cardBack — .playcard.back pattern, base high */
+  --chip-1: #d05a4e; /* skin point: chipFace — FeltTable decorative chip-rack disc 1 */
+  --chip-2: #4a7fd0; /* skin point: chipFace — disc 2 */
+  --chip-3: #2fae6a; /* skin point: chipFace — disc 3 */
+  --chip-4: #8a6bd0; /* skin point: chipFace — disc 4 */
+  --chip-5: #c9a227; /* skin point: chipFace — disc 5 */
+  --accent: #f0c74a; /* skin point: accentPalette — felt caption + camera-switcher highlight only */
+  --plaque-medal: #0d3323; /* skin point: tablePlaque — .medal center-mark fill */
+  --plaque-medal-stroke: #b98f2c55; /* skin point: tablePlaque — .medal text-stroke */
 }
 
 /* ============================== shell ============================== */
@@ -487,7 +515,7 @@
      viewports — where it instead pushes the tray/history past the fold so `.stagewrap` scrolls to
      them, rather than squashing the stage to nothing. */
   min-height: min(58vh, 440px);
-  background: radial-gradient(120% 80% at 50% 0%, #16281e 0%, #080f0b 72%);
+  background: radial-gradient(120% 80% at 50% 0%, var(--backdrop-hi, #16281e) 0%, var(--backdrop-lo, #080f0b) 72%);
   border: 1px solid #ffffff0d;
   box-shadow: 0 30px 70px -22px #000, inset 0 1px 0 #ffffff10;
   display: grid;
@@ -509,7 +537,7 @@
   height: 55%;
   transform: translateX(-50%);
   pointer-events: none;
-  background: radial-gradient(50% 60% at 50% 0%, #ffe9a81f, transparent 70%);
+  background: radial-gradient(50% 60% at 50% 0%, var(--ambient-glow, #ffe9a81f), transparent 70%);
 }
 
 /* ============================== felt (blackjack) ============================== */
@@ -575,6 +603,9 @@
   transform: translateX(-50%);
   color: #efe6c8bb;
   font-size: clamp(9px, 1.1vw, 13px);
+  /* NOTE: intentionally NOT var(--accent) — this caption sits directly over the felt's payout
+     odds text (e.g. "BLACKJACK PAYS 3 TO 2"), so its color stays hard-coded like the odds it
+     labels. `--accent` themes the camera-switcher highlight below instead. */
   letter-spacing: 0.32em;
   font-weight: 700;
   white-space: nowrap;
@@ -586,9 +617,9 @@
   transform: translate(-50%, -50%);
   font-size: clamp(46px, 7vw, 84px);
   font-weight: 900;
-  color: #0d3323;
+  color: var(--plaque-medal, #0d3323);
   text-shadow: 0 1px 0 #ffffff1f, 0 -2px 3px #00000090;
-  -webkit-text-stroke: 2px #b98f2c55;
+  -webkit-text-stroke: 2px var(--plaque-medal-stroke, #b98f2c55);
   letter-spacing: -3px;
 }
 .drack {
@@ -743,7 +774,7 @@
 }
 .felt-views:hover button, .felt-views:focus-within button { max-width: 64px; padding: 6px 12px; opacity: 1; }
 .felt-views button:hover { color: var(--cream, #f3ead7); background: #ffffff12; }
-.felt-views button.on { background: #c9a22733; color: var(--gold-live, #f0c74a); box-shadow: inset 0 0 0 1px #c9a22766; }
+.felt-views button.on { background: #c9a22733; color: var(--accent, #f0c74a); box-shadow: inset 0 0 0 1px #c9a22766; }
 /* the active view stays visible even when collapsed, so you can tell the current angle at a glance */
 .felt-views button.on { max-width: 64px; padding: 6px 12px; opacity: 1; }
 @media (prefers-reduced-motion: reduce) { .scene, .plane, .hand { transition: none; } }
@@ -767,6 +798,7 @@
   width: clamp(38px, 4.6vw, 54px);
   aspect-ratio: 0.7;
   border-radius: 7px;
+  overflow: hidden; /* clips a themed cardBack <img> to the rounded corners; no effect on today's content */
   background: linear-gradient(158deg, #fefdf6, #e6e2d2);
   color: #12203a;
   box-shadow: inset 0 1px 0 #fff, 0 4px 10px -3px #0009;
@@ -802,8 +834,8 @@
 .playcard.back {
   color: #c9a227;
   background:
-    repeating-linear-gradient(45deg, #2c2350 0 6px, #241a44 6px 12px),
-    linear-gradient(160deg, #3a2f5e, #241a44);
+    repeating-linear-gradient(45deg, var(--cardback-1, #2c2350) 0 6px, var(--cardback-2, #241a44) 6px 12px),
+    linear-gradient(160deg, var(--cardback-3, #3a2f5e), var(--cardback-2, #241a44));
   border: 1px solid #c9a22733;
   box-shadow: inset 0 0 0 3px #ffffff0a, 0 4px 10px -3px #0009;
 }
@@ -812,6 +844,11 @@
   margin: auto;
   color: #c9a22788;
   font-size: 1.5em;
+  /* Pinned above a themed cardBack <img> (SkinnedAsset, position:absolute, z-index:auto): the seal
+     is a NORMAL positioned box with an explicit z-index, so it always paints on top — unskinnable
+     regardless of what art a manifest supplies for this surface (invariant I6). */
+  position: relative;
+  z-index: 1;
 }
 
 /* ============================== canvas (crash) ============================== */
