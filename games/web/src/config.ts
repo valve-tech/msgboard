@@ -86,6 +86,19 @@ export type GameDeployment = {
   hiLoWarRules?: viem.Hex
   /** HoldemTableN contract — the N-party Hold'em table (separate channel contract from ZkTable). */
   holdemTableN?: viem.Hex
+  /** The operator substrate (backroom-B security room + backroom-A ops CLI). 943 only — 369 has no
+   *  operator substrate yet, so this stays unset there and the `backroom` tab hides itself (Task 5
+   *  populates the 943 entry's concrete addresses; this type lets useBackroomData typecheck now). */
+  operator?: {
+    coinFlip: viem.Hex
+    escrow: viem.Hex
+    registry: viem.Hex
+    policy: viem.Hex
+    /** Scan operator substrate events from here (the live game's deploy block). */
+    deployBlock: string
+    /** Retired OperatorCoinFlip addresses (spec G7) — same ABI, real history, earlier start block. */
+    retired: viem.Hex[]
+  }
 }
 
 /**
@@ -177,6 +190,24 @@ export const deployments: GameDeployment[] = [
     zkTable: '0x8857779acb9529d583911b0dedc456dd1f0829c4',
     hiLoWarRules: '0x567f431af18eb32c88e747eea1ccf84fe66dc865',
     holdemTableN: '0x7da24fcc5b0754ca075c41fad594a5234c4f4f46',
+    // Operator substrate (backroom-A ops CLI + backroom-B security room). 943 only — 369 has no
+    // operator substrate, so its entry omits this field and the `backroom` tab hides itself.
+    // Addresses from games/contracts/deployments/943-operator-substrate.json (deploy block 25121394).
+    operator: {
+      coinFlip: '0x0c80607ec07999cdab97d4374d6b7a3b5a6f1833',
+      escrow: '0xb572481635904fe2e3957bc45d81be07337e0838',
+      registry: '0xb202144ed8f2ae1c8a6262c241714c171b039cbc',
+      policy: '0xe821380fee740210a51503ec086c4ba3074cb63e',
+      deployBlock: '25121394',
+      // Retired OperatorCoinFlip addresses (spec G7) — same ABI, real history, earlier start block.
+      retired: [
+        '0x360f22c4b6b0a31cbff91226f20f557dbd0a6353',
+        '0xbb9bc6851998bc979889a6d31c1994160a219d04',
+        '0xb22ad173ee0ca5f9a3d36dc647d67bafa0e49e87',
+        '0x30b855799990fa9c2d0dff461bfb905a269efe8e',
+        '0xc3a4edb9601b55df3e25893a4e28971883a4b475',
+      ],
+    },
   },
   // Deployed by the 2026-06-11 mainnet bring-up (gate run + ink-pools; e2e/scripts/369-deployment.json).
   // deployBlock = the web pools' ink block so the site and the cast watcher count heats
