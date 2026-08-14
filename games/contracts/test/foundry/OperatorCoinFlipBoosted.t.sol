@@ -402,4 +402,75 @@ contract OperatorCoinFlipBoostedTest is Test {
         assertEq(game.feeBalance(opB, address(tok)), feeBefore, "fee moved");
         assertEq(game.tableLocked(tid), 0, "tableLocked moved");
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // Task 3: boosted settle (win + lose) (T3/T4)
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    function test_boosted_settleWin_paysPT_releasesResidual_burnsCharge() public {
+        bytes32 tid = _boostedTable();
+        _mintCharges(1);
+        uint256 w = chips.w(seriesId);
+        uint256 r = w - 2 ether; // hold residual
+        (bytes32 roundId, bytes32 key,) = _openBoosted(tid, 0, 4 ether); // player picks HEADS (0)
+        uint256 playerAfterOpen = tok.balanceOf(player); // 100 - 4 stake
+
+        rnd.pushCast(key, bytes32(uint256(0))); // even -> HEADS -> player wins
+
+        // Player received P_t = P_b + d = 6e18 + 2e18 = 8e18 (both bets paid).
+        assertEq(tok.balanceOf(player), playerAfterOpen + 8 ether);
+        // Residual released to the operator's credit; charge burned; hold cleared.
+        assertEq(pool.hold(roundId), 0);
+        assertEq(pool.credit(op, address(tok)), r);
+        assertEq(chips.balanceOf(address(game), seriesId), 0);
+        // Base exposure returned to zero on this table.
+        assertEq(game.tableLocked(tid), 0);
+        assertEq(esc.lockedOf(op, address(tok)), 0);
+        assertEq(esc.lockedOf(address(pool), address(tok)), 0);
+        assertEq(_status(roundId), uint8(OperatorCoinFlip.Status.Settled));
+        _assertPoolInvariants();
+        _assertEscrowSolvent();
+    }
+
+    function test_boosted_claim_isGuardedAndConsistent() public {
+        // claim() carries the new nonReentrant guard (accounting §6). Behaviorally: it reverts TooEarly
+        // before a seed and AlreadyResolved after the round settled — the exactly-once discipline holds.
+        bytes32 tid = _boostedTable();
+        _mintCharges(1);
+        (bytes32 roundId, bytes32 key,) = _openBoosted(tid, 0, 4 ether);
+        uint256 playerAfterOpen = tok.balanceOf(player);
+
+        vm.expectRevert(OperatorCoinFlip.TooEarly.selector);
+        game.claim(roundId); // no seed yet
+
+        rnd.pushCast(key, bytes32(uint256(0))); // finalize (delivers onCast -> settles the win)
+        assertEq(tok.balanceOf(player), playerAfterOpen + 8 ether);
+
+        vm.expectRevert(OperatorCoinFlip.AlreadyResolved.selector);
+        game.claim(roundId); // already settled
+    }
+
+    function test_boosted_settleLoss_returnsD_creditsW_burnsCharge() public {
+        bytes32 tid = _boostedTable();
+        _mintCharges(1);
+        uint256 w = chips.w(seriesId);
+        (bytes32 roundId, bytes32 key,) = _openBoosted(tid, 0, 4 ether); // player picks HEADS (0)
+        uint256 opBankAfterOpen = esc.bankrollOf(op, address(tok)); // BANKROLL - x
+
+        rnd.pushCast(key, bytes32(uint256(1))); // odd -> TAILS -> player loses
+
+        // Operator regains P_b (rake 0): bankroll += P_b = exposure x + player's lost stake.
+        assertEq(esc.bankrollOf(op, address(tok)), opBankAfterOpen + 6 ether);
+        assertEq(esc.bankrollOf(op, address(tok)), BANKROLL - 2 ether + 6 ether); // 1004e18
+        // Bet B returned d to the pool bucket; the pool credits the operator the full w (= d + r).
+        assertEq(esc.bankrollOf(address(pool), address(tok)), w);
+        assertEq(pool.credit(op, address(tok)), w);
+        assertEq(pool.hold(roundId), 0);
+        // Charge burned; player keeps only the lost stake gone.
+        assertEq(chips.balanceOf(address(game), seriesId), 0);
+        assertEq(tok.balanceOf(player), 100 ether - 4 ether);
+        assertEq(game.tableLocked(tid), 0);
+        _assertPoolInvariants();
+        _assertEscrowSolvent();
+    }
 }
