@@ -1,5 +1,6 @@
 import * as viem from 'viem'
 import { cardName } from '@msgboard/games'
+import { SkinnedAsset } from './theme/SkinnedAsset'
 
 /** A fresh random 256-bit deck seed (the house). The commit is keccak(seed); cards are revealed
  *  incrementally and the seed is disclosed at settlement so the player can re-check the whole hand. */
@@ -29,9 +30,13 @@ export const Card = ({ index, big, dim }: { index: number; big?: boolean; dim?: 
   )
 }
 
-/** A face-down card — the ◈-sealed back (committed, not yet revealed). */
+/** A face-down card — the ◈-sealed back (committed, not yet revealed). A themed `cardBack` media
+ *  skin (if any) fills the card underneath; the ◈ seal (`.playcard.back::after`, CSS z-index above
+ *  the art) always stays on top and is never themed — see table.css and skinPoints.ts. */
 export const CardBack = ({ big }: { big?: boolean }) => (
-  <span className={`playcard back${big ? ' big' : ''}`} aria-label="face-down card" />
+  <span className={`playcard back${big ? ' big' : ''}`} aria-label="face-down card">
+    <SkinnedAsset skinPoint="cardBack" fallback={null} />
+  </span>
 )
 
 export const fmtMultD = (x100: bigint): string => `${(Number(x100) / 100).toFixed(2)}x`

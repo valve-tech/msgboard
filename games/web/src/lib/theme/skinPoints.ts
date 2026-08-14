@@ -14,13 +14,36 @@ import type { AssetKind } from './assetRef'
  *   - woodRail        → `.rail-ring` + `--wood-hi/-a/-b` (the table's wooden ring)
  *   - backdrop        → `.stage` radial base + each `*-scene` background (the stage floor)
  *   - ambientLayer    → `.stage::before` glow / ambient atmosphere overlay
- *   - cardBack        → `.playcard.back` / `.fcard.back` art (the ◈ SEAL overlaid via ::after is NOT skinnable)
- *   - chipFace        → `.chip`, `.cval` chip/coin faces
- *   - tablePlaque     → `.medal`, `.arc`, `.cf-plate` nameplate lettering
- *   - accentPalette   → `--gold` / `--gold-live` / `--gold-dim` decorative accents (declarative only)
- *   - lobbyTile       → `.cf-puck` / `.cf-table` lobby tiles (CasinoFloor)
+ *   - cardBack        → `.playcard.back` art (the ◈ SEAL overlaid via ::after is NOT skinnable — see
+ *                       Task 3's wiring note: the seal is pinned to `z-index:1` above any themed art)
+ *   - chipFace        → FeltTable's decorative chip-rack discs only (`--chip-1..5`), NOT the shared
+ *                       `.chip` class generally — that class is reused by StakeInput/DiceX2/VideoPoker/
+ *                       Roulette for quick bet-amount and pick chips, which are trust-adjacent amount
+ *                       controls and must stay hard-coded (Task 3 correction — see below)
+ *   - tablePlaque     → `.medal` nameplate lettering only (`--plaque-medal`, `--plaque-medal-stroke`)
+ *   - accentPalette   → dedicated `--accent` var (felt/camera-switcher decoration only), NOT `--gold` /
+ *                       `--gold-live` / `--gold-dim` (Task 3 correction — see below)
+ *   - lobbyTile       → `.cf-puck` / `.cf-table` lobby tiles (CasinoFloor) — not yet wired (System 1a
+ *                       Task 3 scopes to the shared game stage; the lobby floor is a later slice)
  *   - wheelWedges     → `.mw-rotor` wedges + roulette wheel (TRUST-ADJACENT: hue encodes payout tier)
- *   - dropBoardTints  → `.drop-bucket.lo/.mid/.hi` (TRUST-ADJACENT: hue encodes payout tier)
+ *                       — not yet wired (needs the tier→family + legend-preserving renderer, later slice)
+ *   - dropBoardTints  → `.drop-bucket.lo/.mid/.hi` (TRUST-ADJACENT: hue encodes payout tier) — not yet
+ *                       wired, same reason as wheelWedges
+ *
+ * TASK 3 CORRECTIONS (found while wiring the CSS custom properties — documented, not silently fixed):
+ *   - `.arc` was listed under tablePlaque above at Task 1 time, but FeltTable's own doc comment shows
+ *     it renders the felt's PAYOUT ODDS caption (e.g. "BLACKJACK PAYS 3 TO 2 · INSURANCE PAYS 2 TO 1")
+ *     — that's odds text, trust chrome, and must stay hard-coded. It is REMOVED from tablePlaque and
+ *     added to the excluded list below; table.css's `.arc` rule was never wired to a skin-point var.
+ *   - `.fcard.back` is dead CSS (no component renders a `.fcard`), so it was left unwired.
+ *   - `--gold` / `--gold-live` / `--gold-dim` are reused by trust-adjacent chrome elsewhere in
+ *     table.css (the "Provably fair" `.pf` pill, `.cf-seal`) — even though those elements sit outside
+ *     the `.stage` subtree ThemeProvider now wraps (so today's wiring can't reach them), reusing those
+ *     three vars as-is for accentPalette would make that safety depend on the wiring boundary rather
+ *     than on the variable's own scope. `--accent` is a fresh, independently-scoped var instead.
+ *   - `.chip`/`.cval` is shared by StakeInput's quick bet-amount buttons and Roulette/DiceX2/VideoPoker
+ *     pick chips — NOT decorative-only as first read. chipFace theming is scoped to FeltTable's own
+ *     chip-rack discs (`--chip-1..5`, applied inline in FeltTable.tsx), never the shared `.chip` class.
  *
  * TRUST CHROME — DELIBERATELY EXCLUDED (unskinnable by construction, I6). None of these appear as a
  * skin-point id, so no manifest can target them:
@@ -30,8 +53,10 @@ import type { AssetKind } from './assetRef'
  *     (TrustBanner.tsx), HowItWorks.tsx, VerifyPanel.tsx, the "Provably fair" `.pf` / `.pf-link` pills;
  *   - ALL amounts / odds / multipliers / receipts / seed proofs: `.amount` + `.amount-input` (BetTray),
  *     `.ticker .amt` (WinTicker), `.mult` (Crash), `.mw-hub` multiplier readout, `.lad-mult`,
- *     `.stat b`, `.hchip`, `.pool-odds` / `.pool-stake` / `.pool-fair`, `.nb-head`, and the payout
- *     numbers printed inside drop buckets / wheel wedges (only their TINT is skinnable, never the digits);
+ *     `.stat b`, `.hchip`, `.pool-odds` / `.pool-stake` / `.pool-fair`, `.nb-head`, `.arc` (the felt's
+ *     payout-odds caption), the shared `.chip`/`.cval` class where it renders a bet-amount or pick
+ *     control (StakeInput, DiceX2Screen, VideoPokerScreen, RouletteScreen), and the payout numbers
+ *     printed inside drop buckets / wheel wedges (only their TINT is skinnable, never the digits);
  *   - alert lanes — money-critical notices: `.bk-alert`, `.banner`;
  *   - wallet + network chrome: the `.shell-top` wallet cluster.
  *
