@@ -265,4 +265,141 @@ contract OperatorCoinFlipBoostedTest is Test {
         game.setBonusSeries(tid, 0); // disable
         assertEq(game.bonusSeries(tid), 0);
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // Task 2: openBoosted (T2)
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    function test_openBoosted_locksPairedBets_pullsCharge_consumes() public {
+        bytes32 tid = _boostedTable();
+        _mintCharges(1); // one charge to the player; earmark = w = 4e18
+        uint256 w = chips.w(seriesId);
+        assertEq(pool.earmark(seriesId), w);
+        uint256 feeBefore = game.feeBalance(op, address(tok));
+
+        // roundId is not known ahead, so do not check topic1; verify seriesId (topic2) + data (eff, d).
+        vm.expectEmit(false, true, false, true);
+        emit OperatorCoinFlip.BoostApplied(bytes32(0), seriesId, 200, 2 ether);
+        (bytes32 roundId,,) = _openBoosted(tid, 0, 4 ether);
+
+        // Paired bets in escrow: bet A (operator, stake 4e18, payout P_b 6e18); bet B (pool, 0, d 2e18).
+        GameEscrow.Bet memory a = esc.betOf(address(game), roundId);
+        assertEq(a.operator, op);
+        assertEq(a.stake, 4 ether);
+        assertEq(a.payout, 6 ether); // P_b = 4e18 * 150 / 100
+        GameEscrow.Bet memory b = esc.betOf(address(game), _boostId(roundId));
+        assertEq(b.operator, address(pool));
+        assertEq(b.stake, 0);
+        assertEq(b.payout, 2 ether); // d = P_t - P_b = 8e18 - 6e18
+
+        // Charge pulled into the game; earmark drained; hold = w - d = 2e18.
+        assertEq(chips.balanceOf(address(game), seriesId), 1);
+        assertEq(chips.balanceOf(player, seriesId), 0);
+        assertEq(pool.earmark(seriesId), 0);
+        assertEq(pool.hold(roundId), w - 2 ether);
+        assertEq(pool.circ(seriesId), 0);
+
+        // Base-only cap accounting: tableLocked += x = P_b - stake = 2e18.
+        assertEq(game.tableLocked(tid), 2 ether);
+        // Fee metered n * tierPrice = 3 * 4e18.
+        assertEq(game.feeBalance(op, address(tok)), feeBefore - 3 * 4 ether);
+
+        _assertPoolInvariants();
+        _assertEscrowSolvent();
+    }
+
+    function test_openBoosted_revertsWhenNoSeries() public {
+        vm.prank(op);
+        bytes32 tid = game.createTable(address(tok), BASE_MULT, MIN_STAKE, MAX_STAKE); // no series attached
+        _mintCharges(1);
+        PreimageLocation.Info[] memory locs = _locsAt(game.tierPriceOf(tid, 4 ether));
+        vm.prank(player);
+        vm.expectRevert(OperatorCoinFlip.NoBonusSeries.selector);
+        game.openBoosted(tid, 0, 4 ether, 0, subset, locs);
+    }
+
+    function test_openBoosted_revertsWhenStakeAboveSeriesMax() public {
+        // Table with a wider range than the series' maxStake so the series cap (not the tier) fires.
+        vm.prank(op);
+        bytes32 tid = game.createTable(address(tok), BASE_MULT, MIN_STAKE, 16 ether);
+        vm.prank(op);
+        game.setBonusSeries(tid, seriesId); // series maxStake = 8e18
+        PreimageLocation.Info[] memory locs = _locsAt(game.tierPriceOf(tid, 16 ether));
+        vm.prank(player);
+        vm.expectRevert(OperatorCoinFlip.StakeOutOfRange.selector);
+        game.openBoosted(tid, 0, 16 ether, 0, subset, locs); // 16e18 > series max 8e18
+    }
+
+    function test_openBoosted_revertsWhenExpired() public {
+        bytes32 tid = _boostedTable();
+        _mintCharges(1);
+        vm.warp(block.timestamp + 8 days); // past the 7-day series expiry
+        PreimageLocation.Info[] memory locs = _locsAt(game.tierPriceOf(tid, 4 ether));
+        vm.prank(player);
+        vm.expectRevert(OperatorCoinFlip.SeriesExpired.selector);
+        game.openBoosted(tid, 0, 4 ether, 0, subset, locs);
+    }
+
+    function test_openBoosted_revertsWhenBelowMinEffMult() public {
+        bytes32 tid = _boostedTable();
+        _mintCharges(1);
+        PreimageLocation.Info[] memory locs = _locsAt(game.tierPriceOf(tid, 4 ether));
+        vm.prank(player);
+        vm.expectRevert(OperatorCoinFlip.MinEffMultNotMet.selector);
+        game.openBoosted(tid, 0, 4 ether, 201, subset, locs); // eff 200 < minEffMult 201
+    }
+
+    function test_openBoosted_revertsOnDustBoost() public {
+        // Raw-unit ladder + a 1-point series so the boost delta d truncates to zero at stake 1.
+        uint256 dustSeries = chips.createSeries(1, 128, uint64(block.timestamp + 7 days), address(tok)); // eff 151
+        vm.prank(op);
+        bytes32 tid = game.createTable(address(tok), BASE_MULT, 1, 128);
+        vm.prank(op);
+        game.setBonusSeries(tid, dustSeries);
+        PreimageLocation.Info[] memory locs = _locsAt(game.tierPriceOf(tid, 1));
+        vm.prank(player);
+        // d = floor(1*151/100) - floor(1*150/100) = 1 - 1 = 0 -> DustStake (checked before charge pull).
+        vm.expectRevert(OperatorCoinFlip.DustStake.selector);
+        game.openBoosted(tid, 0, 1, 0, subset, locs);
+    }
+
+    function test_openBoosted_operatorShort_rollsBackEverything() public {
+        // A fresh operator with a bankroll too small for the base exposure x. Bet A (locked LAST) reverts
+        // with InsufficientBankroll, unwinding the charge pull, pool.consume, and the fee meter atomically.
+        address opB = address(0xB2);
+        vm.prank(opB); reg.register();
+        tok.mint(opB, 1_000_000 ether);
+        vm.startPrank(opB);
+        tok.approve(address(esc), type(uint256).max);
+        tok.approve(address(game), type(uint256).max);
+        tok.approve(address(pool), type(uint256).max);
+        esc.depositBankroll(opB, address(tok), 1 ether); // too small: x for a 4e18 stake is 2e18
+        game.depositFees(opB, address(tok), 100 ether);
+        esc.authorizeGame(address(game), true);
+        vm.stopPrank();
+        vm.prank(opB);
+        bytes32 tid = game.createTable(address(tok), BASE_MULT, MIN_STAKE, MAX_STAKE);
+        vm.prank(opB);
+        game.setBonusSeries(tid, seriesId);
+
+        // Mint one charge (funded by opB) to the player.
+        vm.prank(mintSale);
+        pool.fundEarmark(seriesId, 1, opB, player);
+        uint256 w = chips.w(seriesId);
+        uint256 earmarkBefore = pool.earmark(seriesId);
+        uint256 feeBefore = game.feeBalance(opB, address(tok));
+        uint256 chargeBefore = chips.balanceOf(player, seriesId);
+
+        PreimageLocation.Info[] memory locs = _locsAt(game.tierPriceOf(tid, 4 ether));
+        vm.prank(player);
+        vm.expectRevert(); // EscrowLib.InsufficientBankroll on bet A (the last interaction)
+        game.openBoosted(tid, 0, 4 ether, 0, subset, locs);
+
+        // Everything rolled back: pool earmark intact, charge still with the player, fee untouched.
+        assertEq(pool.earmark(seriesId), earmarkBefore, "earmark moved");
+        assertEq(pool.earmark(seriesId), w);
+        assertEq(chips.balanceOf(player, seriesId), chargeBefore, "charge moved");
+        assertEq(game.feeBalance(opB, address(tok)), feeBefore, "fee moved");
+        assertEq(game.tableLocked(tid), 0, "tableLocked moved");
+    }
 }
