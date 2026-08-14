@@ -86,6 +86,19 @@ export type GameDeployment = {
   hiLoWarRules?: viem.Hex
   /** HoldemTableN contract — the N-party Hold'em table (separate channel contract from ZkTable). */
   holdemTableN?: viem.Hex
+  /** The operator substrate (backroom-B security room + backroom-A ops CLI). 943 only — 369 has no
+   *  operator substrate yet, so this stays unset there and the `backroom` tab hides itself (Task 5
+   *  populates the 943 entry's concrete addresses; this type lets useBackroomData typecheck now). */
+  operator?: {
+    coinFlip: viem.Hex
+    escrow: viem.Hex
+    registry: viem.Hex
+    policy: viem.Hex
+    /** Scan operator substrate events from here (the live game's deploy block). */
+    deployBlock: string
+    /** Retired OperatorCoinFlip addresses (spec G7) — same ABI, real history, earlier start block. */
+    retired: viem.Hex[]
+  }
 }
 
 /**
