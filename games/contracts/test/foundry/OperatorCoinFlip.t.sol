@@ -105,15 +105,15 @@ contract OperatorCoinFlipTest is Test {
     }
 
     function _key(bytes32 roundId) internal view returns (bytes32 k) {
-        (,,,,,, k,,,,) = game.rounds(roundId);
+        (,,,,,, k,,,,,,,) = game.rounds(roundId); // Round gained 3 appended S2b boost fields
     }
 
     function _tierPriceOfRound(bytes32 roundId) internal view returns (uint256 tp) {
-        (,,,,, tp,,,,,) = game.rounds(roundId);
+        (,,,,, tp,,,,,,,,) = game.rounds(roundId);
     }
 
     function _status(bytes32 roundId) internal view returns (uint8 s) {
-        (,,,,,,,, OperatorCoinFlip.Status st,,) = game.rounds(roundId);
+        (,,,,,,,, OperatorCoinFlip.Status st,,,,,) = game.rounds(roundId);
         s = uint8(st);
     }
 
