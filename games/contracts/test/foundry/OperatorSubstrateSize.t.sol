@@ -8,6 +8,7 @@ import {OperatorBond} from "../../contracts/games/operator/OperatorBond.sol";
 import {OperatorVault} from "../../contracts/games/operator/OperatorVault.sol";
 import {OperatorVaultFactory} from "../../contracts/games/operator/OperatorVaultFactory.sol";
 import {OperatorCoinFlip} from "../../contracts/games/operator/OperatorCoinFlip.sol";
+import {BurnFeePolicy} from "../../contracts/games/operator/BurnFeePolicy.sol";
 
 /// @notice EIP-170 deployability guard for the table-maintainer substrate (mirrors
 /// HoldemTableNSize.t.sol's rationale). Every new substrate contract must stay under the
@@ -56,8 +57,11 @@ contract OperatorSubstrateSizeTest is Test {
             "OperatorVaultFactory deployed bytecode exceeds the 24,300-byte safety margin"
         );
 
+        BurnFeePolicy burn = new BurnFeePolicy();
+        address[] memory menu = new address[](1);
+        menu[0] = address(burn);
         assertLt(
-            address(new OperatorCoinFlip(address(1), address(2), address(reg))).code.length,
+            address(new OperatorCoinFlip(address(1), address(2), address(reg), menu, address(burn))).code.length,
             SIZE_CEILING,
             "OperatorCoinFlip deployed bytecode exceeds the 24,300-byte safety margin"
         );
