@@ -11,6 +11,7 @@ import {OperatorCoinFlip} from "../../contracts/games/operator/OperatorCoinFlip.
 import {BurnFeePolicy} from "../../contracts/games/operator/BurnFeePolicy.sol";
 import {BonusChips1155} from "../../contracts/games/operator/BonusChips1155.sol";
 import {BackingPool} from "../../contracts/games/operator/BackingPool.sol";
+import {MintSale} from "../../contracts/games/operator/MintSale.sol";
 
 /// @notice EIP-170 deployability guard for the table-maintainer substrate (mirrors
 /// HoldemTableNSize.t.sol's rationale). Every new substrate contract must stay under the
@@ -48,6 +49,14 @@ import {BackingPool} from "../../contracts/games/operator/BackingPool.sol";
 /// 5,024 to 5,339 bytes; OperatorCoinFlip stripped runtime rose from 16,604 to 16,842 bytes (full
 /// deployed 16,895). Both moves are small and both contracts stay far under the 24,576 hard limit and
 /// this file's 24,300 safety margin.
+///
+/// System 2 slice S2c (price-side vesting, 2026-08-14): BonusChips1155 gained the `priceLedger` burn
+/// hook + `burnWithBeneficiary` + setter; OperatorCoinFlip's one chop-burn site moved to
+/// `burnWithBeneficiary`; MintSale is new. Re-scanned the same way (CBOR-stripped, opcode-aligned,
+/// PUSH-immediate-aware) over .deployedBytecode.object: zero MCOPY(0x5e) and TSTORE(0x5d) in all.
+/// Stripped runtimes: BonusChips1155 5,913 bytes (up from 5,339), OperatorCoinFlip 16,829 bytes (down
+/// from 16,842 — the one-line burn change), MintSale 5,058 bytes; BackingPool stays byte-identical at
+/// 6,243 (its logic is untouched). All far under the 24,576 hard limit and this file's safety margin.
 contract OperatorSubstrateSizeTest is Test {
     uint256 internal constant SIZE_CEILING = 24_300;
 
@@ -117,6 +126,15 @@ contract OperatorSubstrateSizeTest is Test {
             address(new BackingPool(address(escForPool), address(chips), address(0x6a3e))).code.length,
             SIZE_CEILING,
             "BackingPool deployed bytecode exceeds the 24,300-byte safety margin"
+        );
+
+        // System 2 slice S2c: MintSale (the purchase-price vesting escrow + primary sale). It must also
+        // deploy on 943; the constructor only stores the chips reference and owner, so a fresh chips
+        // address is enough for the size check.
+        assertLt(
+            address(new MintSale(address(chips))).code.length,
+            SIZE_CEILING,
+            "MintSale deployed bytecode exceeds the 24,300-byte safety margin"
         );
     }
 }
