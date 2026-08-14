@@ -473,4 +473,130 @@ contract OperatorCoinFlipBoostedTest is Test {
         _assertPoolInvariants();
         _assertEscrowSolvent();
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // Task 4: boosted refunds (chop burns charge; plain returns w/ park) (T5/T6)
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    function test_boosted_chopRefund_burnsCharge_routesForfeit_refundsPlayer() public {
+        bytes32 tid = _boostedTable();
+        _mintCharges(1);
+        uint256 w = chips.w(seriesId);
+        (bytes32 roundId, bytes32 key, PreimageLocation.Info[] memory locs) = _openBoosted(tid, 0, 4 ether);
+
+        rnd.setRevealed(key, 0x3); // one of three validators withholds -> forfeit = 1 * tierPrice = 4e18
+
+        vm.expectEmit(true, true, true, true);
+        emit OperatorCoinFlip.ForfeitRouted(roundId, op, address(tok), 4 ether);
+        game.chopAndRoute(roundId, locs);
+
+        // Player made whole; operator bankroll unchanged (forfeit went to the sink, not the house).
+        assertEq(tok.balanceOf(player), 100 ether);
+        assertEq(esc.bankrollOf(op, address(tok)), BANKROLL);
+        assertEq(burnPolicy.burned(address(tok)), 4 ether);
+        // Fee restored (Slice 0 behavior intact).
+        assertEq(game.feeBalance(op, address(tok)), FEES);
+        // Bet B returned d to the pool; operator credited the full w; charge BURNED (never returned, F4).
+        assertEq(esc.bankrollOf(address(pool), address(tok)), w);
+        assertEq(pool.credit(op, address(tok)), w);
+        assertEq(pool.hold(roundId), 0);
+        assertEq(chips.balanceOf(address(game), seriesId), 0);
+        assertEq(chips.balanceOf(player, seriesId), 0);
+        assertEq(_status(roundId), uint8(OperatorCoinFlip.Status.Refunded));
+        assertEq(game.tableLocked(tid), 0);
+        _assertPoolInvariants();
+        _assertEscrowSolvent();
+    }
+
+    function test_boosted_plainTimeout_refunds_returnsCharge_reEarmarks() public {
+        bytes32 tid = _boostedTable();
+        _mintCharges(1);
+        uint256 w = chips.w(seriesId);
+        (bytes32 roundId,,) = _openBoosted(tid, 0, 4 ether);
+        uint256 feeAfterOpen = game.feeBalance(op, address(tok));
+
+        vm.roll(block.number + 201); // past STALE_BLOCKS, no chop -> plain-timeout branch
+        game.refundStale(roundId);
+
+        // Player refunded stake; bet B returned d; pool re-earmarked the full w; charge RETURNED.
+        assertEq(tok.balanceOf(player), 100 ether);
+        assertEq(esc.bankrollOf(op, address(tok)), BANKROLL);
+        assertEq(esc.bankrollOf(address(pool), address(tok)), w);
+        assertEq(pool.earmark(seriesId), w);
+        assertEq(pool.circ(seriesId), 1);
+        assertEq(pool.hold(roundId), 0);
+        assertEq(chips.balanceOf(player, seriesId), 1); // charge back to the player
+        assertEq(chips.balanceOf(address(game), seriesId), 0);
+        assertFalse(game.parkedCharge(roundId));
+        // Fee is NOT restored on a pure timeout (matches the plain-round behavior today).
+        assertEq(game.feeBalance(op, address(tok)), feeAfterOpen);
+        assertEq(game.feeBalance(op, address(tok)), FEES - 3 * 4 ether);
+        assertEq(_status(roundId), uint8(OperatorCoinFlip.Status.Refunded));
+        assertEq(game.tableLocked(tid), 0);
+        _assertPoolInvariants();
+        _assertEscrowSolvent();
+    }
+
+    function test_boosted_plainTimeout_parksChargeOnReceiverFailure_thenClaims() public {
+        RejectableReceiver rcv = new RejectableReceiver();
+        // Onboard the contract-player: fund tok, consent to the game, approve chip moves.
+        tok.mint(address(rcv), 100 ether);
+        vm.prank(address(rcv)); tok.approve(address(esc), type(uint256).max);
+        vm.prank(address(rcv)); esc.setPlayerGame(address(game), true);
+        vm.prank(address(rcv)); chips.setApprovalForAll(address(game), true);
+
+        bytes32 tid = _boostedTable();
+        uint256 w = chips.w(seriesId);
+        vm.prank(mintSale);
+        pool.fundEarmark(seriesId, 1, op, address(rcv)); // accepted (rejecting = false)
+
+        PreimageLocation.Info[] memory locs = _locsAt(game.tierPriceOf(tid, 4 ether));
+        vm.prank(address(rcv));
+        bytes32 roundId = game.openBoosted(tid, 0, 4 ether, 0, subset, locs);
+        roundIds.push(roundId);
+
+        vm.roll(block.number + 201);
+        rcv.setRejecting(true); // the receiver now rejects the incoming charge return
+
+        game.refundStale(roundId); // fund refund MUST still succeed; the charge return parks
+
+        // The token refund landed despite the parked charge.
+        assertEq(tok.balanceOf(address(rcv)), 100 ether);
+        assertTrue(game.parkedCharge(roundId), "charge should be parked");
+        assertEq(chips.balanceOf(address(game), seriesId), 1); // still held by the game, parked
+        assertEq(chips.balanceOf(address(rcv), seriesId), 0);
+        // Pool ledger already reflects the plain refund (re-earmarked, circ up) regardless of the park.
+        assertEq(pool.earmark(seriesId), w);
+        assertEq(pool.circ(seriesId), 1);
+        assertEq(_status(roundId), uint8(OperatorCoinFlip.Status.Refunded));
+        _assertPoolInvariants();
+        _assertEscrowSolvent();
+
+        // Fix the receiver; a permissionless claim delivers the parked charge exactly once.
+        rcv.setRejecting(false);
+        vm.prank(address(0xCAFE));
+        game.claimParkedCharge(roundId);
+        assertFalse(game.parkedCharge(roundId));
+        assertEq(chips.balanceOf(address(rcv), seriesId), 1);
+        assertEq(chips.balanceOf(address(game), seriesId), 0);
+        // A second claim is a no-op (already delivered).
+        game.claimParkedCharge(roundId);
+        assertEq(chips.balanceOf(address(rcv), seriesId), 1);
+        _assertPoolInvariants();
+    }
+}
+
+/// @notice A contract-player whose 1155 receiver can be toggled to reject — proves a boosted plain-timeout
+/// parks the charge (and never freezes the fund refund) when the player's receiver fails.
+contract RejectableReceiver {
+    bool public rejecting;
+
+    function setRejecting(bool v) external {
+        rejecting = v;
+    }
+
+    function onERC1155Received(address, address, uint256, uint256, bytes calldata) external view returns (bytes4) {
+        if (rejecting) revert("receiver rejects");
+        return this.onERC1155Received.selector;
+    }
 }
