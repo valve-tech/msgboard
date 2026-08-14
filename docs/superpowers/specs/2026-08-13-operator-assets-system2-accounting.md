@@ -164,6 +164,6 @@ Guard `claim`. Caps count base exposure only (O2).
   opens with backing present; expiry now gives holders a `w`/unit floor. Full fix
   deferred to the bonus-economy plan.
 - **O6 — boosted-table token policy** (no FOT/zero-revert/rebase) — disclosure UI +
-  mint-time enforcement.
+  enforced on-chain at `createSeries` (zero-value probe); FOT rejected at `fundEarmark`.
 - **O7 — a boosted round emits TWO escrow `Settled` events** (bets A and B); the
   caster/QA/indexer must handle the pair and the `payout != stake·maxMult/100` break.

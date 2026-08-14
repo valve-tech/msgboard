@@ -3,6 +3,8 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {BonusChips1155} from "../../contracts/games/operator/BonusChips1155.sol";
+import {ERC20} from "../../contracts/test/ERC20.sol";
+import {ZeroRevertERC20} from "../../contracts/test/ZeroRevertERC20.sol";
 
 /// @notice Unit tests for the consumable bonus-charge token. The safety-critical property here is the
 /// per-charge backing `w = ceil(maxStake * bonusPoints / 100)` — a FLOOR under-backs by one unit at a
@@ -16,7 +18,10 @@ contract BonusChips1155Test is Test {
     address internal creator = address(0xC0FFEE);
     address internal minter = address(0x111);
     address internal burner = address(0xB0B);
-    address internal token = address(0x7070);
+    // `createSeries` now probes the token with a zero-value self-transfer (M1), so the fixture must be
+    // a real ERC20 contract, not a bare address — a non-contract address has no code and the probe call
+    // reverts (`SafeTransferLib.safeTransfer` requires `extcodesize(token) != 0`).
+    address internal token;
     address internal alice = address(0xA11CE);
     address internal bob = address(0xB0B0B);
 
@@ -25,6 +30,7 @@ contract BonusChips1155Test is Test {
         chips.setCreator(creator);
         chips.setMinter(minter);
         chips.setBurner(burner, true);
+        token = address(new ERC20(false));
     }
 
     function _mkSeries(uint16 bp, uint256 maxStake) internal returns (uint256 id) {
@@ -111,6 +117,34 @@ contract BonusChips1155Test is Test {
         uint256 id = chips.createSeries(25, ceiling, uint64(block.timestamp + 1 days), token);
         (, uint256 maxStake,,) = chips.seriesOf(id);
         assertEq(maxStake, ceiling);
+    }
+
+    // ── M1: O6 zero-value-transfer-revert probe, enforced at createSeries ──────────────────────────
+
+    /// A token that reverts on `transfer(to, 0)` would revert bet B's zero-stake refund
+    /// (`token.safeTransfer(player, 0)`) mid-round, freezing the player's boosted stake. `createSeries`
+    /// MUST reject it up front, before any series can ever back a round.
+    function test_createSeries_revertsForZeroTransferRevertingToken() public {
+        address badToken = address(new ZeroRevertERC20());
+        vm.prank(creator);
+        vm.expectRevert(BonusChips1155.UnsupportedToken.selector);
+        chips.createSeries(25, 999, uint64(block.timestamp + 1 days), badToken);
+    }
+
+    /// A normal token (zero-value transfer is a harmless no-op, per ERC-20) still succeeds — the probe
+    /// must not reject well-behaved tokens.
+    function test_createSeries_succeedsForNormalToken() public {
+        vm.prank(creator);
+        uint256 id = chips.createSeries(25, 999, uint64(block.timestamp + 1 days), token);
+        (,,, address tok) = chips.seriesOf(id);
+        assertEq(tok, token);
+    }
+
+    /// The probe entry point is self-only; nothing else may call it (it moves no value, but the
+    /// self-only convention matches the rest of this codebase's try/catch self-hops).
+    function test_zeroValueTransferProbe_revertsForNonSelf() public {
+        vm.expectRevert(BonusChips1155.NotSelf.selector);
+        chips._zeroValueTransferProbe(token);
     }
 
     // ── mint role ────────────────────────────────────────────────────────────────────────────────

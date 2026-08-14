@@ -12,6 +12,7 @@ import {IValidatorPolicy} from "./IValidatorPolicy.sol";
 import {IFeePolicy} from "./IFeePolicy.sol";
 import {BonusChips1155} from "./BonusChips1155.sol";
 import {IBackingPool} from "./IBackingPool.sol";
+import {BackingPool} from "./BackingPool.sol";
 
 /// @notice Escrow-backed coin flip — the slice-A reference game. Identical parity mechanics to
 /// CoinFlipTables, but every chip lives in GameEscrow (token-agnostic, pre-collateralized) and every
@@ -50,6 +51,7 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
     // --- S2b (boosted rounds) ---
     error BonusInfraUnset();
     error BonusInfraAlreadySet();
+    error BonusInfraMismatch();
     error NoBonusSeries();
     error SeriesTokenMismatch();
     error MultiplierClampExceeded();
@@ -190,8 +192,17 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
     /// @notice Wire the bonus economy: the BackingPool (collateral co-operator) and the BonusChips1155
     /// charge registry. Owner-only and ONE-TIME (the pool references this game in its constructor, so the
     /// deploy order is game -> pool -> setBonusInfra). Setting it does not touch any plain-round path.
+    ///
+    /// L4: cross-check the pair BEFORE storing it. `pool.game()` must point back at THIS game (else the
+    /// paired bet B the game later locks against the pool's bucket would be authorized for a different
+    /// game entirely) and `pool.chips()` must be the SAME registry passed as `chips` (else the pool's
+    /// earmark accounting would be denominated in a different charge series than the one the game
+    /// consumes). Catching a misconfigured pair here fails loudly at set time instead of at the first
+    /// boosted round.
     function setBonusInfra(address pool, address chips) external onlyOwner {
         if (_bonusInfraSet) revert BonusInfraAlreadySet();
+        if (BackingPool(pool).game() != address(this)) revert BonusInfraMismatch();
+        if (address(BackingPool(pool).chips()) != chips) revert BonusInfraMismatch();
         _bonusInfraSet = true;
         backingPool = pool;
         bonusChips = BonusChips1155(chips);
@@ -470,6 +481,19 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
         tableLocked[tableId] -= (payout - stake);
     }
 
+    /// @dev L1 — reentrancy note. This entry point is reached two ways: `GameBase.onCast` (the Random
+    /// push callback, out of scope — shared across every game, NOT `nonReentrant`) and `claim`'s pull
+    /// fallback (which IS `nonReentrant`). The push path is deliberately left unguarded here; it is
+    /// protected by CEI instead of the mutex: `r.status` flips to `Settled` FIRST, before any external
+    /// payout (`GameEscrow.settleWin`/`settleLoss`, the pool hooks, the 1155 burn), and every terminal on
+    /// every path is gated by `if (r.status != Status.Pending) revert AlreadyResolved()`. So a reentrant
+    /// call into `_settle` (or into `claim`, which is itself mutex-guarded) for the SAME round always
+    /// hits `AlreadyResolved` — a second payout can never fire. This holds only because O6 restricts the
+    /// settlement token set (`BonusChips1155.createSeries`'s zero-value-transfer probe): a plain ERC20 or
+    /// ERC777/callback-style token can trigger a callback mid-`_settle` (e.g. during `settleWin`'s
+    /// transfer), but CEI already makes that callback see a `Settled` round and bounce off
+    /// `AlreadyResolved` on every entry point, so ERC777-style tokens are tolerated by construction here
+    /// even though they are not separately probed.
     function _settle(bytes32 roundId, bytes32 seed) internal override {
         Round storage r = rounds[roundId];
         if (r.status != Status.Pending) revert AlreadyResolved();

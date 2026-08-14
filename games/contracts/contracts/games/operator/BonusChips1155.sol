@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {ERC1155} from "solady/src/tokens/ERC1155.sol";
+import {SafeTransferLib} from "solady/src/utils/SafeTransferLib.sol";
 
 /// @notice The consumable bonus-charge token of the operator bonus economy. Each series is a distinct
 /// ERC-1155 id that pins the boost it grants: `bonusPoints` (added to a table's base multiplier),
@@ -20,6 +21,8 @@ import {ERC1155} from "solady/src/tokens/ERC1155.sol";
 /// - `burner` allowlist burns charges (the game on a used round, and the pool on expiry).
 /// No transient storage, no MCOPY — deploys on pre-Cancun 943/369 (I7).
 contract BonusChips1155 is ERC1155 {
+    using SafeTransferLib for address;
+
     struct Series {
         uint16 bonusPoints; // added to the table base multiplier for a boosted round
         uint64 expiry;      // unix ts; openBoosted (S2b) reverts once now >= expiry
@@ -45,6 +48,8 @@ contract BonusChips1155 is ERC1155 {
     error InvalidBonusPoints();
     error InvalidMaxStake();
     error InvalidExpiry();
+    error UnsupportedToken();
+    error NotSelf();
 
     /// @notice Ceiling on `maxStake`. Keeps `w = ceil(maxStake * bonusPoints / 100)` far from any
     /// uint256 overflow (`maxStake * bonusPoints` with `bonusPoints <= type(uint16).max` stays tiny
@@ -94,6 +99,18 @@ contract BonusChips1155 is ERC1155 {
     /// @notice Register a new charge series. Creator-gated (the mint-sale in S2c). The F-C token pin
     /// and the `base + bonusPoints <= MULT_MAX` clamp are enforced by the game's `setBonusSeries` when
     /// the series is attached to a table (S2b); here we only store the parameters.
+    ///
+    /// O6 token policy (accounting doc §6) — a boosted table's bet B is locked with stake 0, and on a
+    /// chop/plain-timeout refund `GameEscrow` calls `token.safeTransfer(player, 0)` — a zero-value
+    /// transfer. A token that REVERTS on a zero-value transfer would revert that whole refund and
+    /// freeze the player's stake (M1). This is enforced HERE, on-chain, at series creation: a zero-value
+    /// self-transfer probe MUST succeed, or the token is rejected. The other two O6 cases are NOT probed
+    /// here: fee-on-transfer is already rejected downstream by `fundEarmark`'s measured-delta check
+    /// (a short delivery reverts the mint), and rebasing tokens are documented-unsupported (no probe can
+    /// catch a balance that moves on its own). ERC777/callback-style tokens are not probed either — the
+    /// game's `_settle`/refund paths rely on CEI (status set terminal before any external payout, every
+    /// terminal `AlreadyResolved`-gated), which already tolerates a token-triggered reentry; see
+    /// `OperatorCoinFlip._settle`'s CEI note (L1).
     function createSeries(uint16 bonusPoints, uint256 maxStake, uint64 expiry, address token)
         external
         returns (uint256 id)
@@ -104,6 +121,9 @@ contract BonusChips1155 is ERC1155 {
         if (bonusPoints == 0) revert InvalidBonusPoints();
         if (maxStake == 0 || maxStake > MAX_STAKE) revert InvalidMaxStake();
         if (expiry <= block.timestamp) revert InvalidExpiry();
+        // M1: reject a token that reverts on a zero-value transfer, before this series can ever back a
+        // round. try/catch needs an external call, so the probe runs through a self-only external hop.
+        try this._zeroValueTransferProbe(token) {} catch { revert UnsupportedToken(); }
         id = nextSeriesId++;
         _series[id] = Series({
             bonusPoints: bonusPoints,
@@ -113,6 +133,14 @@ contract BonusChips1155 is ERC1155 {
             exists: true
         });
         emit SeriesCreated(id, bonusPoints, maxStake, expiry, token);
+    }
+
+    /// @notice M1 probe: a zero-value self-transfer of `token`, called only by `createSeries` (self-only,
+    /// via `this._zeroValueTransferProbe`) so the call can be wrapped in a try/catch. No state changes and
+    /// no value moves (amount is 0); it exists purely to observe whether `token` reverts on amount == 0.
+    function _zeroValueTransferProbe(address token) external {
+        if (msg.sender != address(this)) revert NotSelf();
+        token.safeTransfer(address(this), 0);
     }
 
     function seriesOf(uint256 id)
