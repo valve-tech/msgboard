@@ -105,12 +105,15 @@ interface IFeePolicy {
   only fee-policy addresses from an owner-deployed, **immutable allowlist (the policy
   menu)**; policy-parameter changes are timelocked; the owner key is documented per
   the deployer-key hygiene rule. Not on the money path of any round.
-- **Safety of the seam (F11).** Call sites clamp `feeBps` to a platform max
-  (`bps ≤ 1000`, i.e. ≤10%) before applying it — a `uint16` policy could otherwise
-  return 65535. Every call site defines its behaviour when no policy is set at deploy
-  (the forfeit site defaults to straight burn, never "brick"; see §4.2). Burn
-  transport is per-token, not a global `0xdead` transfer — some tokens block dead-
-  address transfers or lack `burn`.
+- **Safety of the seam (F11).** The `feeBps` clamp (`bps ≤ 1000`, ≤10%) governs ONLY
+  the percentage-cut call sites — the mint-sale and the marketplace — where the fee is
+  a slice of a sale price. The FORFEIT call site does NOT call `feeBps`: it routes the
+  FULL forfeit amount through `route()` (H2 — routing only 10% of the forfeit would
+  reopen the win-denial hole). So "forfeit sink = 100% burn" (§9) and the ≤10% clamp
+  do not conflict; they apply to different call sites. Every call site defines its
+  behaviour when no policy is set at deploy (the forfeit site defaults to straight
+  burn, never "brick"; see §4.2). Burn transport is per-token, not a global `0xdead`
+  transfer — some tokens block dead-address transfers or lack `burn`.
 
 ### 4.2 Neutral-sink forfeit re-route
 
@@ -156,7 +159,9 @@ the charge on a chopped refund (§5.1) would tip that boundary case to *profitab
 - Custody invariant is preserved: the fee restore stays internal to `feeBalance`; the
   forfeit still leaves Random custody by exact `handoff`; only the post-handoff
   destination changes. The QA assertion "forfeit credited to operator bankroll"
-  inverts (§8.3).
+  inverts (§8 item 3). The forfeit is routed by the MEASURED amount received from
+  `handoff` (not the nominal `forfeit`), so a fee-on-transfer token can't strand
+  custody — mirroring the `_pullVerified` idiom (M3, plan-level).
 - Ships on the same new OperatorCoinFlip version as System 2; applies to all operator
   tables, so the 369 fairness fix is general.
 
