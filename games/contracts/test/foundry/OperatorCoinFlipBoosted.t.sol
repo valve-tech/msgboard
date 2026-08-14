@@ -126,11 +126,18 @@ contract OperatorCoinFlipBoostedTest is Test {
     }
 
     function _locsAt(uint256 price) internal view returns (PreimageLocation.Info[] memory L) {
+        return _locsIdx(price, 0);
+    }
+
+    /// @notice Like `_locsAt` but stamps a distinct preimage `index` so concurrent rounds at the SAME
+    /// stake tier get DISTINCT Random keys (the key is keccak of the locations; the game binds only
+    /// provider/token/price, so a fresh index is a legal way to model distinct preimages per round).
+    function _locsIdx(uint256 price, uint256 idx) internal view returns (PreimageLocation.Info[] memory L) {
         L = new PreimageLocation.Info[](subset.length);
         for (uint256 i = 0; i < subset.length; i++) {
             L[i] = PreimageLocation.Info({
                 provider: subset[i], callAtChange: true, durationIsTimestamp: false,
-                duration: 12, token: address(tok), price: price, offset: 0, index: 0
+                duration: 12, token: address(tok), price: price, offset: 0, index: idx
             });
         }
     }
@@ -145,6 +152,17 @@ contract OperatorCoinFlipBoostedTest is Test {
         roundId = game.openBoosted(tableId, side, stake, 0, subset, locs);
         key = _key(roundId);
         if (!roundSeen[roundId]) { roundIds.push(roundId); roundSeen[roundId] = true; }
+    }
+
+    function _openPlain(bytes32 tableId, uint8 side, uint256 stake)
+        internal
+        returns (bytes32 roundId, bytes32 key)
+    {
+        uint256 tierPrice = game.tierPriceOf(tableId, stake);
+        PreimageLocation.Info[] memory locs = _locsAt(tierPrice);
+        vm.prank(player);
+        roundId = game.open(tableId, side, stake, subset, locs);
+        key = _key(roundId);
     }
 
     function _boostId(bytes32 roundId) internal pure returns (bytes32) {
@@ -583,6 +601,129 @@ contract OperatorCoinFlipBoostedTest is Test {
         game.claimParkedCharge(roundId);
         assertEq(chips.balanceOf(address(rcv), seriesId), 1);
         _assertPoolInvariants();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // Task 5: end-to-end randomized invariant — mixed boosted + plain through the REAL stack
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    // Loop-scoped tracking (state vars so the assertion helper can read them without stack juggling).
+    uint256 internal _minted;   // charges funded+minted (T1)
+    uint256 internal _burned;   // charges destroyed (boosted win/loss/chop terminals + expiry)
+    uint256 internal _gameHeld; // charges consumed by currently-open boosted rounds
+    uint256 internal _openNonce; // gives each fuzz round a distinct preimage index -> distinct Random key
+
+    /// Independent circ cross-check: circ = minted - burned - gameHeld. Must equal the pool's own
+    /// counter, on top of P1/P2 and escrow solvency.
+    function _assertE2EInvariants() internal view {
+        assertEq(pool.circ(seriesId), _minted - _burned - _gameHeld, "independent circ != pool.circ");
+        _assertPoolInvariants();
+        _assertEscrowSolvent();
+    }
+
+    /// A bounded random legal sequence of mixed boosted + plain rounds driven THROUGH the real
+    /// openBoosted/open/settle/chop/refund, asserting P1 + P2 + independent circ + escrow solvency after
+    /// every step, and tableLocked == 0 whenever no round (plain or boosted) is open. This is the S2b
+    /// deliverable: the paired-bet flow proven through the real game, not the S2a mock.
+    function test_e2e_randomizedInvariant(uint256 seed) public {
+        bytes32 tid = _boostedTable();
+        uint256 w = chips.w(seriesId);
+
+        // A deep fee pool so opens never starve mid-sequence, and a starting batch of charges.
+        vm.prank(op); game.depositFees(op, address(tok), 5000 ether);
+        _mintCharges(6); _minted += 6;
+        _assertE2EInvariants();
+
+        uint256[3] memory tiers = [uint256(1 ether), 2 ether, 4 ether];
+
+        uint256 nLive;
+        bytes32[64] memory liveRound;
+        bytes32[64] memory liveKey;
+        uint256[64] memory liveTier;
+        uint256[64] memory liveIdx;
+        bool[64] memory liveBoosted;
+
+        for (uint256 step = 0; step < 40; step++) {
+            seed = uint256(keccak256(abi.encode(seed, step)));
+            uint256 action = seed % 7;
+            uint256 stake = tiers[(seed >> 8) % 3];
+            uint8 side = uint8((seed >> 16) % 2);
+
+            if (action == 0) {
+                uint256 n = (seed >> 24) % 3 + 1;
+                _mintCharges(n); _minted += n;
+            } else if (action == 1) {
+                // OPEN BOOSTED — needs a player charge, backing, and fee headroom.
+                if (chips.balanceOf(player, seriesId) == 0) continue;
+                if (pool.earmark(seriesId) < w) continue;
+                if (game.feeBalance(op, address(tok)) < 3 * stake) continue;
+                uint256 idx = ++_openNonce;
+                vm.prank(player);
+                bytes32 rid = game.openBoosted(tid, side, stake, 0, subset, _locsIdx(stake, idx));
+                if (!roundSeen[rid]) { roundIds.push(rid); roundSeen[rid] = true; }
+                liveRound[nLive] = rid; liveKey[nLive] = _key(rid); liveTier[nLive] = stake;
+                liveIdx[nLive] = idx; liveBoosted[nLive] = true;
+                nLive++; _gameHeld++;
+            } else if (action == 2) {
+                // OPEN PLAIN — no charge, just fee + bankroll.
+                if (game.feeBalance(op, address(tok)) < 3 * stake) continue;
+                uint256 idx = ++_openNonce;
+                vm.prank(player);
+                bytes32 rid = game.open(tid, side, stake, subset, _locsIdx(stake, idx));
+                liveRound[nLive] = rid; liveKey[nLive] = _key(rid); liveTier[nLive] = stake;
+                liveIdx[nLive] = idx; liveBoosted[nLive] = false;
+                nLive++;
+            } else if (action >= 3 && action <= 5) {
+                if (nLive == 0) continue;
+                uint256 pick = (seed >> 24) % nLive;
+                if (action == 3) {
+                    // SETTLE via pushCast (win or lose — invariants hold either way).
+                    rnd.pushCast(liveKey[pick], bytes32(seed));
+                    if (liveBoosted[pick]) { _burned++; _gameHeld--; }
+                } else if (action == 4) {
+                    // CHOP — one validator withholds.
+                    rnd.setRevealed(liveKey[pick], 0x3);
+                    game.chopAndRoute(liveRound[pick], _locsIdx(liveTier[pick], liveIdx[pick]));
+                    if (liveBoosted[pick]) { _burned++; _gameHeld--; }
+                } else {
+                    // PLAIN-TIMEOUT — roll past staleness, no chop.
+                    vm.roll(block.number + 201);
+                    game.refundStale(liveRound[pick]);
+                    if (liveBoosted[pick]) { _gameHeld--; } // charge RETURNED (circ +1), not burned
+                }
+                liveRound[pick] = liveRound[nLive - 1];
+                liveKey[pick] = liveKey[nLive - 1];
+                liveTier[pick] = liveTier[nLive - 1];
+                liveIdx[pick] = liveIdx[nLive - 1];
+                liveBoosted[pick] = liveBoosted[nLive - 1];
+                nLive--;
+                if (nLive == 0) assertEq(game.tableLocked(tid), 0, "tableLocked != 0 with no open round");
+            } else {
+                uint256 c = pool.credit(op, address(tok));
+                if (c == 0) continue;
+                uint256 amt = (seed >> 24) % c + 1;
+                vm.prank(op); pool.withdrawCredit(address(tok), amt);
+            }
+
+            _assertE2EInvariants();
+        }
+
+        // Drain: settle every remaining live round, then the table must be fully unlocked.
+        for (uint256 i = 0; i < nLive; i++) {
+            rnd.pushCast(liveKey[i], bytes32(seed + i));
+            if (liveBoosted[i]) { _burned++; _gameHeld--; }
+        }
+        assertEq(game.tableLocked(tid), 0, "tableLocked != 0 after draining all rounds");
+        _assertE2EInvariants();
+
+        // Expire everything left circulating with the player, and settle the operator's backing out.
+        vm.warp(block.timestamp + 8 days);
+        uint256 held = chips.balanceOf(player, seriesId);
+        if (held > 0) {
+            pool.expireCharges(seriesId, player, held);
+            _burned += held;
+        }
+        _assertE2EInvariants();
     }
 }
 
