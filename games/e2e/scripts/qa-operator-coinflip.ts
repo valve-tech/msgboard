@@ -81,6 +81,9 @@ async function main() {
   const ESCROW = (process.env.ESCROW ?? sub.contracts.GameEscrow) as viem.Hex
   const GAME = (process.env.GAME ?? sub.contracts.OperatorCoinFlip) as viem.Hex
   const POLICY = (process.env.POLICY ?? sub.contracts.DefaultValidatorPolicy) as viem.Hex | undefined
+  // BurnFeePolicy is the neutral forfeit sink (Slice 0). Task 5 adds it to the deployment JSON; until then
+  // this stays undefined and the burned() assertion is skipped with a clear log, never a throw.
+  const BURN_POLICY = (process.env.BURN_POLICY ?? sub.contracts.BurnFeePolicy) as viem.Hex | undefined
 
   const cfg = loadDeployment(CHAIN)
   // GAME comes from the substrate file, cfg.operatorCoinFlip (which heatsSincePriced counts on) from the
@@ -108,6 +111,9 @@ async function main() {
   const escrowAbi = loadAbi('GameEscrow')
   const registryAbi = loadAbi('OperatorRegistry')
   const xabi = [...gameAbi, ...escrowAbi, ...registryAbi] as viem.Abi
+  // Minimal ABI for the neutral sink's QA counter — BurnFeePolicy isn't in the substrate JSON yet (Task 5).
+  const burnPolicyAbi = [{ type: 'function', name: 'burned', stateMutability: 'view', inputs: [{ name: '', type: 'address' }], outputs: [{ type: 'uint256' }] }] as const satisfies viem.Abi
+  const burnedOf = (token: viem.Hex) => pc.readContract({ address: BURN_POLICY!, abi: burnPolicyAbi, functionName: 'burned', args: [token] }) as Promise<bigint>
   const chipsAbi = [...erc20Abi, { type: 'function', name: 'mint', stateMutability: 'nonpayable', inputs: [{ name: 'to', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [] }] as const satisfies viem.Abi
 
   // token: reuse the live Chips (deployer can mint the test ERC-20). Source of truth = live CoinFlipTables.
@@ -266,6 +272,7 @@ async function main() {
     const feeBefore = await feeBalanceOf()
     const custodyBefore = await Promise.all(subset.map((a) => custodyOf(a)))
     const playerBefore = await chipsBal(account.address)
+    const burnedBefore = BURN_POLICY ? await burnedOf(CHIPS) : 0n
 
     const { roundId, key, k, locations } = await openRound(tableId, 1 /* TAILS */, TIER)
 
@@ -279,10 +286,16 @@ async function main() {
 
     const chopReceipt = await send({ address: GAME, abi: gameAbi, functionName: 'chopAndRoute', args: [roundId, locations] })
     const forfeitEv = (viem.parseEventLogs({ abi: gameAbi, logs: chopReceipt.logs, eventName: 'ForfeitRouted' })[0] as any)?.args as { forfeit: bigint } | undefined
-    check('ForfeitRouted forfeit == tierPrice', forfeitEv?.forfeit === TIER, forfeitEv ? viem.formatEther(forfeitEv.forfeit) : 'no event')
+    check('ForfeitRouted forfeit (routed to sink) == tierPrice', forfeitEv?.forfeit === TIER, forfeitEv ? viem.formatEther(forfeitEv.forfeit) : 'no event')
     check('round REFUNDED', (await roundStatus(roundId)) === 3)
 
-    check('forfeit banked to operator bankroll (+tierPrice)', (await bankrollOf()) - bankrollBefore === TIER, viem.formatEther((await bankrollOf()) - bankrollBefore))
+    // Slice 0: the forfeit no longer credits the operator bankroll — it burns via BurnFeePolicy (H1).
+    check('operator bankroll UNCHANGED by the forfeit', (await bankrollOf()) === bankrollBefore, viem.formatEther((await bankrollOf()) - bankrollBefore))
+    if (BURN_POLICY) {
+      check('BurnFeePolicy.burned(token) increased by tierPrice', (await burnedOf(CHIPS)) - burnedBefore === TIER, viem.formatEther((await burnedOf(CHIPS)) - burnedBefore))
+    } else {
+      console.log('  ⏭️  BurnFeePolicy.burned() skipped — sink address not yet deployed — run after Task 5')
+    }
     check('exposure released (locked back to base)', (await lockedOf()) === lockedBefore)
     check('player made whole (stake returned)', (await chipsBal(account.address)) === playerBefore, viem.formatEther((await chipsBal(account.address)) - playerBefore))
     const custodyAfter = await Promise.all(subset.map((a) => custodyOf(a)))
