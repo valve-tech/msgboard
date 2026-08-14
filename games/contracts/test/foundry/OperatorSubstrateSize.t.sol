@@ -40,6 +40,14 @@ import {BackingPool} from "../../contracts/games/operator/BackingPool.sol";
 /// way: zero MCOPY(0x5e) and TSTORE(0x5d); stripped runtime 16,604 bytes (full deployed 16,657) — up
 /// from Slice 0's 11,482 but still ~7.9KB under the 24,576 hard limit and under this file's margin. No
 /// series-resolution helper extraction was needed.
+///
+/// S2b security-review hardening (M1/L4/L1, 2026-08-14): BonusChips1155.createSeries gained the O6
+/// zero-value-transfer-revert probe (M1); OperatorCoinFlip.setBonusInfra gained the pool/chips
+/// consistency cross-check (L4) plus a CEI-reliance doc comment on _settle (L1, no bytecode). Re-scanned
+/// the same way: zero MCOPY(0x5e) and TSTORE(0x5d) in both. BonusChips1155 stripped runtime rose from
+/// 5,024 to 5,339 bytes; OperatorCoinFlip stripped runtime rose from 16,604 to 16,842 bytes (full
+/// deployed 16,895). Both moves are small and both contracts stay far under the 24,576 hard limit and
+/// this file's 24,300 safety margin.
 contract OperatorSubstrateSizeTest is Test {
     uint256 internal constant SIZE_CEILING = 24_300;
 
