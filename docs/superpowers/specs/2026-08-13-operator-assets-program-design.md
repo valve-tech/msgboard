@@ -200,6 +200,15 @@ the charge on a chopped refund (§5.1) would tip that boundary case to *profitab
 
 ### 5.3 Collateralization (decision 3, I4)
 
+> **SUPERSEDED by the verified accounting model** in
+> `docs/superpowers/specs/2026-08-13-operator-assets-system2-accounting.md`. A fable
+> accounting pass proved the single-inject flow below unimplementable (F-A: the game
+> has no funding source to re-earmark the boost on refund) and replaced it with the
+> **paired-bet model** — the boost rides as a second, pool-owned, zero-stake escrow
+> bet, so escrow returns it to the pool structurally. It also fixed the earmark to a
+> CEIL (F-B) and pinned the series token (F-C). Read the accounting doc, not the
+> paragraphs below, for the money flow; the paragraphs remain for intent/history.
+
 **The backing pool is a separate token-holding contract (pins the F2 mechanism).**
 `GameEscrow` stays byte-identical (I1), which has exactly ONE compatible way to fund
 the boost: an external backing pool holds the operator's earmarked tokens, and
