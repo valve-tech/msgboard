@@ -13,6 +13,7 @@ import RandomArtifact from '@gibs/random/artifacts/contracts/Random.sol/Random.j
 import RegistryArtifact from '@msgboard/games-contracts/artifacts/contracts/games/operator/OperatorRegistry.sol/OperatorRegistry.json'
 import EscrowArtifact from '@msgboard/games-contracts/artifacts/contracts/games/operator/GameEscrow.sol/GameEscrow.json'
 import GameArtifact from '@msgboard/games-contracts/artifacts/contracts/games/operator/OperatorCoinFlip.sol/OperatorCoinFlip.json'
+import BurnFeePolicyArtifact from '@msgboard/games-contracts/artifacts/contracts/games/operator/BurnFeePolicy.sol/BurnFeePolicy.json'
 import BondArtifact from '@msgboard/games-contracts/artifacts/contracts/games/operator/OperatorBond.sol/OperatorBond.json'
 import VaultArtifact from '@msgboard/games-contracts/artifacts/contracts/games/operator/OperatorVault.sol/OperatorVault.json'
 import FactoryArtifact from '@msgboard/games-contracts/artifacts/contracts/games/operator/OperatorVaultFactory.sol/OperatorVaultFactory.json'
@@ -68,6 +69,7 @@ describe('OperatorCoinFlip validator forfeit — real Random on anvil', () => {
   let registry: viem.Hex
   let escrow: viem.Hex
   let game: viem.Hex
+  let burnPolicy: viem.Hex
   let token: viem.Hex
   let tableId: viem.Hex
   let config: Deployment
@@ -104,6 +106,8 @@ describe('OperatorCoinFlip validator forfeit — real Random on anvil', () => {
     pc.readContract({ address: escrow, abi: EscrowArtifact.abi as viem.Abi, functionName: 'lockedOf', args: [operator.address, token] }) as Promise<bigint>
   const feeBalanceOf = (): Promise<bigint> =>
     pc.readContract({ address: game, abi: GameArtifact.abi as viem.Abi, functionName: 'feeBalance', args: [operator.address, token] }) as Promise<bigint>
+  const burnedOf = (): Promise<bigint> =>
+    pc.readContract({ address: burnPolicy, abi: BurnFeePolicyArtifact.abi as viem.Abi, functionName: 'burned', args: [token] }) as Promise<bigint>
   const tokenBal = (a: viem.Hex): Promise<bigint> =>
     pc.readContract({ address: token, abi: erc20Abi, functionName: 'balanceOf', args: [a] }) as Promise<bigint>
   const roundStatus = async (roundId: viem.Hex): Promise<number> => {
@@ -144,7 +148,10 @@ describe('OperatorCoinFlip validator forfeit — real Random on anvil', () => {
     random = await deploy(RandomArtifact as { abi: unknown; bytecode: string })
     registry = await deploy(RegistryArtifact as { abi: unknown; bytecode: string })
     escrow = await deploy(EscrowArtifact as { abi: unknown; bytecode: string }, [registry])
-    game = await deploy(GameArtifact as { abi: unknown; bytecode: string }, [random, escrow, registry])
+    // Slice 0: the forfeit sink is a constructor-fixed menu (I5). BurnFeePolicy is the default —
+    // it must deploy before the game so its address can seed the menu + default pointer.
+    burnPolicy = await deploy(BurnFeePolicyArtifact as { abi: unknown; bytecode: string })
+    game = await deploy(GameArtifact as { abi: unknown; bytecode: string }, [random, escrow, registry, [burnPolicy], burnPolicy])
     token = await deploy(ERC20Artifact as { abi: unknown; bytecode: string }, [false])
     // The rest of the substrate the brief lists — deployed to prove they co-deploy cleanly, though the
     // forfeit path runs entirely through registry/escrow/game.
@@ -249,10 +256,11 @@ describe('OperatorCoinFlip validator forfeit — real Random on anvil', () => {
     expect(feeBefore - (await feeBalanceOf())).toBe(PRICE * 3n)
   })
 
-  it('FORFEIT path: one validator withholds → chopAndRoute banks the forfeit, refunds the player, honest validators keep stakes', async () => {
+  it('FORFEIT path: one validator withholds → chopAndRoute burns the forfeit to the neutral sink, refunds the player, honest validators keep stakes', async () => {
     const bankrollBefore = await bankrollOf()
     const lockedBefore = await lockedOf()
     const feeBefore = await feeBalanceOf()
+    const burnedBefore = await burnedOf()
     const playerBefore = await tokenBal(player.address)
     const custodyBefore = await Promise.all(subset.map((a) => custodyOf(a)))
 
@@ -275,13 +283,14 @@ describe('OperatorCoinFlip validator forfeit — real Random on anvil', () => {
     const chopReceipt = await send(deployer, { address: game, abi: GameArtifact.abi as viem.Abi, functionName: 'chopAndRoute', args: [roundId, locations] })
     const forfeitEv = viem.parseEventLogs({ abi: GameArtifact.abi as viem.Abi, eventName: 'ForfeitRouted', logs: chopReceipt.logs })[0]
       ?.args as { forfeit: bigint } | undefined
-    expect(forfeitEv?.forfeit, 'forfeit is exactly the tier price').toBe(PRICE)
+    expect(forfeitEv?.forfeit, 'forfeit (routed to the sink) is exactly the tier price').toBe(PRICE)
 
     expect(await roundStatus(roundId), 'round refunded').toBe(3) // Status.Refunded
 
-    // (a) the withheld stake (one tierPrice) landed in the operator's bankroll, net of the round's
-    //     exposure lock/return (which nets to zero across open+refund).
-    expect((await bankrollOf()) - bankrollBefore, 'forfeit banked to operator bankroll').toBe(PRICE)
+    // (a) Slice 0: the forfeit no longer credits the operator bankroll — it burns via BurnFeePolicy (H1).
+    //     The round's exposure lock/return nets to zero across open+refund either way.
+    expect(await bankrollOf(), 'operator bankroll unchanged by the forfeit').toBe(bankrollBefore)
+    expect((await burnedOf()) - burnedBefore, 'BurnFeePolicy.burned(token) credited by the forfeit').toBe(PRICE)
     expect(await lockedOf(), 'exposure released').toBe(lockedBefore)
 
     // (b) the player was made whole (stake pulled at open, returned on refund)
@@ -300,6 +309,7 @@ describe('OperatorCoinFlip validator forfeit — real Random on anvil', () => {
   it('FRONT-RUN: a third party calls the public Random.chop first → chopAndRoute still routes the forfeit (no freeze)', async () => {
     const bankrollBefore = await bankrollOf()
     const feeBefore = await feeBalanceOf()
+    const burnedBefore = await burnedOf()
     const playerBefore = await tokenBal(player.address)
 
     const { roundId, key } = await openRound(1 /* TAILS */, 2n)
@@ -319,9 +329,10 @@ describe('OperatorCoinFlip validator forfeit — real Random on anvil', () => {
     const chopReceipt = await send(deployer, { address: game, abi: GameArtifact.abi as viem.Abi, functionName: 'chopAndRoute', args: [roundId, locations] })
     const forfeitEv = viem.parseEventLogs({ abi: GameArtifact.abi as viem.Abi, eventName: 'ForfeitRouted', logs: chopReceipt.logs })[0]
       ?.args as { forfeit: bigint } | undefined
-    expect(forfeitEv?.forfeit, 'forfeit routed despite the front-run').toBe(PRICE)
+    expect(forfeitEv?.forfeit, 'forfeit routed to the sink despite the front-run').toBe(PRICE)
     expect(await roundStatus(roundId), 'round refunded').toBe(3)
-    expect((await bankrollOf()) - bankrollBefore, 'forfeit banked to operator bankroll').toBe(PRICE)
+    expect(await bankrollOf(), 'operator bankroll unchanged by the forfeit').toBe(bankrollBefore)
+    expect((await burnedOf()) - burnedBefore, 'BurnFeePolicy.burned(token) credited by the forfeit').toBe(PRICE)
     expect(await tokenBal(player.address), 'player refunded').toBe(playerBefore)
     expect(await feeBalanceOf(), 'fee pool restored').toBe(feeBefore)
   })
