@@ -251,6 +251,16 @@ const config: HardhatUserConfig = {
         version: '0.8.25',
         settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
       },
+      // Slice 0 fee-policy seam (I7): same 0.8.25/viaIR/shanghai/runs-700 shape as the rest of the
+      // operator family, so both new contracts deploy on pre-Cancun 943 (no MCOPY/TSTORE).
+      'contracts/games/operator/IFeePolicy.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/games/operator/BurnFeePolicy.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
       'contracts/games/SessionState.sol': {
         version: '0.8.25',
         settings: {

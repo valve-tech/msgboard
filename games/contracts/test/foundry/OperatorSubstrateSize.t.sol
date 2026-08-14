@@ -18,6 +18,12 @@ import {BurnFeePolicy} from "../../contracts/games/operator/BurnFeePolicy.sol";
 /// zero genuine MCOPY mnemonics found (foundry.toml pins evm_version = shanghai, which is
 /// authoritative: solc simply never emits MCOPY/TSTORE for a shanghai target). See
 /// task-11-report.md for the full scan output.
+///
+/// Slice 0 (fee-policy forfeit re-route, 2026-08-13): BurnFeePolicy + the extended OperatorCoinFlip
+/// were re-scanned with a CBOR-metadata-stripped, opcode-aligned walker (PUSH-immediate-aware) over
+/// .deployedBytecode.object, cross-checked against `cast disassemble`. Both zero MCOPY(0x5e) and
+/// TSTORE(0x5d): BurnFeePolicy stripped runtime 411 bytes, OperatorCoinFlip stripped runtime 11,482
+/// bytes — both well under the 24,576 EIP-170 hard limit and this file's 24,300 safety margin.
 contract OperatorSubstrateSizeTest is Test {
     uint256 internal constant SIZE_CEILING = 24_300;
 
@@ -58,6 +64,12 @@ contract OperatorSubstrateSizeTest is Test {
         );
 
         BurnFeePolicy burn = new BurnFeePolicy();
+        assertLt(
+            address(burn).code.length,
+            SIZE_CEILING,
+            "BurnFeePolicy deployed bytecode exceeds the 24,300-byte safety margin"
+        );
+
         address[] memory menu = new address[](1);
         menu[0] = address(burn);
         assertLt(
