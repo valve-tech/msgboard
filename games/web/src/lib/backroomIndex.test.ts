@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { reduceBackroom, type PitRound } from './backroomIndex'
+import { reduceBackroom } from './backroomIndex'
 
 const R = '0xround1' as const
 const T = '0xtable1' as const
@@ -22,7 +22,7 @@ describe('reduceBackroom', () => {
   it('surfaces an open round in the pit with positions only', () => {
     const { pit } = reduceBackroom([created, capSet, opened, exposed], { seedFinalized: noSeed })
     expect(pit).toHaveLength(1)
-    const r = pit[0]
+    const r = pit[0]!
     expect(r.roundId).toBe(R)
     expect(r.stake).toBe(10n)
     expect(r.payout).toBe(18n)
@@ -53,15 +53,15 @@ describe('reduceBackroom', () => {
 
   it('counts in-flight rounds per table and clears on terminal', () => {
     const before = reduceBackroom([created, capSet, opened, exposed], { seedFinalized: noSeed })
-    expect(before.tables[0].inFlight).toBe(1)
+    expect(before.tables[0]!.inFlight).toBe(1)
     const after = reduceBackroom([created, capSet, opened, exposed, settled], { seedFinalized: seeded })
-    expect(after.tables[0].inFlight).toBe(0)
+    expect(after.tables[0]!.inFlight).toBe(0)
   })
 
   it('carries table cap and open flag', () => {
     const { tables } = reduceBackroom([created, capSet], { seedFinalized: noSeed })
-    expect(tables[0].cap).toBe(1000n)
-    expect(tables[0].open).toBe(true)
+    expect(tables[0]!.cap).toBe(1000n)
+    expect(tables[0]!.open).toBe(true)
   })
 
   it('RED TEAM: the full serialized pit projection leaks no outcome material', () => {
