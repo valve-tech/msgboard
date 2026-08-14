@@ -58,12 +58,16 @@ export const FeltTable = ({ dealer, player, spots, spread, arc, centerMark, view
       <div className="plane">
         <div className="rail-ring">
           <div className="felt">
+            {/* skin point: chipFace — these 5 discs are decorative rack furniture (no game state); the
+                shared `.chip` class used elsewhere for bet-amount/pick buttons is NOT themed (see
+                skinPoints.ts). Each `var(--chip-N, …)` falls back to today's literal hex, so an
+                unthemed stage renders identically. */}
             <div className="drack">
-              <span className="chip" style={{ background: '#d05a4e' }} />
-              <span className="chip" style={{ background: '#4a7fd0' }} />
-              <span className="chip" style={{ background: '#2fae6a' }} />
-              <span className="chip" style={{ background: '#8a6bd0' }} />
-              <span className="chip" style={{ background: '#c9a227' }} />
+              <span className="chip" style={{ background: 'var(--chip-1, #d05a4e)' }} />
+              <span className="chip" style={{ background: 'var(--chip-2, #4a7fd0)' }} />
+              <span className="chip" style={{ background: 'var(--chip-3, #2fae6a)' }} />
+              <span className="chip" style={{ background: 'var(--chip-4, #8a6bd0)' }} />
+              <span className="chip" style={{ background: 'var(--chip-5, #c9a227)' }} />
             </div>
             <div className="shoe" />
             {dealer && (
