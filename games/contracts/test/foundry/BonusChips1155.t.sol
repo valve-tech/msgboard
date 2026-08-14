@@ -77,6 +77,42 @@ contract BonusChips1155Test is Test {
         chips.createSeries(25, 999, uint64(block.timestamp + 1 days), token);
     }
 
+    // ── createSeries parameter validation (LOW — defense-in-depth) ──────────────────────────────────
+
+    function test_createSeries_revertsForZeroBonusPoints() public {
+        vm.prank(creator);
+        vm.expectRevert(BonusChips1155.InvalidBonusPoints.selector);
+        chips.createSeries(0, 999, uint64(block.timestamp + 1 days), token);
+    }
+
+    function test_createSeries_revertsForZeroMaxStake() public {
+        vm.prank(creator);
+        vm.expectRevert(BonusChips1155.InvalidMaxStake.selector);
+        chips.createSeries(25, 0, uint64(block.timestamp + 1 days), token);
+    }
+
+    function test_createSeries_revertsForOversizedMaxStake() public {
+        uint256 tooBig = chips.MAX_STAKE() + 1;
+        vm.prank(creator);
+        vm.expectRevert(BonusChips1155.InvalidMaxStake.selector);
+        chips.createSeries(25, tooBig, uint64(block.timestamp + 1 days), token);
+    }
+
+    function test_createSeries_revertsForPastExpiry() public {
+        vm.warp(1000);
+        vm.prank(creator);
+        vm.expectRevert(BonusChips1155.InvalidExpiry.selector);
+        chips.createSeries(25, 999, uint64(block.timestamp), token); // expiry == now is not in the future
+    }
+
+    function test_createSeries_acceptsMaxStakeCeiling() public {
+        uint256 ceiling = chips.MAX_STAKE();
+        vm.prank(creator);
+        uint256 id = chips.createSeries(25, ceiling, uint64(block.timestamp + 1 days), token);
+        (, uint256 maxStake,,) = chips.seriesOf(id);
+        assertEq(maxStake, ceiling);
+    }
+
     // ── mint role ────────────────────────────────────────────────────────────────────────────────
 
     function test_mint_succeedsForMinter() public {
