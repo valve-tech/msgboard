@@ -76,8 +76,11 @@ describe('OperatorCoinFlip validator forfeit — real Random on anvil', () => {
 
   const send = async (
     a: viem.Account,
-    call: { address: viem.Hex; abi: viem.Abi; functionName: string; args: readonly unknown[]; value?: bigint },
+    call: { address: viem.Hex; abi: viem.Abi; functionName: string; args: readonly unknown[]; value?: bigint; gas?: bigint },
   ): Promise<viem.TransactionReceipt> => {
+    // `gas` override matters for `cast`: Random._call swallows an onCast revert, so eth_estimateGas
+    // reports success even when onCast is starved by the EIP-150 63/64 rule and the round stays Pending.
+    // An explicit limit guarantees the push-settlement sub-call is funded.
     const { request } = await pc.simulateContract({ ...call, account: a })
     const hash = await walletFor(a).writeContract(request)
     const receipt = await pc.waitForTransactionReceipt({ hash })
@@ -235,7 +238,7 @@ describe('OperatorCoinFlip validator forfeit — real Random on anvil', () => {
     // caster reveals all three secrets in subset order → seed forms → onCast settles the round
     const locations = operatorLocationsAt(subset, 0n, BigInt(POOL_SIZE), token, PRICE)
     const secrets = subset.map((_a, i) => operatorSecret(SEEDS0, i, token, PRICE, 0n))
-    const castReceipt = await send(deployer, { address: random, abi: RandomArtifact.abi as viem.Abi, functionName: 'cast', args: [key, locations, secrets] })
+    const castReceipt = await send(deployer, { address: random, abi: RandomArtifact.abi as viem.Abi, functionName: 'cast', args: [key, locations, secrets], gas: 1_000_000n })
     const cast = viem.parseEventLogs({ abi: RandomArtifact.abi as viem.Abi, eventName: 'Cast', logs: castReceipt.logs })[0]
     expect(cast, 'seed was cast').toBeTruthy()
 
