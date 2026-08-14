@@ -75,4 +75,21 @@ describe('reduceBackroom', () => {
     for (const forbidden of ['seed', 'won', 'validator', 'reveal', 'preimage', 'outcome', 'result', 'winner'])
       expect(blob.includes(forbidden)).toBe(false)
   })
+
+  it('derived tableLocked tracks EXPOSURE (payout-stake) and returns to 0 after settle', () => {
+    const open = reduceBackroom([created, capSet, opened, exposed], { seedFinalized: noSeed })
+    expect(open.tables[0]!.locked).toBe(8n) // exposure = payout 18 - stake 10, matching the tableLocked view unit
+    const done = reduceBackroom([created, capSet, opened, exposed, settled], { seedFinalized: seeded })
+    expect(done.tables[0]!.locked).toBe(0n)
+  })
+
+  it('releases exposure on a plain-timeout refund', () => {
+    const done = reduceBackroom([created, capSet, opened, exposed, refunded], { seedFinalized: seeded })
+    expect(done.tables[0]!.locked).toBe(0n)
+  })
+
+  it('releases exposure exactly once on a chop (RoundRefunded + ForfeitRouted co-emitted)', () => {
+    const done = reduceBackroom([created, capSet, opened, exposed, refunded, forfeit], { seedFinalized: seeded })
+    expect(done.tables[0]!.locked).toBe(0n) // must NOT be -8n — ForfeitRouted must not double-release
+  })
 })

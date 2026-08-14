@@ -45,6 +45,9 @@ export type OperatorTableView = {
   token: Address
   open: boolean
   cap: bigint
+  /** Event-derived locked EXPOSURE (Σ payout−stake), matching the on-chain `tableLocked` view's unit
+   *  (not the escrow ledger's full-payout `locked`). The hook overwrites this with the view for display;
+   *  the pre-overwrite value is the reconciliation baseline, so the units MUST match or drift is false. */
   locked: bigint
   inFlight: number
   lastActiveBlock: bigint
@@ -125,6 +128,11 @@ export const reduceBackroom = (
   // roundId -> stake, kept after a round leaves the pit (post-terminal stake is safe, spec §5 rule 4)
   // so the tape can show the real settled/refunded amount instead of re-deriving it.
   const roundStake = new Map<Hex, bigint>()
+  // roundId -> operator EXPOSURE (payout - stake) locked at open. Matches the on-chain `tableLocked`
+  // view's unit so the reconciliation baseline doesn't cry wolf. Released exactly once on the first
+  // terminal event (settle or refund) and deleted, so the chop path's co-emitted RoundRefunded +
+  // ForfeitRouted can't double-release.
+  const roundExposure = new Map<Hex, bigint>()
   const tape: TapeEntry[] = []
   const treasuryHistory: TreasuryEvent[] = []
 
@@ -191,11 +199,15 @@ export const reduceBackroom = (
         break
       }
       case 'ExposureLocked': {
-        // betId == roundId. Resolve the table through the round; event-derived lane only.
-        const tableId = roundTable.get(a.betId as Hex)
+        // betId == roundId. Track EXPOSURE (payout - stake) to match the on-chain `tableLocked` view,
+        // which sums exposure, NOT the escrow ledger's full-payout `locked`. Event-derived lane only.
+        const roundId = a.betId as Hex
+        const tableId = roundTable.get(roundId)
         if (tableId) {
           const v = table(tableId, e.blockNumber)
-          v.locked += a.payout as bigint
+          const exposure = (a.payout as bigint) - (a.stake as bigint)
+          roundExposure.set(roundId, exposure)
+          v.locked += exposure
           touch(tableId, e.blockNumber)
         }
         break
@@ -205,7 +217,8 @@ export const reduceBackroom = (
         const tableId = (a.tableId as Hex) ?? roundTable.get(roundId) ?? (ZERO as Hex)
         pit.delete(roundId)
         const v = byTable.get(tableId)
-        if (v) v.locked -= (a.payout as bigint) ?? 0n
+        const exposure = roundExposure.get(roundId)
+        if (v && exposure !== undefined) { v.locked -= exposure; roundExposure.delete(roundId) }
         tape.push({
           kind: 'settled',
           roundId,
@@ -223,6 +236,12 @@ export const reduceBackroom = (
         const roundId = a.roundId as Hex
         const tableId = (a.tableId as Hex) ?? roundTable.get(roundId) ?? (ZERO as Hex)
         pit.delete(roundId)
+        // Release exposure once. Both the plain-timeout refund and the chop path (which co-emits
+        // RoundRefunded + ForfeitRouted) call _releaseTableExposure exactly once on-chain; deleting the
+        // map entry here stops the co-emitted ForfeitRouted from double-releasing.
+        const v = byTable.get(tableId)
+        const exposure = roundExposure.get(roundId)
+        if (v && exposure !== undefined) { v.locked -= exposure; roundExposure.delete(roundId) }
         // `RoundRefunded(roundId, tableId, player, stake)` carries `stake`, not `payout` — a refund
         // returns the player's original stake, there is no payout to speak of.
         tape.push({
