@@ -9,6 +9,7 @@ import {OperatorRegistry} from "./OperatorRegistry.sol";
 import {IRandomStaking} from "./IRandomStaking.sol";
 import {ReentrancyGuard} from "./ReentrancyGuard.sol";
 import {IValidatorPolicy} from "./IValidatorPolicy.sol";
+import {IFeePolicy} from "./IFeePolicy.sol";
 
 /// @notice Escrow-backed coin flip — the slice-A reference game. Identical parity mechanics to
 /// CoinFlipTables, but every chip lives in GameEscrow (token-agnostic, pre-collateralized) and every
@@ -20,11 +21,14 @@ import {IValidatorPolicy} from "./IValidatorPolicy.sol";
 /// minStake and maxStake. Each round heats the table token at its stake tier price (via
 /// _heatBoundStaked), so every validator STAKES that price in the bet's own token. The operator
 /// pre-funds a fee pool (depositFees) that feeds the round's heat fee, metered per operator. When a
-/// validator withholds its reveal, chopAndRoute chops the cohort, restores the operator's fee, and
-/// routes the withheld stake (the forfeit) into the operator's bankroll — then refunds the player.
-/// The forfeit is measured as a custody delta, so it needs no oracle: it is denominated in the bet
-/// token and always at least the stake (tierPrice >= stake by construction), making a selective abort
-/// negative-EV for the validator instead of a free-roll against the player.
+/// validator withholds its reveal, chopAndRoute chops the cohort, restores the operator's fee, refunds
+/// the player, and routes the withheld stake (the forfeit) to a NEUTRAL SINK through an owner-set
+/// IFeePolicy — never to the operator's own bankroll. This closes the operator-run-validator win-denial
+/// hole: the operator gains nothing from a selective abort. The forfeit is measured as a custody delta,
+/// so it needs no oracle; it is denominated in the bet token and always at least the stake
+/// (tierPrice >= stake by construction), making a selective abort negative-EV for the validator. The
+/// refund runs BEFORE the route, and the route is try/catch-parked, so a bad policy can never freeze a
+/// chopped round's refund.
 contract OperatorCoinFlip is GameBase, ReentrancyGuard {
     using SafeTransferLib for address;
 
@@ -45,6 +49,7 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
     uint16 internal constant MULT_MIN = 150;
     uint16 internal constant MULT_MAX = 200;
     uint8 internal constant TAILS = 1;
+    bytes32 internal constant FORFEIT_KIND = keccak256("forfeit");
 
     enum Status { None, Pending, Settled, Refunded }
 
@@ -99,6 +104,15 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
     uint256 internal _tableNonce;
     uint256 internal _roundNonce;
 
+    /// @notice The active neutral sink for the validator forfeit. Owner-set, only to a menu member;
+    /// defaults to a menu BurnFeePolicy so it is never unset. An operator can never set it (I5).
+    address public forfeitPolicy;
+    /// @notice The constructor-fixed fee-policy menu. Populated once at construction; there is NO adder,
+    /// so `setForfeitPolicy` can only ever point at an address the deployer sealed in here (I5).
+    mapping(address policy => bool) public allowedFeePolicy;
+    /// @notice Forfeit parked per token when the policy route failed — retried by `sweepForfeit`.
+    mapping(address token => uint256) public unrouted;
+
     event TableCreated(bytes32 indexed tableId, address indexed operator, address indexed token, uint16 maxMultiplierX100, uint256 minStake, uint256 maxStake);
     event OpenSet(bytes32 indexed tableId, bool open);
     event ValidatorPolicySet(bytes32 indexed tableId, address indexed policy);
@@ -108,11 +122,28 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
     event RoundOpened(bytes32 indexed roundId, bytes32 indexed tableId, address indexed player, uint8 side, uint256 stake, uint256 payout, uint256 tierPrice, bytes32 key, uint256 openedAtBlock);
     event RoundSettled(bytes32 indexed roundId, bytes32 indexed tableId, address indexed player, bool won, uint256 payout, bytes32 seed);
     event RoundRefunded(bytes32 indexed roundId, bytes32 indexed tableId, address indexed player, uint256 stake);
+    /// @notice 4th arg is the amount routed to the neutral sink (0 if the route failed and it parked).
     event ForfeitRouted(bytes32 indexed roundId, address indexed operator, address indexed token, uint256 forfeit);
+    /// @notice The route to the sink failed; the amount is parked in `unrouted` for a later `sweepForfeit`.
+    event ForfeitParked(bytes32 indexed roundId, address indexed token, uint256 amount);
+    event ForfeitPolicySet(address indexed policy);
 
-    constructor(address random_, address escrow_, address registry_) GameBase(random_) {
+    constructor(address random_, address escrow_, address registry_, address[] memory feePolicyMenu_, address forfeitPolicy_)
+        GameBase(random_)
+    {
         escrow = escrow_;
         registry = registry_;
+        for (uint256 i = 0; i < feePolicyMenu_.length; ++i) allowedFeePolicy[feePolicyMenu_[i]] = true;
+        if (!allowedFeePolicy[forfeitPolicy_]) revert PolicyRejected(); // the default must be on the menu
+        forfeitPolicy = forfeitPolicy_;
+    }
+
+    /// @notice Switch the active forfeit sink. Immediate (a recovery lever if a policy goes bad), but only
+    /// to a menu member — an operator can never set this, and it can never point off the fixed menu.
+    function setForfeitPolicy(address policy) external onlyOwner {
+        if (!allowedFeePolicy[policy]) revert PolicyRejected();
+        forfeitPolicy = policy;
+        emit ForfeitPolicySet(policy);
     }
 
     modifier onlyOperator(bytes32 tableId) {
@@ -328,9 +359,11 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
         _routeForfeit(roundId);
     }
 
-    /// @notice Restore the operator's fee, bank the withheld stakes (the forfeit) into its bankroll, and
-    /// refund the player. Drives from r.chopCredit (fee refund + withheld stakes) recorded by onReverse —
-    /// so it is identical whether this game chopped or a third party did.
+    /// @notice Restore the operator's fee, refund the player, then route the withheld stakes (the
+    /// forfeit) to the neutral sink. Drives from r.chopCredit (fee refund + withheld stakes) recorded by
+    /// onReverse — so it is identical whether this game chopped or a third party did. The refund happens
+    /// BEFORE the sink route, and the route is wrapped in a try/catch that parks on failure, so a bad or
+    /// griefing policy can never freeze a chopped round's refund (M1/M2).
     function _routeForfeit(bytes32 roundId) internal {
         Round storage r = rounds[roundId];
         Table storage t = tables[r.tableId];
@@ -342,20 +375,64 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
         uint256 forfeit = r.chopCredit - fee;
 
         // Effects before interactions: resolve the round and restore the fee BEFORE the external
-        // handoff/deposit/refund. nonReentrant already guards the entrypoints; this is the second line.
+        // refund/handoff/route. nonReentrant already guards the entrypoints; this is the second line.
         r.status = Status.Refunded;
         _releaseTableExposure(r.tableId, r.payout, r.stake);
-        feeBalance[operator][token] += fee;
+        feeBalance[operator][token] += fee; // the operator's fee is restored exactly as before
 
-        // Interactions.
-        if (forfeit > 0) {
-            IRandomStaking(random).handoff(address(this), token, int256(forfeit));
-            token.safeApproveWithRetry(escrow, forfeit);
-            GameEscrow(escrow).depositBankroll(operator, token, forfeit);
-        }
+        // Interactions — refund the player FIRST; the sink route must never gate the refund (M1).
         GameEscrow(escrow).refund(roundId);
         emit RoundRefunded(roundId, r.tableId, r.player, r.stake);
-        emit ForfeitRouted(roundId, operator, token, forfeit);
+
+        uint256 routed;
+        if (forfeit > 0) {
+            uint256 pre = token.balanceOf(address(this));
+            IRandomStaking(random).handoff(address(this), token, int256(forfeit));
+            uint256 measured = token.balanceOf(address(this)) - pre; // fee-on-transfer safe (M3)
+            routed = _routeForfeitToSink(roundId, operator, r.player, token, measured);
+        }
+        emit ForfeitRouted(roundId, operator, token, routed); // 4th arg = amount to the sink (0 if parked)
+    }
+
+    /// @notice Deliver the full forfeit to the neutral sink; park it on any failure so a bad policy cannot
+    /// freeze the abort. Returns the amount routed (0 if parked). The transfer + route are wrapped in one
+    /// external self-call so a route() revert rolls the transfer back and we park cleanly.
+    function _routeForfeitToSink(bytes32 roundId, address operator, address player, address token, uint256 amount)
+        internal
+        returns (uint256 routed)
+    {
+        if (amount == 0) return 0;
+        bytes memory ctx = abi.encode(roundId, operator, player); // I5: policy can self-check non-participant
+        try this._deliverAndRoute(forfeitPolicy, token, amount, ctx) {
+            return amount;
+        } catch {
+            unrouted[token] += amount;
+            emit ForfeitParked(roundId, token, amount);
+            return 0;
+        }
+    }
+
+    /// @notice External-self-only: transfer `amount` to the policy then call route(), atomically, so the
+    /// caller's try/catch can roll both back together. Full amount — never a bps cut (H2). NOT
+    /// nonReentrant: it is a self-call from within an already-nonReentrant path (chopAndRoute / refundStale
+    /// / sweepForfeit), so guarding it would deadlock; the self-only check plus the outer mutex protect it.
+    function _deliverAndRoute(address policy, address token, uint256 amount, bytes calldata ctx) external {
+        if (msg.sender != address(this)) revert NotOperator(); // self-only
+        token.safeTransfer(policy, amount);
+        IFeePolicy(policy).route(FORFEIT_KIND, token, amount, ctx);
+    }
+
+    /// @notice Permissionless retry of parked forfeits (after the owner swapped a bad policy). Exactly-once:
+    /// zero the ledger before the external route, park it back on failure.
+    function sweepForfeit(address token) external nonReentrant {
+        uint256 amount = unrouted[token];
+        if (amount == 0) return;
+        unrouted[token] = 0;
+        try this._deliverAndRoute(forfeitPolicy, token, amount, abi.encode(bytes32(0), address(0), address(0))) {
+            // routed
+        } catch {
+            unrouted[token] = amount; // restore; still parked
+        }
     }
 
     /// @notice Liveness fallback. If a chop already happened (credit recorded), route the forfeit exactly

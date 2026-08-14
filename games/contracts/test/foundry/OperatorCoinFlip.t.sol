@@ -10,6 +10,8 @@ import {PreimageLocation} from "../../contracts/PreimageLocation.sol";
 import {ERC20} from "../../contracts/test/ERC20.sol";
 import {MockRandomStaking} from "./MockRandomStaking.sol";
 import {IValidatorPolicy} from "../../contracts/games/operator/IValidatorPolicy.sol";
+import {IFeePolicy} from "../../contracts/games/operator/IFeePolicy.sol";
+import {BurnFeePolicy} from "../../contracts/games/operator/BurnFeePolicy.sol";
 
 /// @notice Staking-model suite for OperatorCoinFlip: stake-tier ladder, per-operator fee metering,
 /// table-token heat at the tier price, and the chopAndRoute validator-forfeit path. Uses the faithful
@@ -20,6 +22,8 @@ contract OperatorCoinFlipTest is Test {
     OperatorRegistry internal reg;
     MockRandomStaking internal rnd;
     ERC20 internal tok;
+    BurnFeePolicy internal burnPolicy;
+    RevertingFeePolicy internal revertingPolicy;
     address[] internal subset;
 
     address internal op = address(0x0B);
@@ -35,7 +39,13 @@ contract OperatorCoinFlipTest is Test {
         reg = new OperatorRegistry();
         esc = new GameEscrow(address(reg));
         tok = new ERC20(false);
-        game = new OperatorCoinFlip(address(rnd), address(esc), address(reg));
+        // The forfeit sink menu: the default BurnFeePolicy, plus a reverting policy the park test swaps in.
+        burnPolicy = new BurnFeePolicy();
+        revertingPolicy = new RevertingFeePolicy();
+        address[] memory menu = new address[](2);
+        menu[0] = address(burnPolicy);
+        menu[1] = address(revertingPolicy);
+        game = new OperatorCoinFlip(address(rnd), address(esc), address(reg), menu, address(burnPolicy));
         for (uint256 i = 0; i < 3; i++) {
             address v = address(uint160(0x3000 + i));
             game.addValidator(v);
@@ -260,9 +270,9 @@ contract OperatorCoinFlipTest is Test {
         assertGt(esc.bankrollOf(op, address(tok)), BANKROLL); // operator gained
     }
 
-    // --- Task 5: chopAndRoute forfeits the withheld stake into the bankroll ---
+    // --- Task 5: chopAndRoute routes the withheld stake to the neutral sink ---
 
-    function test_chopAndRoute_forfeitsToBankroll_refundsPlayer() public {
+    function test_chopAndRoute_forfeitsToSink_refundsPlayer() public {
         bytes32 tid = _table();
         (bytes32 roundId, bytes32 key, PreimageLocation.Info[] memory locs) = _open(tid, 0, 4 ether);
         uint256 feeAfterOpen = game.feeBalance(op, address(tok));
@@ -276,8 +286,10 @@ contract OperatorCoinFlipTest is Test {
 
         // (a) player made whole.
         assertEq(tok.balanceOf(player), 100 ether);
-        // (b) operator bankroll grew by exactly the tier price (the forfeit).
-        assertEq(esc.bankrollOf(op, address(tok)), BANKROLL + 4 ether);
+        // (b) operator bankroll UNCHANGED — the forfeit no longer credits the house.
+        assertEq(esc.bankrollOf(op, address(tok)), BANKROLL);
+        // (b') the tier price was burned at the neutral sink instead.
+        assertEq(burnPolicy.burned(address(tok)), 4 ether);
         // (c) fee pool restored by n * tierPrice.
         assertEq(game.feeBalance(op, address(tok)), feeAfterOpen + 3 * 4 ether);
         assertEq(game.feeBalance(op, address(tok)), FEES);
@@ -306,7 +318,8 @@ contract OperatorCoinFlipTest is Test {
         game.chopAndRoute(roundId, locs);
 
         assertEq(tok.balanceOf(player), 100 ether);
-        assertEq(esc.bankrollOf(op, address(tok)), BANKROLL + 4 ether);
+        assertEq(esc.bankrollOf(op, address(tok)), BANKROLL); // bankroll unchanged; forfeit went to the sink
+        assertEq(burnPolicy.burned(address(tok)), 4 ether);
         assertEq(game.feeBalance(op, address(tok)), FEES);
         assertEq(_status(roundId), uint8(OperatorCoinFlip.Status.Refunded));
         assertEq(rnd.balanceOf(address(game), address(tok)), game.feeBalance(op, address(tok)));
@@ -325,10 +338,75 @@ contract OperatorCoinFlipTest is Test {
         game.refundStale(roundId);
 
         assertEq(tok.balanceOf(player), 100 ether);
-        assertEq(esc.bankrollOf(op, address(tok)), BANKROLL + 4 ether);
+        assertEq(esc.bankrollOf(op, address(tok)), BANKROLL); // bankroll unchanged; forfeit went to the sink
+        assertEq(burnPolicy.burned(address(tok)), 4 ether);
         assertEq(game.feeBalance(op, address(tok)), FEES);
         assertEq(_status(roundId), uint8(OperatorCoinFlip.Status.Refunded));
         assertEq(rnd.balanceOf(address(game), address(tok)), game.feeBalance(op, address(tok)));
+    }
+
+    /// A reverting sink must NOT freeze the abort: the player refund still succeeds, the round resolves,
+    /// and the forfeit parks in `unrouted` for a later sweep. Operator bankroll is untouched throughout.
+    function test_forfeit_parks_when_policy_reverts() public {
+        // Swap the active sink to the reverting policy (already on the menu from setUp).
+        game.setForfeitPolicy(address(revertingPolicy));
+
+        bytes32 tid = _table();
+        (bytes32 roundId, bytes32 key, PreimageLocation.Info[] memory locs) = _open(tid, 0, 4 ether);
+        rnd.setRevealed(key, 0x3); // one validator withholds → 4 ether forfeit
+
+        // The route reverts inside the self-call; the abort must catch it and park (4th arg 0 = parked).
+        vm.expectEmit(true, true, true, true);
+        emit OperatorCoinFlip.ForfeitParked(roundId, address(tok), 4 ether);
+        game.chopAndRoute(roundId, locs);
+
+        // Player refund SUCCEEDED and the round resolved despite the bad policy.
+        assertEq(tok.balanceOf(player), 100 ether);
+        assertEq(_status(roundId), uint8(OperatorCoinFlip.Status.Refunded));
+        // Forfeit parked, nothing burned, operator bankroll unchanged, fee restored.
+        assertEq(game.unrouted(address(tok)), 4 ether);
+        assertEq(burnPolicy.burned(address(tok)), 0);
+        assertEq(esc.bankrollOf(op, address(tok)), BANKROLL);
+        assertEq(game.feeBalance(op, address(tok)), FEES);
+    }
+
+    /// After a park, the owner swaps back to a working sink and anyone may sweep: the parked amount
+    /// routes exactly once, `unrouted` clears, and the sink burn counter rises by the parked amount.
+    function test_sweepForfeit_routes_parked() public {
+        game.setForfeitPolicy(address(revertingPolicy));
+        bytes32 tid = _table();
+        (bytes32 roundId, bytes32 key, PreimageLocation.Info[] memory locs) = _open(tid, 0, 4 ether);
+        rnd.setRevealed(key, 0x3);
+        game.chopAndRoute(roundId, locs);
+        assertEq(game.unrouted(address(tok)), 4 ether); // parked
+
+        // Recover: point back at the burn sink, then a permissionless sweep drains the parked forfeit.
+        game.setForfeitPolicy(address(burnPolicy));
+        vm.prank(address(0xCAFE));
+        game.sweepForfeit(address(tok));
+
+        assertEq(game.unrouted(address(tok)), 0);
+        assertEq(burnPolicy.burned(address(tok)), 4 ether);
+    }
+
+    /// Tier-boundary case (F4): stake == minStake so tierPrice == stake. The forfeit routed to the sink
+    /// equals exactly tierPrice, and the operator bankroll is unchanged.
+    function test_forfeit_tier_boundary() public {
+        bytes32 tid = _table(); // MIN_STAKE..MAX_STAKE = 1e18..8e18
+        uint256 stake = MIN_STAKE; // on a tier → tierPrice == stake
+        uint256 tierPrice = game.tierPriceOf(tid, stake);
+        assertEq(tierPrice, stake);
+
+        (bytes32 roundId, bytes32 key, PreimageLocation.Info[] memory locs) = _open(tid, 0, stake);
+        rnd.setRevealed(key, 0x3); // one withholds → forfeit == 1 * tierPrice
+
+        vm.expectEmit(true, true, true, true);
+        emit OperatorCoinFlip.ForfeitRouted(roundId, op, address(tok), tierPrice);
+        game.chopAndRoute(roundId, locs);
+
+        assertEq(burnPolicy.burned(address(tok)), tierPrice);
+        assertEq(esc.bankrollOf(op, address(tok)), BANKROLL);
+        assertEq(tok.balanceOf(player), 100 ether);
     }
 
     /// onReverse must be onlyRandom: a forged credit would let a caller route custody the game never
@@ -474,7 +552,8 @@ contract OperatorCoinFlipTest is Test {
         rnd.setRevealed(key, 0x3);
         game.chopAndRoute(roundId, locs);
         assertEq(_status(roundId), uint8(OperatorCoinFlip.Status.Refunded));
-        assertEq(esc.bankrollOf(op, address(tok)), BANKROLL + 4 ether);
+        assertEq(esc.bankrollOf(op, address(tok)), BANKROLL); // bankroll unchanged; forfeit went to the sink
+        assertEq(burnPolicy.burned(address(tok)), 4 ether);
     }
 
     // --- Task 1 (bankroll): per-table exposure caps ---
@@ -568,4 +647,10 @@ contract RevertingPolicy is IValidatorPolicy {
 // Accepts even a too-small subset — proves the game floor still rejects regardless of the hook.
 contract TwoIsFinePolicy is IValidatorPolicy {
     function validate(address, bytes32, address, address[] calldata s) external pure returns (bool) { return s.length >= 2; }
+}
+
+// A fee policy whose route() always reverts — proves the abort parks the forfeit instead of freezing.
+contract RevertingFeePolicy is IFeePolicy {
+    function feeBps(bytes32, address, address) external pure returns (uint16) { return 0; }
+    function route(bytes32, address, uint256, bytes calldata) external pure { revert("route boom"); }
 }
