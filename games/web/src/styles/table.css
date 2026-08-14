@@ -1887,3 +1887,42 @@
 }
 .cft-name-input:focus { outline: none; border-color: var(--gold, #c9a227); }
 .cft-name-input::placeholder { color: #ffffff66; }
+
+/* ============================== backroom (BackroomScreen.tsx + components/backroom/*.tsx) ============================== */
+/* The operator's security room — a page-scroll dashboard, so it reuses the house .card/.tag/.mono/
+   table language rather than the immersive stage classes above. All backroom-only layout bits (the
+   tile grid, the exposure bars, the status lamp, the loading skeleton, the pinned alert lane) are
+   scoped under .brm-* so nothing here can collide with a felt game's classes. */
+.brm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 0.7rem; margin-top: 0.6rem; }
+.brm-tile {
+  padding: 0.75rem 0.85rem;
+  background: linear-gradient(160deg, var(--felt-700), var(--felt-800));
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.brm-skel {
+  min-height: 9.5rem;
+  background: linear-gradient(100deg, var(--felt-800) 40%, var(--felt-700) 50%, var(--felt-800) 60%);
+  background-size: 200% 100%;
+  animation: brm-pulse 1.6s ease-in-out infinite;
+}
+@keyframes brm-pulse { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .brm-skel { animation: none; } }
+
+.brm-alerts { display: flex; flex-direction: column; gap: 0.4rem; margin: 0.7rem 0; }
+.brm-alerts .banner { margin: 0; }
+
+.brm-lamp { display: inline-block; width: 0.55rem; height: 0.55rem; border-radius: 50%; margin-right: 0.4rem; vertical-align: middle; }
+.brm-lamp-pending { background: var(--brass); box-shadow: 0 0 6px rgba(201, 162, 39, 0.7); animation: brm-blink 1.4s ease-in-out infinite; }
+.brm-lamp-settling { background: var(--ok); box-shadow: 0 0 6px rgba(111, 220, 166, 0.7); }
+.brm-lamp-off { background: var(--line); }
+@keyframes brm-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+@media (prefers-reduced-motion: reduce) { .brm-lamp-pending { animation: none; } }
+
+.brm-meter { margin: 0.55rem 0; }
+.brm-bar { height: 0.6rem; border-radius: 4px; background: var(--felt-900); border: 1px solid var(--line); overflow: hidden; margin-top: 0.25rem; }
+.brm-bar-fill { height: 100%; border-radius: 3px 0 0 3px; transition: width 0.2s ease; }
+@media (prefers-reduced-motion: reduce) { .brm-bar-fill { transition: none; } }
+.brm-bar-ok { background: var(--ok); }
+.brm-bar-warn { background: var(--brass); }
+.brm-bar-bad { background: var(--bad); }
