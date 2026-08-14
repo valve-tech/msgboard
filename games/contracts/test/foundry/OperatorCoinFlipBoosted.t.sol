@@ -219,11 +219,36 @@ contract OperatorCoinFlipBoostedTest is Test {
         address[] memory menu = new address[](1);
         menu[0] = address(burnPolicy);
         OperatorCoinFlip g = new OperatorCoinFlip(address(rnd), address(esc), address(reg), menu, address(burnPolicy));
-        g.setBonusInfra(address(pool), address(chips));
-        assertEq(g.backingPool(), address(pool));
+        // L4: the pool must point back at `g` (BackingPool.game() is set once, in its constructor), so a
+        // fresh game needs a fresh pool wired to IT — the shared setUp `pool` points at `game`, not `g`.
+        BackingPool gPool = new BackingPool(address(esc), address(chips), address(g));
+        g.setBonusInfra(address(gPool), address(chips));
+        assertEq(g.backingPool(), address(gPool));
         assertEq(address(g.bonusChips()), address(chips));
         vm.expectRevert(OperatorCoinFlip.BonusInfraAlreadySet.selector);
+        g.setBonusInfra(address(gPool), address(chips));
+    }
+
+    /// L4: a pool wired to a DIFFERENT game (the mismatch case) must be rejected at set time, not left to
+    /// fail later mid-round.
+    function test_setBonusInfra_revertsForMismatchedPoolGame() public {
+        address[] memory menu = new address[](1);
+        menu[0] = address(burnPolicy);
+        OperatorCoinFlip g = new OperatorCoinFlip(address(rnd), address(esc), address(reg), menu, address(burnPolicy));
+        // The shared setUp `pool` was constructed against `game`, not `g`.
+        vm.expectRevert(OperatorCoinFlip.BonusInfraMismatch.selector);
         g.setBonusInfra(address(pool), address(chips));
+    }
+
+    /// L4: a pool wired to the right game but the WRONG chips registry must also be rejected.
+    function test_setBonusInfra_revertsForMismatchedChips() public {
+        address[] memory menu = new address[](1);
+        menu[0] = address(burnPolicy);
+        OperatorCoinFlip g = new OperatorCoinFlip(address(rnd), address(esc), address(reg), menu, address(burnPolicy));
+        BonusChips1155 otherChips = new BonusChips1155();
+        BackingPool gPool = new BackingPool(address(esc), address(otherChips), address(g));
+        vm.expectRevert(OperatorCoinFlip.BonusInfraMismatch.selector);
+        g.setBonusInfra(address(gPool), address(chips)); // gPool references otherChips, not chips
     }
 
     function test_setBonusSeries_revertsForNonOperator() public {
