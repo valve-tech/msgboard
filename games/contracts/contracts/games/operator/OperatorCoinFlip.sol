@@ -601,7 +601,9 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
         }
         emit ForfeitRouted(roundId, operator, token, routed); // 4th arg = amount to the sink (0 if parked)
 
-        if (sid != 0) bonusChips.burn(address(this), sid, 1); // 1155 move LAST
+        // Chop-harvest fix (accounting §S4): burn with the player as price beneficiary, so the round's
+        // purchase price refunds to the player and NEVER vests to the operator on an abort.
+        if (sid != 0) bonusChips.burnWithBeneficiary(address(this), sid, 1, r.player); // 1155 move LAST
     }
 
     /// @notice Deliver the full forfeit to the neutral sink; park it on any failure so a bad policy cannot

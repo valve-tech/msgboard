@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {ERC1155} from "solady/src/tokens/ERC1155.sol";
 import {SafeTransferLib} from "solady/src/utils/SafeTransferLib.sol";
+import {IPriceLedger} from "./IPriceLedger.sol";
 
 /// @notice The consumable bonus-charge token of the operator bonus economy. Each series is a distinct
 /// ERC-1155 id that pins the boost it grants: `bonusPoints` (added to a table's base multiplier),
@@ -34,6 +35,10 @@ contract BonusChips1155 is ERC1155 {
     address public owner;
     address public creator;
     address public minter;
+    /// @notice The S2c price ledger (the MintSale). Every burn fires `priceLedger.onBurn(...)` AFTER the
+    /// `_burn`, so a burned charge releases its stamped purchase price in the same call. Unset (address 0)
+    /// keeps the pre-S2c behavior — the pool never needs to know about the price side. Set once at wiring.
+    address public priceLedger;
     mapping(address account => bool allowed) public isBurner;
 
     mapping(uint256 id => Series) internal _series;
@@ -59,6 +64,7 @@ contract BonusChips1155 is ERC1155 {
     event OwnerSet(address indexed owner);
     event CreatorSet(address indexed creator);
     event MinterSet(address indexed minter);
+    event PriceLedgerSet(address indexed priceLedger);
     event BurnerSet(address indexed account, bool allowed);
     event SeriesCreated(uint256 indexed id, uint16 bonusPoints, uint256 maxStake, uint64 expiry, address token);
 
@@ -87,6 +93,13 @@ contract BonusChips1155 is ERC1155 {
     function setMinter(address m) external onlyOwner {
         minter = m;
         emit MinterSet(m);
+    }
+
+    /// @notice Point the burn hook at the S2c price ledger (the MintSale). Owner-only. Leaving it unset
+    /// disables the price side entirely; setting it makes every burn release the charge's stamped price.
+    function setPriceLedger(address p) external onlyOwner {
+        priceLedger = p;
+        emit PriceLedgerSet(p);
     }
 
     function setBurner(address account, bool allowed) external onlyOwner {
@@ -172,9 +185,32 @@ contract BonusChips1155 is ERC1155 {
         _mint(to, id, amount, "");
     }
 
+    /// @notice Burn `amount` of series `id` from `from` (burner-allowlist-gated). ABI unchanged from
+    /// pre-S2c, so the pool's `expireCharges` burn needs no edit. The price release routes with
+    /// `beneficiary == address(0)`: a pool burn refunds the holder, a game burn vests to the operator
+    /// (see the ledger's routing). The hook fires AFTER `_burn`, so a burned unit releases exactly once.
     function burn(address from, uint256 id, uint256 amount) external {
         if (!isBurner[msg.sender]) revert NotBurner();
         _burn(from, id, amount);
+        _fireOnBurn(msg.sender, from, id, amount, address(0));
+    }
+
+    /// @notice Burn with an explicit price-refund `beneficiary` (burner-allowlist-gated). The game uses
+    /// this for the chop terminal: `burnWithBeneficiary(game, sid, 1, player)` refunds the round's price
+    /// to the player instead of vesting it to the operator — the chop-harvest fix (accounting doc §S4).
+    function burnWithBeneficiary(address from, uint256 id, uint256 amount, address beneficiary) external {
+        if (!isBurner[msg.sender]) revert NotBurner();
+        _burn(from, id, amount);
+        _fireOnBurn(msg.sender, from, id, amount, beneficiary);
+    }
+
+    /// @notice Fire the price-release hook after a burn. No-op when the ledger is unset. `burner` is the
+    /// allowlisted caller (the game or the pool) — the ledger routes on it.
+    function _fireOnBurn(address burner, address from, uint256 id, uint256 amount, address beneficiary) internal {
+        address ledger = priceLedger;
+        if (ledger != address(0)) {
+            IPriceLedger(ledger).onBurn(burner, from, id, amount, beneficiary);
+        }
     }
 
     // ── metadata ─────────────────────────────────────────────────────────────────────────────────
