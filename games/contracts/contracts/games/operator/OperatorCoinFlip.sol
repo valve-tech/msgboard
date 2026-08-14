@@ -10,6 +10,8 @@ import {IRandomStaking} from "./IRandomStaking.sol";
 import {ReentrancyGuard} from "./ReentrancyGuard.sol";
 import {IValidatorPolicy} from "./IValidatorPolicy.sol";
 import {IFeePolicy} from "./IFeePolicy.sol";
+import {BonusChips1155} from "./BonusChips1155.sol";
+import {IBackingPool} from "./IBackingPool.sol";
 
 /// @notice Escrow-backed coin flip — the slice-A reference game. Identical parity mechanics to
 /// CoinFlipTables, but every chip lives in GameEscrow (token-agnostic, pre-collateralized) and every
@@ -45,6 +47,14 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
     error TooEarly();
     error PolicyRejected();
     error TableCapExceeded();
+    // --- S2b (boosted rounds) ---
+    error BonusInfraUnset();
+    error BonusInfraAlreadySet();
+    error NoBonusSeries();
+    error SeriesTokenMismatch();
+    error MultiplierClampExceeded();
+    error SeriesExpired();
+    error MinEffMultNotMet();
 
     uint16 internal constant MULT_MIN = 150;
     uint16 internal constant MULT_MAX = 200;
@@ -76,6 +86,11 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
         // appended (indices 9,10) so the earlier tuple layout the caster/QA read stays stable:
         uint256 feeCharged; // n*tierPrice metered out of the operator's fee pool at open
         uint256 chopCredit; // fee refund + withheld stakes, recorded by onReverse on chop (any caller)
+        // S2b boost fields, appended (indices 11,12,13) — the same appended-index rule. A plain round
+        // leaves all three at zero; `seriesId != 0` is the sole boosted/plain branch across every path.
+        uint256 seriesId; // 0 = plain round; != 0 = the attached bonus series consumed at open
+        uint256 boostD;   // the boost delta d = P_t - P_b, escrowed as bet B against the pool bucket
+        uint16  effMult;  // the effective multiplier applied (base + bonusPoints, capped at MULT_MAX)
     }
 
     address public immutable escrow;
@@ -113,6 +128,23 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
     /// @notice Forfeit parked per token when the policy route failed — retried by `sweepForfeit`.
     mapping(address token => uint256) public unrouted;
 
+    // --- S2b bonus economy (boosted rounds) ---
+    /// @notice The collateral co-operator (BackingPool) and the charge registry (BonusChips1155). Set
+    /// once by the owner via `setBonusInfra` AFTER the pool is deployed (the pool references this game in
+    /// its own constructor, so deploy order is game -> pool -> setBonusInfra). Until set, `openBoosted`
+    /// and any series attach revert; plain `open()` is unaffected.
+    address public backingPool;
+    BonusChips1155 public bonusChips;
+    bool internal _bonusInfraSet;
+    /// @notice The bonus series attached to a table (0 = none/disabled). An operator attaches a series
+    /// with `setBonusSeries`; `openBoosted` consumes one charge of it per round. A round records the id
+    /// it consumed in `Round.seriesId`, so every terminal branches boosted/plain on `seriesId != 0`.
+    mapping(bytes32 tableId => uint256 seriesId) public bonusSeries;
+    /// @notice A plain-timeout charge return that the player's 1155 receiver rejected — parked here so a
+    /// contract-player receiver failure can never freeze the round's fund refund. Retried permissionlessly
+    /// by `claimParkedCharge`, mirroring the `unrouted`/`sweepForfeit` park pattern.
+    mapping(bytes32 roundId => bool) public parkedCharge;
+
     event TableCreated(bytes32 indexed tableId, address indexed operator, address indexed token, uint16 maxMultiplierX100, uint256 minStake, uint256 maxStake);
     event OpenSet(bytes32 indexed tableId, bool open);
     event ValidatorPolicySet(bytes32 indexed tableId, address indexed policy);
@@ -127,6 +159,15 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
     /// @notice The route to the sink failed; the amount is parked in `unrouted` for a later `sweepForfeit`.
     event ForfeitParked(bytes32 indexed roundId, address indexed token, uint256 amount);
     event ForfeitPolicySet(address indexed policy);
+    // --- S2b events ---
+    event BonusInfraSet(address indexed pool, address indexed chips);
+    event BonusSeriesSet(bytes32 indexed tableId, uint256 indexed seriesId);
+    /// @notice A boosted round opened: `effMult` is the applied multiplier and `d` the boost delta (bet B).
+    event BoostApplied(bytes32 indexed roundId, uint256 indexed seriesId, uint16 effMult, uint256 d);
+    /// @notice A plain-timeout charge was returned to the player (T5).
+    event ChargeReturned(bytes32 indexed roundId, address indexed player, uint256 seriesId);
+    /// @notice The player's 1155 receiver rejected the returned charge; it is parked for a later claim.
+    event ChargeParked(bytes32 indexed roundId, address indexed player, uint256 seriesId);
 
     constructor(address random_, address escrow_, address registry_, address[] memory feePolicyMenu_, address forfeitPolicy_)
         GameBase(random_)
@@ -144,6 +185,32 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
         if (!allowedFeePolicy[policy]) revert PolicyRejected();
         forfeitPolicy = policy;
         emit ForfeitPolicySet(policy);
+    }
+
+    /// @notice Wire the bonus economy: the BackingPool (collateral co-operator) and the BonusChips1155
+    /// charge registry. Owner-only and ONE-TIME (the pool references this game in its constructor, so the
+    /// deploy order is game -> pool -> setBonusInfra). Setting it does not touch any plain-round path.
+    function setBonusInfra(address pool, address chips) external onlyOwner {
+        if (_bonusInfraSet) revert BonusInfraAlreadySet();
+        _bonusInfraSet = true;
+        backingPool = pool;
+        bonusChips = BonusChips1155(chips);
+        emit BonusInfraSet(pool, chips);
+    }
+
+    /// @notice Attach (or, with `seriesId == 0`, disable) a bonus series on a table. Operator-only. F-C:
+    /// the series' settlement token MUST equal the table token (otherwise backing sits in the wrong
+    /// token), and `base + bonusPoints <= MULT_MAX` must hold with NO clamp reliance (a clamp at attach
+    /// would silently under-deliver the advertised boost). Enable requires the infra to be set.
+    function setBonusSeries(bytes32 tableId, uint256 seriesId) external onlyOperator(tableId) {
+        if (seriesId != 0) {
+            if (!_bonusInfraSet) revert BonusInfraUnset();
+            (uint16 bonusPoints,,, address seriesToken) = bonusChips.seriesOf(seriesId);
+            if (tables[tableId].token != seriesToken) revert SeriesTokenMismatch();
+            if (uint256(tables[tableId].maxMultiplierX100) + bonusPoints > MULT_MAX) revert MultiplierClampExceeded();
+        }
+        bonusSeries[tableId] = seriesId;
+        emit BonusSeriesSet(tableId, seriesId);
     }
 
     modifier onlyOperator(bytes32 tableId) {
@@ -295,7 +362,8 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
         rounds[roundId] = Round({
             tableId: tableId, player: msg.sender, side: side, stake: stake, payout: payout,
             tierPrice: tierPrice, key: key, openedAtBlock: block.number, status: Status.Pending,
-            feeCharged: feeCharged, chopCredit: 0
+            feeCharged: feeCharged, chopCredit: 0,
+            seriesId: 0, boostD: 0, effMult: 0 // plain round — no boost
         });
         instanceByKey[key] = roundId;
 
@@ -303,6 +371,95 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
         // debits the operator's exposure from its bankroll — reverting if the operator is short.
         GameEscrow(escrow).lockExposure(roundId, t.operator, t.token, msg.sender, stake, payout);
         emit RoundOpened(roundId, tableId, msg.sender, side, stake, payout, tierPrice, key, block.number);
+    }
+
+    /// @notice The bet-B (boost) escrow id for a boosted round — the pool-owned second bet under the
+    /// same roundId. Kept in one place so open/settle/refund derive it identically.
+    function _boostId(bytes32 roundId) internal pure returns (bytes32) {
+        return keccak256(abi.encode(roundId, "boost"));
+    }
+
+    /// @notice Open a BOOSTED round: identical to `open()` for the operator's own bet A (stake, payout
+    /// P_b), PLUS a second escrow bet B owned by the BackingPool (stake 0, payout d) that funds the boost
+    /// from pre-collateralized bonus backing. Consumes exactly one of the table's attached bonus charges.
+    ///
+    /// `base` = table multiplier; `eff = min(base + bonusPoints, MULT_MAX)`; `P_b = stake*base/100`;
+    /// `P_t = stake*eff/100`; `d = P_t - P_b` (the boost, escrowed as bet B); `x = P_b - stake` (the
+    /// operator's marginal risk, the ONLY thing the table cap counts, O2). `minEffMult` is the player's
+    /// slippage floor on the applied multiplier.
+    ///
+    /// CEI (accounting §6, T2), EXACTLY: checks -> effects (Round incl. boost fields, `tableLocked += x`,
+    /// `feeBalance -= F`, instanceByKey) -> heat -> pull 1 charge (player->game) -> `pool.consume` ->
+    /// `lockExposure(B: pool, 0, d)` -> `lockExposure(A: operator, stake, P_b)` LAST. `nonReentrant`.
+    function openBoosted(
+        bytes32 tableId,
+        uint8 side,
+        uint256 stake,
+        uint16 minEffMult,
+        address[] calldata validatorSubset,
+        PreimageLocation.Info[] calldata validatorLocations
+    ) external nonReentrant returns (bytes32 roundId) {
+        Table storage t = tables[tableId];
+        if (t.operator == address(0)) revert TableClosed();
+        if (!t.open) revert TableClosed();
+        if (side > TAILS) revert WrongSide();
+
+        uint256 sid = bonusSeries[tableId];
+        if (sid == 0) revert NoBonusSeries();
+
+        _validateSubset(validatorSubset); // hard floor first — a hook can only tighten it
+        address policy = t.validatorPolicy;
+        if (policy != address(0)) {
+            if (!IValidatorPolicy(policy).validate(t.operator, tableId, msg.sender, validatorSubset)) revert PolicyRejected();
+        }
+
+        // Series parameters. Token match + no-clamp were enforced at `setBonusSeries` (F-C); here we
+        // enforce the round-time guards: not expired, and the stake within the series' backed range.
+        (uint16 bonusPoints, uint256 maxStake, uint64 expiry,) = bonusChips.seriesOf(sid);
+        if (block.timestamp >= expiry) revert SeriesExpired();
+        if (stake > maxStake) revert StakeOutOfRange();
+
+        uint256 tierPrice = _tierPrice(t.minStake, t.maxStake, stake);
+
+        uint16 base = t.maxMultiplierX100;
+        uint16 eff = base + bonusPoints > MULT_MAX ? MULT_MAX : base + bonusPoints;
+        if (eff <= base) revert BadMultiplier();          // the boost must add value
+        if (eff < minEffMult) revert MinEffMultNotMet();  // player slippage floor
+
+        uint256 pB = stake * base / 100;
+        uint256 pT = stake * eff / 100;
+        uint256 d = pT - pB;
+        if (d == 0) revert DustStake();      // boost truncated to nothing at this stake
+        uint256 x = pB - stake;
+        if (x == 0) revert DustStake();      // base payout truncated to break-even (matches plain open)
+
+        // Per-table exposure cap gates BASE exposure `x` only (O2) — the boost is pre-funded and cannot
+        // bankrupt the operator.
+        uint256 cap = tableCap[tableId];
+        if (cap != 0 && tableLocked[tableId] + x > cap) revert TableCapExceeded();
+
+        // --- effects (all local state written before any external interaction) ---
+        tableLocked[tableId] += x;
+        uint256 feeCharged = validatorSubset.length * tierPrice;
+        _chargeFee(t.operator, t.token, validatorSubset.length, tierPrice); // feeBalance -= F
+        bytes32 key = _heatBoundStaked(validatorSubset, validatorLocations, t.token, tierPrice);
+        roundId = keccak256(abi.encode(address(this), ++_roundNonce, tableId, msg.sender));
+        rounds[roundId] = Round({
+            tableId: tableId, player: msg.sender, side: side, stake: stake, payout: pB,
+            tierPrice: tierPrice, key: key, openedAtBlock: block.number, status: Status.Pending,
+            feeCharged: feeCharged, chopCredit: 0,
+            seriesId: sid, boostD: d, effMult: eff
+        });
+        instanceByKey[key] = roundId;
+
+        // --- interactions, in the pinned order; bet A LAST so an operator-short revert unwinds all ---
+        bonusChips.safeTransferFrom(msg.sender, address(this), sid, 1, ""); // pull 1 charge (exact-pull)
+        IBackingPool(backingPool).consume(roundId, sid, d);                 // earmark -= w; hold = w - d
+        GameEscrow(escrow).lockExposure(_boostId(roundId), backingPool, t.token, msg.sender, 0, d); // bet B
+        GameEscrow(escrow).lockExposure(roundId, t.operator, t.token, msg.sender, stake, pB);       // bet A
+
+        emit BoostApplied(roundId, sid, eff, d);
+        emit RoundOpened(roundId, tableId, msg.sender, side, stake, pB, tierPrice, key, block.number);
     }
 
     /// @notice Release a round's exposure from its table's running total on a terminal transition.
@@ -319,15 +476,33 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
         r.status = Status.Settled;
         _releaseTableExposure(r.tableId, r.payout, r.stake);
         bool won = uint8(uint256(seed) & 1) == r.side;
+        uint256 sid = r.seriesId; // 0 = plain round; branch boosted on != 0
         if (won) {
+            // T3: bet A pays P_b; boosted also settles bet B (pays d, so the player receives P_t), the
+            // pool releases the residual r to the operator's credit, then the charge burns LAST.
             GameEscrow(escrow).settleWin(roundId);
+            if (sid != 0) {
+                GameEscrow(escrow).settleWin(_boostId(roundId));
+                IBackingPool(backingPool).onSettleWin(roundId);
+                bonusChips.burn(address(this), sid, 1);
+            }
         } else {
+            // T4: bet A returns to the operator minus rake; boosted also settles bet B (d returns to the
+            // pool bucket), the pool credits the operator the full w, then the charge burns LAST.
             GameEscrow(escrow).settleLoss(roundId);
+            if (sid != 0) {
+                GameEscrow(escrow).settleLoss(_boostId(roundId));
+                IBackingPool(backingPool).onSettleLoss(roundId);
+                bonusChips.burn(address(this), sid, 1);
+            }
         }
         emit RoundSettled(roundId, r.tableId, r.player, won, r.payout, seed);
     }
 
-    function claim(bytes32 roundId) external {
+    /// @dev `nonReentrant` (accounting §6): a boosted `_settle` pays the player out of escrow and then
+    /// moves a 1155 charge; guarding the pull-fallback entry keeps that terminal single-shot even though
+    /// the status-first CEI already makes re-entry hit `AlreadyResolved`.
+    function claim(bytes32 roundId) external nonReentrant {
         Round storage r = rounds[roundId];
         if (r.status != Status.Pending) revert AlreadyResolved();
         bytes32 seed = _seed(r.key);
@@ -384,6 +559,15 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
         GameEscrow(escrow).refund(roundId);
         emit RoundRefunded(roundId, r.tableId, r.player, r.stake);
 
+        // T6 boosted: refund bet B (d returns to the pool bucket) and credit the operator the full w.
+        // The charge burn (never a return — removes the tier-boundary selective-abort profit, F4) is the
+        // 1155 move, done LAST below after the forfeit route.
+        uint256 sid = r.seriesId;
+        if (sid != 0) {
+            GameEscrow(escrow).refund(_boostId(roundId));
+            IBackingPool(backingPool).onChopRefund(roundId);
+        }
+
         uint256 routed;
         if (forfeit > 0) {
             uint256 pre = token.balanceOf(address(this));
@@ -392,6 +576,8 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
             routed = _routeForfeitToSink(roundId, operator, r.player, token, measured);
         }
         emit ForfeitRouted(roundId, operator, token, routed); // 4th arg = amount to the sink (0 if parked)
+
+        if (sid != 0) bonusChips.burn(address(this), sid, 1); // 1155 move LAST
     }
 
     /// @notice Deliver the full forfeit to the neutral sink; park it on any failure so a bad policy cannot
@@ -448,5 +634,50 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
         _releaseTableExposure(r.tableId, r.payout, r.stake);
         GameEscrow(escrow).refund(roundId);
         emit RoundRefunded(roundId, r.tableId, r.player, r.stake);
+
+        // T5 boosted plain-timeout: refund bet B (d returns to the pool bucket), the pool re-earmarks the
+        // full w (funded exactly by the returned d + r — no external liquidity), then RETURN the charge to
+        // the player LAST. A contract-player receiver failure parks the charge so the fund refund above
+        // can never freeze; `claimParkedCharge` retries it permissionlessly. Fee is NOT restored (matches
+        // the plain-timeout behavior today).
+        uint256 sid = r.seriesId;
+        if (sid != 0) {
+            GameEscrow(escrow).refund(_boostId(roundId));
+            IBackingPool(backingPool).onPlainRefund(roundId);
+            _returnOrParkCharge(roundId, r.player, sid);
+        }
+    }
+
+    /// @notice Return one charge to the player as the LAST interaction of a boosted plain-timeout. Wrapped
+    /// so a hostile/broken 1155 receiver on a contract-player can never revert the already-completed fund
+    /// refund — on failure the charge parks and `claimParkedCharge` retries it.
+    function _returnOrParkCharge(bytes32 roundId, address to, uint256 sid) internal {
+        try bonusChips.safeTransferFrom(address(this), to, sid, 1, "") {
+            emit ChargeReturned(roundId, to, sid);
+        } catch {
+            parkedCharge[roundId] = true;
+            emit ChargeParked(roundId, to, sid);
+        }
+    }
+
+    /// @notice Permissionless retry of a parked charge return (after the player's receiver is fixed).
+    /// Exactly-once: clears the flag before the external move, restores it on failure — mirroring the
+    /// `unrouted`/`sweepForfeit` pattern.
+    function claimParkedCharge(bytes32 roundId) external nonReentrant {
+        if (!parkedCharge[roundId]) return;
+        Round storage r = rounds[roundId];
+        parkedCharge[roundId] = false;
+        try bonusChips.safeTransferFrom(address(this), r.player, r.seriesId, 1, "") {
+            emit ChargeReturned(roundId, r.player, r.seriesId);
+        } catch {
+            parkedCharge[roundId] = true; // restore; still parked
+        }
+    }
+
+    /// @notice Accept the exact-pull of one bonus charge at `openBoosted`. Accounts NOTHING (the pool's
+    /// earmark bookkeeping and the game's own round record are the source of truth); an unsolicited push
+    /// is simply held and is harmless over-backing.
+    function onERC1155Received(address, address, uint256, uint256, bytes calldata) external pure returns (bytes4) {
+        return this.onERC1155Received.selector;
     }
 }
