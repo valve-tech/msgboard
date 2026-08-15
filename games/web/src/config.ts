@@ -169,9 +169,11 @@ export const deployments: GameDeployment[] = [
     // P2P guessing-game coinflip offer book (deployed + all 4 paths exercised on-chain 2026-07-20).
     flipBook: '0xb009bd8b849dd33d9c5081ec6e53f29a947f6832',
     flipBookDeployBlock: '24921235',
-    // Variant-B flip book over x402PLS (deployed + live-exercised 2026-07-21).
-    flipBookX: '0x9e232e84E80FCaC3c78dE0820dABccf660511275',
-    flipBookXDeployBlock: '24932217',
+    // Variant-B flip book over x402PLS. REDEPLOYED 2026-08-15 with the guessCommit-binding
+    // takerNonce fix (034d2c3, HIGH relayer-theft hole). Prior 0x9e23…1275 (block 24932217) is the
+    // retired VULNERABLE build — kept indexable for in-flight flips; never point players at it.
+    flipBookX: '0xdfa2f37167c524ff05d075cce7d099aee9f21f39',
+    flipBookXDeployBlock: '25140838',
     x402Pls: '0xeb274050cb029288B8A4F232Da8d23F393d54A1E',
     // EAS leaderboard layer (deployed + schemas registered 2026-07-20; SolveResolvers.t.sol).
     eas: '0x9e84Aa4BD0C1931A34B14C1EC918A53C33e2B0F8',
@@ -253,9 +255,11 @@ export const deployments: GameDeployment[] = [
     // P2P guessing-game coinflip offer book (deployed + exercised on-chain 2026-07-20; Sourcify exact_match).
     flipBook: '0x603e32ddaf5f4b6ada77e04bb7c44c4603f59eee',
     flipBookDeployBlock: '27080922',
-    // Variant-B flip book over x402PLS (deployed 2026-07-21; Sourcify exact_match).
-    flipBookX: '0x28EfA8fA6c956C0b49f6Cdc6273b1eBe76382CD8',
-    flipBookXDeployBlock: '27091482',
+    // Variant-B flip book over x402PLS. REDEPLOYED 2026-08-15 with the guessCommit-binding
+    // takerNonce fix (034d2c3, HIGH relayer-theft hole). Prior 0x28Ef…2CD8 (block 27091482) is the
+    // retired VULNERABLE build — kept indexable for in-flight flips; never point players at it.
+    flipBookX: '0x823A85BBcBc94c6322812161058132b7BCf226fd',
+    flipBookXDeployBlock: '27296644',
     x402Pls: '0xeb274050cb029288B8A4F232Da8d23F393d54A1E',
     // EAS leaderboard layer (deployed + schemas registered 2026-07-20; SolveResolvers.t.sol).
     eas: '0x9e84Aa4BD0C1931A34B14C1EC918A53C33e2B0F8',
