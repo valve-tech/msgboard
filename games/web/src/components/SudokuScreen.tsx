@@ -9,7 +9,6 @@ import { attestSudokuSolve, sudokuAttestedSet, sudokuEasReady } from '../lib/eas
 import { sendGameTx } from '../tx'
 import { InfoDot } from './Meta'
 import { GameStage } from './shell/GameStage'
-import { HowItWorksLink } from './HowItWorks'
 import { ControlTray } from './shell/ControlTray'
 import { MetaPanel } from './shell/MetaPanel'
 import { PuzzleBoard } from './stages/PuzzleBoard'
@@ -267,7 +266,7 @@ export const SudokuScreen = ({
 
   return (
     <>
-      <GameStage title="ZK SUDOKU" subtitle={`puzzle #${PUZZLE_ID.toString()} · prove without revealing`} action={<HowItWorksLink />}>
+      <GameStage title="ZK SUDOKU" subtitle={`puzzle #${PUZZLE_ID.toString()} · prove without revealing`}>
         <PuzzleBoard
           tone="sudoku"
           head={

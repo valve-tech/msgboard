@@ -14,7 +14,6 @@ import { parseStake } from './StakeInput'
 import { RoundTiming } from './TurnTiming'
 import { involvement } from '../model/participation'
 import { GameStage } from './shell/GameStage'
-import { HowItWorksLink } from './HowItWorks'
 import { BetTray } from './shell/BetTray'
 import { MetaPanel } from './shell/MetaPanel'
 import { BookBoard } from './stages/BookBoard'
@@ -398,7 +397,7 @@ export const RaffleScreen = ({
 
   return (
     <>
-      <GameStage title="THE NUMBERS" subtitle="pick 1–256 · closest to the draw wins the pot" action={<HowItWorksLink />}>
+      <GameStage title="THE NUMBERS" subtitle="pick 1–256 · closest to the draw wins the pot">
         <BookBoard
           alert={alertNode}
           defaultKey={revealDueRounds.length > 0 ? 'mine' : 'open'}

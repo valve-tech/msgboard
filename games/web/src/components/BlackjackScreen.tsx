@@ -8,7 +8,6 @@ import type { GameDeployment } from '../config'
 import { parseStake } from './StakeInput'
 import { randomDeckSeed, Card, CardBack } from './decisionShared'
 import { GameStage } from './shell/GameStage'
-import { HowItWorksLink } from './HowItWorks'
 import { BetTray } from './shell/BetTray'
 import { MetaPanel } from './shell/MetaPanel'
 import { FeltTable } from './stages/FeltTable'
@@ -83,7 +82,7 @@ export const BlackjackScreen = ({ deployment: _d, walletClient, trustAcknowledge
 
   return (
     <>
-      <GameStage title="BLACKJACK" subtitle="sealed before you play" action={<HowItWorksLink />}>
+      <GameStage title="BLACKJACK" subtitle="sealed before you play">
         <FeltTable dealer={dealerNode} player={playerNode} spots={spotsNode} arc="BLACKJACK PAYS 3 TO 2 · INSURANCE PAYS 2 TO 1" />
       </GameStage>
 

@@ -6,7 +6,6 @@ import { useSession, type RoundRecord } from '../hooks/useSession'
 import { parseStake } from './StakeInput'
 import { TurnTiming } from './TurnTiming'
 import { GameStage } from './shell/GameStage'
-import { HowItWorksLink } from './HowItWorks'
 import { BetTray } from './shell/BetTray'
 import { MetaPanel } from './shell/MetaPanel'
 import { CanvasStage } from './stages/CanvasStage'
@@ -121,7 +120,6 @@ export const CrashScreen = ({
       <GameStage
         title="CRASH"
         subtitle="cash out before it busts · sealed before you play"
-        action={<HowItWorksLink />}
       >
         <CanvasStage multiplier={bigMultiplier} history={historyChips.length > 0 ? historyChips : undefined} />
       </GameStage>

@@ -11,7 +11,6 @@ import { useMinesSession, type MinesGameRecord } from '../hooks/useMinesSession'
 import { parseStake } from './StakeInput'
 import { TurnTiming } from './TurnTiming'
 import { GameStage } from './shell/GameStage'
-import { HowItWorksLink } from './HowItWorks'
 import { BetTray } from './shell/BetTray'
 import { MetaPanel } from './shell/MetaPanel'
 import { RevealGrid, type RevealTile } from './stages/RevealGrid'
@@ -149,7 +148,7 @@ export const MinesScreen = ({
 
   return (
     <>
-      <GameStage title="MINES" subtitle="flip gems, dodge the mines · sealed before you play" action={<HowItWorksLink />}>
+      <GameStage title="MINES" subtitle="flip gems, dodge the mines · sealed before you play">
         {gridTiles.length > 0 ? (
           <RevealGrid cols={cols} tiles={gridTiles} banner={banner} onTile={onTile} />
         ) : (

@@ -6,7 +6,6 @@ import { useSession, type RoundRecord } from '../hooks/useSession'
 import { parseStake } from './StakeInput'
 import { TurnTiming } from './TurnTiming'
 import { GameStage } from './shell/GameStage'
-import { HowItWorksLink } from './HowItWorks'
 import { BetTray } from './shell/BetTray'
 import { MetaPanel } from './shell/MetaPanel'
 import { FeltTable } from './stages/FeltTable'
@@ -111,7 +110,7 @@ export const CrapsScreen = ({ deployment, walletClient, trustAcknowledged, myAdd
 
   return (
     <>
-      <GameStage title="CRAPS" subtitle="the pass line · sealed dice" action={<HowItWorksLink />}>
+      <GameStage title="CRAPS" subtitle="the pass line · sealed dice">
         <FeltTable dealer={puckNode} spread={diceNode} spots={spotsNode} centerMark={null} />
       </GameStage>
 
