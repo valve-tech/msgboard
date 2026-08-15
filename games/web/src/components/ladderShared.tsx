@@ -2,7 +2,6 @@ import type { ReactNode } from 'react'
 import * as viem from 'viem'
 import type { LadderGameRecord, LadderSessionApi } from '../hooks/useLadderSession'
 import { GameStage } from './shell/GameStage'
-import { HowItWorksLink } from './HowItWorks'
 import { BetTray } from './shell/BetTray'
 import { MetaPanel } from './shell/MetaPanel'
 import { LadderPath } from './stages/LadderPath'
@@ -101,7 +100,7 @@ export const LadderShell = ({
 
   return (
     <>
-      <GameStage title={title} subtitle={subtitle} action={<HowItWorksLink />}>
+      <GameStage title={title} subtitle={subtitle}>
         <LadderPath
           steps={steps}
           current={session.step}

@@ -8,7 +8,6 @@ import type { GameDeployment } from '../config'
 import { parseStake } from './StakeInput'
 import { randomDeckSeed, Card, CardBack } from './decisionShared'
 import { GameStage } from './shell/GameStage'
-import { HowItWorksLink } from './HowItWorks'
 import { BetTray } from './shell/BetTray'
 import { MetaPanel } from './shell/MetaPanel'
 import { FeltTable } from './stages/FeltTable'
@@ -122,7 +121,7 @@ export const PaiGowScreen = ({ deployment: _d, walletClient, trustAcknowledged, 
 
   return (
     <>
-      <GameStage title="PAI GOW POKER" subtitle="split seven · beat both hands" action={<HowItWorksLink />}>
+      <GameStage title="PAI GOW POKER" subtitle="split seven · beat both hands">
         <FeltTable
           dealer={dealerSeat}
           player={playerSeat}

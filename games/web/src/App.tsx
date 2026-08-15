@@ -45,7 +45,7 @@ import { CasinoFloor } from './components/CasinoFloor'
 import { BackroomScreen } from './components/BackroomScreen'
 import { Menu } from './components/Menu'
 import { AppShell } from './components/shell/AppShell'
-import { HowItWorksProvider, HowItWorksModal } from './components/HowItWorks'
+import { HowItWorksModal } from './components/HowItWorks'
 
 const short = (a?: viem.Hex) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '')
 
@@ -210,7 +210,7 @@ export const App = () => {
   )
 
   return (
-    <HowItWorksProvider value={() => setHowOpen(true)}>
+    <>
       <HowItWorksModal
         open={howOpen}
         onClose={() => setHowOpen(false)}
@@ -558,6 +558,6 @@ export const App = () => {
       {tab === 'backroom' && deployment.operator && <BackroomScreen deployment={deployment} operator={wallet.address} />}
       </AppShell>
       )}
-    </HowItWorksProvider>
+    </>
   )
 }

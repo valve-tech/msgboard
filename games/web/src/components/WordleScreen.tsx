@@ -13,7 +13,6 @@ import type { SolveProof } from '../lib/wordleProving'
 import { sendGameTx } from '../tx'
 import { InfoDot } from './Meta'
 import { GameStage } from './shell/GameStage'
-import { HowItWorksLink } from './HowItWorks'
 import { ControlTray } from './shell/ControlTray'
 import { MetaPanel } from './shell/MetaPanel'
 import { PuzzleBoard } from './stages/PuzzleBoard'
@@ -510,7 +509,7 @@ export const WordleScreen = ({
 
   return (
     <>
-      <GameStage title="ZK WORDLE" subtitle="set a word · friends prove-fairly guess it" action={<HowItWorksLink />}>
+      <GameStage title="ZK WORDLE" subtitle="set a word · friends prove-fairly guess it">
         <PuzzleBoard tone="wordle" head={head}>
           {surface}
         </PuzzleBoard>
