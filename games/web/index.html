@@ -54,7 +54,12 @@
       #root {
         height: 100vh;
         height: 100dvh;
-        overflow: hidden;
+        /* Non-stage screens (the lobby/standings/live floor) render taller than the viewport: .main
+           sits in a 100vh grid track without min-height:0, so .app grows past 100vh. Scroll #root
+           instead of clipping it, so the floor is reachable. Game stages fit 100vh and keep their
+           own internal .stagewrap scroll region, so #root never overflows there. */
+        overflow-y: auto;
+        overflow-x: hidden;
       }
       /* NOTE: .app is intentionally NOT styled here — table.css's `.app { display:grid;
          grid-template-columns:60px 1fr; height:100vh }` is the single source of truth for the shell
