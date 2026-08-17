@@ -35,16 +35,22 @@ function loadFlipBookXArtifact(): { abi: viem.Abi; bytecode: viem.Hex } {
 
 async function main(): Promise<void> {
   /* eslint-disable no-console */
-  const { mnemonicToAccount } = await import('viem/accounts')
+  const { mnemonicToAccount, privateKeyToAccount } = await import('viem/accounts')
 
   const RPC = process.env.RPC_URL ?? 'https://rpc.v4.testnet.pulsechain.com'
   const CHAIN_ID = Number(process.env.CHAIN_ID ?? 943)
   const BUFFER_BPS = BigInt(process.env.GAS_BUFFER_BPS ?? 20_000n)
   const EXECUTE = process.env.DEPLOY_EXECUTE === '1'
 
+  // Accept either a raw PRIVATE_KEY (the valve_deployer op item is a 0x pk, matching the qa scripts)
+  // or a MNEMONIC. PRIVATE_KEY wins if both are set.
+  const pk = process.env.PRIVATE_KEY
   const mnemonic = process.env.MNEMONIC
-  if (!mnemonic) throw new Error('set MNEMONIC in the environment (games/contracts/.env)')
-  const deployer = mnemonicToAccount(mnemonic)
+  const deployer = pk
+    ? privateKeyToAccount((pk.startsWith('0x') ? pk : `0x${pk}`) as viem.Hex)
+    : mnemonic
+      ? mnemonicToAccount(mnemonic)
+      : (() => { throw new Error('set PRIVATE_KEY or MNEMONIC in the environment') })()
 
   const chain = { id: CHAIN_ID, name: `chain-${CHAIN_ID}`, nativeCurrency: { name: 'PLS', symbol: 'PLS', decimals: 18 }, rpcUrls: { default: { http: [RPC] } } } as const
   const publicClient = viem.createPublicClient({ chain, transport: viem.http(RPC) })
