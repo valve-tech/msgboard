@@ -147,6 +147,45 @@ const main = async () => {
       }
     })
 
+  // Read the FIRST committed preimage-hash inked at a pool location. The `pointer` is an SSTORE2 data
+  // contract: its runtime code is a 0x00 STOP byte followed by the raw 32-byte preimage hashes, so the
+  // first hash is code bytes [1..33). Returns null when the location is uninked.
+  const committedFirstHash = async (probe: Info): Promise<viem.Hex | null> => {
+    const ptr = (await publicClient.readContract({
+      address: config.random,
+      abi: randomAbi,
+      functionName: 'pointer',
+      args: [probe],
+    })) as viem.Hex
+    if (ptr === viem.zeroAddress) return null
+    const code = await publicClient.getCode({ address: ptr })
+    if (!code || code.length < 4 + 64) return null
+    return ('0x' + code.slice(4, 4 + 64)) as viem.Hex // skip '0x' + the leading 00 STOP byte, take 32 bytes
+  }
+
+  // A pool is DRIFTED when its on-chain commitment doesn't match the secret the cast reveals for that
+  // slot — i.e. it was inked with the WRONG pool's preimages (an append/offset drift; happened once at
+  // 943 pool 25 / slots 1600-1663). Such a pool can never be cast for any slot, so the caster must stop
+  // re-simulating it every tick (the failing sims otherwise spin forever and slow the tick), and those
+  // rounds settle via each game's own timeout/refund, not the caster. Cached per-process.
+  const driftedPools = new Set<string>()
+  const isPoolDrifted = async (poolStart: bigint): Promise<boolean> => {
+    if (driftedPools.has(poolStart.toString())) return true
+    for (const [i, provider] of config.canonicalSubset.entries()) {
+      const base = BigInt(config.poolOffsets[provider.toLowerCase()] ?? '0')
+      const pool = poolLocationFor(poolStart, base, poolSize)
+      const probe: Info = { provider, callAtChange: false, durationIsTimestamp: false, duration: 12n, token: viem.zeroAddress, price: 0n, offset: pool.offset, index: 0n }
+      const got = await committedFirstHash(probe)
+      if (got === null) return false // uninked (not drifted) — maintainPools will ink it
+      const expected = viem.keccak256(seeds0Secret(env.SEEDS0!, i * SECRET_STRIDE + Number(poolStart)))
+      if (got !== expected) {
+        driftedPools.add(poolStart.toString())
+        return true
+      }
+    }
+    return false
+  }
+
   /**
    * Ensure the pool the CURRENT heat slot lives in exists, and pre-ink pool n+1 when the live
    * pool is nearly spent. The current-pool check is the recovery path: if this watcher was down
@@ -179,6 +218,28 @@ const main = async () => {
           args: [probe],
         })) as viem.Hex
         if (pointer !== viem.zeroAddress) continue // this pool already inked
+
+        // DRIFT PREVENTION. The caster IGNORES the passed offset and APPENDS at its own internal
+        // cursor; `poolLocationFor` only PREDICTS this pool lands at base + poolStart, and that holds
+        // ONLY if appends are strictly ordered with no gap. If the PREDECESSOR pool (poolStart -
+        // poolSize) isn't inked yet, appending now would land THIS pool's preimages in the
+        // predecessor's slot — the exact off-by-64 drift that wedged 943 pool 25. Refuse to append
+        // into a gap; the predecessor must be inked first (this pass inks [current, n+1] in order, so
+        // the normal boundary case is fine; a multi-pool gap from long downtime needs ordered backfill).
+        if (poolStart >= poolSize) {
+          const predOffset = poolLocationFor(poolStart - poolSize, base, poolSize).offset
+          const predPtr = (await publicClient.readContract({
+            address: config.random,
+            abi: randomAbi,
+            functionName: 'pointer',
+            args: [{ ...probe, offset: predOffset }],
+          })) as viem.Hex
+          if (predPtr === viem.zeroAddress) {
+            console.error(`INK SKIPPED slot ${poolStart} validator ${i}: predecessor pool at offset ${predOffset} is not inked — appending now would drift into the gap; backfill the predecessor first`)
+            continue
+          }
+        }
+
         const vault = await publicClient.getBalance({ address: treasury.account.address })
         if (vault < VAULT_FLOOR) {
           console.log(`vault below floor (${viem.formatEther(vault)} < ${viem.formatEther(VAULT_FLOOR)}) — pool inking paused until refilled`)
@@ -195,6 +256,18 @@ const main = async () => {
           args: [{ ...probe, offset: 0n }, viem.concatHex(preimages)],
         })
         console.log(`inked pool at slot ${poolStart} for validator ${i} (${provider}) at offset ${pool.offset}`)
+        // Read back what ACTUALLY landed. Despite the contiguity guard, a concurrent append (e.g. an
+        // RPC-lagged pointer read that missed a just-mined ink) can still land this pool off-target.
+        // If committed[0] doesn't match this pool's first secret, the append DRIFTED: record it (so
+        // casts drop the pool), alarm, and ABORT the rest of this pass so the drift can never compound
+        // across the remaining pools/validators.
+        const committed = await committedFirstHash(probe)
+        const expected = viem.keccak256(seeds0Secret(env.SEEDS0!, i * SECRET_STRIDE + firstSecretIndex))
+        if (committed !== expected) {
+          driftedPools.add(poolStart.toString())
+          console.error(`POOL INK DRIFT slot ${poolStart} validator ${i}: committed[0] ${committed} != expected ${expected} — append landed off-target; aborting further inking this pass to avoid compounding. Manual repair needed.`)
+          return
+        }
       }
     }
   }
@@ -361,7 +434,17 @@ const main = async () => {
             })
             return { c, request }
           } catch (error) {
-            console.error(`cast ${c.key} (slot ${c.k}) sim failed: ${(error as Error).message?.split('\n').slice(0, 3).join(' ¦ ')}`)
+            const msg = (error as Error).message ?? ''
+            // A drifted pool (wrong preimages inked) can NEVER be cast — drop the heat so the caster
+            // stops re-simulating it every tick (the death-spiral). Its round settles via the game's
+            // own timeout/refund, not here. Only SecretMismatch is treated as terminal, and only once
+            // the pool is verified drifted (a transient race still retries next tick).
+            if (msg.includes('SecretMismatch') && (await isPoolDrifted((c.k / poolSize) * poolSize))) {
+              resolved.add(c.key)
+              console.error(`cast ${c.key} (slot ${c.k}) DROPPED: pool ${(c.k / poolSize) * poolSize} inked with the wrong preimages (drift) — cannot be cast; settle via the game's timeout`)
+            } else {
+              console.error(`cast ${c.key} (slot ${c.k}) sim failed: ${msg.split('\n').slice(0, 3).join(' ¦ ')}`)
+            }
             return null
           }
         }),
