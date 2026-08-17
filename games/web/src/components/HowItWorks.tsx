@@ -1,29 +1,12 @@
-import { createContext, useContext, useEffect } from 'react'
+import { useEffect } from 'react'
 import type { GameDeployment } from '../config'
 import type { TrustModel } from './TrustBanner'
 import { CryptoShowcase } from './CryptoShowcase'
 
 /**
  * The fairness explainer, demoted from the old lobby `.pitch` block into an on-demand overlay.
- * The copy is unchanged — it now lives behind a "How it works" affordance in the shell top bar
- * and in each migrated table's title bar (via `HowItWorksLink`, which reads the opener off context).
+ * The copy is unchanged — it lives behind the single "How it works" affordance in the shell top bar.
  */
-
-// The opener is threaded through context so any screen's title-bar action can raise the shared modal
-// without prop-drilling. Defaults to a no-op so a stray render outside the provider is harmless.
-const HowItWorksContext = createContext<() => void>(() => {})
-export const HowItWorksProvider = HowItWorksContext.Provider
-export const useHowItWorks = () => useContext(HowItWorksContext)
-
-/** The inert `ⓘ How it works` title-bar label, now wired to open the shared explainer. */
-export const HowItWorksLink = () => {
-  const open = useHowItWorks()
-  return (
-    <button type="button" className="pf-open" onClick={open}>
-      ⓘ How it works
-    </button>
-  )
-}
 
 export const HowItWorksModal = ({
   open,

@@ -7,7 +7,6 @@ import { useWarSession, type FlipRecord } from '../hooks/useWarSession'
 import { TurnTiming } from './TurnTiming'
 import { Card, CardBack } from './decisionShared'
 import { GameStage } from './shell/GameStage'
-import { HowItWorksLink } from './HowItWorks'
 import { ControlTray } from './shell/ControlTray'
 import { MetaPanel } from './shell/MetaPanel'
 import { FeltTable } from './stages/FeltTable'
@@ -127,7 +126,7 @@ export const HiLoWarScreen = ({
 
   return (
     <>
-      <GameStage title="HI-LO WAR" subtitle="higher card takes the pot" action={<HowItWorksLink />}>
+      <GameStage title="HI-LO WAR" subtitle="higher card takes the pot">
         <FeltTable
           dealer={houseNode}
           player={youNode}

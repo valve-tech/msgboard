@@ -13,7 +13,6 @@ import { useSession, type RoundRecord } from '../hooks/useSession'
 import { parseStake } from './StakeInput'
 import { TurnTiming } from './TurnTiming'
 import { GameStage } from './shell/GameStage'
-import { HowItWorksLink } from './HowItWorks'
 import { BetTray } from './shell/BetTray'
 import { MetaPanel } from './shell/MetaPanel'
 import { DiffChips, fmtMult, fmtMultShort } from './ladderShared'
@@ -104,7 +103,7 @@ export const PachinkoScreen = ({ deployment, walletClient, trustAcknowledged, my
 
   return (
     <>
-      <GameStage title="PACHINKO" subtitle={`${rows} pins · ${risk} risk`} action={<HowItWorksLink />}>
+      <GameStage title="PACHINKO" subtitle={`${rows} pins · ${risk} risk`}>
         <DropBoard rows={rows} buckets={buckets} path={path} dropId={session.history.length} idleHint="set your risk, then drop" />
       </GameStage>
 

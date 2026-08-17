@@ -13,7 +13,6 @@ import { useSession, type RoundRecord } from '../hooks/useSession'
 import { parseStake } from './StakeInput'
 import { TurnTiming } from './TurnTiming'
 import { GameStage } from './shell/GameStage'
-import { HowItWorksLink } from './HowItWorks'
 import { BetTray } from './shell/BetTray'
 import { MetaPanel } from './shell/MetaPanel'
 import { DiffChips, fmtMult } from './ladderShared'
@@ -117,7 +116,7 @@ export const WheelScreen = ({ deployment, walletClient, trustAcknowledged, myAdd
 
   return (
     <>
-      <GameStage title="WHEEL" subtitle={`${segments} segments · ${risk} risk`} action={<HowItWorksLink />}>
+      <GameStage title="WHEEL" subtitle={`${segments} segments · ${risk} risk`}>
         <MultiWheel segs={segs} landed={landed} spinId={session.history.length} hub={hub} idleHint="set your risk & segments, then spin" />
       </GameStage>
 

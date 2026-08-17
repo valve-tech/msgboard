@@ -7,7 +7,6 @@ import { parseStake } from './StakeInput'
 import { TurnTiming } from './TurnTiming'
 import { Card, CardBack } from './decisionShared'
 import { GameStage } from './shell/GameStage'
-import { HowItWorksLink } from './HowItWorks'
 import { BetTray } from './shell/BetTray'
 import { MetaPanel } from './shell/MetaPanel'
 import { FeltTable } from './stages/FeltTable'
@@ -129,7 +128,7 @@ export const BaccaratScreen = ({
 
   return (
     <>
-      <GameStage title="BACCARAT" subtitle="punto banco · sealed shoe" action={<HowItWorksLink />}>
+      <GameStage title="BACCARAT" subtitle="punto banco · sealed shoe">
         <FeltTable
           dealer={bankerNode}
           player={playerNode}

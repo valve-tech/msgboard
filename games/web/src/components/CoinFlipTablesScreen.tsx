@@ -13,7 +13,6 @@ import { TablePicker } from './TablePicker'
 import { Menu } from './Menu'
 import { parseStake } from './StakeInput'
 import { GameStage } from './shell/GameStage'
-import { HowItWorksLink } from './HowItWorks'
 import { BetTray } from './shell/BetTray'
 import { MetaPanel } from './shell/MetaPanel'
 import { AddressLink, explorerUrl, fmtAmount, InfoDot, MSGBOARD_GAMES_DOCS } from './Meta'
@@ -417,7 +416,7 @@ export const CoinFlipTablesScreen = ({
 
   if (!deployed) {
     return (
-      <GameStage title="PLAYER TABLES" subtitle="bet a coin flip against an operator's bankroll" action={<HowItWorksLink />}>
+      <GameStage title="PLAYER TABLES" subtitle="bet a coin flip against an operator's bankroll">
         <div className="card">
           <p className="muted">
             Player-run tables aren't live on this chain yet. Switch to a chain where the CoinFlipTables
@@ -435,7 +434,7 @@ export const CoinFlipTablesScreen = ({
 
   return (
     <>
-      <GameStage title="PLAYER TABLES" subtitle="bet a coin flip against an operator's bankroll" action={<HowItWorksLink />}>
+      <GameStage title="PLAYER TABLES" subtitle="bet a coin flip against an operator's bankroll">
         <div className="cft-surface">
           <TablePicker deployment={deployment} walletClient={walletClient} selected={tableId} onSelect={setTableId} />
 

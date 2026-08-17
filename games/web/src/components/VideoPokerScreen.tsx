@@ -7,7 +7,6 @@ import type { GameDeployment } from '../config'
 import { parseStake } from './StakeInput'
 import { randomDeckSeed, Card, CardBack } from './decisionShared'
 import { GameStage } from './shell/GameStage'
-import { HowItWorksLink } from './HowItWorks'
 import { BetTray } from './shell/BetTray'
 import { MetaPanel } from './shell/MetaPanel'
 import { FeltTable } from './stages/FeltTable'
@@ -111,7 +110,7 @@ export const VideoPokerScreen = ({ deployment: _d, walletClient, trustAcknowledg
 
   return (
     <>
-      <GameStage title="VIDEO POKER" subtitle="jacks or better · 9/6" action={<HowItWorksLink />}>
+      <GameStage title="VIDEO POKER" subtitle="jacks or better · 9/6">
         <FeltTable player={handNode} arc={arc} centerMark={null} />
       </GameStage>
 

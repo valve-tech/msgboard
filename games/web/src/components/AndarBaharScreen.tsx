@@ -7,7 +7,6 @@ import { parseStake } from './StakeInput'
 import { TurnTiming } from './TurnTiming'
 import { Card, CardBack } from './decisionShared'
 import { GameStage } from './shell/GameStage'
-import { HowItWorksLink } from './HowItWorks'
 import { BetTray } from './shell/BetTray'
 import { MetaPanel } from './shell/MetaPanel'
 import { FeltTable } from './stages/FeltTable'
@@ -139,7 +138,7 @@ export const AndarBaharScreen = ({
 
   return (
     <>
-      <GameStage title="ANDAR BAHAR" subtitle="catch the joker's rank" action={<HowItWorksLink />}>
+      <GameStage title="ANDAR BAHAR" subtitle="catch the joker's rank">
         <FeltTable dealer={jokerNode} spread={rowsNode} spots={spotsNode} centerMark={null} />
       </GameStage>
 
