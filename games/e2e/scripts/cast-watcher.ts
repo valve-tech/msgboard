@@ -218,6 +218,28 @@ const main = async () => {
           args: [probe],
         })) as viem.Hex
         if (pointer !== viem.zeroAddress) continue // this pool already inked
+
+        // DRIFT PREVENTION. The caster IGNORES the passed offset and APPENDS at its own internal
+        // cursor; `poolLocationFor` only PREDICTS this pool lands at base + poolStart, and that holds
+        // ONLY if appends are strictly ordered with no gap. If the PREDECESSOR pool (poolStart -
+        // poolSize) isn't inked yet, appending now would land THIS pool's preimages in the
+        // predecessor's slot — the exact off-by-64 drift that wedged 943 pool 25. Refuse to append
+        // into a gap; the predecessor must be inked first (this pass inks [current, n+1] in order, so
+        // the normal boundary case is fine; a multi-pool gap from long downtime needs ordered backfill).
+        if (poolStart >= poolSize) {
+          const predOffset = poolLocationFor(poolStart - poolSize, base, poolSize).offset
+          const predPtr = (await publicClient.readContract({
+            address: config.random,
+            abi: randomAbi,
+            functionName: 'pointer',
+            args: [{ ...probe, offset: predOffset }],
+          })) as viem.Hex
+          if (predPtr === viem.zeroAddress) {
+            console.error(`INK SKIPPED slot ${poolStart} validator ${i}: predecessor pool at offset ${predOffset} is not inked — appending now would drift into the gap; backfill the predecessor first`)
+            continue
+          }
+        }
+
         const vault = await publicClient.getBalance({ address: treasury.account.address })
         if (vault < VAULT_FLOOR) {
           console.log(`vault below floor (${viem.formatEther(vault)} < ${viem.formatEther(VAULT_FLOOR)}) — pool inking paused until refilled`)
@@ -234,13 +256,17 @@ const main = async () => {
           args: [{ ...probe, offset: 0n }, viem.concatHex(preimages)],
         })
         console.log(`inked pool at slot ${poolStart} for validator ${i} (${provider}) at offset ${pool.offset}`)
-        // Read back what actually landed at this location — the ink APPENDS (offset:0n), so a duplicate
-        // or out-of-order append silently lands a pool's preimages at the wrong offset (the 943 pool-25
-        // drift). Verify committed[0] matches this pool's first secret; alarm loudly if it doesn't.
+        // Read back what ACTUALLY landed. Despite the contiguity guard, a concurrent append (e.g. an
+        // RPC-lagged pointer read that missed a just-mined ink) can still land this pool off-target.
+        // If committed[0] doesn't match this pool's first secret, the append DRIFTED: record it (so
+        // casts drop the pool), alarm, and ABORT the rest of this pass so the drift can never compound
+        // across the remaining pools/validators.
         const committed = await committedFirstHash(probe)
         const expected = viem.keccak256(seeds0Secret(env.SEEDS0!, i * SECRET_STRIDE + firstSecretIndex))
         if (committed !== expected) {
-          console.error(`POOL INK DRIFT slot ${poolStart} validator ${i}: committed[0] ${committed} != expected ${expected} — casts for this pool will SecretMismatch; needs manual repair`)
+          driftedPools.add(poolStart.toString())
+          console.error(`POOL INK DRIFT slot ${poolStart} validator ${i}: committed[0] ${committed} != expected ${expected} — append landed off-target; aborting further inking this pass to avoid compounding. Manual repair needed.`)
+          return
         }
       }
     }
