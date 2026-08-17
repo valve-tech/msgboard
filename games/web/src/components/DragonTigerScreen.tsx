@@ -7,7 +7,6 @@ import { parseStake } from './StakeInput'
 import { TurnTiming } from './TurnTiming'
 import { Card, CardBack } from './decisionShared'
 import { GameStage } from './shell/GameStage'
-import { HowItWorksLink } from './HowItWorks'
 import { BetTray } from './shell/BetTray'
 import { MetaPanel } from './shell/MetaPanel'
 import { FeltTable } from './stages/FeltTable'
@@ -135,7 +134,7 @@ export const DragonTigerScreen = ({
 
   return (
     <>
-      <GameStage title="DRAGON TIGER" subtitle="higher card wins · ace low" action={<HowItWorksLink />}>
+      <GameStage title="DRAGON TIGER" subtitle="higher card wins · ace low">
         <FeltTable player={faceOff} spots={spotsNode} centerMark={null} />
       </GameStage>
 

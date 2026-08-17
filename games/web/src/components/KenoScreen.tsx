@@ -16,7 +16,6 @@ import { useSession, type RoundRecord } from '../hooks/useSession'
 import { parseStake } from './StakeInput'
 import { TurnTiming } from './TurnTiming'
 import { GameStage } from './shell/GameStage'
-import { HowItWorksLink } from './HowItWorks'
 import { BetTray } from './shell/BetTray'
 import { MetaPanel } from './shell/MetaPanel'
 import { fmtMult } from './ladderShared'
@@ -129,7 +128,7 @@ export const KenoScreen = ({ deployment, walletClient, trustAcknowledged, myAddr
 
   return (
     <>
-      <GameStage title="KENO" subtitle={`pick up to ${MAX_PICKS} · 10-of-${POOL} draw`} action={<HowItWorksLink />}>
+      <GameStage title="KENO" subtitle={`pick up to ${MAX_PICKS} · 10-of-${POOL} draw`}>
         <NumberBoard
           pool={POOL}
           columns={8}

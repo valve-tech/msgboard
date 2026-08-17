@@ -8,7 +8,6 @@ import {
 } from '../model/lottery-pool'
 import { parseStake } from './StakeInput'
 import { GameStage } from './shell/GameStage'
-import { HowItWorksLink } from './HowItWorks'
 import { BetTray } from './shell/BetTray'
 import { MetaPanel } from './shell/MetaPanel'
 import { PoolLedger, type PoolSeat } from './stages/PoolLedger'
@@ -119,7 +118,7 @@ export const LotteryScreen = ({ walletClient, trustAcknowledged, myAddress }: {
 
   return (
     <>
-      <GameStage title="THE LOTTERY" subtitle={`${Number(RAKE_BPS) / 100}% rake · winner takes the pool`} action={<HowItWorksLink />}>
+      <GameStage title="THE LOTTERY" subtitle={`${Number(RAKE_BPS) / 100}% rake · winner takes the pool`}>
         <PoolLedger
           seats={seats}
           pool={pool}

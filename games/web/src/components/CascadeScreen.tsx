@@ -9,7 +9,6 @@ import { useSession, type RoundRecord } from '../hooks/useSession'
 import { parseStake } from './StakeInput'
 import { TurnTiming } from './TurnTiming'
 import { GameStage } from './shell/GameStage'
-import { HowItWorksLink } from './HowItWorks'
 import { BetTray } from './shell/BetTray'
 import { MetaPanel } from './shell/MetaPanel'
 import { fmtMult } from './ladderShared'
@@ -81,7 +80,7 @@ export const CascadeScreen = ({ deployment, walletClient, trustAcknowledged, myA
 
   return (
     <>
-      <GameStage title="CASCADE" subtitle={`${COLS}×5 grid · scatter-pays at 8+`} action={<HowItWorksLink />}>
+      <GameStage title="CASCADE" subtitle={`${COLS}×5 grid · scatter-pays at 8+`}>
         <TumbleGrid
           cols={COLS}
           symbols={SYMBOL_EMOJI}

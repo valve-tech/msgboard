@@ -7,7 +7,6 @@ import type { GameDeployment } from '../config'
 import { parseStake } from './StakeInput'
 import { randomDeckSeed, Card, CardBack } from './decisionShared'
 import { GameStage } from './shell/GameStage'
-import { HowItWorksLink } from './HowItWorks'
 import { BetTray } from './shell/BetTray'
 import { MetaPanel } from './shell/MetaPanel'
 import { FeltTable } from './stages/FeltTable'
@@ -70,7 +69,7 @@ export const ThreeCardPokerScreen = ({ deployment: _d, walletClient, trustAcknow
 
   return (
     <>
-      <GameStage title="THREE CARD POKER" subtitle="beat the dealer · queen-high qualifies" action={<HowItWorksLink />}>
+      <GameStage title="THREE CARD POKER" subtitle="beat the dealer · queen-high qualifies">
         <FeltTable dealer={dealerNode} player={playerNode} spots={spotsNode} centerMark={null} />
       </GameStage>
 
