@@ -178,6 +178,30 @@ services:
       SIGNER_COUNT: "5"
       SETTLE_INTERVAL_MS: "300000"
     command: node petition-bot.mjs
+  # Player-run CoinFlipTables bots on 943: an operator (mnemonic index 70) runs one open table; the
+  # players (71..) open rounds against it in CHIPS, and the separate cast-watcher settles each round.
+  # This is the ONLY actor that plays CoinFlipTables — it exists to surface real table + shared-pool
+  # settlement/refund/bankroll bugs instead of us only theorizing. FUNDING: gas auto-tops from index 0;
+  # Chips are NOT minted here — they CIRCULATE within the fleet (win pays the player, loss funds the hot,
+  # operator withdrawHot()s to redistribute). SEED once by sending Chips to the operator address (logged
+  # on boot); until then the bot PAUSES all Chips spend and logs the exact seed request. Modest cadence:
+  # it heats the SHARED validator ladder (CoinFlip/Raffle/CoinFlipTables), so the hardened cast-watcher's
+  # drift-detect is the safety net for the extra open concurrency.
+  table-bots:
+    image: node:24-alpine
+    restart: unless-stopped
+    working_dir: /app
+    volumes: [ "./:/app" ]
+    env_file: .env
+    environment:
+      CHAIN: "943"
+      CONFIG: /app/943-deployment.json
+      RPC: "https://one.valve.city/rpc/${VALVE_RPC_KEY}/evm/943"
+      OP_INDEX: "70"
+      PLAYER_INDEX_BASE: "71"
+      PLAYERS: "3"
+      INTERVAL_MS: "120000"
+    command: node table-bots.mjs
   player-bots-369:
     image: node:24-alpine
     restart: unless-stopped

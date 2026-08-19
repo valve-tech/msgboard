@@ -19,7 +19,7 @@
   vars:
     games_repo: "{{ playbook_dir }}/.."
     actors_dir: /opt/games-actors
-    bundles: [cast-watcher, player-bots, flipbook-bots, cosign-bot, session-bots, landing-house, pow-worker, chip-faucet, petition-bot]
+    bundles: [cast-watcher, player-bots, flipbook-bots, cosign-bot, session-bots, landing-house, pow-worker, chip-faucet, petition-bot, table-bots]
   tasks:
     - name: The actor sources must exist locally
       ansible.builtin.stat:
@@ -108,10 +108,11 @@
            + (['session-bots'] if ('session-bots' in changed_bundles or 'pow-worker' in changed_bundles) else [])
            + (['landing-house', 'landing-house-369'] if 'landing-house' in changed_bundles else [])
            + (['chip-faucet'] if 'chip-faucet' in changed_bundles else [])
-           + (['petition-bot'] if 'petition-bot' in changed_bundles else [])) | unique }}
+           + (['petition-bot'] if 'petition-bot' in changed_bundles else [])
+           + (['table-bots'] if ('table-bots' in changed_bundles or '943' in changed_configs) else [])) | unique }}
       when: restart_targets | length > 0
 
-    - name: Smoke — all eleven services are up
+    - name: Smoke — all twelve services are up
       ansible.builtin.shell: >-
         set -o pipefail;
         docker compose ps --format '{{ '{{' }}.Service{{ '}}' }} {{ '{{' }}.State{{ '}}' }}' | sort
@@ -121,7 +122,7 @@
       register: fleet
       changed_when: false
       failed_when: >-
-        fleet.stdout_lines | select('search', ' running') | list | length != 11
+        fleet.stdout_lines | select('search', ' running') | list | length != 12
 
     # No --tail: the banner prints once at startup, and a long-running unchanged service (no
     # restart this run — by design) has it far beyond any tail window. NO pipefail here — grep -q
@@ -146,6 +147,7 @@
         - { svc: landing-house-369, banner: "landing house on chain 369" }
         - { svc: chip-faucet, banner: "chip faucet on chain 943" }
         - { svc: petition-bot, banner: "petition bot on chain 943" }
+        - { svc: table-bots, banner: "table bots on chain 943" }
       changed_when: false
       register: banner
       retries: 2
