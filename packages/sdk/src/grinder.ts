@@ -99,6 +99,23 @@ async function tryNative(): Promise<Stamper | null> {
 }
 
 /**
+ * Try the native Rust addon for the REVISED algorithm (message version >= 2). The v2 grinder
+ * exports `stamp_v2`; the current v1-only grinder does not. Read the export through an optional
+ * type and guard it with a `typeof` check, so a missing `stamp_v2` yields `null` and never throws.
+ * This lights up v2 acceleration the moment the rebuilt grinder ships, and stays inert until then.
+ */
+async function tryNativeV2(): Promise<Stamper | null> {
+  try {
+    // Declare the v1 `stamp` too, so this type OVERLAPS the current v1-only addon type (TS rejects an
+    // object type with no property in common). `stamp_v2` stays optional and absent until the grinder ships.
+    const mod: { stamp?: EngineStamp; stamp_v2?: EngineStamp } = await import('@msgboard/pow-grinder')
+    return typeof mod.stamp_v2 === 'function' ? wrapEngineStamp(mod.stamp_v2) : null
+  } catch {
+    return null
+  }
+}
+
+/**
  * This module's own location as a `file://` URL — the base for resolving the committed wasm.
  * Read WITHOUT a syntactic `import.meta` token so a CommonJS transpile of this file stays pure
  * CJS (a bare `import.meta` forces ESM detection and the CJS emit then dies on `exports is not
@@ -145,6 +162,30 @@ async function tryWasm(): Promise<Stamper | null> {
 }
 
 /**
+ * Try the WASM module's REVISED-algorithm engine (`stamp_v2`). Same env-aware init as {@link tryWasm}.
+ * The `stamp_v2?` optional type plus the `typeof` guard mean a v1-only wasm build returns `null`
+ * cleanly — a missing export is never accessed as a call and never throws.
+ */
+async function tryWasmV2(): Promise<Stamper | null> {
+  try {
+    const wasm: {
+      default: (arg?: { module_or_path: BufferSource }) => Promise<unknown>
+      stamp_v2?: EngineStamp
+    } = await import('@msgboard/pow-grinder/wasm')
+    if (isNode()) {
+      const { readFileSync } = await import('node:fs')
+      const bytes = readFileSync(await wasmBytesUrl())
+      await wasm.default({ module_or_path: bytes })
+    } else {
+      await wasm.default()
+    }
+    return typeof wasm.stamp_v2 === 'function' ? wrapEngineStamp(wasm.stamp_v2) : null
+  } catch {
+    return null
+  }
+}
+
+/**
  * Resolve (and cache) the fastest available engine: native → WASM → null. Never throws — a
  * `null` simply means `doPoW` keeps its JS grind.
  */
@@ -152,4 +193,19 @@ export async function loadDefaultStamper(): Promise<Stamper | null> {
   if (cachedStamper !== undefined) return cachedStamper
   cachedStamper = (await tryNative()) ?? (await tryWasm())
   return cachedStamper
+}
+
+/** Cache the resolved v2 engine, separate from the v1 one. `undefined` = not probed. */
+let cachedV2Stamper: Stamper | null | undefined
+
+/**
+ * Resolve (and cache) the fastest available REVISED-algorithm engine (message version >= 2):
+ * native `stamp_v2` → WASM `stamp_v2` → null. Never throws. `null` means `doPoW` keeps its v2 JS
+ * grind ({@link createChallengeSearchV2}). Against today's v1-only grinder this always returns
+ * `null`, so the SDK compiles and runs now and gains v2 acceleration once the grinder ships.
+ */
+export async function loadV2Stamper(): Promise<Stamper | null> {
+  if (cachedV2Stamper !== undefined) return cachedV2Stamper
+  cachedV2Stamper = (await tryNativeV2()) ?? (await tryWasmV2())
+  return cachedV2Stamper
 }

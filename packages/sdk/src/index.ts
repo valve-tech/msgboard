@@ -14,11 +14,25 @@ import type {
   WorkResult,
   WorkStats,
 } from '@msgboard/core'
-import { categoryHash, createChallengeSearch, difficulty, encodeData, toRLP } from '@msgboard/core'
-import { loadDefaultStamper, type Stamper } from './grinder.js'
+import {
+  categoryHash,
+  createChallengeSearch,
+  createChallengeSearchV2,
+  difficulty,
+  encodeData,
+  toRLP,
+} from '@msgboard/core'
+import { loadDefaultStamper, loadV2Stamper, type Stamper } from './grinder.js'
 
 export * from '@msgboard/core'
-export { loadDefaultStamper, wrapEngineStamp, type Stamp, type StampInput, type Stamper } from './grinder.js'
+export {
+  loadDefaultStamper,
+  loadV2Stamper,
+  wrapEngineStamp,
+  type Stamp,
+  type StampInput,
+  type Stamper,
+} from './grinder.js'
 
 /**
  * Client config, extended with the fast-grind seam:
@@ -70,13 +84,27 @@ export class MsgBoardClient {
 
   private stamperPromise: Promise<Stamper | null> | undefined
 
-  /** Resolve the fast engine once per client (never throws — null means JS grind). */
+  private v2StamperPromise: Promise<Stamper | null> | undefined
+
+  /** Resolve the fast v1 engine once per client (never throws — null means JS grind). */
   private resolveStamper(): Promise<Stamper | null> {
     this.stamperPromise ??=
       this.configuredStamper !== undefined
         ? Promise.resolve(this.configuredStamper)
         : loadDefaultStamper().catch(() => null)
     return this.stamperPromise
+  }
+
+  /**
+   * Resolve the fast v2 engine once per client (never throws — null means the v2 JS grind).
+   * The `stamper` config is a v1-only seam: an explicit value (a v1 engine, or `null` to force the
+   * JS grind) turns OFF v2 auto-detection, so v2 falls back to its JS grind rather than misusing a
+   * v1 engine. Only auto-detect mode (`stamper` undefined) probes the grinder's `stamp_v2`.
+   */
+  private resolveV2Stamper(): Promise<Stamper | null> {
+    if (this.configuredStamper !== undefined) return Promise.resolve(null)
+    this.v2StamperPromise ??= loadV2Stamper().catch(() => null)
+    return this.v2StamperPromise
   }
 
   get difficultyFactors() {
@@ -158,11 +186,18 @@ export class MsgBoardClient {
     const start = Date.now()
     this.progressHandler({ ...stats })
 
+    // The PoW path is VERSION-AWARE. A v1 message keeps the legacy scheme (createChallengeSearch /
+    // checkWork) and the v1 engine; a v2 message (version >= 2) uses the revised scheme
+    // (createChallengeSearchV2 / verifyWork) and the v2 engine. Both engines share the StampInput /
+    // Stamp contract and the incremental-vs-JS fallback shape, so only the selection differs.
+    const isV2 = message.version >= 2
+
     // ── fast path: the pow-grinder engine (native or WASM), ~1-2s per stamp vs the JS loop's
     // tens of seconds. The engine grinds against a SNAPSHOT of the block info (a stamp stays
     // valid for the board's ~120-block window, so mid-grind block updates don't matter the way
     // they do for the long JS grind). Any engine failure falls through to the JS loop below.
-    const stamper = await this.resolveStamper()
+    // v2 resolves the v2 engine, which is absent on today's grinder and returns null (→ v2 JS grind).
+    const stamper = isV2 ? await this.resolveV2Stamper() : await this.resolveStamper()
     if (stamper) {
       try {
         const blockHash = message.blockHash
@@ -193,11 +228,17 @@ export class MsgBoardClient {
       }
     }
 
-    // Incremental challenge search: advances the challenge point by one curve ADDITION
-    // per nonce instead of a full scalar MULTIPLY, ~10x faster while staying bit-identical
-    // to checkWork (the node's verifier). It mutates message.nonce and rebases on its own
-    // when the block poller above updates message.blockHash mid-grind.
-    const search = createChallengeSearch(message)
+    // JS grind fallback, chosen by version. Both searches expose the same `next(difficulty)` step and
+    // mutate message.nonce in place; the loop below is identical for either.
+    //   v1 — createChallengeSearch: advances the challenge point by one curve ADDITION per nonce
+    //   instead of a full scalar MULTIPLY, ~10x faster while staying bit-identical to checkWork.
+    //   checkWork is this repo's TS reimplementation of the node's verifier, and matches it only when
+    //   the x-coordinate is a fixed 32-byte big-endian encoding — the shared contract with the Rust
+    //   grinder (pow-grinder x_of) and the reth node (pow.rs). It rebases on its own when the block
+    //   poller updates message.blockHash mid-grind.
+    //   v2 — createChallengeSearchV2: each nonce's scalar is an independent hash (no constant point
+    //   step to exploit), and every step verifies through verifyWork, the version-aware verifier.
+    const search = isV2 ? createChallengeSearchV2(message) : createChallengeSearch(message)
     while (true) {
       if (this.cancelled) {
         killPoll = true
