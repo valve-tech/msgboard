@@ -5,20 +5,21 @@ import {Test} from "forge-std/Test.sol";
 import {MsgPow} from "../src/MsgPow.sol";
 import {PoWMint} from "../examples/PoWMint.sol";
 
-/// Exercises the PoWMint example end-to-end using the golden vector (deterministic, CI-safe).
+/// Exercises the PoWMint example end-to-end using the revised golden vector (deterministic, CI-safe).
+/// PoWMint verifies with the canonical `MsgPow.verify`, so the example runs on the revised stamp.
 contract PoWMintTest is Test {
     uint256 internal constant MINT_AMOUNT = 1_000 ether;
 
     function _load() internal view returns (MsgPow.Message memory m, uint256 difficulty) {
-        string memory json = vm.readFile("./test/vectors/valid.json");
-        m.version = uint8(vm.parseUint(vm.parseJsonString(json, ".version")));
-        m.nonce = vm.parseUint(vm.parseJsonString(json, ".nonce"));
-        m.blockHash = vm.parseJsonBytes32(json, ".blockHash");
-        m.category = vm.parseJsonBytes32(json, ".category");
-        m.data = vm.parseJsonBytes(json, ".data");
-        m.workMultiplier = uint64(vm.parseUint(vm.parseJsonString(json, ".workMultiplier")));
-        m.workDivisor = uint64(vm.parseUint(vm.parseJsonString(json, ".workDivisor")));
-        difficulty = vm.parseUint(vm.parseJsonString(json, ".difficulty"));
+        string memory json = vm.readFile("./test/vectors/v2.json");
+        m.version = uint8(vm.parseUint(vm.parseJsonString(json, ".stamp.version")));
+        m.nonce = vm.parseUint(vm.parseJsonString(json, ".stamp.nonce"));
+        m.blockHash = vm.parseJsonBytes32(json, ".stamp.blockHash");
+        m.category = vm.parseJsonBytes32(json, ".stamp.category");
+        m.data = vm.parseJsonBytes(json, ".stamp.data");
+        m.workMultiplier = uint64(vm.parseUint(vm.parseJsonString(json, ".stamp.workMultiplier")));
+        m.workDivisor = uint64(vm.parseUint(vm.parseJsonString(json, ".stamp.workDivisor")));
+        difficulty = vm.parseUint(vm.parseJsonString(json, ".stamp.difficulty"));
     }
 
     function test_mint_with_valid_work() public {
@@ -30,7 +31,8 @@ contract PoWMintTest is Test {
         assertEq(minted, MINT_AMOUNT, "returns the minted amount");
         assertEq(token.balanceOf(address(this)), MINT_AMOUNT, "credits the caller");
         assertEq(token.totalSupply(), MINT_AMOUNT, "increases total supply");
-        assertTrue(token.claimed(MsgPow.workHash(m)), "marks the stamp claimed");
+        (, bytes32 wh) = MsgPow.workHash(m);
+        assertTrue(token.claimed(wh), "marks the stamp claimed");
     }
 
     function test_mint_rejects_replay() public {

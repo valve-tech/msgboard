@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { keccak256, toHex, bytesToHex, type Hex } from 'viem'
-import { getChallenge, checkWork, difficulty } from './utils.js'
+import { getChallengeLegacy, checkWorkLegacy, difficulty } from './utils.js'
 import type { MessageSeed } from './types.js'
 
 /**
@@ -33,13 +33,13 @@ const seedAt = (nonce: bigint): MessageSeed => ({
   ...FACTORS,
 })
 
-describe('getChallenge encoding', () => {
+describe('getChallengeLegacy encoding', () => {
   it('always returns exactly 32 bytes across hundreds of nonces', () => {
     const bad: string[] = []
     const boundary = 2n ** 248n
     let boundaryCases = 0
     for (let nonce = 1n; nonce <= 1000n; nonce++) {
-      const x = getChallenge(seedAt(nonce))
+      const x = getChallengeLegacy(seedAt(nonce))
       if (x.length !== 32) bad.push(`nonce ${nonce} → ${x.length} bytes`)
       // Detect the boundary by the NUMERIC x value, so it holds whether or not the encoding
       // (buggily) dropped a leading zero — this proves the scan really crosses x < 2^248.
@@ -50,15 +50,15 @@ describe('getChallenge encoding', () => {
   })
 
   it('encodes the pinned boundary nonce (x < 2^248) as a full 32 bytes with a leading zero', () => {
-    const x = getChallenge(seedAt(BOUNDARY_NONCE))
+    const x = getChallengeLegacy(seedAt(BOUNDARY_NONCE))
     expect(x.length).toBe(32) // 31 with the bug
     expect(x[0]).toBe(0) // confirms this vector really is the leading-zero boundary case
   })
 
-  it('checkWork accepts the pinned boundary nonce at difficulty 1', () => {
-    // difficulty(FACTORS, 1) === 1, so every hash passes; checkWork returns the work hash.
+  it('checkWorkLegacy accepts the pinned boundary nonce at difficulty 1', () => {
+    // difficulty(FACTORS, 1) === 1, so every hash passes; checkWorkLegacy returns the work hash.
     expect(difficulty(FACTORS, DATA_LEN)).toBe(1n)
-    const hash = checkWork(seedAt(BOUNDARY_NONCE), 1n)
+    const hash = checkWorkLegacy(seedAt(BOUNDARY_NONCE), 1n)
     expect(hash).not.toBeNull()
   })
 })

@@ -3,12 +3,11 @@ import { keccak256, toHex, hexToBytes, type Hex } from 'viem'
 import {
   payloadHash,
   scalarHash,
-  checkWorkV2,
-  verifyWork,
   checkWork,
+  checkWorkLegacy,
   powTarget,
   difficulty,
-  createChallengeSearchV2,
+  createChallengeSearch,
 } from './utils.js'
 import type { MessageSeed } from './types.js'
 
@@ -73,51 +72,47 @@ describe('revised PoW (v2) grind <-> verify', () => {
     expect(D).toBe(1n)
     expect(powTarget(D)).toBe(2n ** 256n)
     const msg = easyMsg()
-    const search = createChallengeSearchV2(msg)
+    const search = createChallengeSearch(msg)
     let hash: Hex | null = null
     for (let i = 0; i < 20 && !hash; i++) hash = search.next(D)
     expect(hash).not.toBeNull()
     // the nonce the search stopped on re-verifies to the identical hash
-    expect(checkWorkV2(msg, D)).toBe(hash)
-    expect(verifyWork(msg, D)).toBe(hash)
+    expect(checkWork(msg, D)).toBe(hash)
   })
 
   it('rejects work above the target (tiny target = huge difficulty)', () => {
     const msg = easyMsg({ nonce: 1n })
     // First confirm nonce 1 passes at D=1.
-    expect(verifyWork(msg, 1n)).not.toBeNull()
+    expect(checkWork(msg, 1n)).not.toBeNull()
     // target = 2^256 / 2^255 = 2, so any hash >= 2 is rejected — essentially all of them.
     const hugeD = 2n ** 255n
-    expect(() => checkWorkV2(msg, hugeD)).toThrow('invalid work')
-    expect(verifyWork(msg, hugeD)).toBeNull()
+    expect(checkWork(msg, hugeD)).toBeNull() // checkWork returns null on a miss (does not throw)
   })
 
   it('the compressed-point work hash is 32 bytes', () => {
-    const hash = verifyWork(easyMsg({ nonce: 1n }), 1n)
+    const hash = checkWork(easyMsg({ nonce: 1n }), 1n)
     expect(hash).not.toBeNull()
     expect(hexToBytes(hash!).length).toBe(32)
   })
 })
 
-describe('version-gated coexistence', () => {
-  it('verifyWork routes v1 to the legacy algorithm and v2 to the revised one', () => {
-    // Identical fields, different version → different algorithm → different work hash.
-    const common = {
+describe('revised vs legacy are distinct algorithms (both message version 1)', () => {
+  it('checkWork (revised) and checkWorkLegacy produce different hashes for the same message', () => {
+    // Both schemes are message version 1 — the spec makes the revised algorithm version 1, and the
+    // legacy scheme is the pre-revision implementation of the same version. They are NOT dispatched by
+    // the version field; a deployment selects one. So for one message they must differ.
+    const msg: MessageSeed = {
+      version: 1,
       blockHash: keccak256(toHex('gate-block')),
       category: keccak256(toHex('gate-cat')),
       data: DATA,
       nonce: 7n,
       ...EASY,
     }
-    const v1: MessageSeed = { ...common, version: 1 }
-    const v2: MessageSeed = { ...common, version: 2 }
-    const h1 = verifyWork(v1, 1n)
-    const h2 = verifyWork(v2, 1n)
-    expect(h1).not.toBeNull()
-    expect(h2).not.toBeNull()
-    expect(h1).not.toBe(h2)
-    // v1 path is exactly the legacy checkWork; v2 path is exactly checkWorkV2.
-    expect(h1).toBe(checkWork(v1, 1n))
-    expect(h2).toBe(checkWorkV2(v2, 1n))
+    const revised = checkWork(msg, 1n)
+    const legacy = checkWorkLegacy(msg, 1n)
+    expect(revised).not.toBeNull()
+    expect(legacy).not.toBeNull()
+    expect(revised).not.toBe(legacy)
   })
 })

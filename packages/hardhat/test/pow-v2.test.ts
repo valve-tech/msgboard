@@ -12,12 +12,16 @@ const { MsgBoardProvider } = require('../dist/provider') as {
     wrapped: { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> },
     isHardhatNetwork: boolean,
   ) => {
-    setNodeConstraints: (constraints: { workMultiplier: bigint; workDivisor: bigint }) => Promise<void>
+    setNodeConstraints: (constraints: {
+      workMultiplier?: bigint
+      workDivisor?: bigint
+      algorithm?: 'legacy' | 'revised'
+    }) => Promise<void>
     request: (args: { method: string; params?: unknown[] }) => Promise<unknown>
   }
 }
 
-// Easy difficulty so the v2 grind finishes fast: divisor >> multiplier.
+// Easy difficulty so the grind finishes fast: divisor >> multiplier.
 const workMultiplier = 1n
 const workDivisor = 1_000_000n
 const blockHash = keccak256(toHex('pow-v2-block')) // a non-zero 32-byte block hash
@@ -32,65 +36,80 @@ const mockWrapped = {
   },
 }
 
-/**
- * Grinds a valid revised (v2) message stamp at the given easy difficulty.
- * Returns the message seed (with a passing nonce) and its work hash.
- */
-const grindV2Message = () => {
-  const category = keccak256(toHex('pow-v2-category'))
-  const data = toHex('pow-v2-data')
-  const msg: msgboard.MessageSeed = {
-    version: 2,
-    blockHash,
-    nonce: 0n,
-    workMultiplier,
-    workDivisor,
-    category,
-    data,
-  }
-  const difficulty = msgboard.difficulty({ workMultiplier, workDivisor }, hexToBytes(data).length)
+// Both schemes are message version 1. A stamp is a fresh message seed with a category, data and
+// difficulty; the grind advances the nonce until the chosen verifier accepts it.
+const seed = (category: string, data: string): msgboard.MessageSeed => ({
+  version: 1,
+  blockHash,
+  nonce: 0n,
+  workMultiplier,
+  workDivisor,
+  category: keccak256(toHex(category)),
+  data: toHex(data),
+})
+
+const diffFor = (msg: msgboard.MessageSeed) =>
+  msgboard.difficulty({ workMultiplier, workDivisor }, hexToBytes(msg.data).length)
+
+/** Grinds the nonce until `verify` accepts the message; returns the seed and its work hash. */
+const grind = (
+  msg: msgboard.MessageSeed,
+  verify: (m: msgboard.MessageSeed, difficulty: bigint) => Hex | null,
+) => {
+  const difficulty = diffFor(msg)
   let hash: Hex | null = null
-  // grind the nonce until verifyWork accepts the v2 stamp
   while (!hash) {
     msg.nonce += 1n
-    hash = msgboard.verifyWork(msg, difficulty)
+    hash = verify(msg, difficulty)
   }
   return { msg, hash, difficulty }
 }
 
-describe('provider v2 proof-of-work', () => {
-  it('verifies a v2 stamp through verifyWork, not the v1 checkWork', () => {
-    const { msg, hash, difficulty } = grindV2Message()
-    // the version-aware verifier accepts it
-    expect(msgboard.verifyWork(msg, difficulty)).toEqual(hash)
-    // the legacy v1 verifier does not accept a v2 stamp
-    expect(msgboard.checkWork(msg, difficulty)).not.toEqual(hash)
+describe('provider proof-of-work schemes', () => {
+  it('the revised checkWork accepts a revised stamp; the legacy verifier does not return that hash', () => {
+    const { msg, hash, difficulty } = grind(seed('pow-v2-category', 'pow-v2-data'), msgboard.checkWork)
+    // the canonical (revised) verifier accepts it
+    expect(msgboard.checkWork(msg, difficulty)).toEqual(hash)
+    // the legacy verifier computes a different work hash — it never returns the revised hash
+    expect(msgboard.checkWorkLegacy(msg, difficulty)).not.toEqual(hash)
   })
 
-  it('accepts and stores a v2 message', async () => {
+  it('accepts and stores a revised stamp when configured for the revised scheme', async () => {
     const provider = new MsgBoardProvider(mockWrapped, true)
-    await provider.setNodeConstraints({ workMultiplier, workDivisor })
+    await provider.setNodeConstraints({ workMultiplier, workDivisor, algorithm: 'revised' })
 
-    const { msg, hash } = grindV2Message()
+    const { msg, hash } = grind(seed('pow-v2-category', 'pow-v2-data'), msgboard.checkWork)
     const rlp = msgboard.toRLP(msg)
 
-    // the provider accepts the v2 message and returns its work hash
+    // the provider accepts the revised stamp and returns its work hash
     const returned = await provider.request({ method: 'msgboard_addMessage', params: [rlp] })
     expect(returned).toEqual(hash)
 
-    // the stored message is retrievable by that hash
+    // the stored message is retrievable by that hash and carries version 1
     const stored = (await provider.request({ method: 'msgboard_getMessage', params: [hash] })) as {
       version: Hex
     }
     expect(stored).not.toBeNull()
-    expect(BigInt(stored.version)).toEqual(2n)
+    expect(BigInt(stored.version)).toEqual(1n)
+  })
+
+  it('accepts a legacy stamp under the default legacy scheme', async () => {
+    const provider = new MsgBoardProvider(mockWrapped, true)
+    // no algorithm passed — the default is legacy
+    await provider.setNodeConstraints({ workMultiplier, workDivisor })
+
+    const { msg, hash } = grind(seed('pow-legacy-category', 'pow-legacy-data'), msgboard.checkWorkLegacy)
+    const rlp = msgboard.toRLP(msg)
+
+    const returned = await provider.request({ method: 'msgboard_addMessage', params: [rlp] })
+    expect(returned).toEqual(hash)
   })
 
   it('rejects an unsupported version (0)', async () => {
     const provider = new MsgBoardProvider(mockWrapped, true)
-    await provider.setNodeConstraints({ workMultiplier, workDivisor })
+    await provider.setNodeConstraints({ workMultiplier, workDivisor, algorithm: 'revised' })
 
-    const { msg } = grindV2Message()
+    const { msg } = grind(seed('pow-v2-category', 'pow-v2-data'), msgboard.checkWork)
     const badRlp = msgboard.toRLP({ ...msg, version: 0 })
 
     await expect(

@@ -9,17 +9,13 @@ import {PoWGate} from "../examples/PoWGate.sol";
 /// Tracks whether the golden stamp has ever been accepted so the invariant can
 /// assert it was never subsequently cleared.
 ///
-/// @dev Nonce periodicity note: scalar multiplication over secp256k1 has period NN
-/// (the curve order). Any two nonces that differ by a multiple of NN produce the same
-/// challengeX and therefore the same workHash. This is expected — they represent the
-/// same proof-of-work stamp, so replay-protection via workHash is correct: only one
-/// holder of any equivalent nonce set can use a given stamp. The handler's
-/// enterAlt function explores this space; some alternate nonces will succeed and
-/// consume the same stamp as the golden vector.
+/// @dev The gate runs the canonical (revised) algorithm, so this handler feeds the revised
+/// golden stamp. In the revised scheme each nonce hashes into an independent scalar, so — unlike
+/// the legacy scheme — there is no nonce periodicity to exploit: a changed nonce yields a fresh,
+/// independent stamp. The handler's enterAlt function explores alternate nonces; a fraction clear
+/// the difficulty and consume their OWN stamp (a different workHash), while collisions with the
+/// golden workHash are effectively impossible. Either outcome is fine for the invariant.
 contract PoWGateHandler is Test {
-    /// secp256k1 curve order — adding this to any nonce yields the same workHash.
-    uint256 internal constant NN = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141;
-
     PoWGate public immutable gate;
 
     MsgPow.Message internal _golden;
@@ -29,19 +25,19 @@ contract PoWGateHandler is Test {
     bool public goldenHashUsed;
 
     constructor() {
-        string memory json = vm.readFile("./test/vectors/valid.json");
-        _golden.version        = uint8(vm.parseUint(vm.parseJsonString(json, ".version")));
-        _golden.nonce          = vm.parseUint(vm.parseJsonString(json, ".nonce"));
-        _golden.blockHash      = vm.parseJsonBytes32(json, ".blockHash");
-        _golden.category       = vm.parseJsonBytes32(json, ".category");
-        _golden.data           = vm.parseJsonBytes(json, ".data");
-        _golden.workMultiplier = uint64(vm.parseUint(vm.parseJsonString(json, ".workMultiplier")));
-        _golden.workDivisor    = uint64(vm.parseUint(vm.parseJsonString(json, ".workDivisor")));
+        string memory json = vm.readFile("./test/vectors/v2.json");
+        _golden.version        = uint8(vm.parseUint(vm.parseJsonString(json, ".stamp.version")));
+        _golden.nonce          = vm.parseUint(vm.parseJsonString(json, ".stamp.nonce"));
+        _golden.blockHash      = vm.parseJsonBytes32(json, ".stamp.blockHash");
+        _golden.category       = vm.parseJsonBytes32(json, ".stamp.category");
+        _golden.data           = vm.parseJsonBytes(json, ".stamp.data");
+        _golden.workMultiplier = uint64(vm.parseUint(vm.parseJsonString(json, ".stamp.workMultiplier")));
+        _golden.workDivisor    = uint64(vm.parseUint(vm.parseJsonString(json, ".stamp.workDivisor")));
 
-        uint256 difficulty = vm.parseUint(vm.parseJsonString(json, ".difficulty"));
+        uint256 difficulty = vm.parseUint(vm.parseJsonString(json, ".stamp.difficulty"));
 
         gate       = new PoWGate(difficulty);
-        goldenHash = MsgPow.workHash(_golden);
+        (, goldenHash) = MsgPow.workHash(_golden);
     }
 
     /// Submit the golden vector. First call succeeds and marks the stamp used;
@@ -52,10 +48,10 @@ contract PoWGateHandler is Test {
         } catch {}
     }
 
-    /// Submit a message with an alternate nonce. Nonces that are multiples of NN
-    /// away from the golden nonce produce the same workHash (same stamp, same difficulty)
-    /// and will succeed on first use. All other nonces produce a different — usually
-    /// invalid — stamp and are rejected by verify(). The handler accepts either outcome.
+    /// Submit a message with an alternate nonce. In the revised scheme every nonce produces an
+    /// independent stamp, so an alternate nonce either clears the difficulty with its OWN workHash
+    /// or is rejected by verify(). It does not reproduce the golden workHash. The handler accepts
+    /// either outcome.
     function enterAlt(uint256 nonceOffset) external {
         vm.assume(nonceOffset != 0);
         MsgPow.Message memory m = _golden;

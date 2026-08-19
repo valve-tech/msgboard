@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { keccak256, toHex, hexToBytes, bytesToHex, type Hex } from 'viem'
-import { checkWork, getChallenge, type MessageSeed } from '@msgboard/core'
+import { checkWorkLegacy, getChallengeLegacy, type MessageSeed } from '@msgboard/core'
 
 /**
  * TS ↔ Rust grinder agreement at the challenge-encoding BOUNDARY.
@@ -66,12 +66,12 @@ const seedAt = (nonce: bigint): MessageSeed => ({
 
 describe('challenge encoding parity (TS ↔ committed Rust WASM)', () => {
   it('the pinned vector really is the leading-zero boundary case', () => {
-    const x = getChallenge(seedAt(BOUNDARY_NONCE))
+    const x = getChallengeLegacy(seedAt(BOUNDARY_NONCE))
     expect(x.length).toBe(32)
     expect(x[0]).toBe(0) // x < 2^248
   })
 
-  it('the committed WASM grinder and TS checkWork agree on the boundary nonce', async () => {
+  it('the committed WASM grinder and TS checkWorkLegacy agree on the boundary nonce', async () => {
     const engine = await loadRawWasmEngine()
     // If the committed WASM cannot load here, fail loudly — this test must actually run the compare.
     expect(engine, 'committed WASM engine failed to load').not.toBeNull()
@@ -91,8 +91,8 @@ describe('challenge encoding parity (TS ↔ committed Rust WASM)', () => {
     const rustHash = bytesToHex(out!.subarray(8, 40)) as Hex
     expect(rustNonce).toBe(BOUNDARY_NONCE)
 
-    // TS side: difficulty is 1, so checkWork returns the work hash for this exact nonce.
-    const tsHash = checkWork(seedAt(BOUNDARY_NONCE), 1n)
+    // TS side: difficulty is 1, so checkWorkLegacy returns the work hash for this exact nonce.
+    const tsHash = checkWorkLegacy(seedAt(BOUNDARY_NONCE), 1n)
     expect(tsHash).not.toBeNull()
     expect(rustHash).toBe(tsHash) // the encodings agree byte-for-byte at the boundary
   }, 60_000)

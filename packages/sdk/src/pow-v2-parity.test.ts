@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import { keccak256, toHex, hexToBytes, bytesToHex, type Hex } from 'viem'
-import { checkWorkV2, verifyWork, difficulty, type MessageSeed } from '@msgboard/core'
+import { checkWork, difficulty, type MessageSeed } from '@msgboard/core'
 
 /**
- * TS ↔ Rust grinder agreement for the REVISED algorithm (v2). The committed WASM `stamp_v2` grinds a
- * v2 message; TS `checkWorkV2` must return the SAME work hash for the nonce it found. This is the
+ * TS ↔ Rust grinder agreement for the REVISED algorithm. The committed WASM `stamp_v2` grinds a
+ * revised message; TS `checkWork` must return the SAME work hash for the nonce it found. This is the
  * consensus gate: the fast Rust engine and the TS verifier have to agree byte-for-byte, or a stamp
  * the grinder finds would be rejected by the verifier (and the node).
  *
@@ -60,8 +60,8 @@ const seedAt = (nonce: bigint): MessageSeed => ({
   workDivisor: WD,
 })
 
-describe('revised PoW (v2) parity (TS ↔ committed Rust WASM stamp_v2)', () => {
-  it('the WASM v2 grinder and TS checkWorkV2 agree on the nonce the grinder found', async () => {
+describe('revised PoW parity (TS ↔ committed Rust WASM stamp_v2)', () => {
+  it('the WASM revised grinder and TS checkWork agree on the nonce the grinder found', async () => {
     const engine = await loadRawWasmV2()
     expect(engine, 'committed WASM stamp_v2 failed to load (rebuild pow-grinder?)').not.toBeNull()
 
@@ -84,9 +84,7 @@ describe('revised PoW (v2) parity (TS ↔ committed Rust WASM stamp_v2)', () => 
     const rustHash = bytesToHex(out!.subarray(8, 40)) as Hex
 
     // TS must return the identical work hash for the exact nonce the Rust engine settled on.
-    const tsHash = checkWorkV2(seedAt(rustNonce), 1n)
+    const tsHash = checkWork(seedAt(rustNonce), 1n)
     expect(tsHash).toBe(rustHash)
-    // and the version-aware dispatcher agrees too
-    expect(verifyWork(seedAt(rustNonce), 1n)).toBe(rustHash)
   }, 60_000)
 })

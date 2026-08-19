@@ -99,10 +99,9 @@ async function tryNative(): Promise<Stamper | null> {
 }
 
 /**
- * Try the native Rust addon for the REVISED algorithm (message version >= 2). The v2 grinder
- * exports `stamp_v2`; the current v1-only grinder does not. Read the export through an optional
- * type and guard it with a `typeof` check, so a missing `stamp_v2` yields `null` and never throws.
- * This lights up v2 acceleration the moment the rebuilt grinder ships, and stays inert until then.
+ * Try the native Rust addon for the REVISED algorithm. The grinder exports the revised engine as
+ * `stamp_v2`. Read the export through an optional type and guard it with a `typeof` check, so a
+ * grinder without the revised engine yields `null` and never throws.
  */
 async function tryNativeV2(): Promise<Stamper | null> {
   try {
@@ -163,8 +162,8 @@ async function tryWasm(): Promise<Stamper | null> {
 
 /**
  * Try the WASM module's REVISED-algorithm engine (`stamp_v2`). Same env-aware init as {@link tryWasm}.
- * The `stamp_v2?` optional type plus the `typeof` guard mean a v1-only wasm build returns `null`
- * cleanly — a missing export is never accessed as a call and never throws.
+ * The `stamp_v2?` optional type plus the `typeof` guard mean a build without the revised engine
+ * returns `null` cleanly — a missing export is never accessed as a call and never throws.
  */
 async function tryWasmV2(): Promise<Stamper | null> {
   try {
@@ -195,16 +194,16 @@ export async function loadDefaultStamper(): Promise<Stamper | null> {
   return cachedStamper
 }
 
-/** Cache the resolved v2 engine, separate from the v1 one. `undefined` = not probed. */
+/** Cache the resolved revised engine, separate from the legacy one. `undefined` = not probed. */
 let cachedV2Stamper: Stamper | null | undefined
 
 /**
- * Resolve (and cache) the fastest available REVISED-algorithm engine (message version >= 2):
- * native `stamp_v2` → WASM `stamp_v2` → null. Never throws. `null` means `doPoW` keeps its v2 JS
- * grind ({@link createChallengeSearchV2}). Against today's v1-only grinder this always returns
- * `null`, so the SDK compiles and runs now and gains v2 acceleration once the grinder ships.
+ * Resolve (and cache) the fastest available REVISED-algorithm engine: native `stamp_v2` → WASM
+ * `stamp_v2` → null. Never throws. `null` means `doPoW` keeps its revised JS grind
+ * ({@link createChallengeSearch} in @msgboard/core). The `algorithm: 'revised'` client option
+ * selects this engine.
  */
-export async function loadV2Stamper(): Promise<Stamper | null> {
+export async function loadRevisedStamper(): Promise<Stamper | null> {
   if (cachedV2Stamper !== undefined) return cachedV2Stamper
   cachedV2Stamper = (await tryNativeV2()) ?? (await tryWasmV2())
   return cachedV2Stamper

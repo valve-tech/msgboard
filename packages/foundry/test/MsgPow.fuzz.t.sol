@@ -8,28 +8,28 @@ import {MsgPow} from "../src/MsgPow.sol";
 /// None of these require a live node — all inputs are synthetic.
 ///
 /// Tests are grouped by the function under test:
-///   digest       — cheap (no ecMul), default run count
-///   workHash     — calls ecMul (~700k gas each), low run count
-///   verify       — same cost as workHash, low run count
-///   v2 digests   — cheap, default run count
-///   v2 verify    — calls ecMul, low run count
-///   powTarget    — cheap, default run count
+///   digest          — cheap (no ecMul), default run count
+///   workHashLegacy  — calls ecMul (~700k gas each), low run count
+///   verifyLegacy    — same cost as workHashLegacy, low run count
+///   revised digests — cheap, default run count
+///   verify          — calls ecMul, low run count
+///   powTarget       — cheap, default run count
 contract MsgPowFuzzTest is Test {
     // ── External wrappers so vm.expectRevert works on library internal calls ──
 
-    function ext_verifyV1(MsgPow.Message calldata m, uint256 difficulty) external pure returns (bool) {
-        return MsgPow.verifyV1(m, difficulty);
+    function ext_verifyLegacy(MsgPow.Message calldata m, uint256 difficulty) external pure returns (bool) {
+        return MsgPow.verifyLegacy(m, difficulty);
     }
 
-    function ext_verifyV2(MsgPow.Message calldata m, uint256 difficulty) external pure returns (bool) {
-        return MsgPow.verifyV2(m, difficulty);
+    function ext_verify(MsgPow.Message calldata m, uint256 difficulty) external pure returns (bool) {
+        return MsgPow.verify(m, difficulty);
     }
 
     function ext_powTarget(uint256 d) external pure returns (uint256) {
         return MsgPow.powTarget(d);
     }
 
-    function _v1(
+    function _legacy(
         uint256 nonce,
         bytes32 blockHash,
         bytes32 category,
@@ -52,9 +52,9 @@ contract MsgPowFuzzTest is Test {
         assertEq(MsgPow.digest(wm, wd), MsgPow.digest(wm, wd));
     }
 
-    // ── workHash (v1) ───────────────────────────────────────────────────────────
+    // ── workHashLegacy ────────────────────────────────────────────────────────────
 
-    /// workHash is deterministic: two calls with the same inputs must agree.
+    /// workHashLegacy is deterministic: two calls with the same inputs must agree.
     /// forge-config: default.fuzz.runs = 32
     function testFuzz_workHash_deterministic(
         uint256 nonce,
@@ -64,8 +64,8 @@ contract MsgPowFuzzTest is Test {
         uint64 wm,
         uint64 wd
     ) public pure {
-        MsgPow.Message memory m = _v1(nonce, blockHash, category, data, wm, wd);
-        assertEq(MsgPow.workHash(m), MsgPow.workHash(m), "workHash must be deterministic");
+        MsgPow.Message memory m = _legacy(nonce, blockHash, category, data, wm, wd);
+        assertEq(MsgPow.workHashLegacy(m), MsgPow.workHashLegacy(m), "workHashLegacy must be deterministic");
     }
 
     /// Changing data with everything else fixed must change the workHash (sha256 collision
@@ -81,9 +81,11 @@ contract MsgPowFuzzTest is Test {
         uint64 wd
     ) public pure {
         vm.assume(keccak256(data) != keccak256(otherData));
-        MsgPow.Message memory m1 = _v1(nonce, blockHash, category, data, wm, wd);
-        MsgPow.Message memory m2 = _v1(nonce, blockHash, category, otherData, wm, wd);
-        assertNotEq(MsgPow.workHash(m1), MsgPow.workHash(m2), "different data must produce different workHash");
+        MsgPow.Message memory m1 = _legacy(nonce, blockHash, category, data, wm, wd);
+        MsgPow.Message memory m2 = _legacy(nonce, blockHash, category, otherData, wm, wd);
+        assertNotEq(
+            MsgPow.workHashLegacy(m1), MsgPow.workHashLegacy(m2), "different data must produce different workHash"
+        );
     }
 
     /// Changing category with everything else fixed must change the workHash.
@@ -98,14 +100,16 @@ contract MsgPowFuzzTest is Test {
         uint64 wd
     ) public pure {
         vm.assume(category != otherCategory);
-        MsgPow.Message memory m1 = _v1(nonce, blockHash, category, data, wm, wd);
-        MsgPow.Message memory m2 = _v1(nonce, blockHash, otherCategory, data, wm, wd);
-        assertNotEq(MsgPow.workHash(m1), MsgPow.workHash(m2), "different category must produce different workHash");
+        MsgPow.Message memory m1 = _legacy(nonce, blockHash, category, data, wm, wd);
+        MsgPow.Message memory m2 = _legacy(nonce, blockHash, otherCategory, data, wm, wd);
+        assertNotEq(
+            MsgPow.workHashLegacy(m1), MsgPow.workHashLegacy(m2), "different category must produce different workHash"
+        );
     }
 
-    // ── verify (v1) ─────────────────────────────────────────────────────────────
+    // ── verifyLegacy ────────────────────────────────────────────────────────────
 
-    /// verify must always revert when difficulty == 0 (v1 path).
+    /// verifyLegacy must always revert when difficulty == 0.
     function testFuzz_verify_reverts_on_zero_difficulty(
         uint256 nonce,
         bytes32 blockHash,
@@ -114,9 +118,9 @@ contract MsgPowFuzzTest is Test {
         uint64 wm,
         uint64 wd
     ) public {
-        MsgPow.Message memory m = _v1(nonce, blockHash, category, data, wm, wd);
+        MsgPow.Message memory m = _legacy(nonce, blockHash, category, data, wm, wd);
         vm.expectRevert("MsgPow: zero difficulty");
-        this.ext_verifyV1(m, 0);
+        this.ext_verifyLegacy(m, 0);
     }
 
     /// difficulty == 1 must accept every message because uint256 % 1 == 0 for all uint256.
@@ -129,8 +133,8 @@ contract MsgPowFuzzTest is Test {
         uint64 wm,
         uint64 wd
     ) public pure {
-        MsgPow.Message memory m = _v1(nonce, blockHash, category, data, wm, wd);
-        assertTrue(MsgPow.verify(m, 1), "difficulty=1 must accept every v1 message");
+        MsgPow.Message memory m = _legacy(nonce, blockHash, category, data, wm, wd);
+        assertTrue(MsgPow.verifyLegacy(m, 1), "difficulty=1 must accept every legacy message");
     }
 
     /// If a message passes a stricter (larger) difficulty D, it must also pass difficulty == 1.
@@ -145,13 +149,13 @@ contract MsgPowFuzzTest is Test {
         uint256 difficulty
     ) public pure {
         vm.assume(difficulty > 1);
-        MsgPow.Message memory m = _v1(nonce, blockHash, category, data, wm, wd);
-        if (MsgPow.verify(m, difficulty)) {
-            assertTrue(MsgPow.verify(m, 1), "a message passing difficulty D must pass difficulty 1");
+        MsgPow.Message memory m = _legacy(nonce, blockHash, category, data, wm, wd);
+        if (MsgPow.verifyLegacy(m, difficulty)) {
+            assertTrue(MsgPow.verifyLegacy(m, 1), "a message passing difficulty D must pass difficulty 1");
         }
     }
 
-    /// verify is deterministic: two calls with identical inputs must return the same bool.
+    /// verifyLegacy is deterministic: two calls with identical inputs must return the same bool.
     /// forge-config: default.fuzz.runs = 32
     function testFuzz_verify_deterministic(
         uint256 nonce,
@@ -163,11 +167,13 @@ contract MsgPowFuzzTest is Test {
         uint256 difficulty
     ) public pure {
         vm.assume(difficulty != 0);
-        MsgPow.Message memory m = _v1(nonce, blockHash, category, data, wm, wd);
-        assertEq(MsgPow.verify(m, difficulty), MsgPow.verify(m, difficulty), "verify must be deterministic");
+        MsgPow.Message memory m = _legacy(nonce, blockHash, category, data, wm, wd);
+        assertEq(
+            MsgPow.verifyLegacy(m, difficulty), MsgPow.verifyLegacy(m, difficulty), "verifyLegacy must be deterministic"
+        );
     }
 
-    // ── v2 digests ──────────────────────────────────────────────────────────────
+    // ── revised digests ───────────────────────────────────────────────────────────
 
     /// scalarHash is deterministic.
     function testFuzz_v2_scalarHash_deterministic(
@@ -178,7 +184,7 @@ contract MsgPowFuzzTest is Test {
         uint64 wm,
         uint64 wd
     ) public pure {
-        MsgPow.Message memory m = MsgPow.Message(2, nonce, blockHash, category, data, wm, wd);
+        MsgPow.Message memory m = MsgPow.Message(1, nonce, blockHash, category, data, wm, wd);
         assertEq(MsgPow.scalarHash(m), MsgPow.scalarHash(m), "scalarHash must be deterministic");
     }
 
@@ -194,15 +200,15 @@ contract MsgPowFuzzTest is Test {
         uint64 wd
     ) public pure {
         vm.assume(nonce != otherNonce);
-        MsgPow.Message memory m1 = MsgPow.Message(2, nonce, blockHash, category, data, wm, wd);
-        MsgPow.Message memory m2 = MsgPow.Message(2, otherNonce, blockHash, category, data, wm, wd);
+        MsgPow.Message memory m1 = MsgPow.Message(1, nonce, blockHash, category, data, wm, wd);
+        MsgPow.Message memory m2 = MsgPow.Message(1, otherNonce, blockHash, category, data, wm, wd);
         assertNotEq(MsgPow.scalarHash(m1), MsgPow.scalarHash(m2), "different nonce must change scalarHash");
     }
 
-    // ── verifyV2 ──────────────────────────────────────────────────────────────
+    // ── verify (revised) ──────────────────────────────────────────────────────
 
-    /// verifyV2 must always revert when difficulty == 0.
-    function testFuzz_verifyV2_reverts_on_zero_difficulty(
+    /// verify must always revert when difficulty == 0.
+    function testFuzz_verifyRevised_reverts_on_zero_difficulty(
         uint256 nonce,
         bytes32 blockHash,
         bytes32 category,
@@ -210,14 +216,14 @@ contract MsgPowFuzzTest is Test {
         uint64 wm,
         uint64 wd
     ) public {
-        MsgPow.Message memory m = MsgPow.Message(2, nonce, blockHash, category, data, wm, wd);
+        MsgPow.Message memory m = MsgPow.Message(1, nonce, blockHash, category, data, wm, wd);
         vm.expectRevert("MsgPow: zero difficulty");
-        this.ext_verifyV2(m, 0);
+        this.ext_verify(m, 0);
     }
 
-    /// verifyV2 is deterministic.
+    /// verify is deterministic.
     /// forge-config: default.fuzz.runs = 24
-    function testFuzz_verifyV2_deterministic(
+    function testFuzz_verifyRevised_deterministic(
         uint256 nonce,
         bytes32 blockHash,
         bytes32 category,
@@ -227,15 +233,15 @@ contract MsgPowFuzzTest is Test {
         uint256 difficulty
     ) public pure {
         vm.assume(difficulty != 0);
-        MsgPow.Message memory m = MsgPow.Message(2, nonce, blockHash, category, data, wm, wd);
-        assertEq(MsgPow.verifyV2(m, difficulty), MsgPow.verifyV2(m, difficulty), "verifyV2 must be deterministic");
+        MsgPow.Message memory m = MsgPow.Message(1, nonce, blockHash, category, data, wm, wd);
+        assertEq(MsgPow.verify(m, difficulty), MsgPow.verify(m, difficulty), "verify must be deterministic");
     }
 
     /// difficulty == 1 → target == 2^256, so every in-range scalar passes. A miss is only possible
     /// when the scalar is out of range (about a 2^-128 chance), so this asserts the target rule,
-    /// not the scalar range: verifyV2 at difficulty 1 equals "scalar in range".
+    /// not the scalar range: verify at difficulty 1 equals "scalar in range".
     /// forge-config: default.fuzz.runs = 24
-    function testFuzz_verifyV2_difficulty_one_passes_when_scalar_in_range(
+    function testFuzz_verifyRevised_difficulty_one_passes_when_scalar_in_range(
         uint256 nonce,
         bytes32 blockHash,
         bytes32 category,
@@ -243,9 +249,9 @@ contract MsgPowFuzzTest is Test {
         uint64 wm,
         uint64 wd
     ) public pure {
-        MsgPow.Message memory m = MsgPow.Message(2, nonce, blockHash, category, data, wm, wd);
-        (bool ok,) = MsgPow.workHashV2(m);
-        assertEq(MsgPow.verifyV2(m, 1), ok, "difficulty=1 passes iff the scalar is in range");
+        MsgPow.Message memory m = MsgPow.Message(1, nonce, blockHash, category, data, wm, wd);
+        (bool ok,) = MsgPow.workHash(m);
+        assertEq(MsgPow.verify(m, 1), ok, "difficulty=1 passes iff the scalar is in range");
     }
 
     // ── powTarget ─────────────────────────────────────────────────────────────
