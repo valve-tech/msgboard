@@ -11,6 +11,7 @@ contract PoWMintTest is Test {
 
     function _load() internal view returns (MsgPow.Message memory m, uint256 difficulty) {
         string memory json = vm.readFile("./test/vectors/valid.json");
+        m.version = uint8(vm.parseUint(vm.parseJsonString(json, ".version")));
         m.nonce = vm.parseUint(vm.parseJsonString(json, ".nonce"));
         m.blockHash = vm.parseJsonBytes32(json, ".blockHash");
         m.category = vm.parseJsonBytes32(json, ".category");

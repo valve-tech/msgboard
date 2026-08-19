@@ -5,6 +5,10 @@ import * as msgboard from '@msgboard/sdk'
 
 import type { MsgBoardSettings } from './types'
 
+// The message version is RLP-encoded as a single byte, so 255 is the highest value core
+// can carry. Core verifies version 1 (legacy) and version >= 2 (revised) through verifyWork.
+export const MAX_SUPPORTED_VERSION = 255
+
 export const globalDefaultSettings: MsgBoardSettings = {
   enabled: true,
   workMultiplier: 10_000n,
@@ -79,7 +83,11 @@ export class MsgBoardProvider extends ProviderWrapper {
     if (bytes.length > this.settings.messageSizeLimit) {
       throw new Error('msgboard: message too large')
     }
-    if (m.version !== 1) {
+    // The PoW path is version-aware. Core supports version 1 (legacy) and version >= 2
+    // (revised); verifyWork() dispatches on m.version. The version is encoded as a single
+    // byte, so 255 is the maximum core can carry. Reject a version outside that range —
+    // version 0, a negative or non-integer value, or a value above what core supports.
+    if (!Number.isInteger(m.version) || m.version < 1 || m.version > MAX_SUPPORTED_VERSION) {
       throw new Error('powmsg: invalid version')
     }
     if (hexToBytes(m.category).length !== 32) {
@@ -102,7 +110,7 @@ export class MsgBoardProvider extends ProviderWrapper {
       throw new Error('powmsg: invalid data')
     }
     const difficulty = msgboard.difficulty(difficultyFactors, bytes.length)
-    const hash = msgboard.checkWork(m, difficulty)
+    const hash = msgboard.verifyWork(m, difficulty)
     if (!hash) {
       if (
         difficultyFactors.workMultiplier !== this.settings.workMultiplier ||

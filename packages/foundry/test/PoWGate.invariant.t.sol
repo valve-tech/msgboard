@@ -30,6 +30,7 @@ contract PoWGateHandler is Test {
 
     constructor() {
         string memory json = vm.readFile("./test/vectors/valid.json");
+        _golden.version        = uint8(vm.parseUint(vm.parseJsonString(json, ".version")));
         _golden.nonce          = vm.parseUint(vm.parseJsonString(json, ".nonce"));
         _golden.blockHash      = vm.parseJsonBytes32(json, ".blockHash");
         _golden.category       = vm.parseJsonBytes32(json, ".category");
