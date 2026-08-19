@@ -750,6 +750,32 @@ contract OperatorCoinFlipBoostedTest is Test {
         }
         _assertE2EInvariants();
     }
+
+    // --- Item 4a: the subset-size cap also gates the boosted open path (NF-1) ---
+
+    /// openBoosted enforces the same per-round validator-subset ceiling as open(), so the player cannot
+    /// inflate the boosted round's fee spend beyond the operator's bound either.
+    function test_openBoosted_defaultMaxSubset_blocksOversizeSubset() public {
+        bytes32 tid = _boostedTable();
+        _mintCharges(1);
+        // Assemble a subset above DEFAULT_MAX_SUBSET (5): six distinct allowlisted validators + locations.
+        uint256 over = game.DEFAULT_MAX_SUBSET() + 1;
+        address[] memory big = new address[](over);
+        PreimageLocation.Info[] memory locs = new PreimageLocation.Info[](over);
+        uint256 tierPrice = game.tierPriceOf(tid, 4 ether);
+        for (uint256 i = 0; i < over; i++) {
+            address v = address(uint160(0x4000 + i));
+            game.addValidator(v);
+            big[i] = v;
+            locs[i] = PreimageLocation.Info({
+                provider: v, callAtChange: true, durationIsTimestamp: false,
+                duration: 12, token: address(tok), price: tierPrice, offset: 0, index: 0
+            });
+        }
+        vm.prank(player);
+        vm.expectRevert(OperatorCoinFlip.SubsetTooLarge.selector);
+        game.openBoosted(tid, 0, 4 ether, 0, big, locs);
+    }
 }
 
 /// @notice A contract-player whose 1155 receiver can be toggled to reject — proves a boosted plain-timeout

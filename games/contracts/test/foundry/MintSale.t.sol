@@ -495,6 +495,48 @@ contract MintSaleTest is Test {
         sale.buy(id, 1);
     }
 
+    // ── Item 4b: owner-set per-token charge-price floor (economic L2) ────────────────────────────────
+
+    function test_setMinSeriesPrice_onlyOwner() public {
+        vm.prank(address(0xBAD));
+        vm.expectRevert(MintSale.NotOwner.selector);
+        sale.setMinSeriesPrice(address(tok), 500);
+    }
+
+    /// With a floor set, a series priced below it is rejected; at/above the floor it stamps normally.
+    function test_createSeries_belowFloor_reverts() public {
+        sale.setMinSeriesPrice(address(tok), P); // floor == P (1000)
+        vm.prank(operator);
+        vm.expectRevert(MintSale.PriceBelowFloor.selector);
+        sale.createSeries(25, 999, uint64(block.timestamp + 7 days), address(tok), P - 1);
+
+        // Exactly at the floor is fine.
+        vm.prank(operator);
+        uint256 id = sale.createSeries(25, 999, uint64(block.timestamp + 7 days), address(tok), P);
+        assertEq(sale.price(id), P);
+    }
+
+    /// The floor is per token: a floor on one token never gates a series in a different token.
+    function test_minSeriesPrice_isPerToken() public {
+        ERC20 other = new ERC20(false);
+        sale.setMinSeriesPrice(address(tok), P); // floor only on `tok`
+        vm.prank(operator);
+        uint256 id = sale.createSeries(25, 999, uint64(block.timestamp + 7 days), address(other), 1);
+        assertEq(sale.price(id), 1); // untouched by tok's floor
+    }
+
+    /// A zero floor (the default) disables the check — the pre-existing ZeroPrice guard still applies.
+    function test_createSeries_zeroFloor_disabled() public {
+        // No floor set → any non-zero price stamps.
+        vm.prank(operator);
+        uint256 id = sale.createSeries(25, 999, uint64(block.timestamp + 7 days), address(tok), 1);
+        assertEq(sale.price(id), 1);
+        // Zero price is still rejected by the pre-existing guard.
+        vm.prank(operator);
+        vm.expectRevert(MintSale.ZeroPrice.selector);
+        sale.createSeries(25, 999, uint64(block.timestamp + 7 days), address(tok), 0);
+    }
+
     function test_createSeries_revertsWhenFeeTooHigh() public {
         policy.setBps(1001); // above MAX_FEE_BPS
         vm.prank(operator);

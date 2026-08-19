@@ -653,6 +653,96 @@ contract OperatorCoinFlipTest is Test {
         assertEq(_status(roundId), uint8(OperatorCoinFlip.Status.Settled));
         assertEq(game.tableLocked(tid), 0);
     }
+
+    // --- Item 4a: per-round validator-subset size cap (bounds the player-set fee spend, NF-1) ---
+
+    /// @notice Allowlist `count` fresh validators and return them as a subset the player can name.
+    function _bigSubset(uint256 count) internal returns (address[] memory vs) {
+        vs = new address[](count);
+        for (uint256 i = 0; i < count; i++) {
+            address v = address(uint160(0x4000 + i));
+            game.addValidator(v);
+            vs[i] = v;
+        }
+    }
+
+    function _locsFor(address[] memory sub, uint256 price) internal view returns (PreimageLocation.Info[] memory L) {
+        L = new PreimageLocation.Info[](sub.length);
+        for (uint256 i = 0; i < sub.length; i++) {
+            L[i] = PreimageLocation.Info({
+                provider: sub[i], callAtChange: true, durationIsTimestamp: false,
+                duration: 12, token: address(tok), price: price, offset: 0, index: 0
+            });
+        }
+    }
+
+    /// With no operator override, a subset above DEFAULT_MAX_SUBSET is rejected — a player cannot inflate
+    /// the round's fee spend (subset.length * tierPrice) beyond the conservative default ceiling.
+    function test_open_defaultMaxSubset_blocksOversizeSubset() public {
+        bytes32 tid = _table();
+        uint256 over = game.DEFAULT_MAX_SUBSET() + 1; // 6 distinct allowlisted validators
+        address[] memory big = _bigSubset(over);
+        PreimageLocation.Info[] memory locs = _locsFor(big, game.tierPriceOf(tid, 4 ether));
+        vm.prank(player);
+        vm.expectRevert(OperatorCoinFlip.SubsetTooLarge.selector);
+        game.open(tid, 0, 4 ether, big, locs);
+    }
+
+    /// A subset exactly at the default ceiling is accepted.
+    function test_open_defaultMaxSubset_allowsAtCeiling() public {
+        bytes32 tid = _table();
+        address[] memory atMax = _bigSubset(game.DEFAULT_MAX_SUBSET()); // 5
+        PreimageLocation.Info[] memory locs = _locsFor(atMax, game.tierPriceOf(tid, 4 ether));
+        vm.prank(player);
+        bytes32 roundId = game.open(tid, 0, 4 ether, atMax, locs);
+        assertEq(_status(roundId), uint8(OperatorCoinFlip.Status.Pending));
+    }
+
+    /// The operator can raise the ceiling on its own table, then a larger subset is accepted.
+    function test_setMaxValidators_operatorCanRaise() public {
+        bytes32 tid = _table();
+        address[] memory big = _bigSubset(6);
+        // Above the default (5) → rejected until the operator raises it.
+        PreimageLocation.Info[] memory locs = _locsFor(big, game.tierPriceOf(tid, 4 ether));
+        vm.prank(player);
+        vm.expectRevert(OperatorCoinFlip.SubsetTooLarge.selector);
+        game.open(tid, 0, 4 ether, big, locs);
+
+        vm.prank(op); game.setMaxValidators(tid, 6);
+        assertEq(game.maxValidators(tid), 6);
+        vm.prank(player);
+        bytes32 roundId = game.open(tid, 0, 4 ether, big, locs);
+        assertEq(_status(roundId), uint8(OperatorCoinFlip.Status.Pending));
+    }
+
+    /// The operator can tighten the ceiling below the default; a subset above the new max is rejected.
+    function test_setMaxValidators_operatorCanTighten() public {
+        bytes32 tid = _table();
+        vm.prank(op); game.setMaxValidators(tid, 3); // exactly the floor
+        address[] memory four = _bigSubset(4);
+        PreimageLocation.Info[] memory locs4 = _locsFor(four, game.tierPriceOf(tid, 4 ether));
+        vm.prank(player);
+        vm.expectRevert(OperatorCoinFlip.SubsetTooLarge.selector);
+        game.open(tid, 0, 4 ether, four, locs4);
+        // The default 3-subset still opens.
+        (bytes32 roundId,,) = _open(tid, 0, 4 ether);
+        assertEq(_status(roundId), uint8(OperatorCoinFlip.Status.Pending));
+    }
+
+    function test_setMaxValidators_onlyOperator() public {
+        bytes32 tid = _table();
+        vm.prank(address(0xBAD));
+        vm.expectRevert(OperatorCoinFlip.NotOperator.selector);
+        game.setMaxValidators(tid, 4);
+    }
+
+    /// A non-zero max below MIN_SUBSET is rejected — it would brick the table (the floor needs 3).
+    function test_setMaxValidators_rejectsBelowFloor() public {
+        bytes32 tid = _table();
+        vm.prank(op);
+        vm.expectRevert(OperatorCoinFlip.BadMaxValidators.selector);
+        game.setMaxValidators(tid, 2);
+    }
 }
 
 // --- minimal policies for hook tests ---

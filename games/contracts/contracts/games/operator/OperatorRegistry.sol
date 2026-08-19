@@ -2,9 +2,9 @@
 pragma solidity ^0.8.24;
 
 /// @notice Permissionless operator identity + config for the table-maintainer substrate. Anyone may
-/// register (no admin gate); the registry holds NO funds — it stores only rake config, a funding-source
-/// pointer, and a metadata URI event. Curation / "verified" status lives entirely off-chain in the
-/// discovery layer (slice C); this contract gatekeeps nothing.
+/// register (no admin gate); the registry holds NO funds — it stores only rake config and a metadata URI
+/// event. Curation / "verified" status lives entirely off-chain in the discovery layer (slice C); this
+/// contract gatekeeps nothing.
 contract OperatorRegistry {
     error NotRegistered();
     error RakeTooHigh();
@@ -14,12 +14,10 @@ contract OperatorRegistry {
     mapping(address operator => bool) public registered;
     mapping(address operator => mapping(address game => uint16)) internal _rakeBps;
     mapping(address operator => mapping(address token => address)) internal _rakeRecipient;
-    mapping(address operator => mapping(address token => address)) internal _fundingSource;
 
     event Registered(address indexed operator);
     event RakeSet(address indexed operator, address indexed game, uint16 bps);
     event RakeRecipientSet(address indexed operator, address indexed token, address recipient);
-    event FundingSourceSet(address indexed operator, address indexed token, address src);
     event MetadataSet(address indexed operator, string uri);
 
     modifier onlyRegistered() {
@@ -51,21 +49,6 @@ contract OperatorRegistry {
     function rakeRecipientOf(address operator, address token) external view returns (address) {
         address r = _rakeRecipient[operator][token];
         return r == address(0) ? operator : r;
-    }
-
-    /// @notice ADVISORY ONLY. The substrate uses an internal pre-funded bankroll ledger in GameEscrow
-    /// (operators call `depositBankroll`), NOT a per-bet pull from this pointer — no on-chain code reads
-    /// `fundingSourceOf`. It exists as an off-chain hint (which address an operator funds from) for
-    /// discovery/tooling. This deviates from the spec's original "pull-per-bet from the funding source"
-    /// model; the deviation is deliberate (all collateral sits in escrow before any bet opens, so escrow
-    /// solvency is a local invariant). Wire an on-chain pull here only if that model is revived.
-    function setFundingSource(address token, address src) external onlyRegistered {
-        _fundingSource[msg.sender][token] = src;
-        emit FundingSourceSet(msg.sender, token, src);
-    }
-
-    function fundingSourceOf(address operator, address token) external view returns (address) {
-        return _fundingSource[operator][token];
     }
 
     function setMetadataURI(string calldata uri) external onlyRegistered {
