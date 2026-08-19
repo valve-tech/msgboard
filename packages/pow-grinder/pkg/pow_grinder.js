@@ -20,6 +20,26 @@ export function stamp(req) {
     }
     return v1;
 }
+
+/**
+ * Mint a MsgBoard PoW stamp with the revised (v2) algorithm. Takes one object `{ category, data,
+ * workMultiplier, workDivisor, blockHash, version, startNonce, maxIters }`; returns a 40-byte
+ * Uint8Array `nonce_be(8) ‖ hash(32)`, or undefined if `maxIters` was exhausted. (SDK verb: `stampV2`.)
+ * @param {any} req
+ * @returns {Uint8Array | undefined}
+ */
+export function stamp_v2(req) {
+    const ret = wasm.stamp_v2(req);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    let v1;
+    if (ret[0] !== 0) {
+        v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    }
+    return v1;
+}
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,

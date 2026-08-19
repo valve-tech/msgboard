@@ -58,7 +58,12 @@ export function getChallenge(msg: types.MessageSeed) {
   if (challenge.isInfinity()) {
     throw new Error('unable to create challenge')
   }
-  return Uint8Array.from(challenge.getX().toArray())
+  // The x-coordinate MUST be a fixed 32-byte big-endian encoding. bn.js `toArray()` with no length
+  // returns the MINIMAL representation, dropping leading zero bytes — so an x below 2^248 (one input
+  // in 256) would encode to 31 bytes and mismatch the node. The node's verifier and this repo's Rust
+  // grinder both always produce 32 bytes (pow-grinder/src/lib.rs x_of → [u8; 32]; reth pow.rs
+  // serialize_uncompressed()[1..33]). Pin the width to match them.
+  return Uint8Array.from(challenge.getX().toArray('be', 32))
 }
 
 /**
@@ -112,7 +117,9 @@ export function createChallengeSearch(message: types.MessageSeed) {
       if (point!.isInfinity()) {
         throw new Error('unable to create challenge')
       }
-      const challenge = Uint8Array.from(point!.getX().toArray())
+      // Fixed 32-byte big-endian x — see the note in getChallenge. `toArray('be', 32)` matches the
+      // node + Rust grinder; a bare `toArray()` drops leading zeros (~1 nonce in 256) and mismatches.
+      const challenge = Uint8Array.from(point!.getX().toArray('be', 32))
       const hash = sha256(new Uint8Array([...challenge, ...suffix]))
       if (BigInt(hash) % msgDifficulty !== 0n) {
         return null
@@ -131,6 +138,95 @@ export function createChallengeSearch(message: types.MessageSeed) {
 export function difficulty({ workMultiplier, workDivisor }: types.DifficultyFactors, dataLen: number) {
   // difficulty is increased with the size of the message
   return ((2n ** 24n + BigInt(dataLen) * 10_000n) * workMultiplier) / workDivisor
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// Revised PoW algorithm (message version >= 2). Version-gated: version 1 keeps the legacy scheme
+// above (getChallenge/checkWork/createChallengeSearch); version >= 2 uses this scheme, matching the
+// node's REST spec byte-for-byte. verifyWork() dispatches on msg.version so the two coexist.
+//
+// Differences from v1: the scalar is a SHA256 of the whole transcript (not nonce*digest+blockHash);
+// the work hash is over the COMPRESSED point (33 bytes, so no leading-zero encoding hazard like the
+// v1 x-coordinate had); an out-of-range scalar is REJECTED, not reduced (mirrors Go ScalarBaseMult);
+// and acceptance is `workHash < 2^256 / D`, not `hash % D == 0`.
+//
+// VERSION MAPPING — FLAGGED FOR RECONCILIATION: we assign legacy=1, revised=2 per the coexistence
+// decision. The node spec's own examples show version 0x1 alongside the revised scalarHash, so the
+// node's version->algorithm dispatch MUST be confirmed before v2 messages go to a live node.
+
+/** The acceptance target for the revised algo: a work hash is valid iff it is below 2^256 / D. */
+export function powTarget(d: bigint): bigint {
+  return d === 0n ? 0n : (2n ** 256n) / d
+}
+
+/** Revised algo, step 3: SHA256(category ‖ data). Commits category + data once per message body. */
+export function payloadHash(msg: types.MessageSeed): Hex {
+  return sha256(concatBytes([hexToBytes(msg.category, { size: 32 }), hexToBytes(msg.data)]))
+}
+
+/**
+ * Revised algo, step 4: SHA256(version ‖ blockHash ‖ payloadHash ‖ workMultiplier ‖ workDivisor ‖ nonce).
+ * Fixed-width big-endian: 1-byte version, 32-byte blockHash, 32-byte payloadHash, 8-byte M / D / nonce.
+ */
+export function scalarHash(msg: types.MessageSeed, payloadHashBytes: Uint8Array): Hex {
+  return sha256(
+    concatBytes([
+      numberToBytes(msg.version, { size: 1 }),
+      hexToBytes(msg.blockHash, { size: 32 }),
+      payloadHashBytes,
+      numberToBytes(msg.workMultiplier, { size: 8 }),
+      numberToBytes(msg.workDivisor, { size: 8 }),
+      numberToBytes(msg.nonce, { size: 8 }),
+    ]),
+  )
+}
+
+/**
+ * Revised-algo verifier (message version >= 2). Matches the node spec exactly and THROWS on invalid
+ * work — an out-of-range scalar (must satisfy 1 <= scalar < n; reject, do not reduce), a point at
+ * infinity, or a hash at/above the target. Returns the work hash on success.
+ */
+export function checkWorkV2(msg: types.MessageSeed, msgDifficulty: bigint): Hex {
+  const payloadHashBytes = hexToBytes(payloadHash(msg))
+  const scalar = new BN(hexToBytes(scalarHash(msg, payloadHashBytes)))
+  // Reject rather than reduce: must match Go's secp256k1 ScalarBaseMult behaviour.
+  if (scalar.isZero() || scalar.gte(ec.n as BN)) throw new Error('invalid work')
+  const point = g.mul(scalar)
+  if (point.isInfinity()) throw new Error('invalid work')
+  const compressed = Uint8Array.from(point.encodeCompressed()) // 0x02/0x03 ‖ x (33 bytes)
+  const hash = sha256(compressed)
+  if (BigInt(hash) >= powTarget(msgDifficulty)) throw new Error('invalid work')
+  return hash
+}
+
+/**
+ * Version-aware verifier: v1 -> legacy {@link checkWork} (returns null on a miss); v2+ -> the
+ * spec-exact {@link checkWorkV2} (which throws), normalised to null-on-miss. Returns the work hash,
+ * or null when the work does not pass. This is what a version-agnostic caller should use.
+ */
+export function verifyWork(msg: types.MessageSeed, msgDifficulty: bigint): Hex | null {
+  if (msg.version >= 2) {
+    try {
+      return checkWorkV2(msg, msgDifficulty)
+    } catch {
+      return null
+    }
+  }
+  return checkWork(msg, msgDifficulty)
+}
+
+/**
+ * Revised-algo grind (message version >= 2). Each nonce's scalar is an independent hash, so — unlike
+ * the v1 {@link createChallengeSearch} — there is no constant point step to exploit; every nonce pays
+ * a full scalar multiply. Mutates `message.nonce`; returns the work hash when a nonce passes, else null.
+ */
+export function createChallengeSearchV2(message: types.MessageSeed) {
+  return {
+    next(msgDifficulty: bigint): Hex | null {
+      message.nonce += 1n
+      return verifyWork(message, msgDifficulty)
+    },
+  }
 }
 
 /**
