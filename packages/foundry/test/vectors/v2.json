@@ -1,0 +1,27 @@
+{
+  "fixture": {
+    "version": 2,
+    "nonce": "42",
+    "blockHash": "0x2e4283657020515742f1cdee8b4a01b1920e459419be89a5316152be3bb122e2",
+    "category": "0xda5195d22a0b240b14559bfd687e228acb43f8c5b1a7f876b1761584306b3c45",
+    "data": "0x0102030405",
+    "workMultiplier": "1",
+    "workDivisor": "1",
+    "payloadHash": "0xd73f3e001a3e81f1483ac0cdc9c56e2fe4d8b0fff3d8e9c4b385be4941289671",
+    "scalarHash": "0xb30158e41c77b19c5fa193978fc81310a3690db47085eb2e62bf819fa4311a89"
+  },
+  "stamp": {
+    "version": 2,
+    "nonce": "24",
+    "blockHash": "0x80b77fe15818b61e0c9a36535243794608f1592ac88a5b8663ddc19b5cc11e66",
+    "category": "0x50a708bca5d752288fd658d84874e26001ecfcae57fd09fe74a4c155103d4cb5",
+    "data": "0x",
+    "workMultiplier": "1",
+    "workDivisor": "65536",
+    "difficulty": "256",
+    "powTarget": "0x0100000000000000000000000000000000000000000000000000000000000000",
+    "payloadHash": "0xa4b196852bf18d45319e070fa8324093d906cddf24d4ecdd94e42c99d7414c40",
+    "scalarHash": "0xb05e26925056bb781f250766cf0c4efcd01263550db67d59ee7911a7ba225d06",
+    "workHash": "0x0057f7c7bc9878a3a9e9d0edc593bd48d463aade15d8f62217f623e7e8fdbd7c"
+  }
+}

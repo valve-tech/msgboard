@@ -8,43 +8,36 @@ import {MsgPow} from "../src/MsgPow.sol";
 /// None of these require a live node — all inputs are synthetic.
 ///
 /// Tests are grouped by the function under test:
-///   minimalBytes — cheap (no ecMul), default run count
-///   digest       — cheap, default run count
+///   digest       — cheap (no ecMul), default run count
 ///   workHash     — calls ecMul (~700k gas each), low run count
 ///   verify       — same cost as workHash, low run count
+///   v2 digests   — cheap, default run count
+///   v2 verify    — calls ecMul, low run count
+///   powTarget    — cheap, default run count
 contract MsgPowFuzzTest is Test {
     // ── External wrappers so vm.expectRevert works on library internal calls ──
 
-    function ext_verify(MsgPow.Message calldata m, uint256 difficulty) external pure returns (bool) {
-        return MsgPow.verify(m, difficulty);
+    function ext_verifyV1(MsgPow.Message calldata m, uint256 difficulty) external pure returns (bool) {
+        return MsgPow.verifyV1(m, difficulty);
     }
 
-    // ── minimalBytes ──────────────────────────────────────────────────────────
-
-    /// No leading zero bytes unless x == 0.
-    function testFuzz_minimalBytes_no_leading_zeros(uint256 x) public pure {
-        bytes memory b = MsgPow.minimalBytes(x);
-        if (x == 0) {
-            assertEq(b.length, 0, "zero must produce empty bytes");
-        } else {
-            assertGt(b.length, 0, "nonzero must produce nonempty bytes");
-            assertNotEq(uint8(b[0]), 0, "first byte must be nonzero");
-        }
+    function ext_verifyV2(MsgPow.Message calldata m, uint256 difficulty) external pure returns (bool) {
+        return MsgPow.verifyV2(m, difficulty);
     }
 
-    /// Encoding always fits in 32 bytes (uint256 is at most 256 bits).
-    function testFuzz_minimalBytes_bounded(uint256 x) public pure {
-        assertLe(MsgPow.minimalBytes(x).length, 32, "result must fit within 32 bytes");
+    function ext_powTarget(uint256 d) external pure returns (uint256) {
+        return MsgPow.powTarget(d);
     }
 
-    /// Decoding the produced bytes must recover x exactly.
-    function testFuzz_minimalBytes_roundtrip(uint256 x) public pure {
-        bytes memory b = MsgPow.minimalBytes(x);
-        uint256 recovered;
-        for (uint256 i = 0; i < b.length; i++) {
-            recovered = (recovered << 8) | uint8(b[i]);
-        }
-        assertEq(recovered, x, "minimalBytes must encode x losslessly");
+    function _v1(
+        uint256 nonce,
+        bytes32 blockHash,
+        bytes32 category,
+        bytes calldata data,
+        uint64 wm,
+        uint64 wd
+    ) internal pure returns (MsgPow.Message memory) {
+        return MsgPow.Message(1, nonce, blockHash, category, data, wm, wd);
     }
 
     // ── digest ────────────────────────────────────────────────────────────────
@@ -59,7 +52,7 @@ contract MsgPowFuzzTest is Test {
         assertEq(MsgPow.digest(wm, wd), MsgPow.digest(wm, wd));
     }
 
-    // ── workHash ──────────────────────────────────────────────────────────────
+    // ── workHash (v1) ───────────────────────────────────────────────────────────
 
     /// workHash is deterministic: two calls with the same inputs must agree.
     /// forge-config: default.fuzz.runs = 32
@@ -71,7 +64,7 @@ contract MsgPowFuzzTest is Test {
         uint64 wm,
         uint64 wd
     ) public pure {
-        MsgPow.Message memory m = MsgPow.Message(nonce, blockHash, category, data, wm, wd);
+        MsgPow.Message memory m = _v1(nonce, blockHash, category, data, wm, wd);
         assertEq(MsgPow.workHash(m), MsgPow.workHash(m), "workHash must be deterministic");
     }
 
@@ -88,8 +81,8 @@ contract MsgPowFuzzTest is Test {
         uint64 wd
     ) public pure {
         vm.assume(keccak256(data) != keccak256(otherData));
-        MsgPow.Message memory m1 = MsgPow.Message(nonce, blockHash, category, data, wm, wd);
-        MsgPow.Message memory m2 = MsgPow.Message(nonce, blockHash, category, otherData, wm, wd);
+        MsgPow.Message memory m1 = _v1(nonce, blockHash, category, data, wm, wd);
+        MsgPow.Message memory m2 = _v1(nonce, blockHash, category, otherData, wm, wd);
         assertNotEq(MsgPow.workHash(m1), MsgPow.workHash(m2), "different data must produce different workHash");
     }
 
@@ -105,14 +98,14 @@ contract MsgPowFuzzTest is Test {
         uint64 wd
     ) public pure {
         vm.assume(category != otherCategory);
-        MsgPow.Message memory m1 = MsgPow.Message(nonce, blockHash, category, data, wm, wd);
-        MsgPow.Message memory m2 = MsgPow.Message(nonce, blockHash, otherCategory, data, wm, wd);
+        MsgPow.Message memory m1 = _v1(nonce, blockHash, category, data, wm, wd);
+        MsgPow.Message memory m2 = _v1(nonce, blockHash, otherCategory, data, wm, wd);
         assertNotEq(MsgPow.workHash(m1), MsgPow.workHash(m2), "different category must produce different workHash");
     }
 
-    // ── verify ────────────────────────────────────────────────────────────────
+    // ── verify (v1) ─────────────────────────────────────────────────────────────
 
-    /// verify must always revert when difficulty == 0.
+    /// verify must always revert when difficulty == 0 (v1 path).
     function testFuzz_verify_reverts_on_zero_difficulty(
         uint256 nonce,
         bytes32 blockHash,
@@ -121,9 +114,9 @@ contract MsgPowFuzzTest is Test {
         uint64 wm,
         uint64 wd
     ) public {
-        MsgPow.Message memory m = MsgPow.Message(nonce, blockHash, category, data, wm, wd);
+        MsgPow.Message memory m = _v1(nonce, blockHash, category, data, wm, wd);
         vm.expectRevert("MsgPow: zero difficulty");
-        this.ext_verify(m, 0);
+        this.ext_verifyV1(m, 0);
     }
 
     /// difficulty == 1 must accept every message because uint256 % 1 == 0 for all uint256.
@@ -136,12 +129,11 @@ contract MsgPowFuzzTest is Test {
         uint64 wm,
         uint64 wd
     ) public pure {
-        MsgPow.Message memory m = MsgPow.Message(nonce, blockHash, category, data, wm, wd);
-        assertTrue(MsgPow.verify(m, 1), "difficulty=1 must accept every message");
+        MsgPow.Message memory m = _v1(nonce, blockHash, category, data, wm, wd);
+        assertTrue(MsgPow.verify(m, 1), "difficulty=1 must accept every v1 message");
     }
 
     /// If a message passes a stricter (larger) difficulty D, it must also pass difficulty == 1.
-    /// (Converse of the subset property: passing harder implies passing trivial.)
     /// forge-config: default.fuzz.runs = 32
     function testFuzz_verify_stricter_implies_trivial(
         uint256 nonce,
@@ -153,7 +145,7 @@ contract MsgPowFuzzTest is Test {
         uint256 difficulty
     ) public pure {
         vm.assume(difficulty > 1);
-        MsgPow.Message memory m = MsgPow.Message(nonce, blockHash, category, data, wm, wd);
+        MsgPow.Message memory m = _v1(nonce, blockHash, category, data, wm, wd);
         if (MsgPow.verify(m, difficulty)) {
             assertTrue(MsgPow.verify(m, 1), "a message passing difficulty D must pass difficulty 1");
         }
@@ -171,7 +163,123 @@ contract MsgPowFuzzTest is Test {
         uint256 difficulty
     ) public pure {
         vm.assume(difficulty != 0);
-        MsgPow.Message memory m = MsgPow.Message(nonce, blockHash, category, data, wm, wd);
+        MsgPow.Message memory m = _v1(nonce, blockHash, category, data, wm, wd);
         assertEq(MsgPow.verify(m, difficulty), MsgPow.verify(m, difficulty), "verify must be deterministic");
+    }
+
+    // ── v2 digests ──────────────────────────────────────────────────────────────
+
+    /// scalarHash is deterministic.
+    function testFuzz_v2_scalarHash_deterministic(
+        uint256 nonce,
+        bytes32 blockHash,
+        bytes32 category,
+        bytes calldata data,
+        uint64 wm,
+        uint64 wd
+    ) public pure {
+        MsgPow.Message memory m = MsgPow.Message(2, nonce, blockHash, category, data, wm, wd);
+        assertEq(MsgPow.scalarHash(m), MsgPow.scalarHash(m), "scalarHash must be deterministic");
+    }
+
+    /// The nonce enters scalarHash as its low 8 bytes; a change there must change the hash.
+    /// forge-config: default.fuzz.runs = 64
+    function testFuzz_v2_scalarHash_sensitive_to_nonce(
+        uint64 nonce,
+        uint64 otherNonce,
+        bytes32 blockHash,
+        bytes32 category,
+        bytes calldata data,
+        uint64 wm,
+        uint64 wd
+    ) public pure {
+        vm.assume(nonce != otherNonce);
+        MsgPow.Message memory m1 = MsgPow.Message(2, nonce, blockHash, category, data, wm, wd);
+        MsgPow.Message memory m2 = MsgPow.Message(2, otherNonce, blockHash, category, data, wm, wd);
+        assertNotEq(MsgPow.scalarHash(m1), MsgPow.scalarHash(m2), "different nonce must change scalarHash");
+    }
+
+    // ── verifyV2 ──────────────────────────────────────────────────────────────
+
+    /// verifyV2 must always revert when difficulty == 0.
+    function testFuzz_verifyV2_reverts_on_zero_difficulty(
+        uint256 nonce,
+        bytes32 blockHash,
+        bytes32 category,
+        bytes calldata data,
+        uint64 wm,
+        uint64 wd
+    ) public {
+        MsgPow.Message memory m = MsgPow.Message(2, nonce, blockHash, category, data, wm, wd);
+        vm.expectRevert("MsgPow: zero difficulty");
+        this.ext_verifyV2(m, 0);
+    }
+
+    /// verifyV2 is deterministic.
+    /// forge-config: default.fuzz.runs = 24
+    function testFuzz_verifyV2_deterministic(
+        uint256 nonce,
+        bytes32 blockHash,
+        bytes32 category,
+        bytes calldata data,
+        uint64 wm,
+        uint64 wd,
+        uint256 difficulty
+    ) public pure {
+        vm.assume(difficulty != 0);
+        MsgPow.Message memory m = MsgPow.Message(2, nonce, blockHash, category, data, wm, wd);
+        assertEq(MsgPow.verifyV2(m, difficulty), MsgPow.verifyV2(m, difficulty), "verifyV2 must be deterministic");
+    }
+
+    /// difficulty == 1 → target == 2^256, so every in-range scalar passes. A miss is only possible
+    /// when the scalar is out of range (about a 2^-128 chance), so this asserts the target rule,
+    /// not the scalar range: verifyV2 at difficulty 1 equals "scalar in range".
+    /// forge-config: default.fuzz.runs = 24
+    function testFuzz_verifyV2_difficulty_one_passes_when_scalar_in_range(
+        uint256 nonce,
+        bytes32 blockHash,
+        bytes32 category,
+        bytes calldata data,
+        uint64 wm,
+        uint64 wd
+    ) public pure {
+        MsgPow.Message memory m = MsgPow.Message(2, nonce, blockHash, category, data, wm, wd);
+        (bool ok,) = MsgPow.workHashV2(m);
+        assertEq(MsgPow.verifyV2(m, 1), ok, "difficulty=1 passes iff the scalar is in range");
+    }
+
+    // ── powTarget ─────────────────────────────────────────────────────────────
+
+    /// powTarget reverts for d < 2 (the true target 2^256 does not fit in a uint256).
+    function test_powTarget_reverts_below_two() public {
+        vm.expectRevert("MsgPow: target overflow");
+        this.ext_powTarget(1);
+        vm.expectRevert("MsgPow: target overflow");
+        this.ext_powTarget(0);
+    }
+
+    /// powTarget is the exact floor of 2^256 / d: d * target <= 2^256 < d * (target + 1). Rearranged
+    /// without overflow: target <= max/d, and the remainder max - d*target is below d (accounting for
+    /// the +1 that turns max into 2^256).
+    /// forge-config: default.fuzz.runs = 256
+    function testFuzz_powTarget_is_floor(uint256 d) public pure {
+        vm.assume(d >= 2);
+        uint256 target = MsgPow.powTarget(d);
+        // target <= floor(2^256 / d) <= floor(max / d) + 1
+        assertLe(target, type(uint256).max / d + 1, "target upper bound");
+        // d * target must not exceed 2^256, i.e. it fits in a uint256 unless it is exactly 2^256.
+        // Check via: target <= max / d + (max % d + 1 >= d ? 1 : 0), reproduced independently.
+        uint256 expected = type(uint256).max / d;
+        if (type(uint256).max % d + 1 >= d) expected += 1;
+        assertEq(target, expected, "powTarget must equal the overflow-safe floor");
+    }
+
+    /// powTarget is monotonically non-increasing in d (harder difficulty → smaller target).
+    /// forge-config: default.fuzz.runs = 128
+    function testFuzz_powTarget_monotonic(uint256 d1, uint256 d2) public pure {
+        vm.assume(d1 >= 2 && d2 >= 2);
+        if (d1 <= d2) {
+            assertGe(MsgPow.powTarget(d1), MsgPow.powTarget(d2), "larger difficulty must not raise the target");
+        }
     }
 }
