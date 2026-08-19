@@ -3,12 +3,11 @@ import { numberToHex, type Hex, type Block, zeroHash, hexToBytes } from 'viem'
 import type { EIP1193Provider, RequestArguments } from 'hardhat/types'
 import * as msgboard from '@msgboard/sdk'
 
-import type { MsgBoardSettings } from './types'
+import type { MsgBoardSettings, PowAlgorithm } from './types'
 
-// The message version is RLP-encoded as a single byte, so 255 is the highest value core
-// can carry. Core verifies version 1 (legacy) and version >= 2 (revised) through verifyWork.
-export const MAX_SUPPORTED_VERSION = 255
-
+// There is ONE message version — version 1. Two algorithms verify it, legacy and revised; the board
+// selects one by config, not by the version field. The default is legacy, because the live 943 board
+// still runs the legacy scheme.
 export const globalDefaultSettings: MsgBoardSettings = {
   enabled: true,
   workMultiplier: 10_000n,
@@ -16,6 +15,13 @@ export const globalDefaultSettings: MsgBoardSettings = {
   messageSizeLimit: 1024n * 8n,
   boardCountLimit: 10_000n,
   blockRangeLimit: 120n,
+  algorithm: 'legacy',
+}
+
+// Maps the configured scheme to its core verifier. Both return the work hash, or null on a miss.
+const verifiers: Record<PowAlgorithm, (m: msgboard.MessageSeed, difficulty: bigint) => Hex | null> = {
+  legacy: msgboard.checkWorkLegacy,
+  revised: msgboard.checkWork,
 }
 export const defaultSettings = () => ({
   ...globalDefaultSettings,
@@ -83,11 +89,10 @@ export class MsgBoardProvider extends ProviderWrapper {
     if (bytes.length > this.settings.messageSizeLimit) {
       throw new Error('msgboard: message too large')
     }
-    // The PoW path is version-aware. Core supports version 1 (legacy) and version >= 2
-    // (revised); verifyWork() dispatches on m.version. The version is encoded as a single
-    // byte, so 255 is the maximum core can carry. Reject a version outside that range —
-    // version 0, a negative or non-integer value, or a value above what core supports.
-    if (!Number.isInteger(m.version) || m.version < 1 || m.version > MAX_SUPPORTED_VERSION) {
+    // There is one message version — version 1. The scheme (legacy or revised) does NOT come from
+    // the version field; the board selects it by config. Accept version 1; reject 0 or any other
+    // value, and a non-integer.
+    if (!Number.isInteger(m.version) || m.version !== 1) {
       throw new Error('powmsg: invalid version')
     }
     if (hexToBytes(m.category).length !== 32) {
@@ -110,7 +115,7 @@ export class MsgBoardProvider extends ProviderWrapper {
       throw new Error('powmsg: invalid data')
     }
     const difficulty = msgboard.difficulty(difficultyFactors, bytes.length)
-    const hash = msgboard.verifyWork(m, difficulty)
+    const hash = verifiers[this.settings.algorithm](m, difficulty)
     if (!hash) {
       if (
         difficultyFactors.workMultiplier !== this.settings.workMultiplier ||

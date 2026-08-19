@@ -11,8 +11,8 @@
     "scalarHash": "0xb30158e41c77b19c5fa193978fc81310a3690db47085eb2e62bf819fa4311a89"
   },
   "stamp": {
-    "version": 2,
-    "nonce": "24",
+    "version": 1,
+    "nonce": "269",
     "blockHash": "0x80b77fe15818b61e0c9a36535243794608f1592ac88a5b8663ddc19b5cc11e66",
     "category": "0x50a708bca5d752288fd658d84874e26001ecfcae57fd09fe74a4c155103d4cb5",
     "data": "0x",
@@ -21,7 +21,7 @@
     "difficulty": "256",
     "powTarget": "0x0100000000000000000000000000000000000000000000000000000000000000",
     "payloadHash": "0xa4b196852bf18d45319e070fa8324093d906cddf24d4ecdd94e42c99d7414c40",
-    "scalarHash": "0xb05e26925056bb781f250766cf0c4efcd01263550db67d59ee7911a7ba225d06",
-    "workHash": "0x0057f7c7bc9878a3a9e9d0edc593bd48d463aade15d8f62217f623e7e8fdbd7c"
+    "scalarHash": "0xa73acd08bb8662e6e80a72f219f24a61542a61446a72ca829cf0d20b8256ade1",
+    "workHash": "0x00bef90d173b08a3db9346da3a4b606d5c9d779ad899bf24b39d5f0abc35c617"
   }
 }

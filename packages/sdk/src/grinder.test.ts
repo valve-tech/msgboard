@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import { keccak256, toHex, type Hex } from 'viem'
-import { checkWork, difficulty, type MessageSeed } from '@msgboard/core'
+import { checkWorkLegacy, difficulty, type MessageSeed } from '@msgboard/core'
 import { loadDefaultStamper } from './grinder.js'
 
 /**
- * The fast engine must be bit-identical to the node's verifier: a stamp found by the Rust
- * grinder has to pass core's `checkWork` — the exact check the RPC applies on submit. This is
+ * The fast legacy engine must be bit-identical to the node's verifier: a stamp found by the Rust
+ * grinder has to pass core's `checkWorkLegacy` — the exact check the legacy RPC applies on submit.
+ * `loadDefaultStamper` is the legacy `stamp` engine, so it pairs with the legacy verifier. This is
  * the parity gate that lets `doPoW` trust the engine's output without re-verifying.
  */
 
@@ -21,7 +22,7 @@ describe('loadDefaultStamper', () => {
     expect(stamper).not.toBeNull()
   })
 
-  it('finds a stamp that passes core checkWork — the canonical verifier', async () => {
+  it('finds a stamp that passes core checkWorkLegacy — the legacy verifier', async () => {
     const stamper = (await loadDefaultStamper())!
     const { nonce, hash } = await stamper({
       category: CATEGORY,
@@ -38,7 +39,7 @@ describe('loadDefaultStamper', () => {
       ...FACTORS,
     }
     const dataLen = (DATA.length - 2) / 2
-    const verified = checkWork(seed, difficulty(FACTORS, dataLen))
+    const verified = checkWorkLegacy(seed, difficulty(FACTORS, dataLen))
     expect(verified).not.toBeNull()
     expect(verified).toBe(hash)
   }, 120_000)

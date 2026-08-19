@@ -25,15 +25,16 @@ const ec = new EC('secp256k1')
 const g = ec.g as elliptic.curve.base.BasePoint
 
 /**
- * Computes the message hash and checks it against the given difficulty.
- * @param msg the message seed
- * @param msgDifficulty the message difficulty
- * @returns the message hash
- * @throws error if the message nonce/work is not valid
+ * LEGACY (pre-revision) verifier. The msgboard spec revised the PoW algorithm to the transcript-hash
+ * scheme in {@link checkWork}; this is the OLD scheme (challenge = x of G·(nonce·digest + blockHash),
+ * accept if hash % D == 0). The live 943 board still runs it today, so it is kept — but new work must
+ * use {@link checkWork}. Selection is by deployment config, NOT the message version field (both schemes
+ * are message version 1; see the spec — the revised algorithm IS version 1).
+ * @returns the message hash, or null when the work does not pass.
  */
-export function checkWork(msg: types.MessageSeed, msgDifficulty: bigint) {
+export function checkWorkLegacy(msg: types.MessageSeed, msgDifficulty: bigint) {
   const bytes = new Uint8Array([
-    ...getChallenge(msg),
+    ...getChallengeLegacy(msg),
     ...hexToBytes(msg.category, { size: 32 }),
     ...hexToBytes(msg.data),
   ])
@@ -45,12 +46,10 @@ export function checkWork(msg: types.MessageSeed, msgDifficulty: bigint) {
 }
 
 /**
- * Returns the challenge component of the message hash calculation.
- * @param msg the message seed
- * @returns the challenge component
+ * LEGACY challenge component (the x of G·(nonce·digest + blockHash)). Used only by {@link checkWorkLegacy}.
  * @throws error if the challenge is invalid
  */
-export function getChallenge(msg: types.MessageSeed) {
+export function getChallengeLegacy(msg: types.MessageSeed) {
   const digest = BigInt(difficultyDigest(msg))
   // nonce = msg.nonce * msg.difficultyDigest() + msg.blockHash
   const nonce = new BN((msg.nonce * digest + BigInt(msg.blockHash)).toString())
@@ -83,13 +82,16 @@ export function getChallenge(msg: types.MessageSeed) {
  * and returns the work hash if `hash % msgDifficulty === 0n`, else null. It reads
  * `message.blockHash` live every call: if it changed since the running point was based (the
  * {@link MsgBoardClient.doPoW} block poller updates it mid-grind), the point is rebased with a
- * single scalar multiply before continuing. {@link checkWork} remains the canonical verifier;
+ * single scalar multiply before continuing. {@link checkWorkLegacy} is the verifier this matches;
  * this only accelerates finding a winning nonce, and must stay byte-for-byte equivalent to it.
+ *
+ * LEGACY (pre-revision) grind — pairs with {@link checkWorkLegacy}. Use {@link createChallengeSearch}
+ * for the revised (spec) algorithm.
  *
  * @param message the message to grind; its `nonce` is mutated in place as the search advances.
  * @returns an object whose `next(msgDifficulty)` performs one nonce step.
  */
-export function createChallengeSearch(message: types.MessageSeed) {
+export function createChallengeSearchLegacy(message: types.MessageSeed) {
   const digest = BigInt(difficultyDigest(message))
   const stepPoint = g.mul(new BN(digest.toString())) // D = g·digest, constant for this grind
   const suffix = new Uint8Array([
@@ -117,7 +119,7 @@ export function createChallengeSearch(message: types.MessageSeed) {
       if (point!.isInfinity()) {
         throw new Error('unable to create challenge')
       }
-      // Fixed 32-byte big-endian x — see the note in getChallenge. `toArray('be', 32)` matches the
+      // Fixed 32-byte big-endian x — see the note in getChallengeLegacy. `toArray('be', 32)` matches the
       // node + Rust grinder; a bare `toArray()` drops leading zeros (~1 nonce in 256) and mismatches.
       const challenge = Uint8Array.from(point!.getX().toArray('be', 32))
       const hash = sha256(new Uint8Array([...challenge, ...suffix]))
@@ -141,18 +143,22 @@ export function difficulty({ workMultiplier, workDivisor }: types.DifficultyFact
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
-// Revised PoW algorithm (message version >= 2). Version-gated: version 1 keeps the legacy scheme
-// above (getChallenge/checkWork/createChallengeSearch); version >= 2 uses this scheme, matching the
-// node's REST spec byte-for-byte. verifyWork() dispatches on msg.version so the two coexist.
+// The msgboard PoW algorithm (the REVISED spec scheme). This is the CANONICAL checkWork/
+// createChallengeSearch — message version 1. The spec defines exactly one algorithm, every example
+// carries version 0x1, and the only `msg/2` in the spec is a devp2p wire-capability bump reserved for
+// changing the packet limits — NOT a message-version bump. So there is no "message version 2": the
+// revision REPLACES version 1's algorithm. The pre-revision scheme is preserved above as
+// getChallengeLegacy/checkWorkLegacy/createChallengeSearchLegacy.
 //
-// Differences from v1: the scalar is a SHA256 of the whole transcript (not nonce*digest+blockHash);
-// the work hash is over the COMPRESSED point (33 bytes, so no leading-zero encoding hazard like the
-// v1 x-coordinate had); an out-of-range scalar is REJECTED, not reduced (mirrors Go ScalarBaseMult);
-// and acceptance is `workHash < 2^256 / D`, not `hash % D == 0`.
+// Differences from the legacy scheme: the scalar is a SHA256 of the whole transcript (not
+// nonce*digest+blockHash); the work hash is over the COMPRESSED point (33 bytes, so no leading-zero
+// encoding hazard like the legacy x-coordinate had); an out-of-range scalar is REJECTED, not reduced
+// (mirrors Go ScalarBaseMult); and acceptance is `workHash < 2^256 / D`, not `hash % D == 0`.
 //
-// VERSION MAPPING — FLAGGED FOR RECONCILIATION: we assign legacy=1, revised=2 per the coexistence
-// decision. The node spec's own examples show version 0x1 alongside the revised scalarHash, so the
-// node's version->algorithm dispatch MUST be confirmed before v2 messages go to a live node.
+// CUTOVER — the live 943 board still runs the LEGACY scheme (verified against a real message), so a
+// client cannot tell legacy from revised by the version field (both are version 1) or from
+// msgboard_status (no algorithm marker). A deployment SELECTS the algorithm; clients default to legacy
+// until the node ships the revised build, then flip in lockstep.
 
 /** The acceptance target for the revised algo: a work hash is valid iff it is below 2^256 / D. */
 export function powTarget(d: bigint): bigint {
@@ -182,49 +188,39 @@ export function scalarHash(msg: types.MessageSeed, payloadHashBytes: Uint8Array)
 }
 
 /**
- * Revised-algo verifier (message version >= 2). Matches the node spec exactly and THROWS on invalid
- * work — an out-of-range scalar (must satisfy 1 <= scalar < n; reject, do not reduce), a point at
- * infinity, or a hash at/above the target. Returns the work hash on success.
+ * The msgboard PoW verifier — the REVISED spec algorithm, which is the CANONICAL scheme at message
+ * version 1 (the spec defines one algorithm and every example carries version 0x1; there is no message
+ * version 2 — the only `msg/2` in the spec is a devp2p wire-capability bump reserved for changing the
+ * packet limits). scalar = SHA256(version ‖ blockHash ‖ payloadHash ‖ M ‖ D ‖ nonce), rejected unless
+ * 1 <= scalar < n (reject, do NOT reduce — matches Go ScalarBaseMult); the work hash is SHA256 of the
+ * COMPRESSED point; accept iff workHash < 2^256 / D. Returns the work hash, or null when it does not
+ * pass. The pre-revision scheme is {@link checkWorkLegacy}; both are version 1, selected by config —
+ * the live 943 board still runs the legacy scheme, so clients default to it until the node cuts over.
  */
-export function checkWorkV2(msg: types.MessageSeed, msgDifficulty: bigint): Hex {
+export function checkWork(msg: types.MessageSeed, msgDifficulty: bigint): Hex | null {
   const payloadHashBytes = hexToBytes(payloadHash(msg))
   const scalar = new BN(hexToBytes(scalarHash(msg, payloadHashBytes)))
   // Reject rather than reduce: must match Go's secp256k1 ScalarBaseMult behaviour.
-  if (scalar.isZero() || scalar.gte(ec.n as BN)) throw new Error('invalid work')
+  if (scalar.isZero() || scalar.gte(ec.n as BN)) return null
   const point = g.mul(scalar)
-  if (point.isInfinity()) throw new Error('invalid work')
+  if (point.isInfinity()) return null
   const compressed = Uint8Array.from(point.encodeCompressed()) // 0x02/0x03 ‖ x (33 bytes)
   const hash = sha256(compressed)
-  if (BigInt(hash) >= powTarget(msgDifficulty)) throw new Error('invalid work')
+  if (BigInt(hash) >= powTarget(msgDifficulty)) return null
   return hash
 }
 
 /**
- * Version-aware verifier: v1 -> legacy {@link checkWork} (returns null on a miss); v2+ -> the
- * spec-exact {@link checkWorkV2} (which throws), normalised to null-on-miss. Returns the work hash,
- * or null when the work does not pass. This is what a version-agnostic caller should use.
+ * The msgboard PoW grind — pairs with {@link checkWork} (the revised algorithm). Each nonce's scalar is
+ * an independent hash, so — unlike the legacy {@link createChallengeSearchLegacy} — there is no constant
+ * point step to exploit; every nonce pays a full scalar multiply. Mutates `message.nonce`; returns the
+ * work hash when a nonce passes, else null.
  */
-export function verifyWork(msg: types.MessageSeed, msgDifficulty: bigint): Hex | null {
-  if (msg.version >= 2) {
-    try {
-      return checkWorkV2(msg, msgDifficulty)
-    } catch {
-      return null
-    }
-  }
-  return checkWork(msg, msgDifficulty)
-}
-
-/**
- * Revised-algo grind (message version >= 2). Each nonce's scalar is an independent hash, so — unlike
- * the v1 {@link createChallengeSearch} — there is no constant point step to exploit; every nonce pays
- * a full scalar multiply. Mutates `message.nonce`; returns the work hash when a nonce passes, else null.
- */
-export function createChallengeSearchV2(message: types.MessageSeed) {
+export function createChallengeSearch(message: types.MessageSeed) {
   return {
     next(msgDifficulty: bigint): Hex | null {
       message.nonce += 1n
-      return verifyWork(message, msgDifficulty)
+      return checkWork(message, msgDifficulty)
     },
   }
 }

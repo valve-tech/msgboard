@@ -25,7 +25,8 @@ contract PoWGate {
     /// @notice Perform the gated action if `m` carries valid work at or above `minDifficulty`.
     function enter(MsgPow.Message calldata m) external returns (bytes32 workHash) {
         require(MsgPow.verify(m, minDifficulty), "PoWGate: invalid work");
-        workHash = MsgPow.workHash(m);
+        // verify() passed, so the revised work hash is in range (ok is always true here).
+        (, workHash) = MsgPow.workHash(m);
         require(!used[workHash], "PoWGate: stamp already used");
         used[workHash] = true;
         emit Passed(msg.sender, workHash);
