@@ -21,11 +21,11 @@ contract OperatorBondTest is Test {
 
     function test_post_and_withdraw() public {
         bond.postBond(op, address(tok), 50 ether);
-        (uint256 total, uint256 locked) = bond.bondOf(op, address(tok));
-        assertEq(total, 50 ether); assertEq(locked, 0);
+        uint256 total = bond.bondOf(op, address(tok));
+        assertEq(total, 50 ether);
         vm.prank(op);
         bond.withdrawBond(address(tok), 20 ether);
-        (total,) = bond.bondOf(op, address(tok));
+        total = bond.bondOf(op, address(tok));
         assertEq(total, 30 ether);
         assertEq(tok.balanceOf(op), 20 ether);
     }
@@ -35,7 +35,7 @@ contract OperatorBondTest is Test {
         vm.prank(op);
         bond.authorizeGame(address(this), true);
         bond.slashToPlayer(op, address(tok), player, 15 ether); // this contract is the "game"
-        (uint256 total,) = bond.bondOf(op, address(tok));
+        uint256 total = bond.bondOf(op, address(tok));
         assertEq(total, 35 ether);
         assertEq(tok.balanceOf(player), 15 ether);
     }
@@ -52,7 +52,7 @@ contract OperatorBondTest is Test {
         bond.postBond(op, address(tok), 50 ether);
         vm.expectRevert(OperatorBond.Unauthorized.selector);
         bond.slashToPlayer(op, address(tok), player, 15 ether);
-        (uint256 total,) = bond.bondOf(op, address(tok));
+        uint256 total = bond.bondOf(op, address(tok));
         assertEq(total, 50 ether);
         assertEq(tok.balanceOf(player), 0);
     }

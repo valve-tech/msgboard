@@ -227,6 +227,12 @@ const config: HardhatUserConfig = {
         version: '0.8.25',
         settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
       },
+      // Shared measured-delta token-pull library (code-review §1): GameEscrow + OperatorCoinFlip both call
+      // it, so it MUST target shanghai like the rest of the operator family (no MCOPY/TSTORE on 943/369).
+      'contracts/games/operator/TokenPull.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
       'contracts/games/operator/OperatorRegistry.sol': {
         version: '0.8.25',
         settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },

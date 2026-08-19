@@ -5,6 +5,7 @@ import {SafeTransferLib} from "solady/src/utils/SafeTransferLib.sol";
 import {GameBase} from "../../GameBase.sol";
 import {PreimageLocation} from "../../PreimageLocation.sol";
 import {GameEscrow} from "./GameEscrow.sol";
+import {TokenPull} from "./TokenPull.sol";
 import {OperatorRegistry} from "./OperatorRegistry.sol";
 import {IRandomStaking} from "./IRandomStaking.sol";
 import {ReentrancyGuard} from "./ReentrancyGuard.sol";
@@ -48,6 +49,8 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
     error TooEarly();
     error PolicyRejected();
     error TableCapExceeded();
+    error SubsetTooLarge();
+    error BadMaxValidators();
     // --- S2b (boosted rounds) ---
     error BonusInfraUnset();
     error BonusInfraAlreadySet();
@@ -60,6 +63,15 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
 
     uint16 internal constant MULT_MIN = 150;
     uint16 internal constant MULT_MAX = 200;
+    /// @notice Conservative default ceiling on a round's validator-subset size when the operator has NOT
+    /// set a per-table maximum. It bounds the player-controlled per-round fee spend
+    /// (subset.length * tierPrice), which the CALLER sizes: without a cap a player can name the largest
+    /// allowlisted subset it can assemble and drain the operator's fee pool, or route that fee to
+    /// player-affiliated validators (security NF-1). MIN_SUBSET (3) is still the floor, so the default
+    /// accepted window is [3, 5] — three-honest-validator grinding resistance with a tight fee ceiling.
+    /// Operators widen or tighten it per table with setMaxValidators. OWNER REVIEW: confirm 5 fits the
+    /// live validator set before enabling real-money (369) tables.
+    uint256 public constant DEFAULT_MAX_SUBSET = 5;
     uint8 internal constant TAILS = 1;
     bytes32 internal constant FORFEIT_KIND = keccak256("forfeit");
 
@@ -118,6 +130,11 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
     /// drift from the true sum of open-round exposure.
     mapping(bytes32 tableId => uint256) public tableCap;
     mapping(bytes32 tableId => uint256) public tableLocked;
+    /// @notice Operator-set maximum validator-subset size per table (0 = use DEFAULT_MAX_SUBSET). Bounds
+    /// the player-controlled per-round fee spend (security NF-1). Enforced in the open path only; it never
+    /// touches settle/forfeit/custody. A non-zero value must be >= MIN_SUBSET (else the table could never
+    /// open).
+    mapping(bytes32 tableId => uint256) public maxValidators;
     uint256 internal _tableNonce;
     uint256 internal _roundNonce;
 
@@ -151,6 +168,7 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
     event OpenSet(bytes32 indexed tableId, bool open);
     event ValidatorPolicySet(bytes32 indexed tableId, address indexed policy);
     event TableCapSet(bytes32 indexed tableId, uint256 cap);
+    event MaxValidatorsSet(bytes32 indexed tableId, uint256 max);
     event FeesDeposited(address indexed operator, address indexed token, uint256 credited);
     event FeesWithdrawn(address indexed operator, address indexed token, uint256 amount);
     event RoundOpened(bytes32 indexed roundId, bytes32 indexed tableId, address indexed player, uint8 side, uint256 stake, uint256 payout, uint256 tierPrice, bytes32 key, uint256 openedAtBlock);
@@ -265,6 +283,24 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
         emit TableCapSet(tableId, cap);
     }
 
+    /// @notice Set the per-table maximum validator-subset size (0 = use DEFAULT_MAX_SUBSET). It caps the
+    /// player-controlled per-round fee spend (security NF-1). A non-zero value must be at least MIN_SUBSET,
+    /// otherwise the table could never open (the floor requires MIN_SUBSET distinct validators).
+    function setMaxValidators(bytes32 tableId, uint256 max) external onlyOperator(tableId) {
+        if (max != 0 && max < MIN_SUBSET) revert BadMaxValidators();
+        maxValidators[tableId] = max;
+        emit MaxValidatorsSet(tableId, max);
+    }
+
+    /// @notice Reject a subset larger than the table's ceiling. The ceiling is the operator's per-table
+    /// maximum, or DEFAULT_MAX_SUBSET when unset. Called in both open paths, right after the floor check,
+    /// so a player can never inflate the round's fee spend beyond the operator's chosen bound.
+    function _enforceSubsetMax(bytes32 tableId, uint256 len) internal view {
+        uint256 max = maxValidators[tableId];
+        if (max == 0) max = DEFAULT_MAX_SUBSET;
+        if (len > max) revert SubsetTooLarge();
+    }
+
     /// @notice The smallest ladder tier >= `stake`, in [minStake, maxStake]. Reverts if out of range.
     function _tierPrice(uint256 minStake, uint256 maxStake, uint256 stake) internal pure returns (uint256 price) {
         if (stake < minStake || stake > maxStake) revert StakeOutOfRange();
@@ -280,13 +316,6 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
 
     // --- fee pool ---
 
-    /// @notice Pull `amount` of `token` from `from`, crediting the MEASURED delta (fee-on-transfer safe).
-    function _pullVerified(address token, address from, uint256 amount) internal returns (uint256 received) {
-        uint256 balBefore = token.balanceOf(address(this));
-        token.safeTransferFrom(from, address(this), amount);
-        received = token.balanceOf(address(this)) - balBefore;
-    }
-
     /// @notice Fund `operator`'s fee pool for `token`. Pulls the tokens from msg.sender, parks them in
     /// this game's Random custody (so `heat` can charge them), and meters them to the operator's pool.
     /// Anyone may fund any operator. The pool is credited by the MEASURED Random-custody delta of the
@@ -295,7 +324,7 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
     /// more than it funded — draining co-operators' shared custody. Crediting the custody delta keeps
     /// Random.balanceOf(this, token) == Σ feeBalance exact.
     function depositFees(address operator, address token, uint256 amount) external nonReentrant {
-        uint256 credited = _pullVerified(token, msg.sender, amount);
+        uint256 credited = TokenPull.measured(token, msg.sender, amount);
         uint256 balBefore = IRandomStaking(random).balanceOf(address(this), token);
         token.safeApproveWithRetry(random, credited);
         IRandomStaking(random).handoff(address(this), token, -int256(credited));
@@ -335,6 +364,7 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
         if (!t.open) revert TableClosed();
         if (side > TAILS) revert WrongSide();
         _validateSubset(validatorSubset); // hard floor first — a hook can only tighten it
+        _enforceSubsetMax(tableId, validatorSubset.length); // bound the player-set fee spend (NF-1)
         address policy = t.validatorPolicy;
         if (policy != address(0)) {
             if (!IValidatorPolicy(policy).validate(t.operator, tableId, msg.sender, validatorSubset)) revert PolicyRejected();
@@ -419,6 +449,7 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
         if (sid == 0) revert NoBonusSeries();
 
         _validateSubset(validatorSubset); // hard floor first — a hook can only tighten it
+        _enforceSubsetMax(tableId, validatorSubset.length); // bound the player-set fee spend (NF-1)
         address policy = t.validatorPolicy;
         if (policy != address(0)) {
             if (!IValidatorPolicy(policy).validate(t.operator, tableId, msg.sender, validatorSubset)) revert PolicyRejected();

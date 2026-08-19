@@ -53,6 +53,16 @@ contract MintSale is IPriceLedger, ReentrancyGuard {
     address public game;      // the boosted game; its burns route the vest/chop branch of onBurn
     IFeePolicy public policy; // quotes the mint fee at series creation; receives swept fees
 
+    /// @notice Owner-set per-token minimum charge price `P` (0 = disabled). A platform floor that stops an
+    /// operator setting a near-zero `P` that drains its OWN fee pool at a fair (eff = 200) table: at eff =
+    /// 200 the only house margin is `P - f`, but the operator still pays validator heat per round out of
+    /// its fee pool, so a too-cheap `P` bleeds that pool (economic L2). The floor is a PLATFORM control,
+    /// not an operator one, because the operator is the party being protected from its own misprice.
+    /// Token-denominated, so it MUST be owner-set per token (decimals differ, e.g. 6 vs 18); there is no
+    /// safe token-agnostic default, so it ships at 0 (disabled). OWNER REVIEW: set a floor for every
+    /// supported token before enabling real-money (369) series.
+    mapping(address token => uint256) public minSeriesPrice;
+
     // ── per-series stamp (immutable after createSeries) ──────────────────────────────────────────────
     mapping(uint256 series => bool) public stamped;
     mapping(uint256 series => uint256) public price;      // P, in the series token
@@ -76,6 +86,7 @@ contract MintSale is IPriceLedger, ReentrancyGuard {
     error PolicyUnset();
     error AlreadyStamped();
     error ZeroPrice();
+    error PriceBelowFloor();
     error ZeroAmount();
     error FeeTooHigh();
     error SaleClosed();
@@ -90,6 +101,7 @@ contract MintSale is IPriceLedger, ReentrancyGuard {
     event PolicySet(address indexed policy);
     event SeriesStamped(uint256 indexed series, address indexed operator, address indexed token, uint256 price, uint256 feePerUnit);
     event SaleOpenSet(uint256 indexed series, bool open);
+    event MinSeriesPriceSet(address indexed token, uint256 minPrice);
     event Bought(uint256 indexed series, address indexed buyer, uint256 units, uint256 paid);
     event Refunded(uint256 indexed series, address indexed beneficiary, uint256 amount);
     event Vested(uint256 indexed series, address indexed operator, uint256 vestedAmount, uint256 fee);
@@ -130,6 +142,14 @@ contract MintSale is IPriceLedger, ReentrancyGuard {
         emit PolicySet(p);
     }
 
+    /// @notice Set (or, with 0, disable) the per-token minimum charge price floor. Owner-only, because it
+    /// is a platform protection against an operator underpricing a fair table (economic L2). It gates only
+    /// NEW series; existing stamped series keep their immutable price.
+    function setMinSeriesPrice(address token, uint256 minPrice) external onlyOwner {
+        minSeriesPrice[token] = minPrice;
+        emit MinSeriesPriceSet(token, minPrice);
+    }
+
     // ── series creation (stamps the price + fee + operator) ──────────────────────────────────────────
 
     /// @notice Register a new charge series on the chips (this contract holds `chips.creator`) and stamp
@@ -143,6 +163,10 @@ contract MintSale is IPriceLedger, ReentrancyGuard {
     {
         if (address(policy) == address(0)) revert PolicyUnset();
         if (seriesPrice == 0) revert ZeroPrice();
+        // Platform price floor (economic L2): reject a near-zero `P` that would drain the operator's own
+        // fee pool at a fair table. Disabled (0) = no floor for this token.
+        uint256 floorPrice = minSeriesPrice[token];
+        if (floorPrice != 0 && seriesPrice < floorPrice) revert PriceBelowFloor();
         uint16 bps = policy.feeBps(MINT_KIND, token, msg.sender);
         if (bps > MAX_FEE_BPS) revert FeeTooHigh();
 

@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {SafeTransferLib} from "solady/src/utils/SafeTransferLib.sol";
 import {EscrowLib} from "./EscrowLib.sol";
+import {TokenPull} from "./TokenPull.sol";
 import {OperatorRegistry} from "./OperatorRegistry.sol";
 import {ReentrancyGuard} from "./ReentrancyGuard.sol";
 
@@ -100,23 +101,11 @@ contract GameEscrow is ReentrancyGuard {
         return ledgers[_ledgerKey(operator, token)].rake;
     }
 
-    /// @notice Pull `amount` of `token` from `from` and return the MEASURED delta actually received.
-    /// Crediting the delta (not the requested amount) keeps the books exact for fee-on-transfer tokens
-    /// and contains any such token to its own bucket. NOTE: this measures only the DEPOSIT-time delta —
-    /// a token that rebases (balance drifts) BETWEEN lock and settle is not re-measured, so a genuinely
-    /// rebasing token can desync a bucket. Such tokens are out of the supported set; the isolation
-    /// guarantee still confines any damage to that token's own bucket.
-    function _pullVerified(address token, address from, uint256 amount) internal returns (uint256 received) {
-        uint256 balBefore = token.balanceOf(address(this));
-        token.safeTransferFrom(from, address(this), amount);
-        received = token.balanceOf(address(this)) - balBefore;
-    }
-
     /// @notice Fund an operator's (operator, token) bankroll from msg.sender — the BYO funding source
     /// (EOA, Safe, OperatorVault clone). Anyone may fund any operator; only the measured delta is
-    /// credited.
+    /// credited. The measured-delta pull lives in the shared TokenPull library (see its rebasing note).
     function depositBankroll(address operator, address token, uint256 amount) external nonReentrant {
-        uint256 credited = _pullVerified(token, msg.sender, amount);
+        uint256 credited = TokenPull.measured(token, msg.sender, amount);
         ledgers[_ledgerKey(operator, token)].creditBankroll(credited);
         emit BankrollDeposited(operator, token, msg.sender, credited);
     }
@@ -185,7 +174,7 @@ contract GameEscrow is ReentrancyGuard {
             open: true
         });
 
-        uint256 received = _pullVerified(token, player, stake);
+        uint256 received = TokenPull.measured(token, player, stake);
         if (received < stake) revert StakeUnderDelivered();
 
         emit ExposureLocked(betId, operator, token, player, stake, payout);
