@@ -5,10 +5,13 @@ import './setup-buffer'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
+import { PresentationModeProvider } from './components/visuals/PresentationMode'
 import './styles/table.css'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <PresentationModeProvider>
+      <App />
+    </PresentationModeProvider>
   </StrictMode>,
 )

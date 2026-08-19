@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import * as viem from 'viem'
-import { dice, diceMultiplierX100, buildSeedChain, commitSeed, makeDomain, type DiceParams } from '@msgboard/games'
+import { dice, diceMultiplierX100, diceRoll, buildSeedChain, commitSeed, makeDomain, type DiceParams } from '@msgboard/games'
 import { EscrowedSettlement, signOpenTerms, paramsHashOf, type OpenTerms } from '@msgboard/settle'
 import type { GameDeployment } from '../config'
 import { useSession, makeInMemoryHouseDriver, PLACEHOLDER_VERIFIER, type RoundRecord, DEMO_HOUSE_ADDRESS } from '../hooks/useSession'
@@ -10,6 +10,8 @@ import { GameStage } from './shell/GameStage'
 import { BetTray } from './shell/BetTray'
 import { MetaPanel } from './shell/MetaPanel'
 import { ProbabilityStrip } from './stages/ProbabilityStrip'
+import { NumberDie } from './visuals/NumberDie'
+import { usePresentationMode, PresentationToggle } from './visuals/PresentationMode'
 
 const HUNDREDTHS = 100n
 
@@ -79,6 +81,10 @@ export const DiceScreen = ({
   const [targetPct, setTargetPct] = useState('50')
   const [tableStatus, setTableStatus] = useState<TableStatus>('idle')
   const [settleError, setSettleError] = useState<string>()
+  // The roll-under target used for the last settled round, captured at play time so the visual die's
+  // win zone stays truthful even if the player edits the win-chance field afterwards.
+  const [lastTargetPct, setLastTargetPct] = useState<number>()
+  const { mode } = usePresentationMode()
 
   const sessionDomain = useMemo(
     () => makeDomain(deployment.chainId, deployment.houseChannel ?? PLACEHOLDER_VERIFIER),
@@ -117,9 +123,11 @@ export const DiceScreen = ({
 
   const roll = async () => {
     if (stake === undefined || targetX100 === undefined) return
+    const playedPct = pct
     setTableStatus('playing')
     const record = await session.play(stake, { targetX100 })
     if (record) {
+      setLastTargetPct(playedPct)
       setTableStatus('settle-pending')
     } else {
       setTableStatus('idle')
@@ -279,10 +287,31 @@ export const DiceScreen = ({
     { label: 'Pays on win', value: potentialWin !== undefined ? `+${viem.formatEther(potentialWin)}` : '—' },
   ]
 
+  // Visual mode reads the sealed roll from the latest co-signed record — the SAME value the receipt
+  // shows. `diceRoll(raw)` returns 0..9999 (0.00%..99.99%); the die never rolls its own number.
+  const lastRecord = session.history[session.history.length - 1]
+  const rollPct = lastRecord ? Number(diceRoll(lastRecord.raw)) / 100 : undefined
+  const dieTarget = lastTargetPct ?? (targetOk ? pct : 50)
+
   return (
     <>
-      <GameStage title="DICE" subtitle="roll under your target to win · sealed before you play">
-        <ProbabilityStrip header={`ROLL UNDER ${targetDisplay}`} markerPct={markerPct} stats={stats} />
+      <GameStage
+        title="DICE"
+        subtitle="roll under your target to win · sealed before you play"
+        action={<PresentationToggle />}
+      >
+        {mode === 'visual' ? (
+          <div className="dicestage">
+            <NumberDie
+              outcome={rollPct}
+              target={dieTarget}
+              win={lastRecord?.win}
+              revealNonce={lastRecord?.round}
+            />
+          </div>
+        ) : (
+          <ProbabilityStrip header={`ROLL UNDER ${targetDisplay}`} markerPct={markerPct} stats={stats} />
+        )}
       </GameStage>
 
       <div className="tray-col">
