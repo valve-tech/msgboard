@@ -18,7 +18,7 @@
   },
   "dependencies": {
     "@msgboard/games": "*",
-    "@msgboard/relayer": "*",
+    "@msgboard/relayer": "^0.2.0",
     "@msgboard/settle": "*",
     "viem": "^2.25.0"
   },
