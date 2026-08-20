@@ -60,12 +60,14 @@ jobs:
           targets: wasm32-unknown-unknown
       - run: cargo install wasm-pack --locked
 
-      # build the JS packages in dependency order (core <- sdk <- cosign <- history <- relayer); hardhat
-      # ships its tsc output. cosign builds before history because history imports @msgboard/cosign at
-      # runtime (its types are needed for history's tsc to resolve the module).
+      # build the JS packages in dependency order (core <- sdk <- cosign <- petition <- history <- relayer);
+      # hardhat ships its tsc output. history's tsc imports @msgboard/cosign AND @msgboard/petition, so both
+      # must be built first (petition is built here only to satisfy history's build — it is not published in
+      # this release's loop below). petition itself imports cosign + sdk, so it builds after them.
       - run: npm run build --workspace @msgboard/core
       - run: npm run build --workspace @msgboard/sdk
       - run: npm run build --workspace @msgboard/cosign
+      - run: npm run build --workspace @msgboard/petition
       - run: npm run build --workspace @msgboard/history
       - run: (cd packages/hardhat && npx tsc)
       - run: npm run build --workspace @msgboard/relayer
