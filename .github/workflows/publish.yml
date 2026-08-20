@@ -49,22 +49,16 @@ jobs:
 
       - run: npm ci
 
-      # pow-grinder is a Rust/WASM package. Install the toolchain so its WASM is built FROM SOURCE in CI
-      # (real provenance, not a trusted-from-git binary), and verify the committed pkg/ matches a fresh
-      # build so the repo artifact is proven current (the sdk's committed-WASM parity depends on it).
+      # pow-grinder is a Rust/WASM package. Install the toolchain so its WASM builds FROM SOURCE in CI —
+      # its own prepublishOnly hook runs during `npm publish` below, so the published binary is built in
+      # CI (real provenance), not shipped from a committed blob. We deliberately do NOT byte-compare the
+      # result against the committed pkg/: wasm-pack/wasm-bindgen output is not reproducible across
+      # toolchain versions, so a fresh CI build differs byte-for-byte from a local one while computing the
+      # identical PoW (same Rust source). The committed pkg/ remains for local dev + the sdk parity tests.
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
       - run: cargo install wasm-pack --locked
-      - name: Verify pow-grinder committed WASM == a fresh source build
-        run: |
-          cd packages/pow-grinder
-          wasm-pack build --release --target web --out-dir pkg-verify -- --no-default-features --features wasm
-          a=$(shasum -a256 pkg/pow_grinder_bg.wasm | cut -d' ' -f1)
-          b=$(shasum -a256 pkg-verify/pow_grinder_bg.wasm | cut -d' ' -f1)
-          rm -rf pkg-verify
-          [ "$a" = "$b" ] || { echo "committed pow-grinder WASM ($a) != fresh source build ($b)"; exit 1; }
-          echo "verified: committed pow-grinder WASM == source ($a)"
 
       # build the JS packages in dependency order (core <- sdk <- cosign <- history <- relayer); hardhat
       # ships its tsc output. cosign builds before history because history imports @msgboard/cosign at
