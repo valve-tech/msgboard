@@ -5,7 +5,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/gibs-finance/random.git",
+    "url": "git+https://github.com/valve-tech/msgboard.git",
     "directory": "packages/pow-grinder"
   },
   "main": "index.js",
