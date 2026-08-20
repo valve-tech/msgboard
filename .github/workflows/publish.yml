@@ -49,9 +49,26 @@ jobs:
 
       - run: npm ci
 
-      # build in dependency order (core <- sdk <- cosign <- history <- relayer); hardhat ships its tsc output.
-      # cosign builds before history because history imports @msgboard/cosign at runtime (its types are
-      # needed for history's tsc to resolve the module).
+      # pow-grinder is a Rust/WASM package. Install the toolchain so its WASM is built FROM SOURCE in CI
+      # (real provenance, not a trusted-from-git binary), and verify the committed pkg/ matches a fresh
+      # build so the repo artifact is proven current (the sdk's committed-WASM parity depends on it).
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - run: cargo install wasm-pack --locked
+      - name: Verify pow-grinder committed WASM == a fresh source build
+        run: |
+          cd packages/pow-grinder
+          wasm-pack build --release --target web --out-dir pkg-verify -- --no-default-features --features wasm
+          a=$(shasum -a256 pkg/pow_grinder_bg.wasm | cut -d' ' -f1)
+          b=$(shasum -a256 pkg-verify/pow_grinder_bg.wasm | cut -d' ' -f1)
+          rm -rf pkg-verify
+          [ "$a" = "$b" ] || { echo "committed pow-grinder WASM ($a) != fresh source build ($b)"; exit 1; }
+          echo "verified: committed pow-grinder WASM == source ($a)"
+
+      # build the JS packages in dependency order (core <- sdk <- cosign <- history <- relayer); hardhat
+      # ships its tsc output. cosign builds before history because history imports @msgboard/cosign at
+      # runtime (its types are needed for history's tsc to resolve the module).
       - run: npm run build --workspace @msgboard/core
       - run: npm run build --workspace @msgboard/sdk
       - run: npm run build --workspace @msgboard/cosign
@@ -62,9 +79,11 @@ jobs:
       # No NODE_AUTH_TOKEN: authentication is OpenID Connect. Provenance is automatic.
       - name: Publish public @msgboard/* (idempotent)
         run: |
-          # Dependency order: @msgboard/cosign is published before @msgboard/history (which depends on
-          # it at runtime), and @msgboard/history before @msgboard/relayer (which depends on it).
-          for entry in "@msgboard/core:packages/core" "@msgboard/sdk:packages/sdk" "@msgboard/cosign:packages/cosign" "@msgboard/history:packages/history" "@msgboard/hardhat:packages/hardhat" "@msgboard/relayer:packages/relayer"; do
+          # Dependency order (leaves first): core + pow-grinder before sdk (sdk depends on BOTH at
+          # runtime), cosign before history (history depends on it), history before relayer. pow-grinder
+          # rebuilds its WASM from source via its own prepublishOnly hook (the Rust toolchain is installed
+          # above), so its published binary is built in CI — no --ignore-scripts.
+          for entry in "@msgboard/core:packages/core" "@msgboard/pow-grinder:packages/pow-grinder" "@msgboard/sdk:packages/sdk" "@msgboard/cosign:packages/cosign" "@msgboard/history:packages/history" "@msgboard/hardhat:packages/hardhat" "@msgboard/relayer:packages/relayer"; do
             pkg="${entry%%:*}"
             dir="${entry##*:}"
             ver=$(node -p "require('./$dir/package.json').version")

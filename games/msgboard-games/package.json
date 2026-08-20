@@ -6,7 +6,9 @@
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
-  "exports": { ".": "./src/index.ts" },
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "scripts": {
     "build": "echo '@msgboard/games: consumed as TS source, no build step'",
     "test": "vitest run",
@@ -14,8 +16,8 @@
     "demo": "tsx scripts/demo.ts"
   },
   "dependencies": {
-    "@msgboard/pow-grinder": "*",
-    "@msgboard/sdk": "^0.0.31",
+    "@msgboard/pow-grinder": "^0.2.0",
+    "@msgboard/sdk": "^0.2.0",
     "viem": "^2.25.0"
   },
   "devDependencies": {

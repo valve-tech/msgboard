@@ -19,17 +19,17 @@
   },
   "dependencies": {
     "@msgboard/coinflip": "*",
-    "@msgboard/cosign": "*",
+    "@msgboard/cosign": "^0.2.0",
     "@msgboard/games-core": "*",
     "@msgboard/games-house-service": "*",
     "@msgboard/hilo-war": "*",
     "@msgboard/games": "*",
-    "@msgboard/petition": "*",
-    "@msgboard/pow-grinder": "*",
+    "@msgboard/petition": "^0.2.0",
+    "@msgboard/pow-grinder": "^0.2.0",
     "@msgboard/raffle": "*",
     "@gibs/random": "^0.0.19",
     "@msgboard/zk-cards-core": "*",
-    "@msgboard/sdk": "^0.0.31",
+    "@msgboard/sdk": "^0.2.0",
     "viem": "^2.25.0"
   },
   "devDependencies": {
