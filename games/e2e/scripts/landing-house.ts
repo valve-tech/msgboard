@@ -19,7 +19,7 @@
  *   MSGBOARD_RPC  MsgBoard RPC (post/read board messages). Keyed valve endpoint, passed from compose.
  *   HOUSE_INDEX   default 50 — the mnemonic addressIndex the house key is derived at.
  */
-import { initSync, stamp as wasmStamp } from '@msgboard/pow-grinder/wasm'
+import { initSync, stamp_v2 as wasmStamp } from '@msgboard/pow-grinder/wasm'
 import { runLandingHouse, houseSignerFromMnemonic } from '@msgboard/games-house-service'
 import type { Stamper } from '@msgboard/games'
 import { POW_GRINDER_WASM_B64 } from './pow-grinder-wasm-b64'
@@ -42,6 +42,7 @@ const wasmStamper: Stamper = async ({ category, data, workMultiplier, workDiviso
     workMultiplier: Number(workMultiplier),
     workDivisor: Number(workDivisor),
     blockHash: toBytes(blockHash),
+    version: 1, // the one and only message version, hashed into the scalar transcript; stamp_v2 requires it
     startNonce: 0,
     maxIters: 50_000_000, // ample for the 943 floor (~190k iters); the wasm grinder finds it in ~1-2s
   })
