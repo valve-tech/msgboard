@@ -56,7 +56,7 @@ const chainIcon = (chainId: number): string | undefined =>
 const GAMES = [
   { id: 'lobby', label: '🏛 The Floor' },
   { id: 'coinflip', label: '🪙 Coin Flip' },
-  { id: 'flipx', label: '✍️ Signed Flips' },
+  { id: 'flipbookx', label: '✍️ Signed Flips' },
   { id: 'raffle', label: '🎟 The Numbers' },
   { id: 'tables', label: '🎲 Tables' },
   { id: 'dice', label: '🎲 Dice' },
@@ -102,7 +102,7 @@ type Tab = (typeof GAMES)[number]['id']
 // 'live' is a feed, not a game, so it shows no trust strip. 'backroom' is the operator's own
 // read-only dashboard, not a wagered table, so it carries no player trust model either.
 const VALIDATOR_GAMES = new Set<Tab>(['raffle', 'tables'])
-const P2P_GAMES = new Set<Tab>(['coinflip', 'flipx'])
+const P2P_GAMES = new Set<Tab>(['coinflip', 'flipbookx'])
 const ZK_GAMES = new Set<Tab>(['sudoku', 'wordle'])
 const trustModelFor = (tab: Tab): TrustModel | null =>
   tab === 'live' || tab === 'standings' || tab === 'lobby' || tab === 'backroom'
@@ -278,7 +278,7 @@ export const App = () => {
           myAddress={wallet.address}
         />
       )}
-      {tab === 'flipx' && (
+      {tab === 'flipbookx' && (
         <FlipBookXScreen
           deployment={deployment}
           walletClient={wallet.walletClient}

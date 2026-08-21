@@ -61,13 +61,13 @@ const FLIPBOOKX = (env.FLIPBOOKX ?? '') as viem.Hex // unset → variant B disab
 const FLIPBOOKX_FROM = BigInt(env.FLIPBOOKX_DEPLOY_BLOCK ?? '24932217')
 const X402PLS = (env.X402PLS ?? '0xeb274050cb029288B8A4F232Da8d23F393d54A1E') as viem.Hex
 // The board is per-chain, so a plain category suffices; the web offer book reads the same one.
-const FLIPX_CATEGORY = viem.stringToHex('flipx', { size: 32 })
+const FLIPBOOKX_CATEGORY = viem.stringToHex('flipbookx', { size: 32 })
 const WS_URL = env.BOARD_WS ?? `wss://games.msgboard.xyz/rpc/evm/${CHAIN}`
 const MAX_OPEN_X = env.MAX_OPEN_X ? Number(env.MAX_OPEN_X) : 2
 const STAKES_X = (env.STAKES_X ?? '0.1,0.25').split(',').map((v) => viem.parseEther(v.trim()))
 const X_TAKE_DEADLINE_S = 7_200n
 const X_REVEAL_WINDOW_S = 900
-const FLIPX_KEY_BASE = 61_000_000 // reserved seeds0 range (variant-A flip bots use 60M)
+const FLIPBOOKX_KEY_BASE = 61_000_000 // reserved seeds0 range (variant-A flip bots use 60M)
 const SALT_SLOTS = 8 // offers per hour bucket the stateless recovery scan covers
 const SALT_SCAN_HOURS = 26 // takenAt-anchored scan depth (offer lives ≤ 2h + clock slack)
 
@@ -97,7 +97,7 @@ type Offer = {
   revealBy?: bigint
 }
 
-const flipxAbi = viem.parseAbi([
+const flipbookXAbi = viem.parseAbi([
   'struct Offer { address maker; bytes32 commit; uint256 stake; uint256 makerBond; uint256 takerBond; uint64 takeDeadline; uint32 makerRevealWindow; uint32 takerRevealWindow; }',
   'function take(Offer o, bytes makerSig, address taker, bytes32 guessCommit, bytes takerSig) returns (bytes32)',
   'function revealChoice(bytes32 id, bool choice, bytes32 salt)',
@@ -272,8 +272,8 @@ const main = async () => {
   const xEnabled = FLIPBOOKX.length === 42
   const wsTransport = xEnabled ? new WsBoardTransport(WS_URL) : undefined
   const wsBoard = wsTransport ? new MsgBoardClient(wsTransport) : undefined
-  const makerKey = seeds0Secret(env.SEEDS0!, FLIPX_KEY_BASE)
-  const takerKey = seeds0Secret(env.SEEDS0!, FLIPX_KEY_BASE + 1)
+  const makerKey = seeds0Secret(env.SEEDS0!, FLIPBOOKX_KEY_BASE)
+  const takerKey = seeds0Secret(env.SEEDS0!, FLIPBOOKX_KEY_BASE + 1)
   let domainSeparator: viem.Hex | undefined
   let wsHeadsSeen = 0
   let xTickQueued = false
@@ -307,7 +307,7 @@ const main = async () => {
   const xReadBoard = async (now: bigint): Promise<{ offer: XOffer; id: viem.Hex; makerSig: viem.Hex }[]> => {
     if (!wsBoard) return []
     // SDK Content is Record<categoryHash, RPCMessage[]> with each message's payload in `data`.
-    const content = (await wsBoard.content({ category: FLIPX_CATEGORY })) as unknown as Record<string, Array<{ data: viem.Hex }>>
+    const content = (await wsBoard.content({ category: FLIPBOOKX_CATEGORY })) as unknown as Record<string, Array<{ data: viem.Hex }>>
     const seen = new Map<string, { offer: XOffer; id: viem.Hex; makerSig: viem.Hex }>()
     for (const messages of Object.values(content ?? {})) {
       for (const { data: raw } of messages ?? []) {
@@ -362,7 +362,7 @@ const main = async () => {
       offer: { ...offer, stake: offer.stake.toString(), makerBond: offer.makerBond.toString(), takerBond: offer.takerBond.toString(), takeDeadline: offer.takeDeadline.toString() },
     }
     const data = viem.stringToHex(JSON.stringify(notice))
-    const work = await wsBoard!.doPoW(FLIPX_CATEGORY, data)
+    const work = await wsBoard!.doPoW(FLIPBOOKX_CATEGORY, data)
     await wsBoard!.addMessage(work.message)
     console.log(`x: posted signed offer ${id.slice(0, 10)}… (${viem.formatEther(stake)} + ${viem.formatEther(bond)} bond)${xForfeit(salt) ? ' [destined to forfeit]' : ''}`)
   }
@@ -387,12 +387,12 @@ const main = async () => {
     const nowS = Number(nowTs)
 
     // chain state first: reveals + claims are deadline-critical
-    const takenLogs = await chunkedEvents(publicClient, { address: FLIPBOOKX, abi: flipxAbi as viem.Abi, eventName: 'Taken', fromBlock: FLIPBOOKX_FROM })
-    const revealedLogs = await chunkedEvents(publicClient, { address: FLIPBOOKX, abi: flipxAbi as viem.Abi, eventName: 'ChoiceRevealed', fromBlock: FLIPBOOKX_FROM })
+    const takenLogs = await chunkedEvents(publicClient, { address: FLIPBOOKX, abi: flipbookXAbi as viem.Abi, eventName: 'Taken', fromBlock: FLIPBOOKX_FROM })
+    const revealedLogs = await chunkedEvents(publicClient, { address: FLIPBOOKX, abi: flipbookXAbi as viem.Abi, eventName: 'ChoiceRevealed', fromBlock: FLIPBOOKX_FROM })
     const doneLogs = [
-      ...(await chunkedEvents(publicClient, { address: FLIPBOOKX, abi: flipxAbi as viem.Abi, eventName: 'Settled', fromBlock: FLIPBOOKX_FROM })),
-      ...(await chunkedEvents(publicClient, { address: FLIPBOOKX, abi: flipxAbi as viem.Abi, eventName: 'MakerDefaulted', fromBlock: FLIPBOOKX_FROM })),
-      ...(await chunkedEvents(publicClient, { address: FLIPBOOKX, abi: flipxAbi as viem.Abi, eventName: 'TakerDefaulted', fromBlock: FLIPBOOKX_FROM })),
+      ...(await chunkedEvents(publicClient, { address: FLIPBOOKX, abi: flipbookXAbi as viem.Abi, eventName: 'Settled', fromBlock: FLIPBOOKX_FROM })),
+      ...(await chunkedEvents(publicClient, { address: FLIPBOOKX, abi: flipbookXAbi as viem.Abi, eventName: 'MakerDefaulted', fromBlock: FLIPBOOKX_FROM })),
+      ...(await chunkedEvents(publicClient, { address: FLIPBOOKX, abi: flipbookXAbi as viem.Abi, eventName: 'TakerDefaulted', fromBlock: FLIPBOOKX_FROM })),
     ]
     const done = new Set(doneLogs.map((l) => (l.args as { offerId: viem.Hex }).offerId))
     const revealedBy = new Map(revealedLogs.map((l) => {
@@ -417,12 +417,12 @@ const main = async () => {
           if (!plan) { console.error(`x: no plan recovered for ${a.offerId.slice(0, 10)}…`); continue }
           if (plan.forfeit) continue
           await attempt(`x: revealChoice ${a.offerId.slice(0, 10)}…`, async () => {
-            await sendAs(maker.publicClient, maker.wallet, { address: FLIPBOOKX, abi: flipxAbi as viem.Abi, functionName: 'revealChoice', args: [a.offerId, plan.bit, plan.salt] })
+            await sendAs(maker.publicClient, maker.wallet, { address: FLIPBOOKX, abi: flipbookXAbi as viem.Abi, functionName: 'revealChoice', args: [a.offerId, plan.bit, plan.salt] })
             console.log(`x: revealed choice on ${a.offerId.slice(0, 10)}…`)
           })
         } else if (nowS > Number(a.choiceRevealBy)) {
           await attempt(`x: claimMakerDefault ${a.offerId.slice(0, 10)}…`, async () => {
-            await sendAs(taker.publicClient, taker.wallet, { address: FLIPBOOKX, abi: flipxAbi as viem.Abi, functionName: 'claimMakerDefault', args: [a.offerId] })
+            await sendAs(taker.publicClient, taker.wallet, { address: FLIPBOOKX, abi: flipbookXAbi as viem.Abi, functionName: 'claimMakerDefault', args: [a.offerId] })
             console.log(`x: claimed maker default on ${a.offerId.slice(0, 10)}…`)
           })
         }
@@ -431,12 +431,12 @@ const main = async () => {
           const plan = xRecover(taker.account.address, takerKey, a.guessCommit, takenAtTs)
           if (!plan) { console.error(`x: no guess plan for ${a.offerId.slice(0, 10)}…`); continue }
           await attempt(`x: revealGuess ${a.offerId.slice(0, 10)}…`, async () => {
-            await sendAs(taker.publicClient, taker.wallet, { address: FLIPBOOKX, abi: flipxAbi as viem.Abi, functionName: 'revealGuess', args: [a.offerId, plan.bit, plan.salt] })
+            await sendAs(taker.publicClient, taker.wallet, { address: FLIPBOOKX, abi: flipbookXAbi as viem.Abi, functionName: 'revealGuess', args: [a.offerId, plan.bit, plan.salt] })
             console.log(`x: revealed guess on ${a.offerId.slice(0, 10)}…`)
           })
         } else if (nowS > Number(rev.guessRevealBy)) {
           await attempt(`x: claimTakerDefault ${a.offerId.slice(0, 10)}…`, async () => {
-            await sendAs(maker.publicClient, maker.wallet, { address: FLIPBOOKX, abi: flipxAbi as viem.Abi, functionName: 'claimTakerDefault', args: [a.offerId] })
+            await sendAs(maker.publicClient, maker.wallet, { address: FLIPBOOKX, abi: flipbookXAbi as viem.Abi, functionName: 'claimTakerDefault', args: [a.offerId] })
             console.log(`x: claimed taker default on ${a.offerId.slice(0, 10)}…`)
           })
         }
@@ -458,7 +458,7 @@ const main = async () => {
         hash: authDigest(taker.account.address, o.offer.stake + o.offer.takerBond, o.offer.takeDeadline, xTakerNonce(o.id, taker.account.address)),
       })
       await sendAs(taker.publicClient, taker.wallet, {
-        address: FLIPBOOKX, abi: flipxAbi as viem.Abi, functionName: 'take',
+        address: FLIPBOOKX, abi: flipbookXAbi as viem.Abi, functionName: 'take',
         args: [o.offer, o.makerSig, taker.account.address, guessCommit, takerSig],
       })
       if (own) markSelfPlay()

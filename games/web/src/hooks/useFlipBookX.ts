@@ -3,7 +3,7 @@ import * as viem from 'viem'
 import { WsBoardTransport, MsgBoardClient, toWsUrl } from '@msgboard/games'
 import { publicClientFor } from '../wallet'
 import type { GameDeployment } from '../config'
-import { flipBookXAbi, xOfferId, FLIPX_CATEGORY, type XOffer } from '../lib/flipBookXContract'
+import { flipBookXAbi, xOfferId, FLIPBOOKX_CATEGORY, type XOffer } from '../lib/flipBookXContract'
 
 const MAX_RANGE = 10_000n
 
@@ -121,7 +121,7 @@ export const useFlipBookX = (deployment: GameDeployment | null): FlipBookXData =
       // The board's standing offers — over the SAME websocket the head pushes ride.
       let boardOffers: BoardOffer[] = []
       if (ws.current) {
-        const content = (await ws.current.board.content({ category: FLIPX_CATEGORY })) as unknown as Record<string, Array<{ data: viem.Hex }>>
+        const content = (await ws.current.board.content({ category: FLIPBOOKX_CATEGORY })) as unknown as Record<string, Array<{ data: viem.Hex }>>
         const now = BigInt(Math.floor(Date.now() / 1000))
         const seen = new Map<string, BoardOffer>()
         for (const messages of Object.values(content ?? {})) {
