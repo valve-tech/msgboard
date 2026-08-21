@@ -119,8 +119,8 @@ describe('Integration tests msgboard', () => {
           message: JSON.stringify(msgboard.toRPCMessage(work.message)),
         })
         const difficulty = hre.msgboard.getDifficulty(work.message.data)
-        // the client's engine grinds the legacy scheme, so the work hash comes from checkWorkLegacy
-        expect(message).toEqual(msgboard.checkWorkLegacy(work.message, difficulty))
+        // the client grinds version 1, so the work hash comes from checkWork
+        expect(message).toEqual(msgboard.checkWork(work.message, difficulty))
       })
     })
     describe('msgboard:work:send', () => {
@@ -135,8 +135,8 @@ describe('Integration tests msgboard', () => {
         // by the time this hits, a new block should not have been mined
         const work = await hre.msgboard.doPoW('test123', 'test123')
         const difficulty = hre.msgboard.getDifficulty(work.message.data)
-        // the client's engine grinds the legacy scheme, so the work hash comes from checkWorkLegacy
-        expect(message).toEqual(msgboard.checkWorkLegacy(work.message, difficulty))
+        // the client grinds version 1, so the work hash comes from checkWork
+        expect(message).toEqual(msgboard.checkWork(work.message, difficulty))
       })
     })
     describe('msgboard:get-message', () => {

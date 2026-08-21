@@ -15,7 +15,6 @@ const { MsgBoardProvider } = require('../dist/provider') as {
     setNodeConstraints: (constraints: {
       workMultiplier?: bigint
       workDivisor?: bigint
-      algorithm?: 'legacy' | 'revised'
     }) => Promise<void>
     request: (args: { method: string; params?: unknown[] }) => Promise<unknown>
   }
@@ -24,7 +23,7 @@ const { MsgBoardProvider } = require('../dist/provider') as {
 // Easy difficulty so the grind finishes fast: divisor >> multiplier.
 const workMultiplier = 1n
 const workDivisor = 1_000_000n
-const blockHash = keccak256(toHex('pow-v2-block')) // a non-zero 32-byte block hash
+const blockHash = keccak256(toHex('pow-block')) // a non-zero 32-byte block hash
 const block = { number: '0x1', hash: blockHash }
 
 // A wrapped provider that answers the two block lookups addMessage makes.
@@ -36,8 +35,8 @@ const mockWrapped = {
   },
 }
 
-// Both schemes are message version 1. A stamp is a fresh message seed with a category, data and
-// difficulty; the grind advances the nonce until the chosen verifier accepts it.
+// A stamp is a fresh message seed with a category, data and difficulty; the grind advances the nonce
+// until the verifier accepts it. There is one message version — version 1.
 const seed = (category: string, data: string): msgboard.MessageSeed => ({
   version: 1,
   blockHash,
@@ -51,37 +50,31 @@ const seed = (category: string, data: string): msgboard.MessageSeed => ({
 const diffFor = (msg: msgboard.MessageSeed) =>
   msgboard.difficulty({ workMultiplier, workDivisor }, hexToBytes(msg.data).length)
 
-/** Grinds the nonce until `verify` accepts the message; returns the seed and its work hash. */
-const grind = (
-  msg: msgboard.MessageSeed,
-  verify: (m: msgboard.MessageSeed, difficulty: bigint) => Hex | null,
-) => {
+/** Grinds the nonce until `checkWork` accepts the message; returns the seed and its work hash. */
+const grind = (msg: msgboard.MessageSeed) => {
   const difficulty = diffFor(msg)
   let hash: Hex | null = null
   while (!hash) {
     msg.nonce += 1n
-    hash = verify(msg, difficulty)
+    hash = msgboard.checkWork(msg, difficulty)
   }
   return { msg, hash, difficulty }
 }
 
-describe('provider proof-of-work schemes', () => {
-  it('the revised checkWork accepts a revised stamp; the legacy verifier does not return that hash', () => {
-    const { msg, hash, difficulty } = grind(seed('pow-v2-category', 'pow-v2-data'), msgboard.checkWork)
-    // the canonical (revised) verifier accepts it
+describe('provider proof-of-work', () => {
+  it('checkWork accepts the stamp it grinds', () => {
+    const { msg, hash, difficulty } = grind(seed('pow-category', 'pow-data'))
     expect(msgboard.checkWork(msg, difficulty)).toEqual(hash)
-    // the legacy verifier computes a different work hash — it never returns the revised hash
-    expect(msgboard.checkWorkLegacy(msg, difficulty)).not.toEqual(hash)
   })
 
-  it('accepts and stores a revised stamp when configured for the revised scheme', async () => {
+  it('accepts and stores a stamp, retrievable by its work hash as version 1', async () => {
     const provider = new MsgBoardProvider(mockWrapped, true)
-    await provider.setNodeConstraints({ workMultiplier, workDivisor, algorithm: 'revised' })
+    await provider.setNodeConstraints({ workMultiplier, workDivisor })
 
-    const { msg, hash } = grind(seed('pow-v2-category', 'pow-v2-data'), msgboard.checkWork)
+    const { msg, hash } = grind(seed('pow-category', 'pow-data'))
     const rlp = msgboard.toRLP(msg)
 
-    // the provider accepts the revised stamp and returns its work hash
+    // the provider accepts the stamp and returns its work hash
     const returned = await provider.request({ method: 'msgboard_addMessage', params: [rlp] })
     expect(returned).toEqual(hash)
 
@@ -93,23 +86,11 @@ describe('provider proof-of-work schemes', () => {
     expect(BigInt(stored.version)).toEqual(1n)
   })
 
-  it('accepts a legacy stamp under the default legacy scheme', async () => {
-    const provider = new MsgBoardProvider(mockWrapped, true)
-    // no algorithm passed — the default is legacy
-    await provider.setNodeConstraints({ workMultiplier, workDivisor })
-
-    const { msg, hash } = grind(seed('pow-legacy-category', 'pow-legacy-data'), msgboard.checkWorkLegacy)
-    const rlp = msgboard.toRLP(msg)
-
-    const returned = await provider.request({ method: 'msgboard_addMessage', params: [rlp] })
-    expect(returned).toEqual(hash)
-  })
-
   it('rejects an unsupported version (0)', async () => {
     const provider = new MsgBoardProvider(mockWrapped, true)
-    await provider.setNodeConstraints({ workMultiplier, workDivisor, algorithm: 'revised' })
+    await provider.setNodeConstraints({ workMultiplier, workDivisor })
 
-    const { msg } = grind(seed('pow-v2-category', 'pow-v2-data'), msgboard.checkWork)
+    const { msg } = grind(seed('pow-category', 'pow-data'))
     const badRlp = msgboard.toRLP({ ...msg, version: 0 })
 
     await expect(

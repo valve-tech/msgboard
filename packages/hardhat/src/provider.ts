@@ -3,11 +3,10 @@ import { numberToHex, type Hex, type Block, zeroHash, hexToBytes } from 'viem'
 import type { EIP1193Provider, RequestArguments } from 'hardhat/types'
 import * as msgboard from '@msgboard/sdk'
 
-import type { MsgBoardSettings, PowAlgorithm } from './types'
+import type { MsgBoardSettings } from './types'
 
-// There is ONE message version — version 1. Two algorithms verify it, legacy and revised; the board
-// selects one by config, not by the version field. The default is legacy, because the live 943 board
-// still runs the legacy scheme.
+// There is ONE message version — version 1 — verified by ONE algorithm (msgboard.checkWork). The
+// pre-revision scheme is gone: the node rejects it.
 export const globalDefaultSettings: MsgBoardSettings = {
   enabled: true,
   workMultiplier: 10_000n,
@@ -15,13 +14,6 @@ export const globalDefaultSettings: MsgBoardSettings = {
   messageSizeLimit: 1024n * 8n,
   boardCountLimit: 10_000n,
   blockRangeLimit: 120n,
-  algorithm: 'legacy',
-}
-
-// Maps the configured scheme to its core verifier. Both return the work hash, or null on a miss.
-const verifiers: Record<PowAlgorithm, (m: msgboard.MessageSeed, difficulty: bigint) => Hex | null> = {
-  legacy: msgboard.checkWorkLegacy,
-  revised: msgboard.checkWork,
 }
 export const defaultSettings = () => ({
   ...globalDefaultSettings,
@@ -115,7 +107,7 @@ export class MsgBoardProvider extends ProviderWrapper {
       throw new Error('powmsg: invalid data')
     }
     const difficulty = msgboard.difficulty(difficultyFactors, bytes.length)
-    const hash = verifiers[this.settings.algorithm](m, difficulty)
+    const hash = msgboard.checkWork(m, difficulty)
     if (!hash) {
       if (
         difficultyFactors.workMultiplier !== this.settings.workMultiplier ||

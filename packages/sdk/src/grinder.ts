@@ -39,13 +39,15 @@ export type Stamp = { nonce: bigint; hash: Hex }
  */
 export type Stamper = (input: StampInput) => Stamp | Promise<Stamp>
 
-/** The low-level engine call both the native addon and the WASM module expose. */
+/** The low-level engine call both the native addon and the WASM module expose (the grinder's
+ *  `stamp_v2`). `version` is the message version hashed into the scalar transcript — always 1. */
 type EngineStamp = (req: {
   category: Uint8Array
   data: Uint8Array
   workMultiplier: number
   workDivisor: number
   blockHash: Uint8Array
+  version: number
   startNonce: number
   maxIters: number
 }) => Uint8Array | null | undefined
@@ -55,10 +57,12 @@ type EngineStamp = (req: {
 const MAX_ITERS = 50_000_000
 
 /**
- * Adapt a raw engine `stamp` (native or WASM, e.g. from `import('@msgboard/pow-grinder/wasm')`)
+ * Adapt a raw engine `stamp_v2` (native or WASM, e.g. from `import('@msgboard/pow-grinder/wasm')`)
  * to the `Stamper` surface: Hex↔bytes conversion + unpacking the 40-byte
  * `nonce_be(8) ‖ hash(32)` result. Browser apps use this to hand their bundler-resolved WASM
- * engine to `MsgBoardClient` via the `stamper` config.
+ * engine to `MsgBoardClient` via the `stamper` config. `version` is pinned to 1 — the message
+ * version hashed into the scalar transcript; `stamp_v2` REQUIRES the field, and omitting it makes
+ * the engine reject the request (→ silent JS-grind fallback).
  */
 export function wrapEngineStamp(engine: EngineStamp): Stamper {
   return (input: StampInput): Stamp => {
@@ -68,6 +72,7 @@ export function wrapEngineStamp(engine: EngineStamp): Stamper {
       workMultiplier: Number(input.workMultiplier),
       workDivisor: Number(input.workDivisor),
       blockHash: hexToBytes(input.blockHash, { size: 32 }),
+      version: 1,
       startNonce: 0,
       maxIters: MAX_ITERS,
     })
@@ -88,25 +93,16 @@ function isNode(): boolean {
   return typeof process !== 'undefined' && process.versions != null && process.versions.node != null
 }
 
-/** Try the native Rust addon (throws on machines without a local cargo build). */
+/**
+ * Try the native Rust addon (throws on machines without a local cargo build). The grinder exports the
+ * PoW engine as `stamp_v2` (the pre-revision `stamp` engine is dead — the node rejects that work). Read
+ * it through an optional type and guard with a `typeof` check, so an old grinder without the engine
+ * yields `null` and never throws.
+ */
 async function tryNative(): Promise<Stamper | null> {
   try {
-    const mod: { stamp?: EngineStamp } = await import('@msgboard/pow-grinder')
-    return typeof mod.stamp === 'function' ? wrapEngineStamp(mod.stamp) : null
-  } catch {
-    return null
-  }
-}
-
-/**
- * Try the native Rust addon for the REVISED algorithm. The grinder exports the revised engine as
- * `stamp_v2`. Read the export through an optional type and guard it with a `typeof` check, so a
- * grinder without the revised engine yields `null` and never throws.
- */
-async function tryNativeV2(): Promise<Stamper | null> {
-  try {
-    // Declare the v1 `stamp` too, so this type OVERLAPS the current v1-only addon type (TS rejects an
-    // object type with no property in common). `stamp_v2` stays optional and absent until the grinder ships.
+    // Declare the dead `stamp` too, so this type OVERLAPS the addon's compiled type (TS rejects an
+    // object type with no property in common). Only `stamp_v2` is ever used.
     const mod: { stamp?: EngineStamp; stamp_v2?: EngineStamp } = await import('@msgboard/pow-grinder')
     return typeof mod.stamp_v2 === 'function' ? wrapEngineStamp(mod.stamp_v2) : null
   } catch {
@@ -140,32 +136,12 @@ async function wasmBytesUrl(): Promise<URL> {
   return new URL('pow_grinder_bg.wasm', `file://${jsPath}`)
 }
 
-/** Try the WASM module. Env-aware init: Node reads the wasm bytes off disk; a browser fetches. */
-async function tryWasm(): Promise<Stamper | null> {
-  try {
-    const wasm: {
-      default: (arg?: { module_or_path: BufferSource }) => Promise<unknown>
-      stamp: EngineStamp
-    } = await import('@msgboard/pow-grinder/wasm')
-    if (isNode()) {
-      const { readFileSync } = await import('node:fs')
-      const bytes = readFileSync(await wasmBytesUrl())
-      await wasm.default({ module_or_path: bytes })
-    } else {
-      await wasm.default()
-    }
-    return typeof wasm.stamp === 'function' ? wrapEngineStamp(wasm.stamp) : null
-  } catch {
-    return null
-  }
-}
-
 /**
- * Try the WASM module's REVISED-algorithm engine (`stamp_v2`). Same env-aware init as {@link tryWasm}.
- * The `stamp_v2?` optional type plus the `typeof` guard mean a build without the revised engine
- * returns `null` cleanly — a missing export is never accessed as a call and never throws.
+ * Try the WASM module's `stamp_v2` engine. Env-aware init: Node reads the wasm bytes off disk; a
+ * browser fetches. The `stamp_v2?` optional type plus the `typeof` guard mean an old build without the
+ * engine returns `null` cleanly — a missing export is never called and never throws.
  */
-async function tryWasmV2(): Promise<Stamper | null> {
+async function tryWasm(): Promise<Stamper | null> {
   try {
     const wasm: {
       default: (arg?: { module_or_path: BufferSource }) => Promise<unknown>
@@ -186,25 +162,10 @@ async function tryWasmV2(): Promise<Stamper | null> {
 
 /**
  * Resolve (and cache) the fastest available engine: native → WASM → null. Never throws — a
- * `null` simply means `doPoW` keeps its JS grind.
+ * `null` simply means `doPoW` keeps its JS grind ({@link createChallengeSearch} in @msgboard/core).
  */
 export async function loadDefaultStamper(): Promise<Stamper | null> {
   if (cachedStamper !== undefined) return cachedStamper
   cachedStamper = (await tryNative()) ?? (await tryWasm())
   return cachedStamper
-}
-
-/** Cache the resolved revised engine, separate from the legacy one. `undefined` = not probed. */
-let cachedV2Stamper: Stamper | null | undefined
-
-/**
- * Resolve (and cache) the fastest available REVISED-algorithm engine: native `stamp_v2` → WASM
- * `stamp_v2` → null. Never throws. `null` means `doPoW` keeps its revised JS grind
- * ({@link createChallengeSearch} in @msgboard/core). The `algorithm: 'revised'` client option
- * selects this engine.
- */
-export async function loadRevisedStamper(): Promise<Stamper | null> {
-  if (cachedV2Stamper !== undefined) return cachedV2Stamper
-  cachedV2Stamper = (await tryNativeV2()) ?? (await tryWasmV2())
-  return cachedV2Stamper
 }
