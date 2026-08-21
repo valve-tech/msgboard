@@ -85,13 +85,13 @@ src/                 MsgPow.sol (verifier), MsgBoard.sol (cheatcode helper)
 test/                MsgPow.t.sol, PoWGate.t.sol, PoWMint.t.sol   — unit/example tests (deterministic, CI)
 test/integration/    MsgBoard.t.sol                — live tests, gated on MSGBOARD_RPC
 examples/            PoWGate.sol, PoWMint.sol
-script/              gen-vectors.cjs, grind-message.cjs, PostMessage.s.sol
+script/              grind-message.cjs, PostMessage.s.sol
 ```
 
 ```sh
 forge build
 forge test                                   # unit + example tests (integration auto-skips)
-node script/gen-vectors.cjs                  # regenerate the golden vector from @msgboard/core
+# MsgPow.t.sol pins the node's Go golden vector inline — no generator step.
 
 # run the live integration tests against a real msgboard node:
 MSGBOARD_RPC=https://one.valve.city/rpc/vk_demo/evm/943 \

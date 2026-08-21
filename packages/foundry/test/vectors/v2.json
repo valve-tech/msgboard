@@ -1,27 +1,13 @@
 {
-  "fixture": {
-    "version": 2,
-    "nonce": "42",
-    "blockHash": "0x2e4283657020515742f1cdee8b4a01b1920e459419be89a5316152be3bb122e2",
-    "category": "0xda5195d22a0b240b14559bfd687e228acb43f8c5b1a7f876b1761584306b3c45",
-    "data": "0x0102030405",
-    "workMultiplier": "1",
-    "workDivisor": "1",
-    "payloadHash": "0xd73f3e001a3e81f1483ac0cdc9c56e2fe4d8b0fff3d8e9c4b385be4941289671",
-    "scalarHash": "0xb30158e41c77b19c5fa193978fc81310a3690db47085eb2e62bf819fa4311a89"
-  },
+  "_comment": "The node's Go golden vector (vector B) — a passing message-version-1 stamp. category = 'chatter' (padded), data = 'golden vector', workHash = 0x00037212834e250723dc736508d445a0dbc01398040a980807641b4be2d1e361. Consumed by the PoWGate/PoWMint example tests; MsgPow.t.sol pins the same vector inline.",
   "stamp": {
-    "version": 1,
-    "nonce": "269",
-    "blockHash": "0x80b77fe15818b61e0c9a36535243794608f1592ac88a5b8663ddc19b5cc11e66",
-    "category": "0x50a708bca5d752288fd658d84874e26001ecfcae57fd09fe74a4c155103d4cb5",
-    "data": "0x",
+    "version": "1",
+    "nonce": "57602",
+    "blockHash": "0x3a2ca760216c5cb648c32aab73cbc1cdfdbcf02f77a4cd190995e3c46f3932b5",
+    "category": "0x6368617474657200000000000000000000000000000000000000000000000000",
+    "data": "0x676f6c64656e20766563746f72",
     "workMultiplier": "1",
-    "workDivisor": "65536",
-    "difficulty": "256",
-    "powTarget": "0x0100000000000000000000000000000000000000000000000000000000000000",
-    "payloadHash": "0xa4b196852bf18d45319e070fa8324093d906cddf24d4ecdd94e42c99d7414c40",
-    "scalarHash": "0xa73acd08bb8662e6e80a72f219f24a61542a61446a72ca829cf0d20b8256ade1",
-    "workHash": "0x00bef90d173b08a3db9346da3a4b606d5c9d779ad899bf24b39d5f0abc35c617"
+    "workDivisor": "1000",
+    "difficulty": "16907"
   }
 }
