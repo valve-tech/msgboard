@@ -1,10 +1,10 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { stringToHex, type Hex } from 'viem'
-// VERIFIER PATH: `checkWork` + `difficulty` are re-exported by `@msgboard/sdk` (it does
+// VERIFIER PATH: `checkWork` + `difficulty` + `powTarget` are re-exported by `@msgboard/sdk` (it does
 // `export * from '@msgboard/core'`). `checkWork(seed, difficulty)` recomputes the message hash exactly
-// as the reth node does and returns it iff `BigInt(hash) % difficulty === 0n` (else null) — so a
+// as the node does and returns it iff `BigInt(hash) < powTarget(difficulty)` (else null) — so a
 // non-null result is a real, node-equivalent proof that the WASM-minted nonce is valid.
-import { checkWork, difficulty, categoryHash } from '@msgboard/sdk'
+import { checkWork, difficulty, powTarget, categoryHash } from '@msgboard/sdk'
 import { loadDefaultStamper } from '../src/stamper'
 import { msgBoardClientAdapter } from '../src/board'
 
@@ -39,7 +39,8 @@ describe('default stamper (WASM/native cascade)', () => {
     expect(verified).not.toBeNull()
     // And the hash the engine reported matches the verifier's recomputed hash.
     expect(verified).toBe(hash)
-    expect(BigInt(hash) % msgDifficulty).toBe(0n)
+    // The revised acceptance rule: the work hash is below the target 2^256 / difficulty.
+    expect(BigInt(hash) < powTarget(msgDifficulty)).toBe(true)
   })
 })
 

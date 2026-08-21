@@ -25,113 +25,6 @@ const ec = new EC('secp256k1')
 const g = ec.g as elliptic.curve.base.BasePoint
 
 /**
- * LEGACY (pre-revision) verifier. The msgboard spec revised the PoW algorithm to the transcript-hash
- * scheme in {@link checkWork}; this is the OLD scheme (challenge = x of G·(nonce·digest + blockHash),
- * accept if hash % D == 0). The live 943 board still runs it today, so it is kept — but new work must
- * use {@link checkWork}. Selection is by deployment config, NOT the message version field (both schemes
- * are message version 1; see the spec — the revised algorithm IS version 1).
- * @returns the message hash, or null when the work does not pass.
- */
-export function checkWorkLegacy(msg: types.MessageSeed, msgDifficulty: bigint) {
-  const bytes = new Uint8Array([
-    ...getChallengeLegacy(msg),
-    ...hexToBytes(msg.category, { size: 32 }),
-    ...hexToBytes(msg.data),
-  ])
-  const hash = sha256(bytes)
-  if (BigInt(hash) % msgDifficulty !== 0n) {
-    return null
-  }
-  return hash
-}
-
-/**
- * LEGACY challenge component (the x of G·(nonce·digest + blockHash)). Used only by {@link checkWorkLegacy}.
- * @throws error if the challenge is invalid
- */
-export function getChallengeLegacy(msg: types.MessageSeed) {
-  const digest = BigInt(difficultyDigest(msg))
-  // nonce = msg.nonce * msg.difficultyDigest() + msg.blockHash
-  const nonce = new BN((msg.nonce * digest + BigInt(msg.blockHash)).toString())
-  const challenge = g.mul(nonce)
-  if (challenge.isInfinity()) {
-    throw new Error('unable to create challenge')
-  }
-  // The x-coordinate MUST be a fixed 32-byte big-endian encoding. bn.js `toArray()` with no length
-  // returns the MINIMAL representation, dropping leading zero bytes — so an x below 2^248 (one input
-  // in 256) would encode to 31 bytes and mismatch the node. The node's verifier and this repo's Rust
-  // grinder both always produce 32 bytes (pow-grinder/src/lib.rs x_of → [u8; 32]; reth pow.rs
-  // serialize_uncompressed()[1..33]). Pin the width to match them.
-  return Uint8Array.from(challenge.getX().toArray('be', 32))
-}
-
-/**
- * A stateful, fast proof-of-work search over consecutive nonces.
- *
- * {@link checkWork} recomputes `challenge = g·(nonce·digest + blockHash)` from scratch
- * every nonce — a full elliptic-curve scalar MULTIPLICATION, which dominates the grind
- * (~0.6 ms each in JS, capping a naive loop near ~1.5k hashes/s). But across consecutive
- * nonces the scalar grows by a constant `digest` (nonce increments by 1), so the challenge
- * POINT advances by a constant point `D = g·digest`. Replacing the per-nonce scalar MULTIPLY
- * with a single point ADDITION makes the search ~20-50x faster while producing bit-identical
- * challenges: `g·a + g·b = g·(a+b)`, and `g·x` depends only on `x mod n`, so the running point
- * after k additions equals `g·(nonce·digest + blockHash)` exactly. The constant message bytes
- * (32-byte category + data) are concatenated once.
- *
- * `next(msgDifficulty)` advances `message.nonce` by 1, steps (or rebases) the running point,
- * and returns the work hash if `hash % msgDifficulty === 0n`, else null. It reads
- * `message.blockHash` live every call: if it changed since the running point was based (the
- * {@link MsgBoardClient.doPoW} block poller updates it mid-grind), the point is rebased with a
- * single scalar multiply before continuing. {@link checkWorkLegacy} is the verifier this matches;
- * this only accelerates finding a winning nonce, and must stay byte-for-byte equivalent to it.
- *
- * LEGACY (pre-revision) grind — pairs with {@link checkWorkLegacy}. Use {@link createChallengeSearch}
- * for the revised (spec) algorithm.
- *
- * @param message the message to grind; its `nonce` is mutated in place as the search advances.
- * @returns an object whose `next(msgDifficulty)` performs one nonce step.
- */
-export function createChallengeSearchLegacy(message: types.MessageSeed) {
-  const digest = BigInt(difficultyDigest(message))
-  const stepPoint = g.mul(new BN(digest.toString())) // D = g·digest, constant for this grind
-  const suffix = new Uint8Array([
-    ...hexToBytes(message.category, { size: 32 }),
-    ...hexToBytes(message.data),
-  ])
-  let point: elliptic.curve.base.BasePoint | undefined
-  let basedBlockHash: Hex | undefined
-
-  // (Re)anchor the running point to the current nonce + blockHash with one scalar multiply.
-  const rebase = () => {
-    const scalar = message.nonce * digest + BigInt(message.blockHash)
-    point = g.mul(new BN(scalar.toString()))
-    basedBlockHash = message.blockHash
-  }
-
-  return {
-    next(msgDifficulty: bigint): Hex | null {
-      message.nonce += 1n
-      if (point === undefined || message.blockHash !== basedBlockHash) {
-        rebase()
-      } else {
-        point = point.add(stepPoint)
-      }
-      if (point!.isInfinity()) {
-        throw new Error('unable to create challenge')
-      }
-      // Fixed 32-byte big-endian x — see the note in getChallengeLegacy. `toArray('be', 32)` matches the
-      // node + Rust grinder; a bare `toArray()` drops leading zeros (~1 nonce in 256) and mismatches.
-      const challenge = Uint8Array.from(point!.getX().toArray('be', 32))
-      const hash = sha256(new Uint8Array([...challenge, ...suffix]))
-      if (BigInt(hash) % msgDifficulty !== 0n) {
-        return null
-      }
-      return hash
-    },
-  }
-}
-
-/**
  * Returns the modulus used for the PoW verification = (2^24)+(10k*dataLen).
  * @param factors the message difficulty factors
  * @param dataLen the length of message data
@@ -143,24 +36,17 @@ export function difficulty({ workMultiplier, workDivisor }: types.DifficultyFact
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
-// The msgboard PoW algorithm (the REVISED spec scheme). This is the CANONICAL checkWork/
-// createChallengeSearch — message version 1. The spec defines exactly one algorithm, every example
-// carries version 0x1, and the only `msg/2` in the spec is a devp2p wire-capability bump reserved for
-// changing the packet limits — NOT a message-version bump. So there is no "message version 2": the
-// revision REPLACES version 1's algorithm. The pre-revision scheme is preserved above as
-// getChallengeLegacy/checkWorkLegacy/createChallengeSearchLegacy.
+// The msgboard PoW algorithm — message version 1. This is the one and only scheme: the spec defines
+// exactly one algorithm and every example carries version 0x1. (The only `msg/2` in the spec is a
+// devp2p wire-capability bump reserved for changing the packet limits — NOT a message-version bump —
+// so there is no "message version 2".) The node verifies with this scheme; a pre-revision scheme once
+// existed but the node now rejects it, so it is gone from this repo.
 //
-// Differences from the legacy scheme: the scalar is a SHA256 of the whole transcript (not
-// nonce*digest+blockHash); the work hash is over the COMPRESSED point (33 bytes, so no leading-zero
-// encoding hazard like the legacy x-coordinate had); an out-of-range scalar is REJECTED, not reduced
-// (mirrors Go ScalarBaseMult); and acceptance is `workHash < 2^256 / D`, not `hash % D == 0`.
-//
-// CUTOVER — the live 943 board still runs the LEGACY scheme (verified against a real message), so a
-// client cannot tell legacy from revised by the version field (both are version 1) or from
-// msgboard_status (no algorithm marker). A deployment SELECTS the algorithm; clients default to legacy
-// until the node ships the revised build, then flip in lockstep.
+// The scheme: the scalar is a SHA256 of the whole transcript; the work hash is over the COMPRESSED
+// point (33 bytes, so no leading-zero encoding hazard); an out-of-range scalar is REJECTED, not
+// reduced (mirrors Go ScalarBaseMult); and acceptance is `workHash < 2^256 / D`.
 
-/** The acceptance target for the revised algo: a work hash is valid iff it is below 2^256 / D. */
+/** The acceptance target: a work hash is valid iff it is below 2^256 / D. */
 export function powTarget(d: bigint): bigint {
   return d === 0n ? 0n : (2n ** 256n) / d
 }
@@ -188,14 +74,10 @@ export function scalarHash(msg: types.MessageSeed, payloadHashBytes: Uint8Array)
 }
 
 /**
- * The msgboard PoW verifier — the REVISED spec algorithm, which is the CANONICAL scheme at message
- * version 1 (the spec defines one algorithm and every example carries version 0x1; there is no message
- * version 2 — the only `msg/2` in the spec is a devp2p wire-capability bump reserved for changing the
- * packet limits). scalar = SHA256(version ‖ blockHash ‖ payloadHash ‖ M ‖ D ‖ nonce), rejected unless
- * 1 <= scalar < n (reject, do NOT reduce — matches Go ScalarBaseMult); the work hash is SHA256 of the
- * COMPRESSED point; accept iff workHash < 2^256 / D. Returns the work hash, or null when it does not
- * pass. The pre-revision scheme is {@link checkWorkLegacy}; both are version 1, selected by config —
- * the live 943 board still runs the legacy scheme, so clients default to it until the node cuts over.
+ * The msgboard PoW verifier — message version 1, the one and only scheme. scalar =
+ * SHA256(version ‖ blockHash ‖ payloadHash ‖ M ‖ D ‖ nonce), rejected unless 1 <= scalar < n (reject,
+ * do NOT reduce — matches Go ScalarBaseMult); the work hash is SHA256 of the COMPRESSED point; accept
+ * iff workHash < 2^256 / D. Returns the work hash, or null when it does not pass.
  */
 export function checkWork(msg: types.MessageSeed, msgDifficulty: bigint): Hex | null {
   const payloadHashBytes = hexToBytes(payloadHash(msg))
@@ -211,10 +93,9 @@ export function checkWork(msg: types.MessageSeed, msgDifficulty: bigint): Hex | 
 }
 
 /**
- * The msgboard PoW grind — pairs with {@link checkWork} (the revised algorithm). Each nonce's scalar is
- * an independent hash, so — unlike the legacy {@link createChallengeSearchLegacy} — there is no constant
- * point step to exploit; every nonce pays a full scalar multiply. Mutates `message.nonce`; returns the
- * work hash when a nonce passes, else null.
+ * The msgboard PoW grind — pairs with {@link checkWork}. Each nonce's scalar is an independent hash, so
+ * there is no constant point step to exploit; every nonce pays a full scalar multiply. Mutates
+ * `message.nonce`; returns the work hash when a nonce passes, else null.
  */
 export function createChallengeSearch(message: types.MessageSeed) {
   return {
@@ -223,17 +104,6 @@ export function createChallengeSearch(message: types.MessageSeed) {
       return checkWork(message, msgDifficulty)
     },
   }
-}
-
-/**
- * Returns a partial digest from the combined difficulty factors.
- * @param factors the message difficulty factors
- * @returns a 16-byte partial digest in HEX form
- */
-export function difficultyDigest({ workMultiplier, workDivisor }: types.DifficultyFactors) {
-  return `0x${sha256(
-    concatBytes([numberToBytes(workMultiplier, { size: 8 }), numberToBytes(workDivisor, { size: 8 })]),
-  ).slice(34)}`
 }
 
 /**

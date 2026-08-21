@@ -3,23 +3,23 @@ import { keccak256, toHex, hexToBytes, bytesToHex, type Hex } from 'viem'
 import { checkWork, difficulty, type MessageSeed } from '@msgboard/core'
 
 /**
- * TS ↔ Rust grinder agreement for the REVISED algorithm. The committed WASM `stamp_v2` grinds a
- * revised message; TS `checkWork` must return the SAME work hash for the nonce it found. This is the
- * consensus gate: the fast Rust engine and the TS verifier have to agree byte-for-byte, or a stamp
- * the grinder finds would be rejected by the verifier (and the node).
+ * TS ↔ Rust grinder agreement. The committed WASM `stamp_v2` grinds a message; TS `checkWork` must
+ * return the SAME work hash for the nonce it found. This is the consensus gate: the fast Rust engine
+ * and the TS verifier have to agree byte-for-byte, or a stamp the grinder finds would be rejected by
+ * the verifier (and the node).
  *
- * v2 has no leading-zero encoding hazard (the work hash is over the 33-byte compressed point), so any
- * nonce suffices — no boundary hunt needed. Difficulty is set to 1 (target 2^256 → accept-all) so the
- * grind returns quickly.
+ * The work hash is over the 33-byte compressed point (no leading-zero encoding hazard), so any nonce
+ * suffices — no boundary hunt needed. Difficulty is set to 1 (target 2^256 → accept-all) so the grind
+ * returns quickly. version is 1 — the one and only message version.
  */
 
-const CATEGORY = keccak256(toHex('v2-parity-cat'))
+const CATEGORY = keccak256(toHex('pow-parity-cat'))
 const DATA = '0x0102030405' as Hex // 1..5, dataLen 5
 const DATA_LEN = 5
-const BLOCK_HASH = keccak256(toHex('v2-parity-block'))
+const BLOCK_HASH = keccak256(toHex('pow-parity-block'))
 const WM = 1n
 const WD = BigInt(2 ** 24 + DATA_LEN * 10000) // difficulty()==1 for this dataLen
-const VERSION = 2
+const VERSION = 1
 
 type EngineStampV2 = (req: {
   category: Uint8Array
@@ -60,8 +60,8 @@ const seedAt = (nonce: bigint): MessageSeed => ({
   workDivisor: WD,
 })
 
-describe('revised PoW parity (TS ↔ committed Rust WASM stamp_v2)', () => {
-  it('the WASM revised grinder and TS checkWork agree on the nonce the grinder found', async () => {
+describe('PoW parity (TS ↔ committed Rust WASM stamp_v2)', () => {
+  it('the WASM grinder and TS checkWork agree on the nonce the grinder found', async () => {
     const engine = await loadRawWasmV2()
     expect(engine, 'committed WASM stamp_v2 failed to load (rebuild pow-grinder?)').not.toBeNull()
 

@@ -14,40 +14,25 @@ import type {
   WorkResult,
   WorkStats,
 } from '@msgboard/core'
-import {
-  categoryHash,
-  createChallengeSearch,
-  createChallengeSearchLegacy,
-  difficulty,
-  encodeData,
-  toRLP,
-} from '@msgboard/core'
-import { loadDefaultStamper, loadRevisedStamper, type Stamper } from './grinder.js'
+import { categoryHash, createChallengeSearch, difficulty, encodeData, toRLP } from '@msgboard/core'
+import { loadDefaultStamper, type Stamper } from './grinder.js'
 
 export * from '@msgboard/core'
 export {
   loadDefaultStamper,
-  loadRevisedStamper,
   wrapEngineStamp,
   type Stamp,
   type StampInput,
   type Stamper,
 } from './grinder.js'
 
-/** The PoW algorithm a deployment runs. Both schemes are message version 1; the deployment SELECTS
- *  one — the choice is NOT the message.version field. */
-export type PoWAlgorithm = 'legacy' | 'revised'
-
 /**
  * Client config, extended with the fast-grind seam:
  * - `stamper` omitted (undefined) → auto-detect the fastest engine (native → WASM → JS grind);
  * - `stamper: fn` → use the given engine (e.g. a bundler-resolved WASM `wrapEngineStamp`);
  * - `stamper: null` → force the pure-JS grind (the pre-0.0.33 behavior).
- *
- * `algorithm` selects the PoW scheme, DEFAULT 'legacy'. The live 943 board runs the legacy scheme,
- * so the default matches it. Set `algorithm: 'revised'` once the node ships the revised build.
  */
-export type ClientConfig = Config & { stamper?: Stamper | null; algorithm?: PoWAlgorithm }
+export type ClientConfig = Config & { stamper?: Stamper | null }
 
 const veryHighLimit = 100_000_000n
 
@@ -71,14 +56,10 @@ export class MsgBoardClient {
 
   version: number = 1
 
-  /** The PoW scheme this client grinds. Default 'legacy' — the live 943 board is legacy. */
-  algorithm: PoWAlgorithm
-
   constructor(
     protected provider: Provider,
     config: ClientConfig = {},
   ) {
-    this.algorithm = config.algorithm ?? 'legacy'
     this._difficultyFactors = {
       workMultiplier: 10_000n,
       workDivisor: 1_000_000n,
@@ -95,28 +76,13 @@ export class MsgBoardClient {
 
   private stamperPromise: Promise<Stamper | null> | undefined
 
-  private v2StamperPromise: Promise<Stamper | null> | undefined
-
-  /** Resolve the fast legacy engine once per client (never throws — null means JS grind). */
+  /** Resolve the fast engine once per client (never throws — null means JS grind). */
   private resolveStamper(): Promise<Stamper | null> {
     this.stamperPromise ??=
       this.configuredStamper !== undefined
         ? Promise.resolve(this.configuredStamper)
         : loadDefaultStamper().catch(() => null)
     return this.stamperPromise
-  }
-
-  /**
-   * Resolve the fast revised engine once per client (never throws — null means the revised JS grind).
-   * The `stamper` config is a legacy-only seam: an explicit value (a legacy engine, or `null` to force
-   * the JS grind) turns OFF revised auto-detection, so the revised path falls back to its JS grind
-   * rather than misusing a legacy engine. Only auto-detect mode (`stamper` undefined) probes the
-   * grinder's `stamp_v2`.
-   */
-  private resolveRevisedStamper(): Promise<Stamper | null> {
-    if (this.configuredStamper !== undefined) return Promise.resolve(null)
-    this.v2StamperPromise ??= loadRevisedStamper().catch(() => null)
-    return this.v2StamperPromise
   }
 
   get difficultyFactors() {
@@ -198,22 +164,11 @@ export class MsgBoardClient {
     const start = Date.now()
     this.progressHandler({ ...stats })
 
-    // The PoW path is ALGORITHM-AWARE, selected by the `algorithm` client option (default 'legacy').
-    // 'legacy' keeps the legacy scheme (createChallengeSearchLegacy) and the legacy fast engine;
-    // 'revised' uses the revised scheme (createChallengeSearch) and the revised fast engine. Both
-    // schemes are message version 1 — the message.version field stays 1 in BOTH cases and never
-    // selects the scheme. Both engines share the StampInput / Stamp contract and the
-    // incremental-vs-JS fallback shape, so only the selection differs. The default is legacy because
-    // the live 943 board runs legacy; flip to 'revised' when the node ships the revised build.
-    const isRevised = this.algorithm === 'revised'
-
     // ── fast path: the pow-grinder engine (native or WASM), ~1-2s per stamp vs the JS loop's
     // tens of seconds. The engine grinds against a SNAPSHOT of the block info (a stamp stays
     // valid for the board's ~120-block window, so mid-grind block updates don't matter the way
     // they do for the long JS grind). Any engine failure falls through to the JS loop below.
-    // The revised path resolves the revised engine (`stamp_v2`), which is absent on a legacy-only
-    // grinder and returns null (→ revised JS grind).
-    const stamper = isRevised ? await this.resolveRevisedStamper() : await this.resolveStamper()
+    const stamper = await this.resolveStamper()
     if (stamper) {
       try {
         const blockHash = message.blockHash
@@ -244,17 +199,11 @@ export class MsgBoardClient {
       }
     }
 
-    // JS grind fallback, chosen by algorithm. Both searches expose the same `next(difficulty)` step
-    // and mutate message.nonce in place; the loop below is identical for either.
-    //   legacy — createChallengeSearchLegacy: advances the challenge point by one curve ADDITION per
-    //   nonce instead of a full scalar MULTIPLY, ~10x faster while staying bit-identical to
-    //   checkWorkLegacy. checkWorkLegacy is this repo's TS reimplementation of the node's verifier,
-    //   and matches it only when the x-coordinate is a fixed 32-byte big-endian encoding — the shared
-    //   contract with the Rust grinder (pow-grinder x_of) and the reth node (pow.rs). It rebases on
-    //   its own when the block poller updates message.blockHash mid-grind.
-    //   revised — createChallengeSearch: each nonce's scalar is an independent hash (no constant point
-    //   step to exploit), and every step verifies through checkWork, the revised verifier.
-    const search = isRevised ? createChallengeSearch(message) : createChallengeSearchLegacy(message)
+    // JS grind fallback: createChallengeSearch exposes a `next(difficulty)` step that mutates
+    // message.nonce in place. Each nonce's scalar is an independent transcript hash (no constant point
+    // step to exploit), and every step verifies through checkWork — the node's verifier, reimplemented
+    // in @msgboard/core.
+    const search = createChallengeSearch(message)
     while (true) {
       if (this.cancelled) {
         killPoll = true
