@@ -62,8 +62,8 @@ jobs:
 
       # build the JS packages in dependency order (core <- sdk <- cosign <- petition <- history <- relayer);
       # hardhat ships its tsc output. history's tsc imports @msgboard/cosign AND @msgboard/petition, so both
-      # must be built first (petition is built here only to satisfy history's build — it is not published in
-      # this release's loop below). petition itself imports cosign + sdk, so it builds after them.
+      # must be built first. petition itself imports cosign + sdk, so it builds after them, and it IS
+      # published in the loop below (browser apps — msgboard-ui, petition-web — depend on it).
       - run: npm run build --workspace @msgboard/core
       - run: npm run build --workspace @msgboard/sdk
       - run: npm run build --workspace @msgboard/cosign
@@ -79,7 +79,7 @@ jobs:
           # runtime), cosign before history (history depends on it), history before relayer. pow-grinder
           # rebuilds its WASM from source via its own prepublishOnly hook (the Rust toolchain is installed
           # above), so its published binary is built in CI — no --ignore-scripts.
-          for entry in "@msgboard/core:packages/core" "@msgboard/pow-grinder:packages/pow-grinder" "@msgboard/sdk:packages/sdk" "@msgboard/cosign:packages/cosign" "@msgboard/history:packages/history" "@msgboard/hardhat:packages/hardhat" "@msgboard/relayer:packages/relayer"; do
+          for entry in "@msgboard/core:packages/core" "@msgboard/pow-grinder:packages/pow-grinder" "@msgboard/sdk:packages/sdk" "@msgboard/cosign:packages/cosign" "@msgboard/petition:packages/petition" "@msgboard/history:packages/history" "@msgboard/hardhat:packages/hardhat" "@msgboard/relayer:packages/relayer"; do
             pkg="${entry%%:*}"
             dir="${entry##*:}"
             ver=$(node -p "require('./$dir/package.json').version")
