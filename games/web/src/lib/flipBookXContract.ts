@@ -1,7 +1,7 @@
 import * as viem from 'viem'
 
 /** The msgboard category the variant-B offer notices live under (per-chain board → no chain tag). */
-export const FLIPX_CATEGORY = viem.stringToHex('flipx', { size: 32 })
+export const FLIPBOOKX_CATEGORY = viem.stringToHex('flipbookx', { size: 32 })
 
 export const flipBookXAbi = viem.parseAbi([
   'struct Offer { address maker; bytes32 commit; uint256 stake; uint256 makerBond; uint256 takerBond; uint64 takeDeadline; uint32 makerRevealWindow; uint32 takerRevealWindow; }',

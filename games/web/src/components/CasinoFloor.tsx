@@ -32,7 +32,7 @@ const PITS: { key: string; sign: string; blurb: string; ids: string[] }[] = [
   { key: 'climb', sign: 'The Climb', blurb: 'press your luck, step by step',
     ids: ['mines', 'towers', 'chicken', 'firewalk', 'heist', 'cipher', 'hilo-ladder'] },
   { key: 'proof', sign: 'Duels & The Proof Parlor', blurb: 'peer vs peer · trust only the math',
-    ids: ['coinflip', 'flipx', 'sudoku', 'wordle'] },
+    ids: ['coinflip', 'flipbookx', 'sudoku', 'wordle'] },
 ]
 
 /** "🂡 Blackjack" -> { glyph:"🂡", name:"Blackjack" }. */

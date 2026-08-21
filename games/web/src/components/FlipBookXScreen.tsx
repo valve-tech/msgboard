@@ -6,7 +6,7 @@ import { sendGameTx } from '../tx'
 import { publicClientFor } from '../wallet'
 import { useFlipBookX, type BoardOffer, type XFlip } from '../hooks/useFlipBookX'
 import {
-  FLIPX_CATEGORY,
+  FLIPBOOKX_CATEGORY,
   flipBookXAbi,
   newSalt,
   receiveAuthTypedData,
@@ -156,7 +156,7 @@ export const FlipBookXScreen = ({
         },
       }
       const hex = viem.stringToHex(JSON.stringify(payload))
-      const work = await board.doPoW(FLIPX_CATEGORY, hex)
+      const work = await board.doPoW(FLIPBOOKX_CATEGORY, hex)
       await board.addMessage(work.message)
       return `signed offer ${id.slice(0, 10)}… posted to the board — no funds moved`
     })
