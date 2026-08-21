@@ -54,8 +54,12 @@ const ZERO32 = viem.padHex('0x0', { size: 32 })
 const INK_AHEAD = 8n
 
 const OPS_INDEX = env.OPS_INDEX ? Number(env.OPS_INDEX) : 10
-const OPS_TOP_UP_BELOW = viem.parseEther('20')
-const OPS_TOP_UP_TO = viem.parseEther('100')
+// Top-up ceiling. The 943 defaults (refill to 100 when below 20) assume near-zero gas. On 369 the
+// base fee is ~730k gwei, so one cast RESERVES gas(1.5M) x maxFeePerGas (~2.5k PLS) up front — a
+// 100 PLS ops wallet fails every cast's balance check ("exceeds balance"). Raise these per chain in
+// the compose env (369 uses OPS_TOP_UP_TO=15000 / OPS_TOP_UP_BELOW=5000).
+const OPS_TOP_UP_BELOW = viem.parseEther(env.OPS_TOP_UP_BELOW || '20')
+const OPS_TOP_UP_TO = viem.parseEther(env.OPS_TOP_UP_TO || '100')
 
 // The operator game's validators are the canonicalSubset, derived from the SAME mnemonic at
 // addressIndex VALIDATOR_INDEX_BASE + i (matches ink-pools.ts / deploy.ts). The caster holds the

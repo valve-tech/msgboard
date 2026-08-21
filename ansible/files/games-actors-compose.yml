@@ -146,6 +146,10 @@ services:
       CONFIG: /app/369-deployment.json
       INTERVAL_MS: "30000"
       VAULT_FLOOR: "5000"
+      # 369 base fee is ~730k gwei, so one cast reserves gas(1.5M) x fee (~2.5k PLS). Keep ops funded
+      # for several concurrent casts (100/20 defaults are 943-only and cause "exceeds balance" here).
+      OPS_TOP_UP_TO: "15000"
+      OPS_TOP_UP_BELOW: "5000"
       RPC: "https://one.valve.city/rpc/${VALVE_RPC_KEY}/evm/369"
       MSGBOARD_RPC: "https://one.valve.city/rpc/${VALVE_RPC_KEY}/evm/369"
     command: node cast-watcher.mjs
