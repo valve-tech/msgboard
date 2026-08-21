@@ -3,16 +3,8 @@
 
 /**
  * Mint a MsgBoard PoW stamp in WASM. Takes one object `{ category, data, workMultiplier,
- * workDivisor, blockHash, startNonce, maxIters }`; returns a 40-byte Uint8Array
- * `nonce_be(8) ‖ hash(32)`, or undefined if `maxIters` was exhausted. Pure compute — no keys,
- * no RPC. (SDK verb: `stamp`.)
- */
-export function stamp(req: any): Uint8Array | undefined;
-
-/**
- * Mint a MsgBoard PoW stamp with the revised (v2) algorithm. Takes one object `{ category, data,
- * workMultiplier, workDivisor, blockHash, version, startNonce, maxIters }`; returns a 40-byte
- * Uint8Array `nonce_be(8) ‖ hash(32)`, or undefined if `maxIters` was exhausted. (SDK verb: `stampV2`.)
+ * workDivisor, blockHash, version, startNonce, maxIters }`; returns a 40-byte Uint8Array
+ * `nonce_be(8) ‖ hash(32)`, or undefined if `maxIters` was exhausted. (SDK verb: `stampV2`.)
  */
 export function stamp_v2(req: any): Uint8Array | undefined;
 
@@ -20,7 +12,6 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
-    readonly stamp: (a: any) => [number, number, number, number];
     readonly stamp_v2: (a: any) => [number, number, number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
