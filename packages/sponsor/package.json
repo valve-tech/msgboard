@@ -18,8 +18,8 @@
   },
   "type": "module",
   "dependencies": {
-    "@msgboard/relayer": "^0.2.0",
-    "@msgboard/sdk": "^0.2.0",
+    "@msgboard/relayer": "^0.3.0",
+    "@msgboard/sdk": "^0.3.0",
     "@types/pg": "^8.11.11",
     "pg": "^8.14.1",
     "tsx": "^4.19.3",

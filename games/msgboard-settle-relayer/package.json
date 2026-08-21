@@ -16,7 +16,7 @@
   "dependencies": {
     "@msgboard/games": "*",
     "@msgboard/settle": "*",
-    "@msgboard/relayer": "^0.2.0",
+    "@msgboard/relayer": "^0.3.0",
     "viem": "^2.25.0"
   },
   "devDependencies": {

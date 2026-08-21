@@ -1,6 +1,6 @@
 {
   "name": "@msgboard/relayer",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Controllable, safe-by-default pool-watcher relayer for the msgboard board",
   "repository": "github:valve-tech/msgboard",
   "author": "MsgBoard",
@@ -39,8 +39,8 @@
     "dist/"
   ],
   "dependencies": {
-    "@msgboard/history": "^0.2.0",
-    "@msgboard/sdk": "^0.2.0",
+    "@msgboard/history": "^0.3.0",
+    "@msgboard/sdk": "^0.3.0",
     "viem": "^2.25.0"
   },
   "peerDependencies": {
