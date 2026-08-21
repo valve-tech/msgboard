@@ -1,6 +1,6 @@
 {
   "name": "@msgboard/pow-grinder",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Fast native/WASM MsgBoard proof-of-work stamper (bit-identical to the reth node verifier)",
   "license": "MIT",
   "repository": {

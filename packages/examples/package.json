@@ -23,9 +23,9 @@
   },
   "dependencies": {
     "@gibs/random": "^0.0.19",
-    "@msgboard/history": "^0.2.0",
-    "@msgboard/relayer": "^0.2.0",
-    "@msgboard/sdk": "^0.2.0",
+    "@msgboard/history": "^0.3.0",
+    "@msgboard/relayer": "^0.3.0",
+    "@msgboard/sdk": "^0.3.0",
     "circomlibjs": "^0.1.7",
     "pg": "^8.14.1",
     "snarkjs": "^0.7.6",

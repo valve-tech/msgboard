@@ -1,6 +1,6 @@
 {
   "name": "@msgboard/petition",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Shared interface for MsgBoard petitions: descriptor codec, EIP-712 digest, category keys, and contract ABI",
   "repository": "github:valve-tech/msgboard",
   "author": "MsgBoard",
@@ -38,8 +38,8 @@
     "dist/"
   ],
   "dependencies": {
-    "@msgboard/cosign": "^0.2.0",
-    "@msgboard/sdk": "^0.2.0",
+    "@msgboard/cosign": "^0.3.0",
+    "@msgboard/sdk": "^0.3.0",
     "viem": "^2.25.0"
   },
   "devDependencies": {

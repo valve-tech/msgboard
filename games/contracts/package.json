@@ -1,7 +1,7 @@
 {
   "license": "AGPL-3.0-only",
   "name": "@msgboard/games-contracts",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "The MsgBoard games platform contracts — CoinFlip/Raffle (Random-consumer games), the FlipBook offer books, the HouseChannel/Chips settlement rail, the ZK table family (HiLoWar/Holdem), the skill games (Sudoku/Wordle) and their EAS solve resolvers. Extracted from gibsfinance/random (source of truth through 2026-07; deployed addresses unchanged).",
   "devDependencies": {
     "@msgboard/games": "*",

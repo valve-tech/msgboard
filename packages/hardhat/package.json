@@ -1,6 +1,6 @@
 {
   "name": "@msgboard/hardhat",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Hardhat plugin for MsgBoard",
   "repository": "github:valve-tech/msgboard",
   "license": "MIT",
@@ -61,6 +61,6 @@
     "coverage:watch": "hardhat compile-for-coverage && vitest --coverage"
   },
   "dependencies": {
-    "@msgboard/sdk": "^0.2.0"
+    "@msgboard/sdk": "^0.3.0"
   }
 }
