@@ -1,5 +1,5 @@
 /// <reference lib="webworker" />
-import init, { stamp } from '@msgboard/pow-grinder/wasm'
+import init, { stamp_v2 as stamp } from '@msgboard/pow-grinder/wasm'
 
 /**
  * MsgBoard proof-of-work grinder — a PURE STAMPER running in a Web Worker, NEVER on the UI thread
@@ -27,7 +27,8 @@ self.onmessage = async (e: MessageEvent<Job>) => {
   try {
     if (!ready) ready = init() // instantiate the wasm module once, lazily
     await ready
-    const packed = stamp({ category, data, workMultiplier: wm, workDivisor: wd, blockHash, startNonce: 0, maxIters })
+    // version 1 — the one and only message version, hashed into the scalar transcript. stamp_v2 requires it.
+    const packed = stamp({ category, data, workMultiplier: wm, workDivisor: wd, blockHash, version: 1, startNonce: 0, maxIters })
     if (!packed) {
       ;(self as unknown as Worker).postMessage({ id, error: 'stamp: maxIters exhausted' })
       return

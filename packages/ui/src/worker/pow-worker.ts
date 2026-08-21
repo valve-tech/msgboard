@@ -24,7 +24,7 @@
  */
 
 import * as msgboard from '@msgboard/sdk'
-import initPowGrinder, { stamp as grinderStamp } from '@msgboard/pow-grinder/wasm'
+import initPowGrinder, { stamp_v2 as grinderStamp } from '@msgboard/pow-grinder/wasm'
 import { createPublicClient, http, type PublicClient } from 'viem'
 import { mainnet, pulsechain, pulsechainV4 } from 'viem/chains'
 import type { StartWorkReq, WorkerRequestMsg, WorkerResponseMsg } from './types'
