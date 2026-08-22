@@ -9,8 +9,8 @@ jobs:
   node:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version-file: '.nvmrc'
       - run: npm ci
@@ -30,7 +30,7 @@ jobs:
   foundry:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: foundry-rs/foundry-toolchain@v1
       - name: forge build + test
         working-directory: packages/foundry
@@ -50,7 +50,7 @@ jobs:
     env:
       MSGBOARD_RPC: https://one.valve.city/rpc/vk_demo/evm/943
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: foundry-rs/foundry-toolchain@v1
       - name: forge integration tests (live msgboard node)
         working-directory: packages/foundry
@@ -67,8 +67,8 @@ jobs:
     # the actor/bot scripts are typechecked locally and exercised by the live deploy smoke.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version-file: '.nvmrc'
       - run: npm ci
@@ -87,8 +87,8 @@ jobs:
     # each of which needs its own compiler settings and so runs as a separate single-target profile.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version-file: '.nvmrc'
       - run: npm ci
