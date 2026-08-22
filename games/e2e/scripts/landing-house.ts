@@ -19,6 +19,7 @@
  *   MSGBOARD_RPC  MsgBoard RPC (post/read board messages). Keyed valve endpoint, passed from compose.
  *   HOUSE_INDEX   default 50 — the mnemonic addressIndex the house key is derived at.
  */
+import './redact-console' // first: scrub the valve RPC key from all console output before anything logs
 import { initSync, stamp_v2 as wasmStamp } from '@msgboard/pow-grinder/wasm'
 import { runLandingHouse, houseSignerFromMnemonic } from '@msgboard/games-house-service'
 import type { Stamper } from '@msgboard/games'
