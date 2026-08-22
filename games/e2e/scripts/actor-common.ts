@@ -17,6 +17,19 @@ import {
   type Info,
 } from '@msgboard/games-core'
 
+// Secret hygiene: never let the keyed valve RPC URL reach stdout. viem embeds the full request URL
+// (which carries VALVE_RPC_KEY in its path) in thrown-error messages, and the actors log those. This
+// scrubs the /rpc/<key>/ path segment and any vk_ token from every console line, at the source — so a
+// leaked key can never land in the container's Docker logs. Every actor imports this module.
+const scrubSecret = (s: string): string =>
+  s.replace(/(\/rpc\/)[^/\s"'`)]+/g, '$1<redacted>').replace(/vk_[A-Za-z0-9_-]{4,}/g, 'vk_<redacted>')
+const redactArg = (v: unknown): unknown =>
+  typeof v === 'string' ? scrubSecret(v) : v instanceof Error ? scrubSecret(v.stack || v.message) : v
+for (const method of ['log', 'error', 'warn', 'info'] as const) {
+  const original = console[method].bind(console)
+  console[method] = (...args: unknown[]) => original(...args.map(redactArg))
+}
+
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 
 /** OperatorCoinFlip.RoundOpened — its own signature (no subsetHash, unlike CoinFlipTables), so
