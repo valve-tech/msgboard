@@ -9,6 +9,7 @@
  * GAS AUTO-REFILL: minting spends gas, so the faucet key is kept topped up from account 0 (FUNDER_INDEX)
  * on a timer — the same pattern the other funded actors use — via the tested `refuelGas` helper.
  */
+import './redact-console' // first: scrub the valve RPC key from all console output before anything logs
 import { createPublicClient, createWalletClient, http, parseEther } from 'viem'
 import { mnemonicToAccount } from 'viem/accounts'
 import { runChipFaucet, refuelGas, type RefuelPublicClient, type RefuelWalletClient } from '@msgboard/games-house-service'
