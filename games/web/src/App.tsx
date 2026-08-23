@@ -8,6 +8,7 @@ import { FlipBookScreen } from './components/FlipBookScreen'
 import { FlipBookXScreen } from './components/FlipBookXScreen'
 import { RaffleScreen } from './components/RaffleScreen'
 import { CoinFlipTablesScreen } from './components/CoinFlipTablesScreen'
+import { OperatorCoinFlipScreen } from './components/OperatorCoinFlipScreen'
 import { DiceScreen } from './components/DiceScreen'
 import { DiceX2Screen } from './components/DiceX2Screen'
 import { LimboScreen } from './components/LimboScreen'
@@ -59,6 +60,7 @@ const GAMES = [
   { id: 'flipbookx', label: '✍️ Signed Flips' },
   { id: 'raffle', label: '🎟 The Numbers' },
   { id: 'tables', label: '🎲 Tables' },
+  { id: 'operator', label: '🎰 Operator Tables' },
   { id: 'dice', label: '🎲 Dice' },
   { id: 'dicex2', label: '🎲 Dice X2' },
   { id: 'limbo', label: '🚀 Limbo' },
@@ -101,7 +103,7 @@ type Tab = (typeof GAMES)[number]['id']
 // the tables are commit-before-bet + co-signed recompute; the ZK games trust only the proof.
 // 'live' is a feed, not a game, so it shows no trust strip. 'backroom' is the operator's own
 // read-only dashboard, not a wagered table, so it carries no player trust model either.
-const VALIDATOR_GAMES = new Set<Tab>(['raffle', 'tables'])
+const VALIDATOR_GAMES = new Set<Tab>(['raffle', 'tables', 'operator'])
 const P2P_GAMES = new Set<Tab>(['coinflip', 'flipbookx'])
 const ZK_GAMES = new Set<Tab>(['sudoku', 'wordle'])
 const trustModelFor = (tab: Tab): TrustModel | null =>
@@ -220,7 +222,7 @@ export const App = () => {
       {tab === 'lobby' ? (
         <CasinoFloor
           deployment={deployment}
-          games={GAMES.filter((g) => !['lobby', 'standings', 'live', 'backroom'].includes(g.id))}
+          games={GAMES.filter((g) => !['lobby', 'standings', 'live', 'backroom'].includes(g.id) && (g.id !== 'operator' || !!deployment.operator))}
           trustFor={(id) => trustModelFor(id as Tab)}
           onPick={(id) => setTab(id as Tab)}
           topRight={topRight}
@@ -228,9 +230,9 @@ export const App = () => {
       ) : (
       <AppShell
         deployment={deployment}
-        // Hide the `backroom` tab entirely on a chain with no operator substrate (Global Constraints:
-        // 943 only) rather than showing it and rendering nothing.
-        games={GAMES.filter((g) => g.id !== 'backroom' || !!deployment.operator)}
+        // Hide the `backroom` and `operator` tabs entirely on a chain with no operator substrate
+        // (Global Constraints: 943 only) rather than showing them and rendering nothing.
+        games={GAMES.filter((g) => (g.id !== 'backroom' && g.id !== 'operator') || !!deployment.operator)}
         active={tab}
         onPick={(id) => setTab(id as Tab)}
         topRight={topRight}
@@ -297,6 +299,16 @@ export const App = () => {
       )}
       {tab === 'tables' && (
         <CoinFlipTablesScreen
+          deployment={deployment}
+          data={data}
+          walletClient={wallet.walletClient}
+          trustAcknowledged={trustAcknowledged}
+          myAddress={wallet.address}
+          initialTableId={initialTableId()}
+        />
+      )}
+      {tab === 'operator' && deployment.operator && (
+        <OperatorCoinFlipScreen
           deployment={deployment}
           data={data}
           walletClient={wallet.walletClient}
