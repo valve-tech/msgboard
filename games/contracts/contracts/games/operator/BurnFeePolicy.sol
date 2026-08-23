@@ -14,14 +14,14 @@ contract BurnFeePolicy is IFeePolicy {
     /// @notice Total burned per token, for QA and observability.
     mapping(address token => uint256) public burned;
 
-    function feeBps(bytes32, address, address) external pure returns (uint16) {
+    function feeBps(bytes32, address, address) external pure override returns (uint16) {
         return 0;
     }
 
     /// @notice Burn `amount` of `token` already delivered to this contract by sending it to the dead
     /// address. Reverts if the transfer fails (a token that blocks dead-address transfers), so the
     /// caller's try/catch parks the amount rather than losing it.
-    function route(bytes32, address token, uint256 amount, bytes calldata) external {
+    function route(bytes32, address token, uint256 amount, bytes calldata) external override {
         burned[token] += amount;
         token.safeTransfer(DEAD, amount);
     }

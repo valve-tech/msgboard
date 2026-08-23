@@ -154,7 +154,6 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
     /// and any series attach revert; plain `open()` is unaffected.
     address public backingPool;
     BonusChips1155 public bonusChips;
-    bool internal _bonusInfraSet;
     /// @notice The bonus series attached to a table (0 = none/disabled). An operator attaches a series
     /// with `setBonusSeries`; `openBoosted` consumes one charge of it per round. A round records the id
     /// it consumed in `Round.seriesId`, so every terminal branches boosted/plain on `seriesId != 0`.
@@ -218,10 +217,9 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
     /// consumes). Catching a misconfigured pair here fails loudly at set time instead of at the first
     /// boosted round.
     function setBonusInfra(address pool, address chips) external onlyOwner {
-        if (_bonusInfraSet) revert BonusInfraAlreadySet();
+        if (backingPool != address(0)) revert BonusInfraAlreadySet();
         if (BackingPool(pool).game() != address(this)) revert BonusInfraMismatch();
         if (address(BackingPool(pool).chips()) != chips) revert BonusInfraMismatch();
-        _bonusInfraSet = true;
         backingPool = pool;
         bonusChips = BonusChips1155(chips);
         emit BonusInfraSet(pool, chips);
@@ -233,7 +231,7 @@ contract OperatorCoinFlip is GameBase, ReentrancyGuard {
     /// would silently under-deliver the advertised boost). Enable requires the infra to be set.
     function setBonusSeries(bytes32 tableId, uint256 seriesId) external onlyOperator(tableId) {
         if (seriesId != 0) {
-            if (!_bonusInfraSet) revert BonusInfraUnset();
+            if (backingPool == address(0)) revert BonusInfraUnset();
             (uint16 bonusPoints,,, address seriesToken) = bonusChips.seriesOf(seriesId);
             if (tables[tableId].token != seriesToken) revert SeriesTokenMismatch();
             if (uint256(tables[tableId].maxMultiplierX100) + bonusPoints > MULT_MAX) revert MultiplierClampExceeded();
