@@ -15,6 +15,18 @@ export default defineConfig({
   // The MsgBoard PoW grinder runs in a Web Worker (powWorker.ts) that imports @msgboard/sdk, so the
   // worker bundle code-splits — which requires the ES module format (Vite's default 'iife' can't).
   worker: { format: 'es' },
+  build: {
+    // The @msgboard/* workspace packages ship CommonJS dist (tsc module: commonjs) and are consumed
+    // through node_modules symlinks that resolve to their real packages/*/dist and games/*/dist paths.
+    // @rollup/plugin-commonjs only transforms files under node_modules by default, so those symlinked
+    // CJS files were left untransformed and rollup could not read a name re-exported through their
+    // `__exportStar`/getter chains — e.g. `import { categoryHash } from '@msgboard/sdk'` in
+    // games/msgboard-games/src/msgboardTransport.ts failed the production build. Include the workspace
+    // dist paths so the commonjs transform extracts their named exports.
+    commonjsOptions: {
+      include: [/node_modules/, /packages\/[^/]+\/dist/, /games\/[^/]+\/dist/],
+    },
+  },
   test: {
     include: ['test/**/*.test.ts'],
   },
