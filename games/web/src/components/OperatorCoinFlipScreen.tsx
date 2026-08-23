@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import * as viem from 'viem'
-import { operatorCoinFlipAbi, randomAbi } from '@msgboard/games-core'
+import { operatorCoinFlipAbi, randomAbi, gameEscrowAbi, poolLocationFor } from '@msgboard/games-core'
 import type { GameDeployment } from '../config'
-import type { ChainData } from '../hooks/useChainData'
 import { useOperatorRounds } from '../hooks/useOperatorRounds'
 import { useOperatorTable } from '../hooks/useOperatorTable'
 import {
@@ -14,8 +13,8 @@ import {
   type OperatorSettledLog,
 } from '../lib/operatorIndex'
 import { fetchThemeManifest } from '../lib/operatorTheme'
-import { operatorBetPlan, betFits, tierPrice, payoutFor, isStale } from '../model/operator-table'
-import { sendGameTx, nextHeatLocations } from '../tx'
+import { operatorBetPlan, betFits, tierPrice, payoutFor, isStale, operatorHeatLocations, nextOperatorHeatIndex, OPERATOR_POOL_SIZE } from '../model/operator-table'
+import { sendGameTx } from '../tx'
 import { publicClientFor } from '../wallet'
 import { OperatorTablePicker } from './OperatorTablePicker'
 import { Menu } from './Menu'
@@ -201,14 +200,12 @@ const RoundCard = ({
  */
 export const OperatorCoinFlipScreen = ({
   deployment,
-  data,
   walletClient,
   trustAcknowledged,
   myAddress,
   initialTableId,
 }: {
   deployment: GameDeployment
-  data: ChainData
   walletClient?: viem.WalletClient
   trustAcknowledged: boolean
   myAddress?: viem.Hex
@@ -297,16 +294,56 @@ export const OperatorCoinFlipScreen = ({
       if (!table) throw new Error('table is still loading — try again in a moment')
       const check = betFits(table, stake)
       if (!check.ok) throw new Error(check.reason ?? 'this bet does not fit the table')
-      // 1. Approve the stake in the table's token to the ESCROW — open() pulls it via GameEscrow.
-      const locations = nextHeatLocations(deployment, data.lobby, data.rounds)
+      const price = tierPrice(table.minStake, table.maxStake, stake)
+      if (price === undefined) throw new Error('stake is outside the table range')
+
+      // Operator tables heat a SEPARATE, STAKED validator pool at offset 0 (token = table token, price =
+      // tier price). Find the next unconsumed slot on-chain (indexer-independent), then build the locations
+      // the contract accepts — the regular free-pool `nextHeatLocations` would revert here (see the model).
+      const client = publicClientFor(deployment.chainId, deployment.rpc)
+      const probe = deployment.canonicalSubset[0]!
+      const isConsumed = async (k: bigint): Promise<boolean> => {
+        const { offset, index } = poolLocationFor(k, 0n, OPERATOR_POOL_SIZE)
+        try {
+          return (await client.readContract({
+            address: deployment.random,
+            abi: randomAbi,
+            functionName: 'consumed',
+            args: [{ provider: probe, callAtChange: false, durationIsTimestamp: false, duration: 12n, token: table.token, price, offset, index }],
+          })) as boolean
+        } catch {
+          return false // past the inked region — treat as not consumed
+        }
+      }
+      const heatIndex = await nextOperatorHeatIndex(isConsumed)
+      const locations = operatorHeatLocations(deployment.canonicalSubset, heatIndex, table.token, price)
       const plan = operatorBetPlan(opCfg, deployment.canonicalSubset, tableId, side, stake, locations)
+
+      // 1. Approve the stake in the table's token to the ESCROW — open() pulls it via GameEscrow.
       await sendGameTx(deployment, walletClient!, {
         address: table.token,
         abi: ERC20_APPROVE_ABI,
         functionName: 'approve',
         args: [plan.approveTo, stake],
       })
-      // 2. open() heats the canonical subset internally; the player never picks validators (spec §5, NF-1).
+      // 2. One-time player consent: GameEscrow.lockExposure reverts PlayerNotConsented until the player
+      // opts this game in to draw on their funds. Send it once (skip if already consented).
+      const player = walletClient!.account!.address
+      const consented = (await client.readContract({
+        address: opCfg.escrow,
+        abi: gameEscrowAbi,
+        functionName: 'playerAllowsGame',
+        args: [player, opCfg.coinFlip],
+      })) as boolean
+      if (!consented) {
+        await sendGameTx(deployment, walletClient!, {
+          address: opCfg.escrow,
+          abi: gameEscrowAbi,
+          functionName: 'setPlayerGame',
+          args: [opCfg.coinFlip, true],
+        })
+      }
+      // 3. open() heats the canonical subset internally; the player never picks validators (spec §5, NF-1).
       const receipt = await sendGameTx(deployment, walletClient!, {
         address: plan.openTo,
         abi: operatorCoinFlipAbi,

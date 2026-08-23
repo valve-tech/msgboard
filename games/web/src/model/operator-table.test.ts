@@ -7,6 +7,9 @@ import {
   operatorBetPlan,
   isStale,
   STALE_BLOCKS,
+  operatorHeatLocations,
+  nextOperatorHeatIndex,
+  OPERATOR_POOL_SIZE,
   type OperatorTable,
 } from './operator-table'
 
@@ -91,5 +94,46 @@ describe('isStale', () => {
     expect(isStale(100n, 100n + STALE_BLOCKS - 1n)).toBe(false)
     expect(isStale(100n, 100n + STALE_BLOCKS)).toBe(true)
     expect(isStale(0n, 999n)).toBe(false) // no open block yet
+  })
+})
+
+describe('operatorHeatLocations', () => {
+  const SUBSET = [V1, '0x00000000000000000000000000000000000000A2', '0x00000000000000000000000000000000000000A3'] as const
+
+  it('stakes each Info with the table token + tier price at offset 0 (NOT the free pools)', () => {
+    const locs = operatorHeatLocations([...SUBSET], 5n, TOKEN, 8n)
+    expect(locs).toHaveLength(3)
+    for (const [i, l] of locs.entries()) {
+      expect(l.provider).toBe(SUBSET[i])
+      expect(l.token).toBe(TOKEN) // table token, never zero — else open() reverts TokenMismatch
+      expect(l.price).toBe(8n) // tier price, never 0 — else PriceMismatch
+      expect(l.offset).toBe(0n) // offset-0 operator pool, in lockstep across validators
+      expect(l.index).toBe(5n)
+    }
+  })
+
+  it('rotates offset/index once the pool fills (poolLocationFor semantics)', () => {
+    const [l] = operatorHeatLocations([V1], OPERATOR_POOL_SIZE + 3n, TOKEN, 1n)
+    expect(l!.offset).toBe(OPERATOR_POOL_SIZE) // second pool starts at offset == poolSize
+    expect(l!.index).toBe(3n)
+  })
+})
+
+describe('nextOperatorHeatIndex', () => {
+  // consumed()==true for k < boundary, false at/after — the monotone shape the probe relies on.
+  const probe = (boundary: bigint) => (k: bigint) => Promise.resolve(k < boundary)
+
+  it('finds the first unconsumed slot by binary search', async () => {
+    expect(await nextOperatorHeatIndex(probe(0n))).toBe(0n) // nothing consumed yet
+    expect(await nextOperatorHeatIndex(probe(13n))).toBe(13n) // matches the live 943 pool (0..12 used)
+    expect(await nextOperatorHeatIndex(probe(1n))).toBe(1n)
+    expect(await nextOperatorHeatIndex(probe(64n))).toBe(64n)
+  })
+
+  it('stops at the boundary when the caller maps a revert (past the inked region) to false', async () => {
+    // The caller (the screen) wraps the on-chain read in try/catch and returns false on revert; the search
+    // then treats the uninked region like the unconsumed region and returns the boundary.
+    const isConsumed = (k: bigint) => Promise.resolve(k < 5n) // >=5 would revert on-chain → caller yields false
+    await expect(nextOperatorHeatIndex(isConsumed)).resolves.toBe(5n)
   })
 })
