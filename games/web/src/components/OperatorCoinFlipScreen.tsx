@@ -9,9 +9,11 @@ import {
   foldOperatorTables,
   foldOperatorRounds,
   verifyOperatorRound,
+  latestMetadataUri,
   type OperatorOpenedLog,
   type OperatorSettledLog,
 } from '../lib/operatorIndex'
+import { fetchThemeManifest } from '../lib/operatorTheme'
 import { operatorBetPlan, betFits, tierPrice, payoutFor, isStale } from '../model/operator-table'
 import { sendGameTx, nextHeatLocations } from '../tx'
 import { publicClientFor } from '../wallet'
@@ -43,7 +45,8 @@ const ZERO32 = viem.padHex('0x0', { size: 32 })
 
 /** The verify receipt for one settled round — recomputes the winner from the seed parity purely from the
  *  RoundOpened + RoundSettled logs (verifyOperatorRound → verifyRound), never trusting the chain's `won`
- *  flag. House trust chrome; never skinnable. */
+ *  flag. House trust chrome; never skinnable — enforced by rendering outside `<GameStage>` (see the
+ *  `roundsLedger` wiring below), not just by convention. */
 const OperatorVerifyPanel = ({
   deployment,
   opened,
@@ -192,7 +195,9 @@ const RoundCard = ({
  * a side, and a stake; approve → open pulls the Chips stake into GameEscrow and heats the auto-picked
  * canonical validator subset; a validator cast then settles the round (push via onCast, or the `claim`
  * pull fallback here). Every settled round shows a verify slip that replays the winner from the seed
- * parity purely from the chain logs. Task 5 skins the stage with the operator's theme.
+ * parity purely from the chain logs. The stage board (the table picker) skins with the operator's theme;
+ * the round ledger and verify slip are house trust chrome and render in `.tray-col`, outside `<GameStage>`,
+ * so no operator palette can ever reach them.
  */
 export const OperatorCoinFlipScreen = ({
   deployment,
@@ -235,6 +240,22 @@ export const OperatorCoinFlipScreen = ({
     () => foldOperatorRounds(rounds.events, sessionRounds, myAddress),
     [rounds.events, sessionRounds, myAddress],
   )
+
+  // Operator-level theme: the operator's latest MetadataSet URI → fetch (timeout + house fallback) → raw
+  // manifest handed to GameStage, which re-validates it through parseManifest. An absent/slow/invalid URI
+  // stays undefined = the house look (spec §6, §9). Keyed on the URI so it refetches only when it changes.
+  const themeUri = useMemo(() => latestMetadataUri(rounds.events, table?.operator), [rounds.events, table?.operator])
+  const [themeManifest, setThemeManifest] = useState<unknown>(undefined)
+  useEffect(() => {
+    let live = true
+    setThemeManifest(undefined)
+    void fetchThemeManifest(themeUri).then((m) => {
+      if (live) setThemeManifest(m)
+    })
+    return () => {
+      live = false
+    }
+  }, [themeUri])
 
   // Disjoint by construction: the contract lets a round reach only ONE of Settled / Refunded.
   const pending = myRounds.filter((r) => !settledByRound.has(r.roundId) && !refundedByRound.has(r.roundId))
@@ -362,54 +383,60 @@ export const OperatorCoinFlipScreen = ({
   const payoutNow = table && stake !== undefined && tierNow !== undefined ? payoutFor(stake, table.maxMultiplierX100) : undefined
   const wonCount = settled.filter((r) => settledByRound.get(r.roundId)!.won).length
 
+  // The round ledger + verify slip are house trust chrome (bet amounts, odds, the seed/parity/address
+  // proof) — never skinnable (spec §6). They render in `.tray-col`, a SIBLING of `<GameStage>`, so they
+  // are never a descendant of GameStage's `theme-root` wrapper: no operator palette, hostile or benign,
+  // can reach them (see OperatorCoinFlipScreen.test.ts). Only the table picker — the skinnable "board" —
+  // sits inside the themed stage.
+  const roundsLedger =
+    myRounds.length === 0 ? (
+      <p className="muted" style={{ padding: '8px 2px' }}>
+        No bets yet — pick an open table above, choose a side, and place a stake to open a round.
+      </p>
+    ) : (
+      <div className="cft-rounds">
+        {pending.map((o) => (
+          <RoundCard
+            key={o.roundId}
+            deployment={deployment}
+            opened={o}
+            seed={seeds[o.roundId]}
+            busy={busy}
+            canSettle={walletClient !== undefined && !busy}
+            stale={isStale(o.openedAtBlock, rounds.head)}
+            onSettle={(r) => void settleRound(r)}
+            onRefund={(r) => void refundRound(r)}
+          />
+        ))}
+        {refunded.map((o) => (
+          <RoundCard key={o.roundId} deployment={deployment} opened={o} refunded busy={busy} canSettle={false} onSettle={() => {}} />
+        ))}
+        {settled.map((o) => (
+          <RoundCard
+            key={o.roundId}
+            deployment={deployment}
+            opened={o}
+            settled={settledByRound.get(o.roundId)}
+            seed={seeds[o.roundId]}
+            busy={busy}
+            canSettle={false}
+            onSettle={() => {}}
+          />
+        ))}
+      </div>
+    )
+
   return (
     <>
-      <GameStage title="OPERATOR TABLES" subtitle="bet a coin flip against an operator's bankroll">
+      <GameStage title="OPERATOR TABLES" subtitle="bet a coin flip against an operator's bankroll" themeManifest={themeManifest}>
         <div className="cft-surface">
           <OperatorTablePicker deployment={deployment} tables={tables} selected={tableId} onSelect={setTableId} />
-
-          {rounds.error && <div className="banner bad">operator read failed: {rounds.error}</div>}
-
-          {myRounds.length === 0 ? (
-            <p className="muted" style={{ padding: '8px 2px' }}>
-              No bets yet — pick an open table above, choose a side, and place a stake to open a round.
-            </p>
-          ) : (
-            <div className="cft-rounds">
-              {pending.map((o) => (
-                <RoundCard
-                  key={o.roundId}
-                  deployment={deployment}
-                  opened={o}
-                  seed={seeds[o.roundId]}
-                  busy={busy}
-                  canSettle={walletClient !== undefined && !busy}
-                  stale={isStale(o.openedAtBlock, rounds.head)}
-                  onSettle={(r) => void settleRound(r)}
-                  onRefund={(r) => void refundRound(r)}
-                />
-              ))}
-              {refunded.map((o) => (
-                <RoundCard key={o.roundId} deployment={deployment} opened={o} refunded busy={busy} canSettle={false} onSettle={() => {}} />
-              ))}
-              {settled.map((o) => (
-                <RoundCard
-                  key={o.roundId}
-                  deployment={deployment}
-                  opened={o}
-                  settled={settledByRound.get(o.roundId)}
-                  seed={seeds[o.roundId]}
-                  busy={busy}
-                  canSettle={false}
-                  onSettle={() => {}}
-                />
-              ))}
-            </div>
-          )}
         </div>
       </GameStage>
 
       <div className="tray-col">
+        {rounds.error && <div className="banner bad">operator read failed: {rounds.error}</div>}
+
         <BetTray
           amount={amount}
           onAmount={setAmount}
@@ -451,6 +478,8 @@ export const OperatorCoinFlipScreen = ({
             {wonCount > 0 && <span className="muted"> · you won {wonCount}</span>}
           </span>
         </MetaPanel>
+
+        {roundsLedger}
       </div>
     </>
   )
