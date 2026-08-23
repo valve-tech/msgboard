@@ -5,16 +5,8 @@ import { OperatorCoinFlipScreen } from './OperatorCoinFlipScreen'
 import { GameStage } from './shell/GameStage'
 import { OperatorTablePicker } from './OperatorTablePicker'
 import { deployments } from '../config'
-import type { ChainData } from '../hooks/useChainData'
 
 const deployment = deployments.find((d) => d.operator)!
-const emptyData: ChainData = {
-  lobby: { openEntries: [], flips: [] },
-  rounds: [],
-  blockNumber: 0n,
-  timestamps: {},
-  refresh: () => {},
-}
 
 // A settled round's raw logs, shaped exactly as useOperatorRounds hands them to foldOperatorRounds —
 // distinctive hex values so the assertions below can find them unambiguously in the rendered HTML.
@@ -60,7 +52,6 @@ describe('OperatorCoinFlipScreen', () => {
     const html = renderToStaticMarkup(
       React.createElement(OperatorCoinFlipScreen, {
         deployment,
-        data: emptyData,
         trustAcknowledged: false,
       }),
     )
@@ -98,7 +89,6 @@ describe('OperatorCoinFlipScreen trust chrome is unskinnable', () => {
     const html = renderToStaticMarkup(
       React.createElement(OperatorCoinFlipScreen, {
         deployment,
-        data: emptyData,
         trustAcknowledged: false,
       }),
     )
