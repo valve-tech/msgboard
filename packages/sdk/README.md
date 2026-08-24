@@ -123,8 +123,57 @@ The board pushes each new message to you over a WebSocket. Subscribing is the
 alternative to polling `content()` on a timer, and it is the only way to see a
 message in the same second the board accepts it.
 
-The SDK has no `subscribe` helper yet, so send the three frames yourself. Point
-a WebSocket at the same URL you use for HTTP, with the `wss://` scheme.
+### With the SDK
+
+`MsgBoardWsClient` carries every `msgboard_*` request on one socket and adds the
+push subscriptions. `subscribeMessages` hands you each accepted message.
+
+```ts
+import { MsgBoardWsClient } from '@msgboard/sdk/ws'
+import { categoryHash } from '@msgboard/sdk'
+
+const board = new MsgBoardWsClient('wss://one.valve.city/rpc/vk_demo/evm/369')
+
+const sub = await board.subscribeMessages((message) => {
+  console.log(message.category, message.data)
+})
+
+// Later, when you no longer want the feed:
+await sub.unsubscribe()
+```
+
+Pass a filter to receive one category. The node applies it, so an unmatched
+message never crosses the network.
+
+```ts
+const sub = await board.subscribeMessages((message) => console.log(message.data), {
+  category: categoryHash('gasmoneyplease'),
+})
+```
+
+The handler takes an `RPCMessage` — the same shape `getMessage` returns, with
+every field hex-encoded. Use `fromRPCMessage` to decode it.
+
+The promise resolves once the subscription is live on the node. It rejects with
+the node's own error if the node cannot subscribe: a node built without the
+`msgboard` WebSocket module answers `-32601`. The client does **not** fall back
+to polling — a silent downgrade is what makes a dead board look like an idle
+one, so you hear about it instead.
+
+The client reconnects on its own and re-opens every live subscription on the new
+socket, which is what you need behind a gateway that hangs up on a timer. It
+routes each notification by subscription id, so it works against both node
+builds (see below). `close()` is final: it ends every subscription and stops
+reconnecting.
+
+`subscribeNewHeads` is the other subscription. It is still worth holding while
+you subscribe to messages, because `grind` needs a fresh `blockHash` to build a
+message against.
+
+### The raw JSON-RPC
+
+You do not need the SDK. Point a WebSocket at the same URL you use for HTTP,
+with the `wss://` scheme, and send the three frames yourself.
 
 **Open the subscription.** The first parameter must be the string
 `"newMessages"`, which is the only kind the board supports. Any other value
