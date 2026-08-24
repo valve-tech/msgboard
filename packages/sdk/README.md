@@ -117,6 +117,79 @@ A category is a 32-byte hash. Pass a string and the client hashes it for you (`c
 
 Messages are short-lived: the board retains roughly the last 120 blocks of messages, so the board is a live signal, not durable storage. The board also has a maximum size cap — if a burst of large messages fills the cap before the 120-block window expires, new submissions may be rejected until older messages age out. Design for loss: treat the board as a delivery channel, not a store.
 
+## Subscriptions
+
+The board pushes each new message to you over a WebSocket. Subscribing is the
+alternative to polling `content()` on a timer, and it is the only way to see a
+message in the same second the board accepts it.
+
+The SDK has no `subscribe` helper yet, so send the three frames yourself. Point
+a WebSocket at the same URL you use for HTTP, with the `wss://` scheme.
+
+**Open the subscription.** The first parameter must be the string
+`"newMessages"`, which is the only kind the board supports. Any other value
+returns error `-32602`.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"msgboard_subscribe","params":["newMessages"]}
+{"jsonrpc":"2.0","id":1,"result":"0xd5c19c3a8649b1dbfcda600653729417"}
+```
+
+**Read the notifications.** Each accepted message arrives as a JSON-RPC
+notification. It carries a `method` and no `id`, and its `result` is the same
+message shape `msgboard_getMessage` returns.
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "msgboard_subscription",
+  "params": {
+    "subscription": "0xd5c19c3a8649b1dbfcda600653729417",
+    "result": { "version": "0x1", "category": "0x26b4…", "data": "0x68656c6c6f", "hash": "0x0000…" }
+  }
+}
+```
+
+**Close it when you are done.** `msgboard_unsubscribe` answers `true` if this
+connection held that id, and `false` if it did not.
+
+```json
+{"jsonrpc":"2.0","id":2,"method":"msgboard_unsubscribe","params":["0xd5c19c3a8649b1dbfcda600653729417"]}
+{"jsonrpc":"2.0","id":2,"result":true}
+```
+
+### Route on the subscription id, not on the method name
+
+Match each notification by `params.subscription` against the id you were given.
+Do not filter on `method`. The notification name has already changed once:
+nodes before reth `v2.5.1-pulse-4` sent `msgboard_subscribe`, and nodes from
+pulse-4 on send `msgboard_subscription`.
+
+A client that tests the name breaks silently against the other build. The
+subscription still opens, the id still looks valid, and no message ever
+reaches your handler — so the board looks idle rather than broken. The id is
+stable across both builds, which is why it is the thing to match.
+
+### Filter by category
+
+Pass a filter as the second parameter to receive one category instead of all of
+them. Give the 32-byte hash, which `categoryHash` produces from a plain name.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"msgboard_subscribe",
+ "params":["newMessages",{"category":"0x26b486e54ae602bd4800bb464e9e091169b68f3d977eeb802b32cfe70331aed0"}]}
+```
+
+The board applies the filter, so an unmatched message never crosses the
+network. Omit the filter to receive every message.
+
+### Through a gateway
+
+A gateway may cap how many subscriptions one connection holds, and how long the
+connection lives. On the valve.city public tier a socket closes after 60
+seconds with WebSocket code `4008`. Treat a close as normal and subscribe again
+on a new socket. Your subscription ids do not survive the reconnect.
+
 ## Keeping work off the UI thread
 
 `grind` is a busy loop; JavaScript blocks while it runs. In a browser, run it in a Web Worker so the interface stays responsive. The client yields periodically (`breakInterval`) to let block updates resolve, but the heavy hashing still occupies the thread it runs on.
@@ -284,6 +357,65 @@ Fetch a single message by its hash.
 }
 ```
 
+### msgboard_subscribe
+
+Subscribe over WebSocket to messages as the board accepts them. Notifications arrive with the method name `msgboard_subscription`.
+
+| Parameter | Type | Required |
+| --- | --- | --- |
+| `kind` | `SubscriptionKind` | yes |
+| `filter` | `NewMessagesFilter` | no |
+
+**Returns:** `Hex`
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "msgboard_subscribe",
+  "params": [
+    "newMessages"
+  ]
+}
+```
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": "0xd5c19c3a8649b1dbfcda600653729417"
+}
+```
+
+### msgboard_unsubscribe
+
+Cancel a subscription. Returns `true` if this connection held that subscription id, and `false` if it did not.
+
+| Parameter | Type | Required |
+| --- | --- | --- |
+| `subscriptionId` | `Hex` | yes |
+
+**Returns:** `boolean`
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "msgboard_unsubscribe",
+  "params": [
+    "0xd5c19c3a8649b1dbfcda600653729417"
+  ]
+}
+```
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": true
+}
+```
+
 ## Schemas
 
 ### Hex
@@ -331,6 +463,18 @@ Array of `Hex`.
 Messages grouped by category hash.
 
 Object whose values are `RPCMessage[]`.
+
+### SubscriptionKind
+
+Always the string `newMessages`. It is the only kind the board supports, and any other value is rejected with JSON-RPC error -32602.
+
+### NewMessagesFilter
+
+Optional second parameter to msgboard_subscribe. Omit it to receive every message the board accepts.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `category` | `Hex` | Deliver only messages in this 32-byte category hash. |
 
 <!-- GENERATED:OPENRPC:END -->
 
