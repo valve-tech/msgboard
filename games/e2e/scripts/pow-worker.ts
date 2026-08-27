@@ -1,5 +1,5 @@
 import { parentPort } from 'node:worker_threads'
-import { initSync, stamp_v2 as wasmStamp } from '@msgboard/pow-grinder/wasm'
+import { initSync, stamp as wasmStamp } from '@msgboard/pow-grinder/wasm'
 import { POW_GRINDER_WASM_B64 } from './pow-grinder-wasm-b64'
 
 /**
@@ -28,9 +28,9 @@ const buf = (hex: string): Buffer => Buffer.from(hex.slice(2), 'hex')
 
 parentPort.on('message', (job: Job) => {
   try {
-    // Same request shape as the native stamp_v2: { category, data, workMultiplier, workDivisor,
+    // Same request shape as the native stamp: { category, data, workMultiplier, workDivisor,
     // blockHash, version, startNonce, maxIters } → Uint8Array(40) = nonce_be(8) ‖ hash(32), or undefined.
-    // version is the message version hashed into the scalar transcript — always 1. stamp_v2 REQUIRES it.
+    // version is the message version hashed into the scalar transcript — always 1. stamp REQUIRES it.
     const out = wasmStamp({
       category: buf(job.category),
       data: buf(job.data),
