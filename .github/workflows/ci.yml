@@ -72,6 +72,11 @@ jobs:
         with:
           node-version-file: '.nvmrc'
       - run: npm ci
+      # @msgboard/games imports @msgboard/sdk (the board client), which depends on @msgboard/core;
+      # both need their dist/ built before the engine suite can resolve them — otherwise vitest fails
+      # with "Failed to resolve entry for package @msgboard/sdk". Mirrors the `node` job above.
+      - run: npm run build --workspace @msgboard/core
+      - run: npm run build --workspace @msgboard/sdk
       - run: npm run test --workspace @msgboard/games
       - run: npm run typecheck --workspace @msgboard/games
 
