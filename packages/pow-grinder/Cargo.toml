@@ -3,6 +3,8 @@ name = "pow-grinder"
 version = "0.0.1"
 edition = "2021"
 description = "Fast MsgBoard proof-of-work grinder (bit-identical to reth msgboard-types pow.rs)"
+license = "MIT"
+repository = "https://github.com/valve-tech/msgboard"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
