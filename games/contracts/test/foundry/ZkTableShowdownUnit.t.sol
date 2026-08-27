@@ -872,12 +872,15 @@ contract ZkTableShowdownUnitTest is Test {
     // ═══════════════════════════════════════════════════════════════════════
 
     // Measured (gasleft() delta around the call, mocked verifier so the snark-check cost is
-    // excluded — that path is covered separately by ZkGas.test.ts's verifyRevealWithSnark
-    // ceiling): postShowdownReveals (cold SSTOREs: first showdowns-mapping writes + the deadline
-    // extension, both slots in one call) ~197k; finalizeShowdown (warm, after 4 prior reveal
-    // writes) ~70.8k. Ceilings set with ~35-40% margin.
-    uint256 internal constant POST_REVEALS_CEILING = 270_000;
-    uint256 internal constant FINALIZE_SHOWDOWN_CEILING = 100_000;
+    // excluded — that path is covered separately by ZkGas.test.ts's verifyRevealWithSnark ceiling).
+    // These are RELATIVE regression guards, calibrated to the CI toolchain (forge 1.8.0, the version
+    // foundry-toolchain@v1 pins in the games-foundry job): postShowdownReveals ~287k (cold SSTOREs:
+    // first showdowns-mapping writes + the deadline extension), finalizeShowdown ~221k (warm, after 4
+    // prior reveal writes). NB the absolute numbers are toolchain-dependent — forge 1.6's via_ir
+    // codegen measured ~197k / ~71k for the identical source; the ceilings track whatever the pinned
+    // CI toolchain produces, with ~30% margin, so they catch a real CODE regression above baseline.
+    uint256 internal constant POST_REVEALS_CEILING = 375_000;
+    uint256 internal constant FINALIZE_SHOWDOWN_CEILING = 290_000;
 
     function test_gas_postShowdownReveals() public {
         (bytes32 id, ) = _openHiloShowdown(3, _winDeck());
