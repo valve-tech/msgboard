@@ -1,6 +1,6 @@
 {
   "name": "@msgboard/core",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "MsgBoard proof-of-work engine (msgpow): pure primitives and encoding",
   "repository": "github:valve-tech/msgboard",
   "author": "MsgBoard",
