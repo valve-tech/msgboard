@@ -12,28 +12,29 @@ export const UPSTREAM_PIN: UpstreamPin = {
   branch: 'pulse-v3.4.4',
   commit: '78fbcffb8b23fee20deff3e6c5641f23865f98ff',
   reviewed: '2026-09-04',
+  // Only what a CLIENT can see. The whole `msgboard` tree and the p2p fetch
+  // path were watched first, and they fire on internal changes that cannot
+  // reach us. These four are the wire format and the RPC surface.
   watched: {
-    msgboard: {
-      type: 'tree',
-      oid: '4f47bf0ecfeddc3117e5026ec1af2fda04c1ee69',
-      why: 'The whole package. A tree oid also catches a file that did not exist when this pin was written, which per-file entries alone would miss.',
-    },
     'msgboard/message_index.go': {
       type: 'blob',
       oid: '3b7b812834d9a0d770a8825be03faf5d39c8a8cb',
-      why: 'Holds MsgIndex.Insert, the board ordering comparator. A change here reorders every board and changes which message is evicted.',
+      why: 'MsgIndex.Insert, the board ordering comparator. A change here reorders every board a client reads.',
     },
-    'msgboard/message_id.go': { type: 'blob', oid: '56826cb7d289109164e4817cc2082c44a88bf9d2' },
-    'msgboard/fetch.go': { type: 'blob', oid: 'b273eee400682b9150aae28eb0afae09ae6e7519' },
-    'msgboard/board.go': { type: 'blob', oid: '2c9e9847fbdea9e755107154f123a7b509920669' },
+    'msgboard/message_id.go': {
+      type: 'blob',
+      oid: '56826cb7d289109164e4817cc2082c44a88bf9d2',
+      why: 'Message identity and its encoding. The client computes the same ids.',
+    },
     'rpc/jsonrpc/msgboard_api.go': {
       type: 'blob',
       oid: '871568e85d48580bd192bf9d71441415e790f9b8',
-      why: 'The JSON-RPC surface this package checks against. ContentFilter lives here.',
+      why: 'The JSON-RPC surface this package calls. ContentFilter lives here.',
     },
     'cmd/rpcdaemon/rpcservices/eth_msgboard.go': {
       type: 'blob',
       oid: '3872648fda3b189aaeb06027bbee79ba78dc6ff8',
+      why: 'How the daemon wires that surface up.',
     },
   },
 }
