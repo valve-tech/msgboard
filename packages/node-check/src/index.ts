@@ -25,3 +25,18 @@ export {
   type Target,
 } from './check.js'
 export { ALL_TARGETS, FLEET, PUBLIC_PEERS } from './targets.js'
+export {
+  DriftExit,
+  checkDrift,
+  parseLsTree,
+  planQueries,
+  validatePin,
+  type DriftExitCode,
+  type DriftResult,
+  type UpstreamFetcher,
+  type UpstreamPin,
+  type UpstreamState,
+  type WatchedObject,
+} from './drift.js'
+export { fetchUpstream } from './drift-fetch.js'
+export { UPSTREAM_PIN } from './upstream-pin.js'
