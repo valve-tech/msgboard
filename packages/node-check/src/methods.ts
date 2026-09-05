@@ -1,4 +1,4 @@
-// Which RPC methods does a node answer to an anonymous caller?
+// Which msgboard methods does a node answer to an anonymous caller?
 //
 // This check lives in the client repo on purpose. msgboard talks to both
 // implementations and depends on neither, so it can point at a reth node or an
@@ -8,6 +8,11 @@
 // It exists because an audit found `msgboard_addMessage` — a write method —
 // answering on 0.0.0.0:8545 behind a config line that read like a
 // three-namespace restriction. Nothing was watching for it.
+//
+// The scope is the msgboard namespace and nothing else. An earlier version
+// also asked about admin, debug, txpool, personal and engine, and warned on
+// six of seven public endpoints for methods those operators serve on purpose.
+// What a node does with its mempool is a different check in a different repo.
 
 /**
  * The one argument every probed method receives.
@@ -89,20 +94,20 @@ export interface SensitiveMethod {
 }
 
 /**
- * Methods that take no arguments, and so cannot be probed safely.
+ * msgboard methods that take no arguments, and so cannot be probed safely.
  *
  * Measured on a live reth node: it accepted PROBE_PARAM as a surplus argument
- * to `txpool_content` and ran the method, returning a 3 MB mempool dump. A
- * strict server answers the same call "too many arguments, want at most 0". We
- * cannot choose which one we are talking to, so a zero-arity method is never
- * inert. Their namespaces are covered below by a sibling that takes a typed
- * argument.
+ * to a zero-arity method and ran it anyway, returning a 3 MB response. A strict
+ * server answers the same call "too many arguments, want at most 0". We cannot
+ * choose which one we are talking to, so a zero-arity method is never inert.
+ *
+ * Both of these are harmless to call deliberately — `msgboard_status` returns a
+ * small configuration object — but this file's job is to ask whether a method
+ * is REGISTERED without running it, and for these two that is not possible.
  */
 export const ZERO_ARITY_METHODS: readonly string[] = [
-  'txpool_content',
-  'admin_nodeInfo',
-  'admin_peers',
-  'personal_listAccounts',
+  'msgboard_status',
+  'msgboard_categories',
 ]
 
 /**
@@ -113,38 +118,28 @@ export const ZERO_ARITY_METHODS: readonly string[] = [
  * monitoring check is worth a chance of starting a stranger's miner.
  */
 export const SENSITIVE_METHODS: readonly SensitiveMethod[] = [
-  { method: 'msgboard_addMessage', severity: 'critical', requiresTypedArg: 'the message, as a hex string' },
-  { method: 'admin_addPeer', severity: 'critical', requiresTypedArg: 'an enode URL' },
-  { method: 'debug_setHead', severity: 'critical', requiresTypedArg: 'a block number, as hex' },
-  { method: 'engine_forkchoiceUpdatedV3', severity: 'critical', requiresTypedArg: 'a forkchoice state object' },
   {
-    // Stands in for `personal_listAccounts`, which takes no arguments and would
-    // have listed the node's accounts on a lenient server.
-    method: 'personal_ecRecover',
+    // A write. The finding that started all of this: it answered on a port
+    // whose config line read like a three-namespace restriction.
+    method: 'msgboard_addMessage',
     severity: 'critical',
-    requiresTypedArg: 'a message and a signature, both hex',
+    requiresTypedArg: 'the message, as hex bytes',
   },
   {
-    // Stands in for `txpool_content`. Same namespace, same evidence, and it
-    // needs an address, so the sentinel cannot reach the handler. Not graded:
-    // the mempool is public whether or not this method serves it.
-    method: 'txpool_contentFrom',
-    severity: 'informational',
-    requiresTypedArg: 'an address',
-  },
-  {
-    // Not graded either. Tracing is a product on most public endpoints.
-    method: 'debug_traceTransaction',
-    severity: 'informational',
-    requiresTypedArg: 'a transaction hash',
-  },
-  {
-    // Graded, unlike its neighbours. It returns the WHOLE board with no limit
-    // or offset, so answering it at all is an unbounded response — a cost the
-    // caller chooses and the node pays.
+    // Graded, because it returns the WHOLE board with no limit or offset on
+    // every deployed build we have measured. Answering it at all hands the
+    // caller an unbounded response the node pays for: 167 MB and 10.9 s on a
+    // full board.
     method: 'msgboard_content',
     severity: 'sensitive',
     requiresTypedArg: 'a content filter object',
+  },
+  {
+    // Not graded. A single message by hash is a bounded read and the reason
+    // the namespace exists — a node serving it is working as intended.
+    method: 'msgboard_getMessage',
+    severity: 'informational',
+    requiresTypedArg: 'a message hash',
   },
 ]
 

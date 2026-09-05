@@ -2,6 +2,8 @@ import type { Target } from './check.js'
 
 // Every endpoint the check asks, in one place, because the list is
 // configuration rather than logic and it should be reviewable as a diff.
+//
+// These are the endpoints a msgboard client actually talks to.
 
 /**
  * The valve fleet, as customers reach it.
@@ -18,7 +20,7 @@ export const FLEET: readonly Target[] = [
 ]
 
 /**
- * The public endpoints msgboard clients actually use.
+ * The public endpoints msgboard clients read the board from.
  *
  * These are other people's nodes. A finding here is worth reporting to them and
  * is never our outage, so it does not fail the run.
