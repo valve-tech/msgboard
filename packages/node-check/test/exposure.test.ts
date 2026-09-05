@@ -69,16 +69,17 @@ describe('buildBatch', () => {
     // The severity split is the difference between a signal and a siren.
     const bySeverity = (sev: string) =>
       SENSITIVE_METHODS.filter((m) => m.severity === sev).map((m) => m.method)
-    expect(bySeverity('informational')).toEqual(['txpool_contentFrom', 'debug_traceTransaction'])
+    expect(bySeverity('critical')).toEqual(['msgboard_addMessage'])
     expect(bySeverity('sensitive')).toEqual(['msgboard_content'])
-    expect(bySeverity('critical')).toContain('msgboard_addMessage')
+    expect(bySeverity('informational')).toEqual(['msgboard_getMessage'])
   })
 
-  it('still covers every namespace an anonymous caller must not reach', () => {
-    const namespaces = new Set(SENSITIVE_METHODS.map((m) => m.method.split('_')[0]))
-    for (const ns of ['msgboard', 'admin', 'debug', 'txpool', 'personal', 'engine']) {
-      expect(namespaces, `no probe covers the ${ns} namespace`).toContain(ns)
-    }
+  it('asks about the msgboard namespace and nothing else', () => {
+    // This is the msgboard client. What a node does with its mempool or its
+    // admin namespace is someone else's check; mixing them in only produced
+    // findings we then had to explain away.
+    for (const m of SENSITIVE_METHODS) expect(m.method.startsWith('msgboard_')).toBe(true)
+    for (const z of ZERO_ARITY_METHODS) expect(z.startsWith('msgboard_')).toBe(true)
   })
 })
 
@@ -114,19 +115,19 @@ describe('checkEndpoint', () => {
     // by nature and providers sell tracing. Grading these would fire on the
     // ordinary configuration of almost every public endpoint, and a check that
     // fires on the normal state is noise. Recorded, never graded.
-    const id = idOf('txpool_contentFrom')
+    const id = idOf('msgboard_getMessage')
     const r = await checkEndpoint(target, {
       fetcher: async () =>
         ok(allAbsent({ id, body: { jsonrpc: '2.0', id, error: { code: -32602, message: 'invalid argument 0' } } })),
     })
     expect(r.status).toBe('pass')
-    expect(r.exposed.map((e) => e.method)).toEqual(['txpool_contentFrom'])
+    expect(r.exposed.map((e) => e.method)).toEqual(['msgboard_getMessage'])
   })
 
   it('still fails a key-gated endpoint for an informational method', async () => {
     // On an endpoint that must refuse everything, "normal on a public RPC" is
     // beside the point: anything that answers got past the key check.
-    const id = idOf('txpool_contentFrom')
+    const id = idOf('msgboard_getMessage')
     const r = await checkEndpoint(
       { name: 'gw', url: 'https://one.valve.city/rpc/v1/369', keyGated: true, ours: true },
       {
