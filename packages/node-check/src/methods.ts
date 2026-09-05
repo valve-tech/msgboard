@@ -65,7 +65,20 @@ export const verdictFor = (error: { code?: number; message?: string }): MethodVe
  */
 export const CONTROL_METHOD = 'msgboard_nodeCheckControl'
 
-export type Severity = 'critical' | 'sensitive'
+/**
+ * How much an exposed method costs us.
+ *
+ * `critical` writes, controls the node, or drives consensus. `sensitive` is
+ * reachable-but-costly: it answers, and answering is a problem. `informational`
+ * is a method public RPCs serve ON PURPOSE — the mempool is public by nature
+ * and providers sell tracing — so it is recorded and never graded. Grading it
+ * would fire on the ordinary configuration of almost every public endpoint,
+ * and a check that fires on the normal state is noise.
+ *
+ * The distinction is dropped on a key-gated endpoint, where anything that
+ * answers an anonymous caller got past the key check.
+ */
+export type Severity = 'critical' | 'sensitive' | 'informational'
 
 export interface SensitiveMethod {
   method: string
@@ -93,10 +106,7 @@ export const ZERO_ARITY_METHODS: readonly string[] = [
 ]
 
 /**
- * Methods an anonymous caller should never reach.
- *
- * `critical` writes, controls the node, or drives consensus. `sensitive` only
- * leaks information.
+ * The methods this check asks about. See Severity for which ones grade.
  *
  * Nothing appears here whose handler could act. `miner_start` and friends would
  * be real findings, but they take an argument a node might coerce, and no
@@ -116,13 +126,26 @@ export const SENSITIVE_METHODS: readonly SensitiveMethod[] = [
   },
   {
     // Stands in for `txpool_content`. Same namespace, same evidence, and it
-    // needs an address, so the sentinel cannot reach the handler.
+    // needs an address, so the sentinel cannot reach the handler. Not graded:
+    // the mempool is public whether or not this method serves it.
     method: 'txpool_contentFrom',
-    severity: 'sensitive',
+    severity: 'informational',
     requiresTypedArg: 'an address',
   },
-  { method: 'debug_traceTransaction', severity: 'sensitive', requiresTypedArg: 'a transaction hash' },
-  { method: 'msgboard_content', severity: 'sensitive', requiresTypedArg: 'a content filter object' },
+  {
+    // Not graded either. Tracing is a product on most public endpoints.
+    method: 'debug_traceTransaction',
+    severity: 'informational',
+    requiresTypedArg: 'a transaction hash',
+  },
+  {
+    // Graded, unlike its neighbours. It returns the WHOLE board with no limit
+    // or offset, so answering it at all is an unbounded response — a cost the
+    // caller chooses and the node pays.
+    method: 'msgboard_content',
+    severity: 'sensitive',
+    requiresTypedArg: 'a content filter object',
+  },
 ]
 
 /** Batch ids run 1..N over SENSITIVE_METHODS, with the control last. */

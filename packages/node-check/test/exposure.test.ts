@@ -65,6 +65,15 @@ describe('buildBatch', () => {
     for (const zero of ZERO_ARITY_METHODS) expect(asked).not.toContain(zero)
   })
 
+  it('grades only what a public RPC has no business serving', () => {
+    // The severity split is the difference between a signal and a siren.
+    const bySeverity = (sev: string) =>
+      SENSITIVE_METHODS.filter((m) => m.severity === sev).map((m) => m.method)
+    expect(bySeverity('informational')).toEqual(['txpool_contentFrom', 'debug_traceTransaction'])
+    expect(bySeverity('sensitive')).toEqual(['msgboard_content'])
+    expect(bySeverity('critical')).toContain('msgboard_addMessage')
+  })
+
   it('still covers every namespace an anonymous caller must not reach', () => {
     const namespaces = new Set(SENSITIVE_METHODS.map((m) => m.method.split('_')[0]))
     for (const ns of ['msgboard', 'admin', 'debug', 'txpool', 'personal', 'engine']) {
@@ -98,6 +107,34 @@ describe('checkEndpoint', () => {
     })
     expect(r.status).toBe('fail')
     expect(r.exposed.map((e) => e.method)).toEqual(['msgboard_addMessage'])
+  })
+
+  it('does not grade an endpoint for a method public RPCs serve on purpose', async () => {
+    // txpool_* and debug_trace* are features, not leaks: the mempool is public
+    // by nature and providers sell tracing. Grading these would fire on the
+    // ordinary configuration of almost every public endpoint, and a check that
+    // fires on the normal state is noise. Recorded, never graded.
+    const id = idOf('txpool_contentFrom')
+    const r = await checkEndpoint(target, {
+      fetcher: async () =>
+        ok(allAbsent({ id, body: { jsonrpc: '2.0', id, error: { code: -32602, message: 'invalid argument 0' } } })),
+    })
+    expect(r.status).toBe('pass')
+    expect(r.exposed.map((e) => e.method)).toEqual(['txpool_contentFrom'])
+  })
+
+  it('still fails a key-gated endpoint for an informational method', async () => {
+    // On an endpoint that must refuse everything, "normal on a public RPC" is
+    // beside the point: anything that answers got past the key check.
+    const id = idOf('txpool_contentFrom')
+    const r = await checkEndpoint(
+      { name: 'gw', url: 'https://one.valve.city/rpc/v1/369', keyGated: true, ours: true },
+      {
+        fetcher: async () =>
+          ok(allAbsent({ id, body: { jsonrpc: '2.0', id, error: { code: -32602, message: 'invalid argument 0' } } })),
+      },
+    )
+    expect(r.status).toBe('fail')
   })
 
   it('warns when only a sensitive method is exposed', async () => {

@@ -268,14 +268,18 @@ export const checkEndpoint = async (target: Target, deps: CheckDeps): Promise<Ex
   }
 
   const refusedList = [...refused.values()]
-  const status: CheckStatus = exposedList.some((e) => e.severity === 'critical')
+  // `informational` methods are recorded and never graded — see Severity.
+  const graded = exposedList.filter((e) => e.severity !== 'informational')
+  const status: CheckStatus = graded.some((e) => e.severity === 'critical')
     ? 'fail'
-    : exposedList.length > 0
+    : graded.length > 0
       ? 'warn'
       : 'pass'
   const detail =
-    exposedList.length > 0
-      ? `${exposedList.map((e) => e.method).join(', ')} reachable unauthenticated`
+    graded.length > 0
+      ? `${graded.map((e) => e.method).join(', ')} reachable unauthenticated`
+      : exposedList.length > 0
+        ? `serves ${exposedList.map((e) => e.method).join(', ')}, which public RPCs commonly do`
       : refusedList.length > 0
         ? `refused rather than absent: ${refusedList.map((e) => e.method).join(', ')}`
         : undefined
