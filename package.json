@@ -9,6 +9,7 @@
     "packages/petition",
     "packages/petition-web",
     "packages/history",
+    "packages/node-check",
     "packages/hardhat",
     "packages/relayer",
     "packages/indexer",
