@@ -59,6 +59,7 @@
     "cosign-archive:start": "npm run start --workspace=packages/cosign-archive"
   },
   "overrides": {
-    "viem": "2.52.2"
+    "viem": "2.52.2",
+    "@noble/curves": "^1.9.7"
   }
 }
