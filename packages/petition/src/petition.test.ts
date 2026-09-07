@@ -2,8 +2,9 @@ import { describe, it, expect } from 'vitest'
 import { type Hex } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import type { Content, RPCMessage } from '@msgboard/sdk'
-import type { BoardClient } from '@msgboard/cosign'
+import { type BoardClient, categoryKey, isoDay } from '@msgboard/cosign'
 import { derivePetitionId, type Petition } from './descriptor.js'
+import { INDEX_SCOPE, PETITION_NS } from './categories.js'
 import {
   createPetition,
   signPetition,
@@ -122,6 +123,47 @@ describe('tally', () => {
     const signatures = await readPetitionSignatures(board, p.id, 1, now)
     const result = tally(signatures)
     expect(result.count).toBe(2)
+  })
+})
+
+describe('readPetitions — categories the board does not have', () => {
+  it('does not query a window day the board has never held', async () => {
+    // On the live node a `msgboard_content` call filtered by an absent category
+    // never answers; the gateway cuts it at 18 seconds. readPetitions sweeps one
+    // category PER DAY, so a 30-day window over an empty index was 30 hangs, and
+    // the petition bot died on it every cycle for nine days.
+    const board = fakeBoard()
+    const petition = makePetition()
+    await createPetition(board, petition, now)
+    const todayKey = categoryKey(PETITION_NS, INDEX_SCOPE, isoDay(now))
+    const requested: Hex[] = []
+    const guarded: BoardClient = {
+      addMessage: board.addMessage,
+      categories: async () => [todayKey],
+      content: async (arg) => {
+        requested.push(arg.category)
+        if (arg.category !== todayKey) throw new Error('the node hangs on an absent category')
+        return board.content(arg)
+      },
+    }
+    const out = await readPetitions(guarded, 30, now)
+    expect(requested).toEqual([todayKey])
+    expect(out.map((x) => x.id)).toEqual([petition.id])
+  })
+
+  it('still sweeps the whole window when the board cannot list categories', async () => {
+    // The fakes and older boards have no `categories`. Behaviour must not change.
+    const board = fakeBoard()
+    const requested: Hex[] = []
+    const plain: BoardClient = {
+      addMessage: board.addMessage,
+      content: async (arg) => {
+        requested.push(arg.category)
+        return board.content(arg)
+      },
+    }
+    await readPetitions(plain, 3, now)
+    expect(requested).toHaveLength(3)
   })
 })
 

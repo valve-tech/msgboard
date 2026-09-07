@@ -15,6 +15,39 @@ export interface BoardClient {
   addMessage(arg: { category: Hex; data: Hex }): Promise<unknown>
   /** Fetches messages for a single category. */
   content(arg: { category: Hex }): Promise<Content>
+  /**
+   * Lists the categories the board currently holds, when the board can.
+   *
+   * Optional because older boards and the test fakes do not have it. Where it
+   * exists it makes the window sweep safe: see `presentKeys`.
+   */
+  categories?(): Promise<readonly Hex[]>
+}
+
+/**
+ * Narrow `keys` to the ones the board actually holds.
+ *
+ * A category the board has never seen is not merely empty. On the live node
+ * `msgboard_content` filtered by an absent category never answers — the gateway
+ * cuts it at 18 seconds — so a 30-day sweep of a scope with no posts was 30
+ * hangs in a row. That is what stopped the petition bot for nine days: it could
+ * not read, so it never created a petition, so the categories stayed absent.
+ *
+ * One cheap `categories()` call replaces up to a month of doomed ones. When the
+ * board cannot list, or the listing fails, every key is returned and the sweep
+ * behaves exactly as before — the shortcut may never make a working board worse.
+ */
+export const presentKeys = async (
+  board: BoardClient,
+  keys: readonly Hex[],
+): Promise<readonly Hex[]> => {
+  if (!board.categories) return keys
+  try {
+    const held = new Set((await board.categories()).map((c) => c.toLowerCase()))
+    return keys.filter((k) => held.has(k.toLowerCase()))
+  } catch {
+    return keys
+  }
 }
 
 /** Arguments for posting a signature. */
@@ -58,7 +91,7 @@ export async function readSignatures(
   board: BoardClient,
   { namespace, scope, days, now }: ReadSignaturesArgs,
 ): Promise<SignatureRecord[]> {
-  const keys = keysForWindow(namespace, scope, days, now)
+  const keys = await presentKeys(board, keysForWindow(namespace, scope, days, now))
   const seen = new Set<Hex>()
   const out: SignatureRecord[] = []
   for (const category of keys) {

@@ -8,6 +8,7 @@ import {
   keysForWindow,
   postSignature,
   readSignatures,
+  presentKeys,
 } from '@msgboard/cosign'
 import { type Petition, decodePetition, encodePetition } from './descriptor.js'
 import { petitionDigest } from './digest.js'
@@ -46,13 +47,17 @@ export async function signPetition(
 /**
  * Sweeps the rolling `days`-window of the petition index and decodes each posted descriptor,
  * skipping undecodable junk (the board is open) and deduping by petition id.
+ *
+ * The window is narrowed to categories the board actually holds first — see
+ * `presentKeys`. Asking for an absent category does not return empty on the live
+ * node, it hangs.
  */
 export async function readPetitions(
   board: BoardClient,
   days: number,
   now: Date = new Date(),
 ): Promise<Petition[]> {
-  const keys = keysForWindow(PETITION_NS, INDEX_SCOPE, days, now)
+  const keys = await presentKeys(board, keysForWindow(PETITION_NS, INDEX_SCOPE, days, now))
   const seen = new Set<Hex>()
   const out: Petition[] = []
   for (const category of keys) {
