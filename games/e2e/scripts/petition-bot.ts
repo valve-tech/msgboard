@@ -132,13 +132,6 @@ const main = async () => {
       const { message } = await boardClient.doPoW(category, data)
       return boardClient.addMessage(message as MessageSeed)
     },
-    // Without this the window sweep asks for every day in the window, and a
-    // category the board has never held does not come back empty on the live
-    // node — it hangs until the gateway cuts it at 18 seconds. A 30-day sweep
-    // over an empty index was 30 hangs, which is what stopped this bot.
-    categories(): Promise<readonly viem.Hex[]> {
-      return boardClient.categories()
-    },
     content({ category }: { category: viem.Hex }): Promise<Content> {
       return boardClient.content({ category })
     },

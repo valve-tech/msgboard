@@ -11,7 +11,6 @@ export {
   decodeRecord,
 } from './record.js'
 export {
-  presentKeys,
   type BoardClient,
   type PostSignatureArgs,
   type ReadSignaturesArgs,
