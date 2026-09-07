@@ -77,6 +77,67 @@ describe('readSignatures', () => {
   })
 })
 
+describe('readSignatures — categories the board does not have', () => {
+  it('asks the board which categories exist and skips the rest', async () => {
+    // A category the board has never seen is not merely empty on the live node:
+    // `msgboard_content` filtered by an absent category never answers, and the
+    // gateway cuts it at 18s. A 30-day sweep of an empty scope was therefore 30
+    // hangs, which is what killed the petition bot for nine days. When the board
+    // can list its categories, only ask for ones that are actually there.
+    const now = new Date('2026-06-13T10:00:00.000Z')
+    const [k0, k1] = keysForWindow('cosign', 'acme', 2, now)
+    const r1 = rec(digestA, signer('1'))
+    const requested: Hex[] = []
+    const board: BoardClient = {
+      addMessage: async () => '0x',
+      categories: async () => [k0],
+      content: async ({ category }) => {
+        requested.push(category)
+        if (category !== k0) throw new Error('the node hangs on an absent category')
+        return { [k0]: [msg(encodeRecord(r1))] } as Content
+      },
+    }
+    const out = await readSignatures(board, { namespace: 'cosign', scope: 'acme', days: 2, now })
+    expect(requested).toEqual([k0])
+    expect(requested).not.toContain(k1)
+    expect(out).toHaveLength(1)
+  })
+
+  it('still sweeps every key when the board cannot list categories', async () => {
+    // Older boards and the test fakes have no `categories`. Behaviour there must
+    // not change, so the optimisation can never make a working board worse.
+    const now = new Date('2026-06-13T10:00:00.000Z')
+    const keys = keysForWindow('cosign', 'acme', 2, now)
+    const requested: Hex[] = []
+    const board: BoardClient = {
+      addMessage: async () => '0x',
+      content: async ({ category }) => {
+        requested.push(category)
+        return {} as Content
+      },
+    }
+    await readSignatures(board, { namespace: 'cosign', scope: 'acme', days: 2, now })
+    expect(requested).toEqual(keys)
+  })
+
+  it('sweeps every key when listing categories fails', async () => {
+    // A failed listing must not silently narrow the sweep to nothing.
+    const now = new Date('2026-06-13T10:00:00.000Z')
+    const keys = keysForWindow('cosign', 'acme', 2, now)
+    const requested: Hex[] = []
+    const board: BoardClient = {
+      addMessage: async () => '0x',
+      categories: async () => { throw new Error('rpc down') },
+      content: async ({ category }) => {
+        requested.push(category)
+        return {} as Content
+      },
+    }
+    await readSignatures(board, { namespace: 'cosign', scope: 'acme', days: 2, now })
+    expect(requested).toEqual(keys)
+  })
+})
+
 describe('groupByDigest', () => {
   it('groups records by their digest', () => {
     const records = [rec(digestA, signer('1')), rec(digestA, signer('2')), rec(digestB, signer('3'))]
