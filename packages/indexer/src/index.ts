@@ -47,30 +47,31 @@ import {
   defaultLogger,
   installConsoleRedactor,
   redactSecrets,
-} from "@msgboard/relayer";
-import pg from "pg";
-import { http } from "viem";
-import type { RPCMessage } from "@msgboard/sdk";
+  sourceLabel,
+} from '@msgboard/relayer'
+import pg from 'pg'
+import { http } from 'viem'
+import type { RPCMessage } from '@msgboard/sdk'
 
 // The first statement this module runs. RPC_<chainId> carries the access key in
 // its path, and viem repeats the whole URL in every error it throws, so any later
 // log line could print a live key to container stdout. This one did, for 17 days.
-installConsoleRedactor();
+installConsoleRedactor()
 
-const databaseUrl = process.env.DATABASE_URL;
-const chains = (process.env.INDEXER_CHAINS ?? "1,369,943")
-  .split(",")
+const databaseUrl = process.env.DATABASE_URL
+const chains = (process.env.INDEXER_CHAINS ?? '1,369,943')
+  .split(',')
   .map((id) => id.trim())
-  .filter(Boolean);
-const intervalMs = Number(process.env.INDEXER_INTERVAL_MS ?? 20_000);
-const retentionDays = Number(process.env.RETENTION_DAYS ?? 365);
+  .filter(Boolean)
+const intervalMs = Number(process.env.INDEXER_INTERVAL_MS ?? 20_000)
+const retentionDays = Number(process.env.RETENTION_DAYS ?? 365)
 
 if (!databaseUrl) {
-  console.error("msgboard-indexer: DATABASE_URL is required");
-  process.exit(1);
+  console.error('msgboard-indexer: DATABASE_URL is required')
+  process.exit(1)
 }
 
-const pool = new pg.Pool({ connectionString: databaseUrl, ssl: false });
+const pool = new pg.Pool({ connectionString: databaseUrl, ssl: false })
 
 // One archive sink shared by every chain's relayer: it is stateless, and each
 // record is stamped with the chain id from its own relayer's tick context, so
@@ -78,43 +79,42 @@ const pool = new pg.Pool({ connectionString: databaseUrl, ssl: false });
 const archive = postgresArchiveSink({
   pool,
   retention: { days: retentionDays },
-});
-await archive.migrate();
+})
+await archive.migrate()
 
-const heartbeat = postgresHeartbeat({ pool });
-await heartbeat.migrate();
+const heartbeat = postgresHeartbeat({ pool })
+await heartbeat.migrate()
 
 /** Split `RPC_<chainId>` into its endpoints, dropping blanks and duplicates. */
 export const endpointsFor = (raw: string | undefined): string[] => [
   ...new Set(
-    (raw ?? "")
-      .split(",")
+    (raw ?? '')
+      .split(',')
       .map((url) => url.trim())
       .filter(Boolean),
   ),
-];
+]
 
-const relayers: Relayer<RPCMessage>[] = [];
+const relayers: Relayer<RPCMessage>[] = []
 for (const chainId of chains) {
-  const endpoints = endpointsFor(process.env[`RPC_${chainId}`]);
+  const endpoints = endpointsFor(process.env[`RPC_${chainId}`])
   if (endpoints.length === 0) {
-    console.error(
-      `msgboard-indexer: no RPC_${chainId} set — skipping chain ${chainId}`,
-    );
-    continue;
+    console.error(`msgboard-indexer: no RPC_${chainId} set — skipping chain ${chainId}`)
+    continue
   }
   for (const rpcUrl of endpoints) {
-    // The label identifies the replica in logs and in the heartbeat table. It must be
-    // the REDACTED url: the raw one carries the access key in its path.
-    const source = redactSecrets(rpcUrl);
+    // Identifies this replica in logs and in the heartbeat table. NOT the raw url — that
+    // carries the access key — and NOT merely the redacted url either: two replicas reached
+    // through the same gateway with different keys redact to the SAME string, so they would
+    // share one heartbeat row and overwrite each other, hiding the very split that table
+    // exists to reveal. `sourceLabel` appends a short digest of the whole url.
+    const source = sourceLabel(rpcUrl)
     const logger = defaultLogger(
-      endpoints.length > 1
-        ? `indexer:${chainId}:${source}`
-        : `indexer:${chainId}`,
-    );
+      endpoints.length > 1 ? `indexer:${chainId}:${source}` : `indexer:${chainId}`,
+    )
     const relayer = new Relayer<RPCMessage>({
       node: { transport: http(rpcUrl) },
-      mode: "observe", // the sink always runs; there is no on-chain action
+      mode: 'observe', // the sink always runs; there is no on-chain action
       intervalMs,
       source: msgboardContentSource(), // every category
       key: (message) => message.hash.toLowerCase(),
@@ -127,50 +127,48 @@ for (const chainId of chains) {
       sink: archive,
       logger,
       onTick: async (report, context) => {
-        let headBlock: bigint | null = null;
+        let headBlock: bigint | null = null
         try {
-          headBlock = await context.publicClient.getBlockNumber();
+          headBlock = await context.publicClient.getBlockNumber()
         } catch {
-          headBlock = null; // the node did not answer; the tick itself still counts
+          headBlock = null // the node did not answer; the tick itself still counts
         }
         logger(
-          "tick polled=%d recorded=%d head=%s",
+          'tick polled=%d recorded=%d head=%s',
           report.polled,
           report.recorded,
           // Node's %s renders a bigint as "123n". Operators read this line; give them the digits.
-          headBlock === null ? "unknown" : headBlock.toString(),
-        );
+          headBlock === null ? 'unknown' : headBlock.toString(),
+        )
         await heartbeat.beat({
           chainId: context.chain.id,
           source,
           polled: report.polled,
           recorded: report.recorded,
           headBlock,
-        });
+        })
       },
-    });
-    relayer.start();
-    relayers.push(relayer);
-    console.log(`msgboard-indexer: indexing chain ${chainId} via ${source}`);
+    })
+    relayer.start()
+    relayers.push(relayer)
+    console.log(`msgboard-indexer: indexing chain ${chainId} via ${source}`)
   }
 }
 
 if (relayers.length === 0) {
-  console.error(
-    "msgboard-indexer: no chains configured — set RPC_<chainId> for at least one chain",
-  );
-  await pool.end();
-  process.exit(1);
+  console.error('msgboard-indexer: no chains configured — set RPC_<chainId> for at least one chain')
+  await pool.end()
+  process.exit(1)
 }
 
 console.log(
   `msgboard-indexer: running — ${relayers.length} endpoint(s) across ${chains.length} chain(s), ` +
-    "archiving the union to message_archive",
-);
+    'archiving the union to message_archive',
+)
 
-process.on("SIGINT", async () => {
-  console.log("msgboard-indexer: shutting down…");
-  await Promise.all(relayers.map((relayer) => relayer.stop()));
-  await pool.end();
-  process.exit(0);
-});
+process.on('SIGINT', async () => {
+  console.log('msgboard-indexer: shutting down…')
+  await Promise.all(relayers.map((relayer) => relayer.stop()))
+  await pool.end()
+  process.exit(0)
+})
