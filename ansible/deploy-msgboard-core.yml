@@ -230,7 +230,10 @@
     # box's key saw 29-34 messages on chain 1 while vk_demo reported 0, eight consecutive
     # samples, same head block. BOTH answers were successful results, not errors, so chain 1
     # is genuinely two boards with different contents — a separate open problem from the
-    # Sepolia build split below, which returns -32601 rather than an empty board. Either way,
+    # Sepolia build split below, which returns -32601 rather than an empty board. Confirmed
+    # separate: reth read both chain-1 replicas off /proc/<pid>/exe and both run f3e90f079f,
+    # the build that still serves msgboard on every transport. Neither is on 893a593, so the
+    # split cannot produce a 29-versus-0 board there. Nobody owns chain 1 yet. Either way,
     # reading a board through a key the writer does not use proves nothing about the writer.
     #
     # The heartbeat reads through the box's own key, on the same node the writers post
