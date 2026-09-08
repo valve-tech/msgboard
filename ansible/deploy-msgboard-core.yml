@@ -39,8 +39,21 @@
     # The services this play owns. `sponsor` and `ui` build from the same source but are
     # deployed by their own plays; rebuilding them here would widen the blast radius.
     core_services: [spam-1, spam-369, spam-943, spam-11155111, bridge, indexer]
-    # Every chain that must be carrying messages when this play finishes.
-    writer_chains: ['1', '369', '943', '11155111']
+    # Chains that MUST be carrying messages when this play finishes. A writer that
+    # reports healthy while its board stays empty is the exact failure this play exists
+    # to catch, so these gate the run.
+    writer_chains: ['1', '369', '943']
+    # Chains whose writer is deployed but cannot post yet for a reason outside this repo.
+    # Reported loudly, never gating — a deploy that fixed three boards must not be marked
+    # failed by a fourth that needs someone else to act.
+    #
+    # 11155111 (Sepolia): the node serves msgboard and the board is enabled, but the
+    # gateway does not expose the msgboard methods TO THIS BOX'S KEY on this chain. The
+    # public vk_demo key reaches them on the same endpoint, so the gap is per-key eRPC
+    # scope, not the node. Symptom: `msgboard_addMessage` and `msgboard_content` both
+    # return -32601 to the box while vk_demo gets a real handler answer. Once the key is
+    # scoped, move this id into writer_chains — no other change is needed.
+    pending_chains: ['11155111']
     src_tarball: /tmp/msgboard-core-src.tgz
 
   tasks:
@@ -227,7 +240,33 @@
 
     # The archivist's own liveness row, added in the same change as this play. A fresh
     # last_tick_at per chain is what makes the next stall visible within minutes.
-    - name: The indexer is writing a heartbeat for every chain
+    # Not an assertion. A pending chain is expected to be empty; printing where it stands
+    # keeps it visible so it does not quietly become permanent.
+    - name: Report where each pending chain stands
+      ansible.builtin.uri:
+        url: "https://one.valve.city/rpc/vk_demo/evm/{{ item }}"
+        method: POST
+        body_format: json
+        body: { jsonrpc: "2.0", id: 1, method: msgboard_status, params: [] }
+        return_content: true
+      delegate_to: localhost
+      loop: "{{ pending_chains }}"
+      register: pending
+      changed_when: false
+      failed_when: false
+
+    - name: Pending chains
+      ansible.builtin.debug:
+        msg: >-
+          chain {{ item.item }}: board holds
+          {{ item.json.result.count | int(base=16) if item.json is defined else 'unknown' }} message(s).
+          Its writer is deployed and grinding; it starts landing posts as soon as the gateway
+          exposes the msgboard methods to this box's key on that chain.
+      loop: "{{ pending.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: The indexer is writing a heartbeat for every chain it can reach
       ansible.builtin.shell: >-
         docker exec msgboard-postgres psql -U msgboard-postgres -d msgboard-postgres -tAc
         "SELECT chain_id, polled, extract(epoch from now() - last_tick_at)::int
