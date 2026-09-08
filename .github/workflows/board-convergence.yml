@@ -1,0 +1,55 @@
+# Is our board still part of the network?
+#
+# msgboard gossips, so every node serving a chain should hold nearly the same board.
+# A node that shares nothing with anyone is partitioned: everything written to it is
+# invisible to the rest of the network, and the archive is recording a private view.
+#
+# This ran nowhere until 2026-09-08, when two mainnet replicas were found holding
+# completely disjoint boards — 33 messages against 0, not one hash in common — for
+# weeks. Every symptom an operator can normally see said healthy, and the msgboard
+# layer logs nothing about peers at all. A person found it by hand. This is the job
+# that should have.
+#
+# Hourly, because the board only keeps a message for about twenty minutes. A daily
+# check would miss whole partitions between runs.
+#
+# There is deliberately NO skip path, for the same reason upstream-drift.yml has none:
+# a job that shrugs when it cannot reach anything reports success while it has stopped
+# looking, which is the blindness this exists to remove.
+#
+# WHAT THIS CANNOT SEE. one.valve.city pins each API key to one upstream and strips
+# client routing headers, so from GitHub we reach one of our replicas and cannot address
+# the other. A replica-versus-replica split is invisible here — the 2026-09-08 outage
+# would NOT have been caught by this job. Set CONVERGENCE_<chain> to per-replica URLs
+# and run it from inside the fleet to check that. This job catches the other half: our
+# view drifting away from the whole network.
+name: board convergence
+
+on:
+  schedule:
+    - cron: '41 * * * *'
+  pull_request:
+    paths:
+      - 'packages/node-check/**'
+  workflow_dispatch:
+
+concurrency:
+  group: board-convergence-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  convergence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+      - run: npm ci
+      - run: npm run build --workspace @msgboard/node-check
+      - run: npm run test --workspace @msgboard/node-check
+      # Exit 1 when our board is partitioned, unreadable, or unverifiable.
+      - run: node packages/node-check/dist/convergence-cli.js

@@ -99,10 +99,18 @@ const rpc = async (
  */
 export const snapshotBoard = async (fetcher: Fetcher, endpoint: string): Promise<BoardSnapshot> => {
   try {
-    const content = (await rpc(fetcher, endpoint, 'msgboard_content', [{}])) as Record<
-      string,
-      unknown
-    >
+    // Two signatures exist in the wild. Ours takes an optional filter object; the
+    // erigon-pulse reference takes no arguments and rejects one with "too many
+    // arguments, want at most 0". Try the filter form, fall back to the bare form,
+    // so a node is never recorded as unreachable over an argument-count difference.
+    let content: Record<string, unknown>
+    try {
+      content = (await rpc(fetcher, endpoint, 'msgboard_content', [{}])) as Record<string, unknown>
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (!/too many arguments|invalid.*param|at most 0/i.test(message)) throw error
+      content = (await rpc(fetcher, endpoint, 'msgboard_content', [])) as Record<string, unknown>
+    }
     const hashes = new Set<string>()
     for (const messages of Object.values(content ?? {})) {
       if (Array.isArray(messages)) {
