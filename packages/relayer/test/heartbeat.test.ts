@@ -120,3 +120,39 @@ describe('postgresHeartbeat.beat', () => {
     expect(calls[0]!.text).toContain('COALESCE($4')
   })
 })
+
+describe('postgresHeartbeat.reconcile', () => {
+  it('deletes rows for our chains whose source is not one of ours', async () => {
+    // A label can change — an endpoint is repointed, or the way labels are derived
+    // improves. The old row then never ticks again and alarms forever, which is how a
+    // monitoring table becomes noise people learn to ignore.
+    const { pool, calls } = fakePool()
+    await postgresHeartbeat({ pool }).reconcile([{ chainId: 1, source: 'ep-a' }])
+    expect(calls[0]!.text).toContain('DELETE FROM indexer_heartbeat')
+    expect(calls[0]!.params).toEqual([[1], ['ep-a']])
+  })
+
+  it('never touches a chain it was not given', async () => {
+    // Another process may own other chains in the same table. Deleting their rows
+    // would silence exactly the alarm they depend on.
+    const { pool, calls } = fakePool()
+    await postgresHeartbeat({ pool }).reconcile([{ chainId: 1, source: 'ep-a' }])
+    expect(calls[0]!.text).toContain('chain_id = ANY($1::bigint[])')
+  })
+
+  it('does nothing at all when given nothing, rather than deleting everything', async () => {
+    // The dangerous edge. An empty list must not read as "keep none of them".
+    const { pool, calls } = fakePool()
+    await postgresHeartbeat({ pool }).reconcile([])
+    expect(calls).toHaveLength(0)
+  })
+
+  it('keeps every source it was given for a chain with several replicas', async () => {
+    const { pool, calls } = fakePool()
+    await postgresHeartbeat({ pool }).reconcile([
+      { chainId: 1, source: 'ep-a' },
+      { chainId: 1, source: 'ep-b' },
+    ])
+    expect(calls[0]!.params).toEqual([[1, 1], ['ep-a', 'ep-b']])
+  })
+})
