@@ -97,7 +97,8 @@ for (const chainId of chains) {
         'tick polled=%d recorded=%d head=%s',
         report.polled,
         report.recorded,
-        headBlock ?? 'unknown',
+        // Node's %s renders a bigint as "123n". Operators read this line; give them the digits.
+        headBlock === null ? 'unknown' : headBlock.toString(),
       )
       await heartbeat.beat({
         chainId: context.chain.id,
