@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { installConsoleRedactor, redactSecrets } from '../src/redact.js'
+import { installConsoleRedactor, redactSecrets, sourceLabel } from '../src/redact.js'
 
 // A realistic keyed endpoint, shaped like the ones the fleet uses. Not a real key.
 const KEYED = 'https://one.example.test/rpc/vk_TestKey_0123456789abcdef/evm/943'
@@ -71,5 +71,44 @@ describe('installConsoleRedactor', () => {
     const wrapped = console.log
     installConsoleRedactor()
     expect(console.log).toBe(wrapped)
+  })
+})
+
+describe('sourceLabel', () => {
+  it('distinguishes two endpoints that differ ONLY by key', () => {
+    // The bug this exists for. Two replicas of one chain are most naturally reached
+    // through the same gateway host with different keys; both redact identically, so
+    // anything keyed on the redacted url merges them. In the heartbeat table that
+    // means two relayers sharing one row and overwriting each other, which hides the
+    // replica split the table was added to reveal.
+    const a = sourceLabel('https://one.example.test/rpc/vk_KeyOne_aaaa/evm/1')
+    const b = sourceLabel('https://one.example.test/rpc/vk_KeyTwo_bbbb/evm/1')
+    expect(redactSecrets('https://one.example.test/rpc/vk_KeyOne_aaaa/evm/1')).toBe(
+      redactSecrets('https://one.example.test/rpc/vk_KeyTwo_bbbb/evm/1'),
+    )
+    expect(a).not.toBe(b)
+  })
+
+  it('never contains the key', () => {
+    const label = sourceLabel('https://one.example.test/rpc/vk_TestKey_0123456789abcdef/evm/1')
+    expect(label).not.toContain('vk_TestKey_0123456789abcdef')
+    expect(label).not.toMatch(/vk_[A-Za-z0-9_-]{4,}/)
+  })
+
+  it('stays the same across calls, so a restart keeps the same row', () => {
+    const url = 'https://one.example.test/rpc/vk_Stable_abcd/evm/369'
+    expect(sourceLabel(url)).toBe(sourceLabel(url))
+  })
+
+  it('stays readable — the redacted url is still the visible part', () => {
+    expect(sourceLabel('https://one.example.test/rpc/vk_Abc_1234/evm/943')).toMatch(
+      /^https:\/\/one\.example\.test\/rpc\/<redacted>\/evm\/943#[0-9a-f]{8}$/,
+    )
+  })
+
+  it('distinguishes different chains on the same host and key', () => {
+    const a = sourceLabel('https://one.example.test/rpc/vk_Same_abcd/evm/1')
+    const b = sourceLabel('https://one.example.test/rpc/vk_Same_abcd/evm/369')
+    expect(a).not.toBe(b)
   })
 })
