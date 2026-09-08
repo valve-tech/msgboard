@@ -64,6 +64,16 @@ const main = async (): Promise<void> => {
         fetcher,
         endpoints: [group.ours, peer],
         requireNonEmpty: true,
+        // Public endpoints are load-balanced pools and the backends are not uniform:
+        // rpc.pulsechain.com served msgboard on 3 of 8 consecutive samples. Three
+        // samples would report "nobody answered" about a quarter of the time, so the
+        // hourly job would flap between two different failure messages for one
+        // condition. Sample more; each one is a single cheap POST.
+        samples: 8,
+        // The pool picks a backend per REQUEST, so spacing samples out buys nothing
+        // here and only makes the job slow. The default 4s interval exists for
+        // propagation lag between replicas, which is a different question.
+        intervalMs: 400,
       })
       const ourSnapshot = r.snapshots[0]!
       if (!ourSnapshot.ok) {
