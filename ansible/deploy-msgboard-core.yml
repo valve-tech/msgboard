@@ -48,21 +48,30 @@
     # failed by a fourth that needs someone else to act.
     #
     # 11155111 (Sepolia): the node serves msgboard and the board is enabled, but this box
-    # cannot reach the methods. `msgboard_addMessage` and `msgboard_content` return -32601
-    # to the box while vk_demo gets a real handler answer on the same endpoint.
+    # cannot reach the methods. THE CAUSE IS NOT ESTABLISHED. Three mechanisms have been
+    # proposed and all three are dead; do not re-derive them.
     #
-    # It is NOT an authorization problem, which is what that evidence first looked like.
-    # eRPC has no per-key method scope. The relay pins every caller to a stable home
-    # upstream per chain by rendezvous hash, and on 11155111 the upstreams split: the
-    # direct nodes serve msgboard, the public ones (publicnode, tenderly) carry
-    # `ignoreMethods: ['msgboard_*']`. vk_demo hashes to a direct node; this box's key
-    # hashes to a public one, and eRPC answers -32601 for a pinned-but-ignored method
-    # rather than failing over.
+    # What is measured, 2026-09-08:
+    #   - box key, chain 11155111: eth_chainId 200 ok; every msgboard_* -> HTTP 200, -32601.
+    #   - box key, chain 943:      every msgboard_* -> 200 ok, on both replicas. Not key-global.
+    #   - vk_demo, chain 11155111: every msgboard_* -> 200 ok, INCLUDING pinned to direct-b,
+    #     the same upstream that answers -32601 to the box key in the same minute.
+    #   - X-ERPC-Use-Upstream has NO effect for the box key here: a nonsense upstream name
+    #     returns the identical -32601, so the request is refused before upstream selection.
+    #     The same header DOES steer vk_demo.
+    #   - Status is always HTTP 200 with -32601, never 403 with -32000, which is what a relay
+    #     key-policy denial returns (proxy-handle-mode1.ts:68 and its siblings).
+    #   - One non-reproducible success: box key + direct-a + msgboard_status returned real data
+    #     once, then failed 11 consecutive times. That points at learned or cached state rather
+    #     than static config.
     #
-    # The fix excludes upstreams that ignore a method from that method's pin candidates,
-    # in the relay's pin-candidates.ts. Nothing changes here. When it lands, this writer
-    # and the archivist start working with no redeploy — move the id into writer_chains
-    # once the heartbeat shows a row for it.
+    # Dead: eRPC per-key method scope (no auth block exists), relay per-key policy (wrong error
+    # code), pinning to a public upstream that ignores msgboard_* (public nodes are never pin
+    # candidates), and a candidate lacking msgboard (both direct replicas serve it to vk_demo).
+    #
+    # The erpc session holds the investigation. Nothing changes in this repo either way: when the
+    # cause is fixed, this writer and the archivist resume with no redeploy. Move the id into
+    # writer_chains once the heartbeat shows a row for it.
     pending_chains: ['11155111']
     src_tarball: /tmp/msgboard-core-src.tgz
 
