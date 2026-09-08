@@ -259,3 +259,50 @@ describe('CONVERGENCE_GROUPS', () => {
     for (const g of CONVERGENCE_GROUPS) expect(g.peers.length).toBeGreaterThan(0)
   })
 })
+
+describe('checkConvergence — requireNonEmpty', () => {
+  it('refuses to call two empty boards agreement', async () => {
+    // Empty boards are identical, so a check that accepts them passes hardest exactly
+    // when there is nothing to compare. Two replicas expiring to zero would read as
+    // converged, and the 18-day window when every writer was dead would grade green.
+    const r = await checkConvergence({
+      fetcher: fleet({ 'http://a': [], 'http://b': [] }),
+      endpoints: ['http://a', 'http://b'],
+      requireNonEmpty: true,
+      sleep: now,
+    })
+    expect(r.verdict).toBe('cannot-check')
+    expect(r.report).toContain('agreement proves nothing')
+  })
+
+  it('still calls two empty boards idle when proof was not demanded', async () => {
+    const r = await checkConvergence({
+      fetcher: fleet({ 'http://a': [], 'http://b': [] }),
+      endpoints: ['http://a', 'http://b'],
+      sleep: now,
+    })
+    expect(r.verdict).toBe('idle')
+  })
+
+  it('passes a shared NON-empty board under requireNonEmpty', async () => {
+    // The claim worth making after a fix: non-empty AND shared.
+    const r = await checkConvergence({
+      fetcher: fleet({ 'http://a': ['0x1', '0x2'], 'http://b': ['0x1', '0x2'] }),
+      endpoints: ['http://a', 'http://b'],
+      requireNonEmpty: true,
+      sleep: now,
+    })
+    expect(r.verdict).toBe('converged')
+    expect(r.shared).toBeGreaterThan(0)
+  })
+
+  it('keeps failing a real split under requireNonEmpty', async () => {
+    const r = await checkConvergence({
+      fetcher: fleet({ 'http://a': ['0x1'], 'http://b': ['0x9'] }),
+      endpoints: ['http://a', 'http://b'],
+      requireNonEmpty: true,
+      sleep: now,
+    })
+    expect(r.verdict).toBe('diverged')
+  })
+})
