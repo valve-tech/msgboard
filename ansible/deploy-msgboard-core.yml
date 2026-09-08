@@ -209,37 +209,51 @@
       changed_when: false
       failed_when: pow_rejects.stdout | trim | int > 0
 
-    # Read the boards through the PUBLIC demo endpoint, from the control machine. No key is
-    # involved, so the check can print its result in full.
-    - name: Each board reports a non-empty message count
-      ansible.builtin.uri:
-        url: "https://one.valve.city/rpc/vk_demo/evm/{{ item }}"
-        method: POST
-        body_format: json
-        body:
-          jsonrpc: "2.0"
-          id: 1
-          method: msgboard_status
-          params: []
-        return_content: true
-      delegate_to: localhost
-      loop: "{{ writer_chains }}"
-      register: boards
-      retries: 10
-      delay: 30
-      until: boards.json.result.count is defined and (boards.json.result.count | int(base=16)) > 0
+    # Prove the writers are landing posts, by asking the archivist what it can SEE.
+    #
+    # The obvious check — read msgboard_status through the public vk_demo endpoint — is
+    # wrong here, and it failed a healthy deploy before this replaced it. The gateway
+    # routes a request to a different upstream set per key: on 2026-09-08 the box's key
+    # saw 34 messages on chain 1 while vk_demo reported 0 on eight consecutive samples.
+    # Reading a board through a key the writer does not use proves nothing about the
+    # writer.
+    #
+    # The heartbeat reads through the box's own key, on the same node the writers post
+    # to, so `polled > 0` means those posts are real and visible. It is also the check
+    # that would have caught the original 17-day outage on day one.
+    - name: Wait until every chain we must serve has a fresh, non-empty heartbeat
+      ansible.builtin.shell: >-
+        docker exec msgboard-postgres psql -U msgboard-postgres -d msgboard-postgres -tAc
+        "SELECT count(*) FROM indexer_heartbeat
+         WHERE chain_id IN ({{ writer_chains | join(',') }})
+           AND polled > 0
+           AND last_tick_at    > now() - interval '5 minutes'
+           AND last_message_at > now() - interval '15 minutes'"
+      args:
+        executable: /bin/bash
+      register: healthy
+      changed_when: false
+      retries: 12
+      delay: 20
+      until: (healthy.stdout | trim | int) == (writer_chains | length)
+      failed_when: (healthy.stdout | trim | int) != (writer_chains | length)
 
-    - name: Board counts
+    - name: Heartbeat table (chain | polled | recorded | secs since tick | secs since message)
+      ansible.builtin.shell: >-
+        docker exec msgboard-postgres psql -U msgboard-postgres -d msgboard-postgres -tAc
+        "SELECT chain_id, polled, recorded,
+                extract(epoch from now() - last_tick_at)::int,
+                coalesce(extract(epoch from now() - last_message_at)::int, -1)
+         FROM indexer_heartbeat ORDER BY chain_id"
+      args:
+        executable: /bin/bash
+      register: heartbeat
+      changed_when: false
+
+    - name: Heartbeat
       ansible.builtin.debug:
-        msg: >-
-          chain {{ item.item }}: {{ item.json.result.count | int(base=16) }} message(s),
-          head block {{ item.json.result.headBlock | int(base=16) }}
-      loop: "{{ boards.results }}"
-      loop_control:
-        label: "{{ item.item }}"
+        msg: "{{ heartbeat.stdout_lines }}"
 
-    # The archivist's own liveness row, added in the same change as this play. A fresh
-    # last_tick_at per chain is what makes the next stall visible within minutes.
     # Not an assertion. A pending chain is expected to be empty; printing where it stands
     # keeps it visible so it does not quietly become permanent.
     - name: Report where each pending chain stands
@@ -265,29 +279,6 @@
       loop: "{{ pending.results }}"
       loop_control:
         label: "{{ item.item }}"
-
-    - name: The indexer is writing a heartbeat for every chain it can reach
-      ansible.builtin.shell: >-
-        docker exec msgboard-postgres psql -U msgboard-postgres -d msgboard-postgres -tAc
-        "SELECT chain_id, polled, extract(epoch from now() - last_tick_at)::int
-         FROM indexer_heartbeat ORDER BY chain_id"
-      args:
-        executable: /bin/bash
-      register: heartbeat
-      changed_when: false
-      retries: 10
-      delay: 20
-      until: heartbeat.stdout_lines | length >= (writer_chains | length)
-
-    - name: Heartbeat rows (chain_id | polled | seconds since last tick)
-      ansible.builtin.debug:
-        msg: "{{ heartbeat.stdout_lines }}"
-
-    - name: Every heartbeat is fresh
-      ansible.builtin.assert:
-        that: (item.split('|')[2] | int) < 300
-        fail_msg: "chain {{ item.split('|')[0] }} has not ticked for {{ item.split('|')[2] }}s"
-      loop: "{{ heartbeat.stdout_lines }}"
 
     - name: The noop log burst is gone
       ansible.builtin.shell: >-
