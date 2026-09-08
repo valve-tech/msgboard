@@ -47,31 +47,25 @@
     # Reported loudly, never gating — a deploy that fixed three boards must not be marked
     # failed by a fourth that needs someone else to act.
     #
-    # 11155111 (Sepolia): the node serves msgboard and the board is enabled, but this box
-    # cannot reach the methods. THE CAUSE IS NOT ESTABLISHED. Three mechanisms have been
-    # proposed and all three are dead; do not re-derive them.
+    # 11155111 (Sepolia): CAUSE FOUND 2026-09-08 — a reth build split, not routing and not
+    # this box's key. The two Sepolia replicas run different builds with identical --http.api:
     #
-    # What is measured, 2026-09-08:
-    #   - box key, chain 11155111: eth_chainId 200 ok; every msgboard_* -> HTTP 200, -32601.
-    #   - box key, chain 943:      every msgboard_* -> 200 ok, on both replicas. Not key-global.
-    #   - vk_demo, chain 11155111: every msgboard_* -> 200 ok, INCLUDING pinned to direct-b,
-    #     the same upstream that answers -32601 to the box key in the same minute.
-    #   - X-ERPC-Use-Upstream has NO effect for the box key here: a nonsense upstream name
-    #     returns the identical -32601, so the request is refused before upstream selection.
-    #     The same header DOES steer vk_demo.
-    #   - Status is always HTTP 200 with -32601, never 403 with -32000, which is what a relay
-    #     key-policy denial returns (proxy-handle-mode1.ts:68 and its siblings).
-    #   - One non-reproducible success: box key + direct-a + msgboard_status returned real data
-    #     once, then failed 11 consecutive times. That points at learned or cached state rather
-    #     than static config.
+    #   direct-a-evm-11155111   build f3e90f0   serves msgboard_*
+    #   direct-b-evm-11155111   build 893a593   answers -32601
     #
-    # Dead: eRPC per-key method scope (no auth block exists), relay per-key policy (wrong error
-    # code), pinning to a public upstream that ignores msgboard_* (public nodes are never pin
-    # candidates), and a candidate lacking msgboard (both direct replicas serve it to vk_demo).
+    # Until 893a593 the msgboard module was installed with `merge_configured`, which merges into
+    # every transport with no namespace check, so msgboard_* answered regardless of the allowlist.
+    # 893a593 changed it to `merge_if_module_configured`, which respects --http.api. Neither box
+    # declares msgboard, so the newer build correctly stops serving it and the older one keeps
+    # leaking it. Callers hash to different homes, so vk_demo reaches the leaking replica and this
+    # box reaches the correct one — same endpoint, same minute, opposite answers.
     #
-    # The erpc session holds the investigation. Nothing changes in this repo either way: when the
-    # cause is fixed, this writer and the archivist resume with no redeploy. Move the id into
-    # writer_chains once the heartbeat shows a row for it.
+    # There is no config-level fix on 893a593: adding `msgboard` to --http.api makes reth refuse to
+    # start ("Unknown RPC module: 'msgboard'"), so the namespace has to become declarable in reth
+    # first. Until then, every replica that rolls to 893a593 loses msgboard.
+    #
+    # Nothing changes in this repo. This writer and the archivist resume with no redeploy once the
+    # replicas serve msgboard again; move the id into writer_chains when the heartbeat shows a row.
     pending_chains: ['11155111']
     src_tarball: /tmp/msgboard-core-src.tgz
 
@@ -231,11 +225,13 @@
     # Prove the writers are landing posts, by asking the archivist what it can SEE.
     #
     # The obvious check — read msgboard_status through the public vk_demo endpoint — is
-    # wrong here, and it failed a healthy deploy before this replaced it. The gateway
-    # routes a request to a different upstream set per key: on 2026-09-08 the box's key
-    # saw 34 messages on chain 1 while vk_demo reported 0 on eight consecutive samples.
-    # Reading a board through a key the writer does not use proves nothing about the
-    # writer.
+    # wrong here, and it failed a healthy deploy before this replaced it. Callers are pinned
+    # to a home upstream per key, so two keys read two different replicas. On 2026-09-08 the
+    # box's key saw 29-34 messages on chain 1 while vk_demo reported 0, eight consecutive
+    # samples, same head block. BOTH answers were successful results, not errors, so chain 1
+    # is genuinely two boards with different contents — a separate open problem from the
+    # Sepolia build split below, which returns -32601 rather than an empty board. Either way,
+    # reading a board through a key the writer does not use proves nothing about the writer.
     #
     # The heartbeat reads through the box's own key, on the same node the writers post
     # to, so `polled > 0` means those posts are real and visible. It is also the check
