@@ -47,12 +47,22 @@
     # Reported loudly, never gating — a deploy that fixed three boards must not be marked
     # failed by a fourth that needs someone else to act.
     #
-    # 11155111 (Sepolia): the node serves msgboard and the board is enabled, but the
-    # gateway does not expose the msgboard methods TO THIS BOX'S KEY on this chain. The
-    # public vk_demo key reaches them on the same endpoint, so the gap is per-key eRPC
-    # scope, not the node. Symptom: `msgboard_addMessage` and `msgboard_content` both
-    # return -32601 to the box while vk_demo gets a real handler answer. Once the key is
-    # scoped, move this id into writer_chains — no other change is needed.
+    # 11155111 (Sepolia): the node serves msgboard and the board is enabled, but this box
+    # cannot reach the methods. `msgboard_addMessage` and `msgboard_content` return -32601
+    # to the box while vk_demo gets a real handler answer on the same endpoint.
+    #
+    # It is NOT an authorization problem, which is what that evidence first looked like.
+    # eRPC has no per-key method scope. The relay pins every caller to a stable home
+    # upstream per chain by rendezvous hash, and on 11155111 the upstreams split: the
+    # direct nodes serve msgboard, the public ones (publicnode, tenderly) carry
+    # `ignoreMethods: ['msgboard_*']`. vk_demo hashes to a direct node; this box's key
+    # hashes to a public one, and eRPC answers -32601 for a pinned-but-ignored method
+    # rather than failing over.
+    #
+    # The fix excludes upstreams that ignore a method from that method's pin candidates,
+    # in the relay's pin-candidates.ts. Nothing changes here. When it lands, this writer
+    # and the archivist start working with no redeploy — move the id into writer_chains
+    # once the heartbeat shows a row for it.
     pending_chains: ['11155111']
     src_tarball: /tmp/msgboard-core-src.tgz
 
