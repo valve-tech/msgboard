@@ -72,6 +72,28 @@
         grep -q 'sepolia' {{ deploy_dir }}/packages/relayer/src/chains.ts
       changed_when: false
 
+    # The box builds with NO lockfile, so `npm i` floats every transitive to whatever is newest
+    # that day, and a green local build proves nothing about this machine. Pin the versions we
+    # actually test against. This dict is duplicated in deploy-msgboard-ui.yml on purpose — either
+    # play may run first, and both must leave the box on the same versions. Keep them identical.
+    - name: Pin floating transitives the box would otherwise resolve fresh
+      ansible.builtin.shell: |
+        cd {{ deploy_dir }}
+        python3 - <<'PY'
+        import json
+        p = json.load(open('package.json'))
+        ov = p.setdefault('overrides', {})
+        want = {'@noble/curves': '^1.9.7', '@types/node': '22.15.2', 'typescript': '5.8.3'}
+        add = {k: v for k, v in want.items() if ov.get(k) != v}
+        if add:
+            ov.update(add)
+            json.dump(p, open('package.json', 'w'), indent=2)
+            open('package.json', 'a').write('\n')
+            print('PINNED ' + ', '.join(add))
+        PY
+      register: override_patch
+      changed_when: "'PINNED' in override_patch.stdout"
+
     # ---------------------------------------------------------------- Sepolia's endpoint
 
     - name: Is RPC_11155111 already set?
