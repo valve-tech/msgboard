@@ -8,6 +8,7 @@ import {
   type BoardSnapshot,
 } from '../src/convergence.js'
 import type { Fetcher } from '../src/check.js'
+import { CONVERGENCE_GROUPS, groupFromEnv } from '../src/targets.js'
 
 /** A board as `msgboard_content` returns it: category -> { hash: message }. */
 const board = (hashes: string[]) =>
@@ -208,5 +209,53 @@ describe('endpointsDiffer', () => {
 
   it('accepts genuinely distinct endpoints', () => {
     expect(endpointsDiffer(['http://a', 'http://b'])).toBe(true)
+  })
+})
+
+describe('groupFromEnv', () => {
+  it('uses the shipped group when no override is set', () => {
+    const g = groupFromEnv({ chain: '1', ours: 'http://ours', peers: ['http://p'] }, {})
+    expect(g.ours).toBe('http://ours')
+    expect(g.peers).toEqual(['http://p'])
+  })
+
+  it('replaces the group with per-replica URLs when the override is set', () => {
+    // This is how the check gets pointed at OUR two replicas from inside the fleet.
+    // From outside, the gateway pins every request to one of them and the stronger
+    // check cannot be expressed at all.
+    const g = groupFromEnv({ chain: '1', ours: 'http://ours', peers: ['http://p'] }, {
+      CONVERGENCE_1: 'http://a, http://b ,http://c',
+    })
+    expect(g.ours).toBe('http://a')
+    expect(g.peers).toEqual(['http://b', 'http://c'])
+  })
+
+  it('ignores an override that names fewer than two endpoints', () => {
+    // One endpoint cannot be compared with anything. Silently checking a node against
+    // itself is the failure mode this whole file exists to prevent.
+    const g = groupFromEnv({ chain: '1', ours: 'http://ours', peers: ['http://p'] }, {
+      CONVERGENCE_1: 'http://only',
+    })
+    expect(g.ours).toBe('http://ours')
+  })
+
+  it('drops duplicates in an override rather than comparing a node with itself', () => {
+    const g = groupFromEnv({ chain: '1', ours: 'http://ours', peers: ['http://p'] }, {
+      CONVERGENCE_1: 'http://a,http://a',
+    })
+    expect(g.ours).toBe('http://ours')
+  })
+})
+
+describe('CONVERGENCE_GROUPS', () => {
+  it('never lists our own endpoint among the peers it is compared against', () => {
+    for (const g of CONVERGENCE_GROUPS) {
+      expect(g.peers).not.toContain(g.ours)
+      expect(endpointsDiffer([g.ours, ...g.peers])).toBe(true)
+    }
+  })
+
+  it('gives every group at least one peer to compare with', () => {
+    for (const g of CONVERGENCE_GROUPS) expect(g.peers.length).toBeGreaterThan(0)
   })
 })

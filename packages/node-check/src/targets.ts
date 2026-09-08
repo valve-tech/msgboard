@@ -36,3 +36,65 @@ export const PUBLIC_PEERS: readonly Target[] = [
 ]
 
 export const ALL_TARGETS: readonly Target[] = [...FLEET, ...PUBLIC_PEERS]
+
+/**
+ * Endpoint groups that SHOULD hold the same board, because msgboard gossips.
+ *
+ * A group is one endpoint of ours plus the public nodes serving the same chain. Our
+ * board is not supposed to be an island: if it shares no message with any public node
+ * that answered, we are partitioned from the network and the archive is recording a
+ * private view.
+ *
+ * WHAT THIS CANNOT SEE FROM OUTSIDE. `one.valve.city` pins each API key to one upstream
+ * and strips client routing headers, so from here we reach exactly one of our replicas
+ * and cannot address the other. A replica-versus-replica split is therefore invisible to
+ * this job — the mainnet split of 2026-09-08 would NOT have been caught here. To check
+ * that, run from inside the fleet with per-replica URLs, which the `CONVERGENCE_<chain>`
+ * environment override exists for. This job catches the other half: our view drifting
+ * away from the whole network.
+ */
+export interface ConvergenceGroup {
+  chain: string
+  /** The endpoint we operate. Its failure fails the run. */
+  ours: string
+  /** Public nodes on the same chain. Their failures are theirs, not ours. */
+  peers: readonly string[]
+}
+
+export const CONVERGENCE_GROUPS: readonly ConvergenceGroup[] = [
+  {
+    chain: '369',
+    // vk_demo, not /rpc/v1/. The v1 path is key-gated and answers 401 to an anonymous
+    // caller — which is the property the exposure check exists to keep true, so this
+    // check must not need a secret to defeat it. vk_demo is the published read key.
+    ours: 'https://one.valve.city/rpc/vk_demo/evm/369',
+    peers: [
+      'https://rpc.pulsechain.com',
+      'https://pulsechain-rpc.publicnode.com',
+      'https://rpc-pulsechain.g4mm4.io',
+    ],
+  },
+  // No 943 group. Measured 2026-09-08: no public testnet endpoint serves msgboard at
+  // all, so an external convergence check there can never pass and would fail hourly
+  // forever — noise, not a signal. Testnet replica convergence is real and worth
+  // checking; it just needs endpoints that reach different replicas, which only exist
+  // inside the fleet. Run with CONVERGENCE_943 set to those URLs. Add a group here if a
+  // public testnet node ever serves the board.
+]
+
+/**
+ * A group with `CONVERGENCE_<chain>` applied, when it is set.
+ *
+ * Set it to a comma-separated list of per-replica URLs to check OUR replicas against
+ * each other — the check that matters and that the public gateway cannot express.
+ */
+export const groupFromEnv = (
+  group: ConvergenceGroup,
+  env: Record<string, string | undefined>,
+): ConvergenceGroup => {
+  const raw = env[`CONVERGENCE_${group.chain}`]
+  if (!raw) return group
+  const urls = [...new Set(raw.split(',').map((u) => u.trim()).filter(Boolean))]
+  if (urls.length < 2) return group
+  return { chain: group.chain, ours: urls[0]!, peers: urls.slice(1) }
+}

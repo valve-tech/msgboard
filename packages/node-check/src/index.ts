@@ -24,7 +24,7 @@ export {
   type Finding,
   type Target,
 } from './check.js'
-export { ALL_TARGETS, FLEET, PUBLIC_PEERS } from './targets.js'
+export { ALL_TARGETS, FLEET, PUBLIC_PEERS, CONVERGENCE_GROUPS, groupFromEnv, type ConvergenceGroup } from './targets.js'
 export {
   CONVERGENCE_SAMPLES,
   MIN_OVERLAP,
