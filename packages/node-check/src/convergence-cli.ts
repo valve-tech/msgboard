@@ -58,7 +58,13 @@ const main = async (): Promise<void> => {
     let ourBoardUnreadable = false
 
     for (const peer of group.peers) {
-      const r = await checkConvergence({ fetcher, endpoints: [group.ours, peer] })
+      // requireNonEmpty: two empty boards are identical, so accepting them would pass
+      // hardest when there is nothing to compare.
+      const r = await checkConvergence({
+        fetcher,
+        endpoints: [group.ours, peer],
+        requireNonEmpty: true,
+      })
       const ourSnapshot = r.snapshots[0]!
       if (!ourSnapshot.ok) {
         // A quota refusal is not a partition, and saying so saves the next person
@@ -80,9 +86,12 @@ const main = async (): Promise<void> => {
       }
       anyPeerAnswered = true
       const pct = (r.overlap * 100).toFixed(0)
-      if (r.verdict === 'converged' || r.verdict === 'idle') {
+      if (r.verdict === 'converged') {
         agreedWithSomeone = true
         console.log(`  ok    ${peer}: ${r.shared}/${r.union} shared (${pct}%)`)
+      } else if (r.verdict === 'cannot-check') {
+        // Both boards empty. Not agreement, not a partition — nothing was learned.
+        console.log(`  ????  ${peer}: both boards empty, convergence unproven`)
       } else {
         console.log(`  DIFF  ${peer}: ${r.shared}/${r.union} shared (${pct}%)`)
       }

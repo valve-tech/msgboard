@@ -70,6 +70,18 @@ export interface ConvergenceDeps {
   samples?: number
   intervalMs?: number
   minOverlap?: number
+  /**
+   * Refuse to call two EMPTY boards agreement.
+   *
+   * Empty boards are identical, so a check that accepts them passes hardest exactly
+   * when there is nothing to compare. Two replicas whose boards both expire to zero
+   * would read as converged, and the eighteen-day window when every writer was dead
+   * would have graded green throughout.
+   *
+   * Set this whenever the answer is load-bearing — verifying a fix, gating a deploy.
+   * The verdict becomes `cannot-check`, because that is what it is.
+   */
+  requireNonEmpty?: boolean
   /** Injected so tests do not wait. */
   sleep?: (ms: number) => Promise<void>
 }
@@ -163,7 +175,9 @@ const describe = (
       : verdict === 'idle'
         ? 'IDLE — every replica answered and every board is empty'
         : verdict === 'cannot-check'
-          ? 'CANNOT CHECK — fewer than two replicas answered'
+          ? union === 0 && snapshots.filter((s) => s.ok).length >= 2
+            ? 'CANNOT CHECK — every board is empty, so agreement proves nothing'
+            : 'CANNOT CHECK — fewer than two replicas answered'
           : `DIVERGED — only ${shared}/${union} messages shared (${(overlap * 100).toFixed(0)}%). ` +
             'The replicas are not gossiping; each holds only what was posted directly to it.'
   return [head, ...lines].join('\n')
@@ -224,7 +238,13 @@ export const checkConvergence = async (deps: ConvergenceDeps): Promise<Convergen
     const union = unionAll(sets).size
     const overlap = union === 0 ? 1 : shared / union
     const verdict: ConvergenceVerdict =
-      union === 0 ? 'idle' : overlap >= minOverlap ? 'converged' : 'diverged'
+      union === 0
+        ? deps.requireNonEmpty
+          ? 'cannot-check'
+          : 'idle'
+        : overlap >= minOverlap
+          ? 'converged'
+          : 'diverged'
     const r: ConvergenceReport = {
       verdict,
       snapshots,
@@ -235,7 +255,9 @@ export const checkConvergence = async (deps: ConvergenceDeps): Promise<Convergen
     }
 
     // A single converged sample settles it — replicas that share a board are talking.
-    if (verdict === 'converged' || verdict === 'idle') return r
+    // An empty-board sample never settles anything when the caller asked for proof.
+    if (verdict === 'converged') return r
+    if (verdict === 'idle') return r
     if (!best || best.verdict === 'cannot-check' || overlap > best.overlap) best = r
   }
 

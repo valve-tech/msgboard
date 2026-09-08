@@ -13,6 +13,12 @@ npm run convergence --workspace=@msgboard/node-check
 Runs hourly in CI (`.github/workflows/board-convergence.yml`) — hourly because the board keeps a
 message for only about twenty minutes, so a daily check would miss whole partitions between runs.
 
+**Two empty boards are not agreement.** They are identical, so a check that accepts them passes
+hardest exactly when there is nothing to compare — and two replicas whose boards both expire to
+zero would read as converged. Pass `requireNonEmpty` whenever the answer is load-bearing (verifying
+a fix, gating a deploy) and the verdict becomes `cannot-check`, which is what it is. The CLI always
+sets it.
+
 **It grades on overlap, not equality.** Healthy replicas never match exactly: messages expire, and
 a message posted a second ago has not propagated. It samples three times and one agreeing sample
 settles it, so lag never pages anyone. Only a pair that never overlaps is diverged. Two empty
