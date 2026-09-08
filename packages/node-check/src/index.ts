@@ -26,6 +26,18 @@ export {
 } from './check.js'
 export { ALL_TARGETS, FLEET, PUBLIC_PEERS } from './targets.js'
 export {
+  CONVERGENCE_SAMPLES,
+  MIN_OVERLAP,
+  SAMPLE_INTERVAL_MS,
+  checkConvergence,
+  endpointsDiffer,
+  snapshotBoard,
+  type BoardSnapshot,
+  type ConvergenceDeps,
+  type ConvergenceReport,
+  type ConvergenceVerdict,
+} from './convergence.js'
+export {
   DriftExit,
   checkDrift,
   parseLsTree,
