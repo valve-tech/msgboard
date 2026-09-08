@@ -22,7 +22,7 @@ export { noopStore } from './stores/noop.js'
 export { postgresStore } from './stores/postgres.js'
 export type { Queryable } from './stores/postgres.js'
 
-export { redactSecrets, installConsoleRedactor } from './redact.js'
+export { redactSecrets, installConsoleRedactor, sourceLabel } from './redact.js'
 export { postgresHeartbeat, HEARTBEAT_TABLE } from './heartbeat.js'
 export type { Heartbeat, HeartbeatOptions, HeartbeatWriter } from './heartbeat.js'
 
