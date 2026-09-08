@@ -1,0 +1,244 @@
+---
+# Deploy the core msgboard writers and the archivist: spam-{1,369,943,11155111}, bridge, indexer.
+#
+# WHY THIS PLAY EXISTS. Every other service on this box had a runbook; these did not, so they were
+# never redeployed after the 2026-08-21 proof-of-work cutover. Their images date from 2026-06-08 and
+# the source under /opt/msgboard/packages dates from 2026-07-17 — both pre-cutover. They kept grinding
+# the old algorithm, the node rejected every post with `powmsg: invalid work`, and the containers
+# reported `running`, exit 0, zero restarts the whole time. Chain 1's board went empty on 2026-08-21
+# and stayed empty for 17 days before anyone noticed.
+#
+# A rebuild alone does NOT fix that. The box is a snapshot, not a checkout, so `docker compose build`
+# would rebuild the same stale source. This play syncs the source first.
+#
+# WHAT IT DOES NOT TOUCH. /opt/msgboard/package.json is a deliberately PRUNED workspace list,
+# maintained in place by deploy-msgboard-ui.yml — it drops the workspaces this box cannot build
+# (games/contracts needs forge, packages/pow-grinder needs a wasm toolchain) and carries the
+# @noble/curves override that keeps the lockfile-less `npm i` from floating into a broken 2.x.
+# Overwriting it with the repo's copy breaks the image build. This play leaves it alone.
+#
+#   ansible-playbook deploy-msgboard-core.yml
+#
+# Roll back (each service keeps its previous image tagged :prev):
+#   ssh root@88.99.62.98 -p 2222 'cd /opt/msgboard && for s in spam-1 spam-369 spam-943 bridge indexer; do
+#     docker tag msgboard-$s:prev msgboard-$s:latest; done && docker compose -f docker-compose.prod.yml up -d'
+- name: Deploy the msgboard writers + archivist (post-PoW-cutover source, adds Sepolia)
+  hosts: msgboard
+  gather_facts: false
+  vars:
+    deploy_dir: /opt/msgboard
+    repo_root: "{{ playbook_dir }}/.."
+    # Only the workspaces these six containers actually run. Each is in the box's pruned
+    # workspace list, so the synced source is what `npm i` links and the image builds.
+    #   core + sdk  — the proof-of-work itself. THE stale pieces that caused `invalid work`.
+    #   relayer     — the engine, plus the new heartbeat, redactor and Sepolia chain entry.
+    #   sponsor     — spam.ts / bridge.ts.
+    #   indexer     — the archivist entrypoint.
+    #   history     — the archive schema the indexer writes through.
+    sync_packages: [core, sdk, relayer, sponsor, indexer, history]
+    # The services this play owns. `sponsor` and `ui` build from the same source but are
+    # deployed by their own plays; rebuilding them here would widen the blast radius.
+    core_services: [spam-1, spam-369, spam-943, spam-11155111, bridge, indexer]
+    # Every chain that must be carrying messages when this play finishes.
+    writer_chains: ['1', '369', '943', '11155111']
+    src_tarball: /tmp/msgboard-core-src.tgz
+
+  tasks:
+    - name: Refuse to run against a box whose package.json we would break
+      ansible.builtin.command: grep -q '"packages/sponsor"' {{ deploy_dir }}/package.json
+      changed_when: false
+
+    # ---------------------------------------------------------------- sync the source
+
+    - name: Pack the writer source (excluding build output and installed modules)
+      ansible.builtin.command:
+        cmd: >-
+          tar --exclude=node_modules --exclude=dist --exclude=.turbo --exclude='*.tsbuildinfo'
+          -czf {{ src_tarball }} Dockerfile docker-compose.prod.yml
+          {{ sync_packages | map('regex_replace', '^', 'packages/') | join(' ') }}
+        chdir: "{{ repo_root }}"
+      delegate_to: localhost
+      changed_when: true
+
+    - name: Ship and unpack it over the box snapshot
+      ansible.builtin.unarchive:
+        src: "{{ src_tarball }}"
+        dest: "{{ deploy_dir }}"
+        mode: "0644"
+      register: src_sync
+
+    - name: Confirm the synced source is post-cutover
+      ansible.builtin.command: >-
+        grep -q 'sepolia' {{ deploy_dir }}/packages/relayer/src/chains.ts
+      changed_when: false
+
+    # ---------------------------------------------------------------- Sepolia's endpoint
+
+    - name: Is RPC_11155111 already set?
+      ansible.builtin.command: grep -q '^RPC_11155111=' {{ deploy_dir }}/.env
+      register: sepolia_set
+      changed_when: false
+      failed_when: false
+
+    # Derive it from the RPC_1 line already in .env — same gateway, same key, different chain id —
+    # then PROVE the derived URL reaches Sepolia before writing anything. Deriving blind would append
+    # a broken line to .env on any endpoint whose path is not the one this sed assumes.
+    # no_log throughout: these lines carry the real key.
+    - name: Probe the derived Sepolia endpoint before writing it
+      ansible.builtin.shell: |
+        set -euo pipefail
+        url=$(grep -m1 '^RPC_1=' {{ deploy_dir }}/.env | sed 's|^RPC_1=||; s|/evm/1$|/evm/11155111|')
+        curl -s --max-time 20 -X POST "$url" -H 'content-type: application/json' \
+          -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' \
+          | grep -o '0xaa36a7' || echo MISMATCH
+      args:
+        executable: /bin/bash
+      register: derived_probe
+      changed_when: false
+      no_log: true
+      when: sepolia_set.rc != 0
+
+    - name: The derived endpoint must actually be Sepolia
+      ansible.builtin.assert:
+        that: "'0xaa36a7' in derived_probe.stdout"
+        fail_msg: >-
+          Deriving RPC_11155111 from RPC_1 did not reach Sepolia (eth_chainId != 0xaa36a7).
+          Set RPC_11155111 in {{ deploy_dir }}/.env by hand and rerun. Nothing was written.
+        success_msg: "The derived endpoint answers eth_chainId 0xaa36a7 (Sepolia)."
+      when: sepolia_set.rc != 0
+
+    - name: Write RPC_11155111 into the box .env
+      ansible.builtin.shell: |
+        set -euo pipefail
+        grep -m1 '^RPC_1=' {{ deploy_dir }}/.env \
+          | sed 's|^RPC_1=|RPC_11155111=|; s|/evm/1$|/evm/11155111|' >> {{ deploy_dir }}/.env
+      args:
+        executable: /bin/bash
+      no_log: true
+      when: sepolia_set.rc != 0
+
+    # INDEXER_CHAINS is unset in .env, so the compose default applies. That default now reads
+    # 1,369,943,11155111 — no .env edit needed, and the chain list stays in version control.
+    - name: Confirm the indexer will be told to watch Sepolia
+      ansible.builtin.command: grep -q 'INDEXER_CHAINS:-1,369,943,11155111' {{ deploy_dir }}/docker-compose.prod.yml
+      changed_when: false
+
+    # ---------------------------------------------------------------- rebuild
+
+    # Keep the running image under :prev so a rollback is a retag, not a rebuild from
+    # whatever source happens to be on the box afterwards.
+    - name: Tag each running image :prev for rollback
+      ansible.builtin.shell: >-
+        docker image inspect msgboard-{{ item }}:latest >/dev/null 2>&1
+        && docker tag msgboard-{{ item }}:latest msgboard-{{ item }}:prev
+        || echo "no current image for {{ item }} — nothing to roll back to"
+      args:
+        executable: /bin/bash
+      loop: "{{ core_services }}"
+      changed_when: true
+
+    - name: Build and restart the writers and the archivist
+      ansible.builtin.command:
+        cmd: docker compose -f docker-compose.prod.yml up -d --build {{ core_services | join(' ') }}
+        chdir: "{{ deploy_dir }}"
+      register: up
+      changed_when: true
+      # A build pulls a base image and runs a full `npm i` for six services.
+      async: 2400
+      poll: 15
+
+    - name: Every service is running
+      ansible.builtin.shell: >-
+        docker inspect -f '{{ '{{' }}.State.Status{{ '}}' }}' {{ core_services | join(' ') }}
+      args:
+        executable: /bin/bash
+      register: states
+      changed_when: false
+      failed_when: states.stdout_lines | reject('equalto', 'running') | list | length > 0
+
+    # ---------------------------------------------------------------- prove it actually works
+
+    - name: Give the grinders time to land a first post
+      ansible.builtin.pause:
+        seconds: 180
+
+    # The failure this play exists to fix. A writer that reports `running` while every post is
+    # rejected looks identical to a healthy one, so assert on the rejection itself.
+    - name: No writer is being rejected for stale proof of work
+      ansible.builtin.shell: >-
+        docker logs --since 10m {{ item }} 2>&1 | grep -c 'invalid work' || true
+      args:
+        executable: /bin/bash
+      loop: "{{ core_services }}"
+      register: pow_rejects
+      changed_when: false
+      failed_when: pow_rejects.stdout | trim | int > 0
+
+    # Read the boards through the PUBLIC demo endpoint, from the control machine. No key is
+    # involved, so the check can print its result in full.
+    - name: Each board reports a non-empty message count
+      ansible.builtin.uri:
+        url: "https://one.valve.city/rpc/vk_demo/evm/{{ item }}"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: msgboard_status
+          params: []
+        return_content: true
+      delegate_to: localhost
+      loop: "{{ writer_chains }}"
+      register: boards
+      retries: 10
+      delay: 30
+      until: boards.json.result.count is defined and (boards.json.result.count | int(base=16)) > 0
+
+    - name: Board counts
+      ansible.builtin.debug:
+        msg: >-
+          chain {{ item.item }}: {{ item.json.result.count | int(base=16) }} message(s),
+          head block {{ item.json.result.headBlock | int(base=16) }}
+      loop: "{{ boards.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    # The archivist's own liveness row, added in the same change as this play. A fresh
+    # last_tick_at per chain is what makes the next stall visible within minutes.
+    - name: The indexer is writing a heartbeat for every chain
+      ansible.builtin.shell: >-
+        docker exec msgboard-postgres psql -U msgboard-postgres -d msgboard-postgres -tAc
+        "SELECT chain_id, polled, extract(epoch from now() - last_tick_at)::int
+         FROM indexer_heartbeat ORDER BY chain_id"
+      args:
+        executable: /bin/bash
+      register: heartbeat
+      changed_when: false
+      retries: 10
+      delay: 20
+      until: heartbeat.stdout_lines | length >= (writer_chains | length)
+
+    - name: Heartbeat rows (chain_id | polled | seconds since last tick)
+      ansible.builtin.debug:
+        msg: "{{ heartbeat.stdout_lines }}"
+
+    - name: Every heartbeat is fresh
+      ansible.builtin.assert:
+        that: (item.split('|')[2] | int) < 300
+        fail_msg: "chain {{ item.split('|')[0] }} has not ticked for {{ item.split('|')[2] }}s"
+      loop: "{{ heartbeat.stdout_lines }}"
+
+    - name: The noop log burst is gone
+      ansible.builtin.shell: >-
+        echo "observe-noop lines in the last 5m: $(docker logs --since 5m indexer 2>&1 | grep -c 'observe: noop' || true)"
+      args:
+        executable: /bin/bash
+      register: noop_count
+      changed_when: false
+      failed_when: (noop_count.stdout | regex_search('[0-9]+$') | int) > 0
+
+    - name: Result
+      ansible.builtin.debug:
+        msg: >-
+          {{ core_services | join(', ') }} rebuilt from post-cutover source and running.
+          {{ noop_count.stdout }}. Roll back with the retag command in this play's header.
