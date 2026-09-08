@@ -46,7 +46,6 @@ import {
   noopAction,
   defaultLogger,
   installConsoleRedactor,
-  redactSecrets,
   sourceLabel,
 } from '@msgboard/relayer'
 import pg from 'pg'
