@@ -105,7 +105,18 @@ export class Relayer<T> {
     }
     this.tickCount += 1
     await this.maybePrune()
+    await this.reportTick(report, ctx)
     return report
+  }
+
+  /** Hands the finished tick to `config.onTick`, never letting it break the loop. */
+  private async reportTick(report: TickReport, ctx: RelayerContext): Promise<void> {
+    if (!this.config.onTick) return
+    try {
+      await this.config.onTick(report, ctx)
+    } catch (error) {
+      this.logger('onTick failed: %o', error instanceof Error ? error.message : error)
+    }
   }
 
   /** Begins the poll loop. Idempotent — a second call is a no-op while running. */

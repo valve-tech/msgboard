@@ -10,6 +10,10 @@
  * This is intentionally its own process, not bolted onto the sponsor scripts: its
  * only job is to index, so it can be scaled, restarted, and reasoned about alone.
  *
+ * Each relayer also writes a heartbeat row per tick (`indexer_heartbeat`). Query
+ * that table to tell a dead indexer from an empty board — see @msgboard/relayer's
+ * heartbeat module for what each column means.
+ *
  * Environment:
  *   DATABASE_URL         Postgres connection string (required)
  *   INDEXER_CHAINS       comma-separated chain ids to index (default "1,369,943")
@@ -17,10 +21,24 @@
  *   INDEXER_INTERVAL_MS  poll cadence per chain (default 20000)
  *   RETENTION_DAYS       prune archive rows older than this (default 365)
  */
+import {
+  Relayer,
+  msgboardContentSource,
+  postgresArchiveSink,
+  postgresHeartbeat,
+  noopAction,
+  defaultLogger,
+  installConsoleRedactor,
+  redactSecrets,
+} from '@msgboard/relayer'
 import pg from 'pg'
 import { http } from 'viem'
-import { Relayer, msgboardContentSource, postgresArchiveSink, noopAction, defaultLogger } from '@msgboard/relayer'
 import type { RPCMessage } from '@msgboard/sdk'
+
+// The first statement this module runs. RPC_<chainId> carries the access key in
+// its path, and viem repeats the whole URL in every error it throws, so any later
+// log line could print a live key to container stdout. This one did, for 17 days.
+installConsoleRedactor()
 
 const databaseUrl = process.env.DATABASE_URL
 const chains = (process.env.INDEXER_CHAINS ?? '1,369,943')
@@ -43,6 +61,9 @@ const pool = new pg.Pool({ connectionString: databaseUrl, ssl: false })
 const archive = postgresArchiveSink({ pool, retention: { days: retentionDays } })
 await archive.migrate()
 
+const heartbeat = postgresHeartbeat({ pool })
+await heartbeat.migrate()
+
 const relayers: Relayer<RPCMessage>[] = []
 for (const chainId of chains) {
   const rpcUrl = process.env[`RPC_${chainId}`]
@@ -50,6 +71,7 @@ for (const chainId of chains) {
     console.error(`msgboard-indexer: no RPC_${chainId} set — skipping chain ${chainId}`)
     continue
   }
+  const logger = defaultLogger(`indexer:${chainId}`)
   const relayer = new Relayer<RPCMessage>({
     node: { transport: http(rpcUrl) },
     mode: 'observe', // the sink always runs; there is no on-chain action
@@ -57,12 +79,37 @@ for (const chainId of chains) {
     source: msgboardContentSource(), // every category
     key: (message) => message.hash.toLowerCase(),
     action: noopAction<RPCMessage>(),
+    // The archive sink runs before this check, so nothing stops being indexed.
+    // What stops is `observe: noop`, which the noop action printed once per
+    // message per poll — 205,000 lines a day on 943 to write 3,400 rows. That
+    // volume hid a dead chain for 17 days. The heartbeat below replaces it.
+    condition: () => false,
     sink: archive,
-    logger: defaultLogger(`indexer:${chainId}`),
+    logger,
+    onTick: async (report, context) => {
+      let headBlock: bigint | null = null
+      try {
+        headBlock = await context.publicClient.getBlockNumber()
+      } catch {
+        headBlock = null // the node did not answer; the tick itself still counts
+      }
+      logger(
+        'tick polled=%d recorded=%d head=%s',
+        report.polled,
+        report.recorded,
+        headBlock ?? 'unknown',
+      )
+      await heartbeat.beat({
+        chainId: context.chain.id,
+        polled: report.polled,
+        recorded: report.recorded,
+        headBlock,
+      })
+    },
   })
   relayer.start()
   relayers.push(relayer)
-  console.log(`msgboard-indexer: indexing chain ${chainId} via ${rpcUrl}`)
+  console.log(`msgboard-indexer: indexing chain ${chainId} via ${redactSecrets(rpcUrl)}`)
 }
 
 if (relayers.length === 0) {

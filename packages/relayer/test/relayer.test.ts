@@ -144,3 +144,93 @@ describe('Relayer lifecycle', () => {
     expect(polls).toBeLessThan(12)
   })
 })
+
+describe('Relayer onTick', () => {
+  it('reports every tick, including one that polled nothing', async () => {
+    // An empty tick is the case that matters. Per-item logging says nothing when
+    // a source returns nothing, so a dead loop and an empty board look the same.
+    const onTick = vi.fn()
+    const relayer = new Relayer(baseConfig({ source: { poll: async () => [] }, onTick }))
+    await relayer.runOnce()
+    expect(onTick).toHaveBeenCalledTimes(1)
+    expect(onTick.mock.calls[0]![0]).toMatchObject({ polled: 0, recorded: 0 })
+  })
+
+  it('hands over the same report runOnce returns', async () => {
+    const onTick = vi.fn()
+    const relayer = new Relayer(baseConfig({ sink: { record: async () => {} }, onTick }))
+    const report = await relayer.runOnce()
+    expect(onTick.mock.calls[0]![0]).toEqual(report)
+  })
+
+  it('passes the tick context, so a hook can read the chain id', async () => {
+    const onTick = vi.fn()
+    const relayer = new Relayer(baseConfig({ onTick }))
+    await relayer.runOnce()
+    expect(onTick.mock.calls[0]![1].chain.id).toBe(pulsechainV4.id)
+  })
+
+  it('runs after the sink, so its counts describe work already done', async () => {
+    const order: string[] = []
+    const relayer = new Relayer(
+      baseConfig({
+        sink: { record: async () => { order.push('record') } },
+        onTick: () => { order.push('tick') },
+      }),
+    )
+    await relayer.runOnce()
+    expect(order).toEqual(['record', 'tick'])
+  })
+
+  it('swallows an error from the hook rather than failing the tick', async () => {
+    // Observability must never take down the loop it observes. A wedged Postgres
+    // would otherwise stop the archiving that still works.
+    const relayer = new Relayer(
+      baseConfig({ onTick: () => { throw new Error('heartbeat table is gone') } }),
+    )
+    await expect(relayer.runOnce()).resolves.toMatchObject({ polled: 1 })
+  })
+
+  it('awaits an async hook before the tick returns', async () => {
+    let settled = false
+    const relayer = new Relayer(
+      baseConfig({
+        onTick: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 5))
+          settled = true
+        },
+      }),
+    )
+    await relayer.runOnce()
+    expect(settled).toBe(true)
+  })
+
+  it('does not report a tick whose source threw, so a stale heartbeat means broken', async () => {
+    const onTick = vi.fn()
+    const relayer = new Relayer(
+      baseConfig({ source: { poll: async () => { throw new Error('node unreachable') } }, onTick }),
+    )
+    await expect(relayer.runOnce()).rejects.toThrow('node unreachable')
+    expect(onTick).not.toHaveBeenCalled()
+  })
+
+  it('still records to the sink when the condition rejects every item', async () => {
+    // The indexer sets `condition: () => false` to silence the observe-mode log
+    // line. Archiving must be untouched by that, because recordItem runs first.
+    const record = vi.fn(async () => {})
+    const describe_ = vi.fn(() => 'x')
+    const relayer = new Relayer(
+      baseConfig({
+        mode: 'observe',
+        condition: () => false,
+        sink: { record },
+        action: { describe: describe_, execute: async () => ({ ok: true }) },
+      }),
+    )
+    const report = await relayer.runOnce()
+    expect(record).toHaveBeenCalledTimes(1)
+    expect(report.recorded).toBe(1)
+    expect(describe_).not.toHaveBeenCalled()
+    expect(report.described).toBe(0)
+  })
+})
