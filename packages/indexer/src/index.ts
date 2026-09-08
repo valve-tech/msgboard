@@ -95,6 +95,8 @@ export const endpointsFor = (raw: string | undefined): string[] => [
 ]
 
 const relayers: Relayer<RPCMessage>[] = []
+/** Every (chain, source) this process owns, for the startup reconcile below. */
+const sources: { chainId: number; source: string }[] = []
 for (const chainId of chains) {
   const endpoints = endpointsFor(process.env[`RPC_${chainId}`])
   if (endpoints.length === 0) {
@@ -150,9 +152,15 @@ for (const chainId of chains) {
     })
     relayer.start()
     relayers.push(relayer)
+    sources.push({ chainId: Number(chainId), source })
     console.log(`msgboard-indexer: indexing chain ${chainId} via ${source}`)
   }
 }
+
+// Labels change — an endpoint is repointed, or the way they are derived improves — and a
+// row under the old label would never tick again and would alarm forever. Drop anything for
+// our chains that is not one of ours, now that every relayer is registered.
+await heartbeat.reconcile(sources)
 
 if (relayers.length === 0) {
   console.error('msgboard-indexer: no chains configured — set RPC_<chainId> for at least one chain')

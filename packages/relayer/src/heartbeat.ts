@@ -54,6 +54,20 @@ export type Heartbeat = {
 export type HeartbeatWriter = {
   migrate(): Promise<void>
   beat(heartbeat: Heartbeat): Promise<void>
+  /**
+   * Forget rows for these chains whose source is not in this list.
+   *
+   * Rows are keyed by a source LABEL, and a label can change — an endpoint is
+   * repointed, or the way labels are derived is improved. The old row then never ticks
+   * again and trips every staleness alarm from then on, which is how a monitoring table
+   * turns into noise that people learn to ignore. Call this once at startup with the
+   * complete set the process is about to write.
+   *
+   * It only ever touches chains named in the list, so a chain served by another process
+   * is never disturbed, and a chain that has genuinely stopped keeps its stale row and
+   * keeps alarming — which is the entire point of the table.
+   */
+  reconcile(sources: readonly { chainId: number; source: string }[]): Promise<void>
 }
 
 /**
@@ -101,6 +115,19 @@ export const postgresHeartbeat = (options: HeartbeatOptions): HeartbeatWriter =>
       // row within one tick — so dropping the placeholder is safe and stops a
       // permanent false alarm.
       await pool.query(`DELETE FROM ${table} WHERE source = 'default'`)
+    },
+    reconcile: async (sources) => {
+      if (sources.length === 0) return
+      // One statement, so a row can never be deleted by a half-applied cleanup.
+      await pool.query(
+        `DELETE FROM ${table} h
+         WHERE h.chain_id = ANY($1::bigint[])
+           AND NOT EXISTS (
+             SELECT 1 FROM unnest($1::bigint[], $2::text[]) AS keep(chain_id, source)
+             WHERE keep.chain_id = h.chain_id AND keep.source = h.source
+           )`,
+        [sources.map((s) => s.chainId), sources.map((s) => s.source)],
+      )
     },
     beat: async ({ chainId, source, polled, recorded, headBlock }) => {
       // pg sends a BIGINT parameter as text, so a bigint head block goes over as a
