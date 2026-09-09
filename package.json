@@ -60,6 +60,8 @@
   },
   "overrides": {
     "viem": "2.52.2",
-    "@noble/curves": "^1.9.7"
+    "@noble/curves": "^1.9.7",
+    "@types/node": "22.15.2",
+    "typescript": "5.8.3"
   }
 }
