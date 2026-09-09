@@ -5,7 +5,12 @@ import {
   bridgeAffirmationSource,
   memoryTtlStore,
   submitMessageAction,
+  installConsoleRedactor,
 } from '@msgboard/relayer'
+
+// RPC_<chainId> carries the access key in its URL path, and viem repeats the whole
+// request URL in every error it throws. See the redactor's own module for why.
+installConsoleRedactor()
 
 const rpcByChain: Record<number, string> = {
   [pulsechainV4.id]:

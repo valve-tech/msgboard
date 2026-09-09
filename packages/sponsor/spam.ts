@@ -1,15 +1,28 @@
 import { Worker, isMainThread } from 'node:worker_threads'
 import { http, stringToHex } from 'viem'
-import { mainnet, pulsechain, pulsechainV4 } from 'viem/chains'
-import { Relayer, generatedSource, noopStore, submitMessageAction } from '@msgboard/relayer'
+import { mainnet, pulsechain, pulsechainV4, sepolia } from 'viem/chains'
+import {
+  Relayer,
+  generatedSource,
+  noopStore,
+  submitMessageAction,
+  installConsoleRedactor,
+} from '@msgboard/relayer'
 import { resolveWorkerCount } from './spam-workers.js'
+
+// RPC_<chainId> carries the access key in its URL path, and viem repeats the whole
+// request URL in every error it throws. This writer logs those errors, so without
+// this the key reaches container stdout.
+installConsoleRedactor()
 
 type Post = { category: string; text: string }
 
 const chainId = Number(process.env.SPAM_CHAIN_ID ?? 943)
-const supported = new Set<number>([mainnet.id, pulsechain.id, pulsechainV4.id])
+const supported = new Set<number>([mainnet.id, pulsechain.id, pulsechainV4.id, sepolia.id])
 if (!supported.has(chainId)) {
-  throw new Error(`spam: unsupported SPAM_CHAIN_ID ${chainId} (expected 1, 369, or 943)`)
+  throw new Error(
+    `spam: unsupported SPAM_CHAIN_ID ${chainId} (expected one of ${[...supported].join(', ')})`,
+  )
 }
 
 const rpcUrl =
