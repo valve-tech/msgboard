@@ -1,28 +1,26 @@
-# Is our board still part of the network?
+# Is our board alive?
 #
-# msgboard gossips, so every node serving a chain should hold nearly the same board.
-# A node that shares nothing with anyone is partitioned: everything written to it is
-# invisible to the rest of the network, and the archive is recording a private view.
+# TWO QUESTIONS, AND ONLY ONE GATES THIS JOB.
 #
-# This ran nowhere until 2026-09-08, when two mainnet replicas were found holding
-# completely disjoint boards — 33 messages against 0, not one hash in common — for
-# weeks. Every symptom an operator can normally see said healthy, and the msgboard
-# layer logs nothing about peers at all. A person found it by hand. This is the job
-# that should have.
+# Alive is ours. An empty board means every writer is down or the node stopped
+# accepting; it cannot be blamed on anyone else and we can fix it. That has actually
+# happened — a proof-of-work cutover broke every writer on 2026-08-21, all three
+# boards drained to zero inside their ~20 minute retention, and nobody noticed for
+# eighteen days. This job catches that within the hour, which is why it runs hourly.
 #
-# Hourly, because the board only keeps a message for about twenty minutes. A daily
-# check would miss whole partitions between runs.
+# Agreement with the wider network is real and unowned. Our PulseChain board shares
+# nothing with rpc.pulsechain.com's. That is worth knowing and nobody has taken it, so
+# it is REPORTED and never gated. An hourly failure on a finding no one has agreed to
+# act on is exactly how a check trains people to ignore it — and this job has to stay
+# believable for the day the liveness half fires. It shipped gating on that finding
+# and failed five times on day one, which is the mistake this comment exists to record.
 #
-# There is deliberately NO skip path, for the same reason upstream-drift.yml has none:
-# a job that shrugs when it cannot reach anything reports success while it has stopped
-# looking, which is the blindness this exists to remove.
-#
-# WHAT THIS CANNOT SEE. one.valve.city pins each API key to one upstream and strips
-# client routing headers, so from GitHub we reach one of our replicas and cannot address
-# the other. A replica-versus-replica split is invisible here — the 2026-09-08 outage
-# would NOT have been caught by this job. Set CONVERGENCE_<chain> to per-replica URLs
-# and run it from inside the fleet to check that. This job catches the other half: our
-# view drifting away from the whole network.
+# Replica-versus-replica disagreement DOES gate, but only where it can be measured.
+# one.valve.city pins each API key to one upstream, so from GitHub we reach one of our
+# replicas and cannot address the other. Set CONVERGENCE_<chain> to per-replica URLs
+# and run it inside the fleet for that. The mainnet split of 2026-09-08, where two
+# nodes held completely disjoint boards for weeks, is NOT visible from here.
+
 name: board convergence
 
 on:

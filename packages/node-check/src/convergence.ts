@@ -273,3 +273,41 @@ export const checkConvergence = async (deps: ConvergenceDeps): Promise<Convergen
  */
 export const endpointsDiffer = (endpoints: readonly string[]): boolean =>
   new Set(endpoints.map((e) => e.trim().toLowerCase())).size === endpoints.length
+
+export type LivenessVerdict = 'alive' | 'empty' | 'unreadable'
+
+export interface LivenessResult {
+  verdict: LivenessVerdict
+  count: number
+  reason?: string
+}
+
+/**
+ * Is OUR OWN board alive?
+ *
+ * This is the half of the check that is ours to act on, and the half that would have
+ * caught the outage that started all of this. On 2026-08-21 a proof-of-work cutover
+ * broke every writer on the fleet. Each board drained to zero within its ~20 minute
+ * retention and stayed there for eighteen days, and nothing noticed, because nothing
+ * asked the only question that had an owner: is anything on our board?
+ *
+ * An empty board is unambiguous and cheap to check. It cannot be explained away as
+ * propagation lag or a peer's outage, and it is always our problem — either the
+ * writers are dead or the node stopped accepting. So this gates the job, while the
+ * comparison against other people's nodes does not: that one is real, but nobody has
+ * agreed to own it, and an hourly failure on an unowned finding is how a check
+ * teaches people to ignore it.
+ */
+export const gradeBoardLiveness = (snapshot: BoardSnapshot): LivenessResult => {
+  if (!snapshot.ok) return { verdict: 'unreadable', count: 0, reason: snapshot.reason }
+  if (snapshot.hashes.size === 0) {
+    return {
+      verdict: 'empty',
+      count: 0,
+      reason:
+        'the board is empty — every writer is down, or the node stopped accepting. ' +
+        'A board with live writers refills within its retention window.',
+    }
+  }
+  return { verdict: 'alive', count: snapshot.hashes.size }
+}

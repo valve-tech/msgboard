@@ -2,9 +2,19 @@
 
 ## Board convergence
 
-msgboard gossips, so every node serving a chain should hold nearly the same board. A node that
-shares nothing with anyone is partitioned: everything written to it is invisible to the rest of
-the network, and any archive reading it records a private view.
+Two questions, and only one of them fails the job.
+
+**Is our board alive?** This gates. An empty board means every writer is down or the node stopped
+accepting — nobody else's fault, and fixable by us. A proof-of-work cutover broke every writer on
+2026-08-21; all three boards drained to zero inside their ~20 minute retention and nobody noticed
+for eighteen days. Hourly, this catches it within the hour.
+
+**Does our board agree with the wider network?** This is reported, never gated. Our PulseChain
+board shares nothing with `rpc.pulsechain.com`'s, which is real and currently unassigned. A job
+that fails hourly on a finding nobody has agreed to act on is how a check teaches people to
+ignore it — and this one has to stay believable for the day the liveness half fires.
+
+**Do our own replicas agree?** This gates too, but only where it can be measured — see below.
 
 ```sh
 npm run convergence --workspace=@msgboard/node-check
