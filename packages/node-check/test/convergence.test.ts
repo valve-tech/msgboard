@@ -4,6 +4,7 @@ import {
   MIN_OVERLAP,
   checkConvergence,
   endpointsDiffer,
+  gradeBoardLiveness,
   snapshotBoard,
   type BoardSnapshot,
 } from '../src/convergence.js'
@@ -304,5 +305,35 @@ describe('checkConvergence — requireNonEmpty', () => {
       sleep: now,
     })
     expect(r.verdict).toBe('diverged')
+  })
+})
+
+describe('gradeBoardLiveness', () => {
+  const snap = (over: Partial<BoardSnapshot>): BoardSnapshot =>
+    ({ endpoint: 'http://a', ok: true, hashes: new Set<string>(), ...over }) as BoardSnapshot
+
+  it('passes a board with messages on it', () => {
+    expect(gradeBoardLiveness(snap({ hashes: new Set(['0x1']) })).verdict).toBe('alive')
+  })
+
+  it('fails an EMPTY board — the eighteen-day outage', () => {
+    // A proof-of-work cutover broke every writer on 2026-08-21. Each board drained to
+    // zero inside its ~20 minute retention and stayed there for eighteen days, and
+    // nothing asked the only question with an owner: is anything on our board?
+    const r = gradeBoardLiveness(snap({}))
+    expect(r.verdict).toBe('empty')
+    expect(r.reason).toMatch(/writer/i)
+  })
+
+  it('separates unreadable from empty', () => {
+    // A node that refuses the method and a node with nothing on it are different
+    // faults with different owners. Collapsing them is how the original outage hid.
+    const r = gradeBoardLiveness(snap({ ok: false, reason: 'Method not found' }))
+    expect(r.verdict).toBe('unreadable')
+    expect(r.reason).toContain('Method not found')
+  })
+
+  it('reports the count so the operator sees a number, not a boolean', () => {
+    expect(gradeBoardLiveness(snap({ hashes: new Set(['0x1', '0x2', '0x3']) })).count).toBe(3)
   })
 })
