@@ -81,12 +81,18 @@ describe('cascade — tumbling-grid slot', () => {
   // RTP is verified by simulation (a tumbling slot's edge is not closed-form). The seed set is
   // deterministic (keccak of the index), so this RTP is reproducible — not a flaky statistical check —
   // and the band documents the invariant: a real house edge, never player-favorable (RTP < 100%).
-  it('simulated RTP sits in a safe band strictly below 100%', () => {
-    const N = 20_000
-    let total = 0n
-    for (let i = 0; i < N; i++) total += resolveCascade(rawAt(i)).totalX100
-    const rtp = Number(total) / 100 / N
-    expect(rtp).toBeGreaterThan(0.85)
-    expect(rtp).toBeLessThan(0.99)
-  })
+  // 20k resolveCascade passes is heavy for vitest's default 5s budget on busy Actions runners
+  // (master games-node timed out here); keep the sample, raise the wall-clock budget.
+  it(
+    'simulated RTP sits in a safe band strictly below 100%',
+    () => {
+      const N = 20_000
+      let total = 0n
+      for (let i = 0; i < N; i++) total += resolveCascade(rawAt(i)).totalX100
+      const rtp = Number(total) / 100 / N
+      expect(rtp).toBeGreaterThan(0.85)
+      expect(rtp).toBeLessThan(0.99)
+    },
+    30_000,
+  )
 })
