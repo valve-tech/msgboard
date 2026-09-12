@@ -6,7 +6,7 @@ import { loadDefaultStamper } from './grinder.js'
 /**
  * The fast engine must be bit-identical to the node's verifier: a stamp found by the Rust grinder has
  * to pass core's `checkWork` — the exact check the RPC applies on submit. `loadDefaultStamper` resolves
- * the `stamp_v2` engine through `wrapEngineStamp` (the real SDK fast path, version pinned to 1), so this
+ * the `stamp` engine through `wrapEngineStamp` (the real SDK fast path, version pinned to 1), so this
  * is the parity gate that lets `doPoW` trust the engine's output without re-verifying.
  */
 

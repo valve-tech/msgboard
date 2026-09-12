@@ -72,6 +72,11 @@ jobs:
         with:
           node-version-file: '.nvmrc'
       - run: npm ci
+      # @msgboard/games imports @msgboard/sdk (the board client), which depends on @msgboard/core;
+      # both need their dist/ built before the engine suite can resolve them — otherwise vitest fails
+      # with "Failed to resolve entry for package @msgboard/sdk". Mirrors the `node` job above.
+      - run: npm run build --workspace @msgboard/core
+      - run: npm run build --workspace @msgboard/sdk
       - run: npm run test --workspace @msgboard/games
       - run: npm run typecheck --workspace @msgboard/games
 
@@ -92,7 +97,12 @@ jobs:
         with:
           node-version-file: '.nvmrc'
       - run: npm ci
+      # Pin forge: the gas-ceiling tests in ZkTableShowdownUnit are toolchain-coupled (forge 1.8's
+      # via_ir codegen measures ~3x the gas of 1.6 for identical source), so an unpinned `stable`
+      # silently shifts the baseline and breaks them. Pinned here so the ceilings stay meaningful.
       - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: '1.8.0'
       - name: install forge-std at repo root (games/contracts remaps to ../../lib)
         run: forge install foundry-rs/forge-std --no-git
       - name: forge build + test (games/contracts)

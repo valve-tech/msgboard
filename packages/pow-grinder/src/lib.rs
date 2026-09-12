@@ -15,8 +15,8 @@
 //! Pure compute: the caller (TS) fetches `{wm, wd, block_hash, block_number}` from the node and
 //! assembles + submits the RLP message; this crate only finds the nonce.
 //!
-//! (The pre-revision algorithm was removed once the node cut over and began rejecting it. The public
-//! engine keeps the `_v2` suffix — `grind_v2` / `stamp_v2` — for API stability with existing consumers.)
+//! (There is one algorithm and one message version. A pre-revision scheme once existed but the node
+//! rejects it, so it is gone; the engine verbs are simply `grind` / `stamp`, with no version suffix.)
 
 use k256::elliptic_curve::sec1::ToEncodedPoint;
 use k256::elliptic_curve::PrimeField;
@@ -56,7 +56,7 @@ pub struct Found {
 }
 
 /// Payload commit: `SHA256(category(32) ‖ data)`.
-fn payload_hash_v2(category: &[u8; 32], data: &[u8]) -> [u8; 32] {
+fn payload_hash(category: &[u8; 32], data: &[u8]) -> [u8; 32] {
     let mut h = Sha256::new();
     h.update(category);
     h.update(data);
@@ -65,7 +65,7 @@ fn payload_hash_v2(category: &[u8; 32], data: &[u8]) -> [u8; 32] {
 
 /// Transcript: `SHA256(version(1) ‖ block_hash(32) ‖ payload_hash(32) ‖ wm(8) ‖ wd(8) ‖ nonce(8))`,
 /// all fields big-endian.
-fn scalar_hash_v2(
+fn scalar_hash(
     version: u8,
     block_hash: &[u8; 32],
     payload_hash: &[u8; 32],
@@ -85,7 +85,7 @@ fn scalar_hash_v2(
 
 /// Acceptance target: `floor(2^256 / D)`. Returned as `U512` because `D == 1` gives `2^256`, which
 /// overflows `U256`; the exact floor also rules out the `workHash * D < 2^256` shortcut. Zero for `D == 0`.
-fn pow_target_v2(d: u64) -> U512 {
+fn pow_target(d: u64) -> U512 {
     if d == 0 {
         return U512::zero();
     }
@@ -94,7 +94,7 @@ fn pow_target_v2(d: u64) -> U512 {
 
 /// Work hash: `SHA256(compressed_point)`, where `compressed_point` is the 33-byte SEC1 encoding
 /// `0x02/0x03 ‖ x`.
-fn work_hash_v2(point: &ProjectivePoint) -> [u8; 32] {
+fn work_hash(point: &ProjectivePoint) -> [u8; 32] {
     let enc = point.to_affine().to_encoded_point(true);
     let mut h = Sha256::new();
     h.update(enc.as_bytes());
@@ -105,7 +105,7 @@ fn work_hash_v2(point: &ProjectivePoint) -> [u8; 32] {
 /// difficulty or `max_iters` is reached. `start_nonce` is exclusive — the first nonce tried is
 /// `start_nonce + 1`. Pure compute — no RPC, no block polling (the caller passes a fresh block and
 /// re-grinds if needed; on a fast machine the grind finishes well inside one block).
-pub fn grind_v2(
+pub fn grind(
     category: &[u8; 32],
     data: &[u8],
     wm: u64,
@@ -119,16 +119,16 @@ pub fn grind_v2(
     if diff == 0 {
         return None;
     }
-    let target = pow_target_v2(diff);
+    let target = pow_target(diff);
     let n = U256::from_big_endian(&SECP_N);
-    let payload_hash = payload_hash_v2(category, data); // constant across nonces
+    let payload_hash = payload_hash(category, data); // constant across nonces
 
     let mut nonce = start_nonce;
     let mut iters = 0u64;
     while iters < max_iters {
         nonce = nonce.wrapping_add(1);
         iters += 1;
-        let sh = scalar_hash_v2(version, block_hash, &payload_hash, wm, wd, nonce);
+        let sh = scalar_hash(version, block_hash, &payload_hash, wm, wd, nonce);
         let scalar_u = U256::from_big_endian(&sh);
         // Reject rather than reduce: require 1 <= scalar < n (mirrors Go's ScalarBaseMult).
         if scalar_u.is_zero() || scalar_u >= n {
@@ -138,7 +138,7 @@ pub fn grind_v2(
         if point == ProjectivePoint::IDENTITY {
             continue;
         }
-        let hash = work_hash_v2(&point);
+        let hash = work_hash(&point);
         if U512::from_big_endian(&hash) < target {
             return Some(Found { nonce, hash, iters });
         }
@@ -148,7 +148,7 @@ pub fn grind_v2(
 
 /// Binding-friendly grind: returns 40 bytes `nonce_be(8) ‖ hash(32)` on success, else `None`.
 /// (Packing keeps the napi/wasm bindings trivial — JS reads the u64 nonce from the first 8 bytes.)
-pub fn grind_v2_packed(
+pub fn grind_packed(
     category: &[u8],
     data: &[u8],
     wm: u64,
@@ -165,7 +165,7 @@ pub fn grind_v2_packed(
     cat.copy_from_slice(category);
     let mut bh = [0u8; 32];
     bh.copy_from_slice(block_hash);
-    grind_v2(&cat, data, wm, wd, &bh, version, start_nonce, max_iters).map(|f| {
+    grind(&cat, data, wm, wd, &bh, version, start_nonce, max_iters).map(|f| {
         let mut out = Vec::with_capacity(40);
         out.extend_from_slice(&f.nonce.to_be_bytes());
         out.extend_from_slice(&f.hash);
@@ -179,9 +179,9 @@ mod napi_binding {
     use napi::bindgen_prelude::Buffer;
     use napi_derive::napi;
 
-    /// Single-object input to `stamp_v2` (JS sees camelCase: category, data, workMultiplier, …).
+    /// Single-object input to `stamp` (JS sees camelCase: category, data, workMultiplier, …).
     #[napi(object)]
-    pub struct StampRequestV2 {
+    pub struct StampRequest {
         pub category: Buffer,
         pub data: Buffer,
         pub work_multiplier: u32,
@@ -193,10 +193,10 @@ mod napi_binding {
     }
 
     /// Mint a MsgBoard PoW stamp natively. Returns a 40-byte Buffer `nonce_be(8) ‖ hash(32)`, or null
-    /// if `maxIters` was exhausted. Pure compute — no keys, no RPC. (SDK verb: `stampV2`.)
+    /// if `maxIters` was exhausted. Pure compute — no keys, no RPC. (SDK verb: `stamp`.)
     #[napi]
-    pub fn stamp_v2(req: StampRequestV2) -> Option<Buffer> {
-        super::grind_v2_packed(
+    pub fn stamp(req: StampRequest) -> Option<Buffer> {
+        super::grind_packed(
             &req.category,
             &req.data,
             req.work_multiplier as u64,
@@ -215,10 +215,10 @@ mod napi_binding {
 mod wasm_binding {
     use wasm_bindgen::prelude::{wasm_bindgen, JsValue};
 
-    /// Single-object input to `stamp_v2` (the byte fields are Uint8Arrays in JS).
+    /// Single-object input to `stamp` (the byte fields are Uint8Arrays in JS).
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "camelCase")]
-    struct StampRequestV2 {
+    struct StampRequest {
         category: Vec<u8>,
         data: Vec<u8>,
         work_multiplier: u32,
@@ -231,12 +231,12 @@ mod wasm_binding {
 
     /// Mint a MsgBoard PoW stamp in WASM. Takes one object `{ category, data, workMultiplier,
     /// workDivisor, blockHash, version, startNonce, maxIters }`; returns a 40-byte Uint8Array
-    /// `nonce_be(8) ‖ hash(32)`, or undefined if `maxIters` was exhausted. (SDK verb: `stampV2`.)
+    /// `nonce_be(8) ‖ hash(32)`, or undefined if `maxIters` was exhausted. (SDK verb: `stamp`.)
     #[wasm_bindgen]
-    pub fn stamp_v2(req: JsValue) -> Result<Option<Vec<u8>>, JsValue> {
-        let r: StampRequestV2 =
+    pub fn stamp(req: JsValue) -> Result<Option<Vec<u8>>, JsValue> {
+        let r: StampRequest =
             serde_wasm_bindgen::from_value(req).map_err(|e| JsValue::from_str(&e.to_string()))?;
-        Ok(super::grind_v2_packed(
+        Ok(super::grind_packed(
             &r.category,
             &r.data,
             r.work_multiplier as u64,
@@ -278,7 +278,7 @@ mod tests {
             hx32("0x3a2ca760216c5cb648c32aab73cbc1cdfdbcf02f77a4cd190995e3c46f3932b5");
         let data = hx("0x676f6c64656e20766563746f72"); // "golden vector", 13 bytes
 
-        let ph = payload_hash_v2(&category, &data);
+        let ph = payload_hash(&category, &data);
         assert_eq!(
             ph,
             hx32("0xb66106e111b0e6cd08a49c7a37afa3259541bee8e465bef5e55f6cd7223d789a"),
@@ -287,42 +287,42 @@ mod tests {
 
         // Vector A: nonce 1, wm 10000, wd 1000000 → D 169072. Pins the transcript + work hash, and must
         // NOT meet difficulty.
-        let sh_a = scalar_hash_v2(1, &block_hash, &ph, 10_000, 1_000_000, 1);
+        let sh_a = scalar_hash(1, &block_hash, &ph, 10_000, 1_000_000, 1);
         assert_eq!(
             sh_a,
             hx32("0x3caed3ea9a5caa6e1e069d0126e4dc6698190aa3eec8ebcdab227d3e5b0fd18d")
         );
         let d_a = difficulty(data.len() as u64, 10_000, 1_000_000);
         assert_eq!(d_a, 169072);
-        let wh_a = work_hash_v2(&point_for_scalar(U256::from_big_endian(&sh_a)));
+        let wh_a = work_hash(&point_for_scalar(U256::from_big_endian(&sh_a)));
         assert_eq!(
             wh_a,
             hx32("0x5ba003ccdb08503a19326a201834198a49e062d2f3f0e9506ff086eddb011dee")
         );
         assert!(
-            U512::from_big_endian(&wh_a) >= pow_target_v2(d_a),
+            U512::from_big_endian(&wh_a) >= pow_target(d_a),
             "vector A must not meet its difficulty"
         );
 
         // Vector B: nonce 57602, wm 1, wd 1000 → D 16907. Passes; the two neighbours do not.
         let d_b = difficulty(data.len() as u64, 1, 1000);
         assert_eq!(d_b, 16907);
-        let target_b = pow_target_v2(d_b);
-        let sh_b = scalar_hash_v2(1, &block_hash, &ph, 1, 1000, 57602);
+        let target_b = pow_target(d_b);
+        let sh_b = scalar_hash(1, &block_hash, &ph, 1, 1000, 57602);
         assert_eq!(
             sh_b,
             hx32("0xbcff3c0ddc5d02b05e282566461d4f30f35ce90b3bfd36cde0c694dcb54a5e7d")
         );
         // checkWork-equivalent: reject an out-of-range scalar, else compare the work hash to the target.
         let passes = |nonce: u64| -> bool {
-            let sh = scalar_hash_v2(1, &block_hash, &ph, 1, 1000, nonce);
+            let sh = scalar_hash(1, &block_hash, &ph, 1, 1000, nonce);
             let s = U256::from_big_endian(&sh);
             if s.is_zero() || s >= n() {
                 return false;
             }
-            U512::from_big_endian(&work_hash_v2(&point_for_scalar(s))) < target_b
+            U512::from_big_endian(&work_hash(&point_for_scalar(s))) < target_b
         };
-        let wh_b = work_hash_v2(&point_for_scalar(U256::from_big_endian(&sh_b)));
+        let wh_b = work_hash(&point_for_scalar(U256::from_big_endian(&sh_b)));
         assert_eq!(
             wh_b,
             hx32("0x00037212834e250723dc736508d445a0dbc01398040a980807641b4be2d1e361")
@@ -343,15 +343,15 @@ mod tests {
         assert_eq!(difficulty(data.len() as u64, wm, wd), 1);
         let block_hash = [0x42u8; 32];
 
-        let found = grind_v2(&category, &data, wm, wd, &block_hash, version, 0, 1_000).expect("found");
+        let found = grind(&category, &data, wm, wd, &block_hash, version, 0, 1_000).expect("found");
 
-        let ph = payload_hash_v2(&category, &data);
-        let sh = scalar_hash_v2(version, &block_hash, &ph, wm, wd, found.nonce);
+        let ph = payload_hash(&category, &data);
+        let sh = scalar_hash(version, &block_hash, &ph, wm, wd, found.nonce);
         let scalar_u = U256::from_big_endian(&sh);
         assert!(!scalar_u.is_zero() && scalar_u < n(), "winning scalar must be in [1, n)");
         let point = point_for_scalar(scalar_u);
-        let hash = work_hash_v2(&point);
+        let hash = work_hash(&point);
         assert_eq!(hash, found.hash, "grind hash must match the from-scratch hash");
-        assert!(U512::from_big_endian(&hash) < pow_target_v2(1), "hash must be below the target");
+        assert!(U512::from_big_endian(&hash) < pow_target(1), "hash must be below the target");
     }
 }

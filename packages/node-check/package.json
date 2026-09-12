@@ -1,0 +1,48 @@
+{
+  "name": "@msgboard/node-check",
+  "version": "0.4.0",
+  "description": "External conformance checks for msgboard RPC endpoints: what a node answers to an anonymous caller, and whether the reference implementation has moved",
+  "repository": "github:valve-tech/msgboard",
+  "author": "MsgBoard",
+  "license": "MIT",
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "keywords": [
+    "msgboard",
+    "rpc",
+    "conformance",
+    "pulsechain"
+  ],
+  "scripts": {
+    "prebuild": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "tsc",
+    "watch": "tsc -w",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "prettier --check .",
+    "check": "npm run build && node dist/cli.js",
+    "drift": "npm run build && node dist/drift-cli.js",
+    "convergence": "npm run build && node dist/convergence-cli.js"
+  },
+  "files": [
+    "dist/"
+  ],
+  "devDependencies": {
+    "typescript": "^5.8.2",
+    "vitest": "^3.2.6"
+  }
+}

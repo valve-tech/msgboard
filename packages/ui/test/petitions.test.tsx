@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
 import type { Hex } from 'viem'
 import { type Petition, derivePetitionId, encodePetition, PETITION_NS, INDEX_SCOPE, signScope } from '@msgboard/petition'
@@ -14,11 +14,19 @@ import type { Content } from '@msgboard/sdk'
  * exercises the REAL `readPetitions` → `readPetitionSignatures` → `tally` pipeline the component runs
  * over that cache, not a re-implementation of it.
  *
- * The sign flow itself needs a deployed PetitionSignatures verifier per chain, which does not exist
- * yet for any chain (`@msgboard/petition`'s `deployments` map is still empty and no
- * `VITE_PETITION_ADDR_*` is set) — so the honest-degrade path (no wallet/connect UI, an explanatory
- * message instead) is exactly what today's default state exercises, and is asserted here too.
+ * The sign flow needs a deployed PetitionSignatures verifier for the chain. This file asserts the
+ * honest-degrade path taken when there is none: no wallet or connect UI, an explanatory message
+ * instead.
+ *
+ * That path is FORCED here rather than assumed. It used to rely on `@msgboard/petition`'s
+ * `deployments` map being empty, and went red the day a verifier landed on 943 (2026-07-28) —
+ * the test broke on a deployment, which is not a defect it should be reporting. The mock below
+ * keeps every real codec and removes only the deployment, so the premise is the test's to set.
  */
+vi.mock('@msgboard/petition', async (importActual) => ({
+  ...(await importActual<typeof import('@msgboard/petition')>()),
+  deployments: {},
+}))
 
 const CHAIN_ID = 943
 const CREATOR = ('0x' + 'ab'.repeat(20)) as Hex

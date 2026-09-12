@@ -3,7 +3,7 @@ import { keccak256, toHex, hexToBytes, bytesToHex, type Hex } from 'viem'
 import { checkWork, difficulty, type MessageSeed } from '@msgboard/core'
 
 /**
- * TS ↔ Rust grinder agreement. The committed WASM `stamp_v2` grinds a message; TS `checkWork` must
+ * TS ↔ Rust grinder agreement. The committed WASM `stamp` grinds a message; TS `checkWork` must
  * return the SAME work hash for the nonce it found. This is the consensus gate: the fast Rust engine
  * and the TS verifier have to agree byte-for-byte, or a stamp the grinder finds would be rejected by
  * the verifier (and the node).
@@ -36,7 +36,7 @@ async function loadRawWasmV2(): Promise<EngineStampV2 | null> {
   try {
     const wasm = (await import('@msgboard/pow-grinder/wasm')) as {
       default: (arg?: { module_or_path: BufferSource }) => Promise<unknown>
-      stamp_v2?: EngineStampV2
+      stamp?: EngineStampV2
     }
     const { createRequire } = await import('node:module')
     const require = createRequire(import.meta.url)
@@ -44,7 +44,7 @@ async function loadRawWasmV2(): Promise<EngineStampV2 | null> {
     const { readFileSync } = await import('node:fs')
     const bytes = readFileSync(new URL('pow_grinder_bg.wasm', `file://${jsPath}`))
     await wasm.default({ module_or_path: bytes })
-    return typeof wasm.stamp_v2 === 'function' ? wasm.stamp_v2 : null
+    return typeof wasm.stamp === 'function' ? wasm.stamp : null
   } catch {
     return null
   }
@@ -60,10 +60,10 @@ const seedAt = (nonce: bigint): MessageSeed => ({
   workDivisor: WD,
 })
 
-describe('PoW parity (TS ↔ committed Rust WASM stamp_v2)', () => {
+describe('PoW parity (TS ↔ committed Rust WASM stamp)', () => {
   it('the WASM grinder and TS checkWork agree on the nonce the grinder found', async () => {
     const engine = await loadRawWasmV2()
-    expect(engine, 'committed WASM stamp_v2 failed to load (rebuild pow-grinder?)').not.toBeNull()
+    expect(engine, 'committed WASM stamp failed to load (rebuild pow-grinder?)').not.toBeNull()
 
     const D = difficulty({ workMultiplier: WM, workDivisor: WD }, DATA_LEN)
     expect(D).toBe(1n) // accept-all, so the grind returns a nonce fast

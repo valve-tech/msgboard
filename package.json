@@ -9,6 +9,7 @@
     "packages/petition",
     "packages/petition-web",
     "packages/history",
+    "packages/node-check",
     "packages/hardhat",
     "packages/relayer",
     "packages/indexer",
@@ -58,6 +59,9 @@
     "cosign-archive:start": "npm run start --workspace=packages/cosign-archive"
   },
   "overrides": {
-    "viem": "2.52.2"
+    "viem": "2.52.2",
+    "@noble/curves": "^1.9.7",
+    "@types/node": "22.15.2",
+    "typescript": "5.8.3"
   }
 }

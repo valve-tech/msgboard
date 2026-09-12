@@ -20,6 +20,17 @@ contract HoldemTableNSizeTest is Test {
     uint256 internal constant EIP170_LIMIT = 24_576;
 
     function test_deployedBytecodeStaysUnderEip170Limit() public {
+        // Production deployability is defined by the DEFAULT profile — optimizer_runs = 700, which
+        // mirrors hardhat.config.ts (the build that actually lands on mainnet; see foundry.toml's
+        // "EIP-170 SIZE FIX" header). The specialized test-only profiles (ffi/zkm2/eas at 1000 runs)
+        // build a larger, NEVER-deployed artifact, so asserting the mainnet size limit under them is a
+        // false signal. Only assert under the production profile.
+        string memory profile = vm.envOr("FOUNDRY_PROFILE", string("default"));
+        if (keccak256(bytes(profile)) != keccak256(bytes("default"))) {
+            vm.skip(true);
+            return;
+        }
+
         HoldemTableN zk = new HoldemTableN(address(0), address(0));
         uint256 deployedBytes = address(zk).code.length;
 

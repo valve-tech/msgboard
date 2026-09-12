@@ -3,6 +3,11 @@
   "type": "module",
   "description": "Fast MsgBoard proof-of-work grinder (bit-identical to reth msgboard-types pow.rs)",
   "version": "0.0.1",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/valve-tech/msgboard"
+  },
   "files": [
     "pow_grinder_bg.wasm",
     "pow_grinder.js",
