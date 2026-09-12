@@ -9,8 +9,9 @@ import {
 describe('statementFromHeadline', () => {
   it('turns a headline into a petition the board can carry', () => {
     const s = statementFromHeadline('Regulators approve the merger')
-    expect(s).toContain('Regulators approve the merger')
-    expect(s.startsWith('We petition the board')).toBe(true)
+    expect(s).not.toBeNull()
+    expect(s!).toContain('Regulators approve the merger')
+    expect(s!.startsWith('We petition the board')).toBe(true)
   })
 
   it('is deterministic, because the petition id derives from the statement', () => {
@@ -26,9 +27,10 @@ describe('statementFromHeadline', () => {
     // Headlines arrive from a third-party feed. They reach a PoW-stamped board
     // post, so they are untrusted input, not display text.
     const s = statementFromHeadline('  Line\u0000one\n\tand   two  ')
-    expect(s).not.toMatch(/[\x00-\x1F\x7F]/)
-    expect(s).not.toMatch(/\s{2,}/)
-    expect(s).toContain('Line one and two')
+    expect(s).not.toBeNull()
+    expect(s!).not.toMatch(/[\x00-\x1F\x7F]/)
+    expect(s!).not.toMatch(/\s{2,}/)
+    expect(s!).toContain('Line one and two')
   })
 
   it('rejects a headline that is too short to mean anything', () => {
