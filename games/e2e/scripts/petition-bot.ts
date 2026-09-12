@@ -70,7 +70,9 @@ import {
   verifySignature,
   buildSubmitBatchArgs,
   PETITION_SIGNATURES_ABI,
+  statementsFromHeadlines,
 } from '@msgboard/petition'
+import { fetchHeadlines } from './petition-headlines.js'
 import { makeActor, sendAs } from './actor-common'
 import { petitionsNeedingCreation, outstandingToSettle } from './petition-bot-logic'
 
@@ -80,6 +82,12 @@ const RPC = env.RPC
 const BOARD_RPC = env.BOARD_RPC || RPC
 const PETITION_VERIFIER = (env.PETITION_VERIFIER ?? '').trim() as viem.Hex | ''
 const STATEMENTS: string[] = JSON.parse(env.PETITION_STATEMENTS ?? '[]')
+// Headline-sourced statements. On by default: a fixed list produces the same
+// petitions forever, and on the box it was never set at all, so the bot seeded
+// nothing. Set PETITION_FROM_HEADLINES=0 to go back to the fixed list only.
+const FROM_HEADLINES = (env.PETITION_FROM_HEADLINES ?? '1') !== '0'
+// How many NEW petitions one tick may create from headlines.
+const HEADLINE_MAX = Number(env.PETITION_HEADLINE_MAX ?? '3')
 const SIGNER_COUNT = Number(env.SIGNER_COUNT ?? '5')
 const CREATOR_INDEX = Number(env.CREATOR_INDEX ?? '0')
 const SIGNER_START_INDEX = Number(env.SIGNER_START_INDEX ?? '1')
@@ -115,8 +123,10 @@ const main = async () => {
         '(signatures are domain-bound to it, so there is nothing correct to sign yet)',
     )
   }
-  if (STATEMENTS.length === 0) {
-    console.error('petition bot: PETITION_STATEMENTS is empty — nothing to seed')
+  if (STATEMENTS.length === 0 && !FROM_HEADLINES) {
+    console.error(
+      'petition bot: PETITION_STATEMENTS is empty and PETITION_FROM_HEADLINES=0 — nothing to seed',
+    )
   }
 
   // Board client: MsgBoardClient + the SDK's doPoW cascade (native→WASM→JS), mirroring cosign-bot.ts.
@@ -171,7 +181,20 @@ const main = async () => {
   const capture = async () => {
     const existing = await attemptRead('capture: readPetitions', () => readPetitions(board, WINDOW_DAYS))
     if (existing === undefined) return
-    const toCreate = petitionsNeedingCreation(existing, STATEMENTS, creator.account.address, saltFor)
+    // Today's headlines, turned into petitions. Deterministic: the same headline
+    // always yields the same statement, so the same id, so an existing petition
+    // is recognised rather than recreated. A dead feed yields none and the tick
+    // proceeds on the fixed list alone.
+    let generated: string[] = []
+    if (FROM_HEADLINES) {
+      const headlines = await fetchHeadlines({ fetcher: (u, i) => fetch(u, i), env })
+      generated = statementsFromHeadlines(headlines, { max: HEADLINE_MAX })
+      if (generated.length > 0) {
+        console.log(`petition bot: ${generated.length} statement(s) from ${headlines.length} headline(s)`)
+      }
+    }
+    const wanted = [...new Set([...STATEMENTS, ...generated])]
+    const toCreate = petitionsNeedingCreation(existing, wanted, creator.account.address, saltFor)
     for (const { statement, id, salt } of toCreate) {
       await attempt(`create petition ${short(id)}`, async () => {
         if (DRY_RUN) {

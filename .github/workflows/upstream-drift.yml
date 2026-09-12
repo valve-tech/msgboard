@@ -1,0 +1,43 @@
+# Has erigon-pulse moved under us?
+#
+# msgboard's protocol is defined upstream on a BRANCH, so it moves silently.
+# That has cost real findings: the msg/1 wire format change and the board
+# comparator guard were both found by a person rather than by a check, and the
+# branch moved again unnoticed while this package was written.
+#
+# There is deliberately NO skip path. A workflow that warns and continues when
+# it cannot reach upstream reports success while it has stopped looking, which
+# is the exact blindness this exists to remove. If this job cannot check, it
+# fails, and someone finds out why.
+name: upstream drift
+
+on:
+  schedule:
+    # Daily. What upstream holds changes on their schedule, not ours.
+    - cron: '17 6 * * *'
+  pull_request:
+    paths:
+      - 'packages/node-check/**'
+  workflow_dispatch:
+
+concurrency:
+  group: upstream-drift-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+      - run: npm ci
+      - run: npm run build --workspace @msgboard/node-check
+      - run: npm run test --workspace @msgboard/node-check
+      # Exit 1 drift, 2 cannot check, 3 pin invalid, 4 a watched path vanished.
+      # Every one of them fails the job.
+      - run: node packages/node-check/dist/drift-cli.js

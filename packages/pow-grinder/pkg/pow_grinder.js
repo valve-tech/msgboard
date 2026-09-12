@@ -3,12 +3,12 @@
 /**
  * Mint a MsgBoard PoW stamp in WASM. Takes one object `{ category, data, workMultiplier,
  * workDivisor, blockHash, version, startNonce, maxIters }`; returns a 40-byte Uint8Array
- * `nonce_be(8) ‖ hash(32)`, or undefined if `maxIters` was exhausted. (SDK verb: `stampV2`.)
+ * `nonce_be(8) ‖ hash(32)`, or undefined if `maxIters` was exhausted. (SDK verb: `stamp`.)
  * @param {any} req
  * @returns {Uint8Array | undefined}
  */
-export function stamp_v2(req) {
-    const ret = wasm.stamp_v2(req);
+export function stamp(req) {
+    const ret = wasm.stamp(req);
     if (ret[3]) {
         throw takeFromExternrefTable0(ret[2]);
     }

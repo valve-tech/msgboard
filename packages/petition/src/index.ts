@@ -32,3 +32,9 @@ export {
   tally,
   verifySignature,
 } from './petition.js'
+export {
+  MAX_STATEMENT_LENGTH,
+  statementFromHeadline,
+  statementsFromHeadlines,
+  type StatementsOptions,
+} from './statements.js'

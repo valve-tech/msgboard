@@ -40,7 +40,7 @@ export type Stamp = { nonce: bigint; hash: Hex }
 export type Stamper = (input: StampInput) => Stamp | Promise<Stamp>
 
 /** The low-level engine call both the native addon and the WASM module expose (the grinder's
- *  `stamp_v2`). `version` is the message version hashed into the scalar transcript — always 1. */
+ *  `stamp`). `version` is the message version hashed into the scalar transcript — always 1. */
 type EngineStamp = (req: {
   category: Uint8Array
   data: Uint8Array
@@ -57,11 +57,11 @@ type EngineStamp = (req: {
 const MAX_ITERS = 50_000_000
 
 /**
- * Adapt a raw engine `stamp_v2` (native or WASM, e.g. from `import('@msgboard/pow-grinder/wasm')`)
+ * Adapt a raw engine `stamp` (native or WASM, e.g. from `import('@msgboard/pow-grinder/wasm')`)
  * to the `Stamper` surface: Hex↔bytes conversion + unpacking the 40-byte
  * `nonce_be(8) ‖ hash(32)` result. Browser apps use this to hand their bundler-resolved WASM
  * engine to `MsgBoardClient` via the `stamper` config. `version` is pinned to 1 — the message
- * version hashed into the scalar transcript; `stamp_v2` REQUIRES the field, and omitting it makes
+ * version hashed into the scalar transcript; `stamp` REQUIRES the field, and omitting it makes
  * the engine reject the request (→ silent JS-grind fallback).
  */
 export function wrapEngineStamp(engine: EngineStamp): Stamper {
@@ -95,16 +95,13 @@ function isNode(): boolean {
 
 /**
  * Try the native Rust addon (throws on machines without a local cargo build). The grinder exports the
- * PoW engine as `stamp_v2` (the pre-revision `stamp` engine is dead — the node rejects that work). Read
- * it through an optional type and guard with a `typeof` check, so an old grinder without the engine
- * yields `null` and never throws.
+ * PoW engine as `stamp`. Read it through an optional type and guard with a `typeof` check, so an old
+ * grinder without the engine yields `null` and never throws.
  */
 async function tryNative(): Promise<Stamper | null> {
   try {
-    // Declare the dead `stamp` too, so this type OVERLAPS the addon's compiled type (TS rejects an
-    // object type with no property in common). Only `stamp_v2` is ever used.
-    const mod: { stamp?: EngineStamp; stamp_v2?: EngineStamp } = await import('@msgboard/pow-grinder')
-    return typeof mod.stamp_v2 === 'function' ? wrapEngineStamp(mod.stamp_v2) : null
+    const mod: { stamp?: EngineStamp } = await import('@msgboard/pow-grinder')
+    return typeof mod.stamp === 'function' ? wrapEngineStamp(mod.stamp) : null
   } catch {
     return null
   }
@@ -137,15 +134,15 @@ async function wasmBytesUrl(): Promise<URL> {
 }
 
 /**
- * Try the WASM module's `stamp_v2` engine. Env-aware init: Node reads the wasm bytes off disk; a
- * browser fetches. The `stamp_v2?` optional type plus the `typeof` guard mean an old build without the
+ * Try the WASM module's `stamp` engine. Env-aware init: Node reads the wasm bytes off disk; a
+ * browser fetches. The `stamp?` optional type plus the `typeof` guard mean an old build without the
  * engine returns `null` cleanly — a missing export is never called and never throws.
  */
 async function tryWasm(): Promise<Stamper | null> {
   try {
     const wasm: {
       default: (arg?: { module_or_path: BufferSource }) => Promise<unknown>
-      stamp_v2?: EngineStamp
+      stamp?: EngineStamp
     } = await import('@msgboard/pow-grinder/wasm')
     if (isNode()) {
       const { readFileSync } = await import('node:fs')
@@ -154,7 +151,7 @@ async function tryWasm(): Promise<Stamper | null> {
     } else {
       await wasm.default()
     }
-    return typeof wasm.stamp_v2 === 'function' ? wrapEngineStamp(wasm.stamp_v2) : null
+    return typeof wasm.stamp === 'function' ? wrapEngineStamp(wasm.stamp) : null
   } catch {
     return null
   }

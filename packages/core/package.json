@@ -1,6 +1,6 @@
 {
   "name": "@msgboard/core",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "MsgBoard proof-of-work engine (msgpow): pure primitives and encoding",
   "repository": "github:valve-tech/msgboard",
   "author": "MsgBoard",
@@ -45,6 +45,6 @@
     "@types/bn.js": "^5.1.6",
     "@types/elliptic": "^6.4.18",
     "typescript": "^5.8.2",
-    "vitest": "^3.1.1"
+    "vitest": "^3.2.6"
   }
 }

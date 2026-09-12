@@ -107,8 +107,14 @@ services:
 
   # spam: posts random lorem-style messages so each board shows activity. Submission
   # is proof-of-work gated, so it needs only an msgboard-enabled RPC — no wallet,
-  # no database. One writer per network (SPAM_CHAIN_ID selects 1, 369, or 943);
-  # SPAM_INTERVAL_MS / SPAM_CATEGORIES tune cadence and categories for all of them.
+  # no database. One writer per network (SPAM_CHAIN_ID selects 1, 369, 943 or
+  # 11155111); SPAM_INTERVAL_MS / SPAM_CATEGORIES tune cadence and categories for all.
+  #
+  # THESE WRITERS MUST BE REBUILT AFTER A PROOF-OF-WORK CUTOVER. They grind the
+  # algorithm baked into their image. After the 2026-08-21 cutover the pre-cutover
+  # images kept running, kept reporting healthy, and had every post rejected with
+  # `powmsg: invalid work` for 17 days. Deploy them with ansible/deploy-msgboard-core.yml,
+  # which checks for exactly that.
   spam-943:
     <<: *spam-writer
     container_name: spam-943
@@ -136,6 +142,18 @@ services:
     environment:
       SPAM_CHAIN_ID: '1'
       RPC_1: ${RPC_1:-}
+      SPAM_INTERVAL_MS: ${SPAM_INTERVAL_MS:-60000}
+      SPAM_CATEGORIES: ${SPAM_CATEGORIES:-lorem,musings,chatter}
+      SPAM_WORKERS: ${SPAM_WORKERS:-2}
+
+  # Sepolia. Verified serving msgboard on 2026-09-08 (msgboard_status enabled=true).
+  # Its board starts empty, so this writer is what puts anything on it at all.
+  spam-11155111:
+    <<: *spam-writer
+    container_name: spam-11155111
+    environment:
+      SPAM_CHAIN_ID: '11155111'
+      RPC_11155111: ${RPC_11155111:-}
       SPAM_INTERVAL_MS: ${SPAM_INTERVAL_MS:-60000}
       SPAM_CATEGORIES: ${SPAM_CATEGORIES:-lorem,musings,chatter}
       SPAM_WORKERS: ${SPAM_WORKERS:-2}
@@ -177,10 +195,11 @@ services:
       - msgboard
     environment:
       DATABASE_URL: postgres://msgboard-postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@msgboard-postgres:5432/msgboard-postgres
-      INDEXER_CHAINS: ${INDEXER_CHAINS:-1,369,943}
+      INDEXER_CHAINS: ${INDEXER_CHAINS:-1,369,943,11155111}
       RPC_1: ${RPC_1:-}
       RPC_369: ${RPC_369:-}
       RPC_943: ${RPC_943:-}
+      RPC_11155111: ${RPC_11155111:-}
       INDEXER_INTERVAL_MS: ${INDEXER_INTERVAL_MS:-20000}
       RETENTION_DAYS: ${RETENTION_DAYS:-365}
     command: ['npm', 'run', 'indexer:start']
