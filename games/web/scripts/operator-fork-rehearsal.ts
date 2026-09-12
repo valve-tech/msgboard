@@ -8,7 +8,9 @@
  * against the real deployed contracts. The steps:
  *   1. depositBankroll — the operator funds its bankroll (0 on live), so a bet can open.
  *   2. ink            — simulate the validator node service inking fresh preimages into the offset-0
- *                       staked pool (exhausted at head: 13/13 consumed), so a heat slot is available.
+ *                       STAKED pool at (CHIPS, tierPrice) — the exact (token, price) `open()` heats via
+ *                       `_heatBoundStaked`. Native/price-0 ink only fills the free pool and does NOT
+ *                       replenish what operator rounds consume (exhausted at head: 13/13 consumed).
  *   3. setPlayerGame  — the player's one-time consent (GameEscrow reverts PlayerNotConsented without it).
  *   4. open()         — approve + open, with the UI's own location math.
  *   5. refundStale()  — mine past STALE_BLOCKS and reclaim the stake (asserted: stake fully returned).
@@ -89,12 +91,30 @@ const isConsumed = (tierPrice: bigint) => async (k: bigint): Promise<boolean> =>
   }
 }
 
-/** Simulate the validator node service: ink `n` fresh preimages per validator into the offset-0 pool. */
-const inkFresh = async (n: number) => {
+/**
+ * Simulate the validator node service: ink `n` fresh preimages per validator into the offset-0
+ * STAKED pool at (CHIPS, tierPrice). Must match `_heatBoundStaked` / `operatorHeatLocations` —
+ * GameBase requires providers to have inked at exactly this (token, price). Native/price-0 only
+ * fills the free pool and will not make a staked heat succeed.
+ */
+const inkFresh = async (n: number, tierPrice: bigint) => {
+  const stakeEach = BigInt(n) * tierPrice
   for (const v of SUBSET) {
     await rpc('anvil_setBalance', [v, viem.toHex(10n ** 20n)])
     await rpc('anvil_impersonateAccount', [v])
-    const section: Info = { provider: v, callAtChange: false, durationIsTimestamp: false, duration: 12n, token: viem.zeroAddress, price: 0n, offset: 0n, index: 0n }
+    // Fund + approve so Random can pull the staked price when inking a priced section.
+    await send(OPERATOR, CHIPS, ERC20_ABI, 'transfer', [v, stakeEach])
+    await send(v, CHIPS, ERC20_ABI, 'approve', [RANDOM, stakeEach])
+    const section: Info = {
+      provider: v,
+      callAtChange: false,
+      durationIsTimestamp: false,
+      duration: 12n,
+      token: CHIPS,
+      price: tierPrice,
+      offset: 0n,
+      index: 0n,
+    }
     for (let j = 0; j < n; j++) {
       const preimage = viem.keccak256(viem.keccak256(viem.toHex(`fork-rehearsal-${v}-${j}`)))
       await send(v, RANDOM, randomAbi, 'ink', [section, preimage])
@@ -136,12 +156,13 @@ const main = async () => {
     const bankroll = (await pub.readContract({ address: ESCROW, abi: ESCROW_ABI, functionName: 'bankrollOf', args: [OPERATOR, CHIPS] })) as bigint
     console.log(`  bankroll now ${fmt(bankroll)} Chips`)
 
-    // 2. Simulate the validator node service replenishing the exhausted offset-0 staked pool.
-    console.log('validators: ink a fresh preimage each into the offset-0 staked pool')
-    await inkFresh(1)
+    // 2. Simulate the validator node service replenishing the exhausted offset-0 staked pool
+    // at the same (CHIPS, tierPrice) the UI will heat — not the free native/price-0 pool.
+    const tierPrice = (await pub.readContract({ address: COINFLIP, abi: operatorCoinFlipAbi, functionName: 'tierPriceOf', args: [TABLE_ID, STAKE] })) as bigint
+    console.log(`validators: ink a fresh preimage each into the offset-0 staked pool (tier ${fmt(tierPrice)} Chips)`)
+    await inkFresh(1, tierPrice)
 
     // 3. The UI bet path: probe the next slot → build the staked locations → consent → approve → open.
-    const tierPrice = (await pub.readContract({ address: COINFLIP, abi: operatorCoinFlipAbi, functionName: 'tierPriceOf', args: [TABLE_ID, STAKE] })) as bigint
     const heatIndex = await nextOperatorHeatIndex(isConsumed(tierPrice))
     const locations = operatorHeatLocations(SUBSET, heatIndex, CHIPS, tierPrice)
     console.log(`player: bet — next slot index ${heatIndex}, tier ${fmt(tierPrice)} Chips (UI location math)`)
