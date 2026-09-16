@@ -10,7 +10,7 @@
     "@msgboard/settle": "*",
     "@msgboard/zk-cards-core": "*",
     "@nomicfoundation/hardhat-chai-matchers": "^2.0.8",
-    "@nomicfoundation/hardhat-ethers": "^3.1.3",
+    "@nomicfoundation/hardhat-ethers": "^4.0.15",
     "@nomicfoundation/hardhat-ignition": "^0.15.16",
     "@nomicfoundation/hardhat-ignition-viem": "^0.15.17",
     "@nomicfoundation/hardhat-toolbox-viem": "^3.0.0",
