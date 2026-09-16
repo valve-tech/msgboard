@@ -103,7 +103,10 @@ const server = archiveServer({
 })
 
 console.log(`archive:        ${databaseUrl.replace(/:[^:@/]+@/, ':****@')}`)
-console.log(`board RPC:      ${rpcUrl} (chain ${chainId})`)
+// The key lives in the URL path (`.../rpc/<key>/evm/943`), and this banner goes straight into the
+// container's docker logs, where any `docker logs cosign-archive` reprints it. Mask the key segment
+// the same way the line above masks the database password.
+console.log(`board RPC:      ${rpcUrl.replace(/(\/rpc\/)[^/]+(\/)/, '$1***$2')} (chain ${chainId})`)
 console.log(`team-file:      ${teamFilePath} (namespace=${teamFile.namespace}, windowDays=${teamFile.windowDays})`)
 console.log(`board cutoff:   ${boardRetentionDays} day(s)`)
 console.log(`listening:      http://${host}:${port}  (health: /health)`)
