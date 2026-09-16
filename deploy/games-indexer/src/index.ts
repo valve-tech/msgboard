@@ -89,23 +89,29 @@ ponder.on('EAS:Attested', async ({ event, context }: any) => {
   await context.db.insert(solveAttestation).values(row).onConflictDoNothing()
 })
 
-// PetitionSignatures (Task H): only registered (see ponder.config.ts's petitionChain) once
-// PETITION_ADDR_{943,369} is set, so this handler is simply never invoked before then. One row per
-// distinct (chainId, petitionId, signer) — keyed by signer, not by log, so a signer can never be
-// double-counted across transactions.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-ponder.on('PetitionSignatures:Signed', async ({ event, context }: any) => {
-  const { petitionId, signer } = event.args
-  await context.db
-    .insert(petitionSignature)
-    .values({
-      id: `${context.chain.id}-${petitionId}-${signer}`,
-      chainId: context.chain.id,
-      petitionId,
-      signer,
-      blockNumber: event.block.number,
-      blockTimestamp: event.block.timestamp,
-      txHash: event.transaction.hash,
-    })
-    .onConflictDoNothing()
-})
+// PetitionSignatures (Task H): ponder.config.ts registers this contract ONLY when
+// PETITION_ADDR_{943,369} is set (see its petitionChain). Ponder validates every `ponder.on` name
+// against the CONFIGURED contracts at build time, not at invocation time — so registering this
+// handler unconditionally kills the whole indexer with "Invalid event
+// 'PetitionSignatures:Signed' uses an unrecognized contract" whenever those vars are absent. It is
+// not a dormant no-op. Guard the registration with the same condition the config uses.
+// One row per distinct (chainId, petitionId, signer) — keyed by signer, not by log, so a signer
+// can never be double-counted across transactions.
+if (process.env.PETITION_ADDR_943 || process.env.PETITION_ADDR_369) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ponder.on('PetitionSignatures:Signed', async ({ event, context }: any) => {
+    const { petitionId, signer } = event.args
+    await context.db
+      .insert(petitionSignature)
+      .values({
+        id: `${context.chain.id}-${petitionId}-${signer}`,
+        chainId: context.chain.id,
+        petitionId,
+        signer,
+        blockNumber: event.block.number,
+        blockTimestamp: event.block.timestamp,
+        txHash: event.transaction.hash,
+      })
+      .onConflictDoNothing()
+  })
+}
