@@ -112,7 +112,7 @@ export function NextSteps() {
             MsgBoard.
           </p>
           <a
-            href="#interactive"
+            href="#try-it"
             className="inline-flex items-center justify-center px-6 py-3 rounded-full bg-blue-600 text-white hover:bg-blue-700 transition-colors duration-200">
             Try it Now
             <Icon icon="mdi:arrow-right" className="w-5 h-5 ml-2" />
