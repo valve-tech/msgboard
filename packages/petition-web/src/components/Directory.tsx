@@ -40,9 +40,11 @@ export function Directory(props: {
           <span className="trunc" style={{ flex: 1, textAlign: 'left' }}>
             {petition.statement}
           </span>
-          <span className="pill" title="captured (posted, unverified)">
-            {capturedCount} captured
-          </span>
+          {capturedCount !== null && (
+            <span className="pill" title="captured (posted, unverified)">
+              {capturedCount} captured
+            </span>
+          )}
           <span className="pill" style={{ marginLeft: 6 }}>
             {short(petition.id)}
           </span>

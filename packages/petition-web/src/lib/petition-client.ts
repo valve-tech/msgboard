@@ -13,7 +13,7 @@ import {
   PETITION_TYPES,
 } from '@msgboard/petition'
 import { PETITION_READ_BASE } from './config.js'
-import { fetchPetitionIndex, fetchAllPetitionSignatures, fetchPetitionTally } from './read-side.js'
+import { fetchPetitionIndex, fetchAllPetitionSignatures } from './read-side.js'
 import { outstanding } from './reconcile.js'
 
 /** A 32-byte random salt, hex-encoded (crypto.getRandomValues — the same source `crypto.randomUUID` uses). */
@@ -36,19 +36,25 @@ async function pollUntil(
 
 export interface PetitionSummary {
   petition: Petition
-  /** CAPTURED count — posted-but-unverified, from the read-side tally. See VerifyPanel for the trustless count. */
-  capturedCount: number
+  /**
+   * CAPTURED count — posted-but-unverified, from the read-side tally. See VerifyPanel for the
+   * trustless count. `null` means "not counted here": the directory does not fetch tallies (see
+   * `listPetitions`), so the count belongs to the detail view. Never render `null` as 0.
+   */
+  capturedCount: number | null
 }
 
 /** `listPetitions` — the Directory's data source: every captured petition descriptor. */
 export async function listPetitions(readBase: string = PETITION_READ_BASE): Promise<PetitionSummary[]> {
+  // ONE request. This deliberately does not fetch a tally per petition. It used to, with
+  // `Promise.all(petitions.map(fetchPetitionTally))` — one request per petition, unbounded. The
+  // live board held 197 petitions on 2026-09-16, each tally costs the read side 1.8-45s, and a
+  // browser allows ~6 connections per host, so the fan-out saturated the origin: the page logged
+  // 182 failed requests and never left "loading the directory…". Worse, the per-tally `.catch`
+  // turned each failure into a count of 0, so the list would have shown false zeros. The count is
+  // a detail-view concern and PetitionDetail fetches its own, so the directory renders the index.
   const petitions = await fetchPetitionIndex(readBase)
-  return Promise.all(
-    petitions.map(async (petition) => {
-      const t = await fetchPetitionTally(petition.id, readBase).catch(() => ({ count: 0, signers: [] }))
-      return { petition, capturedCount: t.count }
-    }),
-  )
+  return petitions.map((petition) => ({ petition, capturedCount: null }))
 }
 
 export interface PetitionDetail {
