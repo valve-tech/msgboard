@@ -35,9 +35,9 @@ jobs:
       id-token: write   # mint the OpenID Connect token npm exchanges for publish rights
       contents: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version-file: '.nvmrc'
           registry-url: 'https://registry.npmjs.org'
@@ -49,12 +49,25 @@ jobs:
 
       - run: npm ci
 
-      # build in dependency order (core <- sdk <- cosign <- history <- relayer); hardhat ships its tsc output.
-      # cosign builds before history because history imports @msgboard/cosign at runtime (its types are
-      # needed for history's tsc to resolve the module).
+      # pow-grinder is a Rust/WASM package. Install the toolchain so its WASM builds FROM SOURCE in CI —
+      # its own prepublishOnly hook runs during `npm publish` below, so the published binary is built in
+      # CI (real provenance), not shipped from a committed blob. We deliberately do NOT byte-compare the
+      # result against the committed pkg/: wasm-pack/wasm-bindgen output is not reproducible across
+      # toolchain versions, so a fresh CI build differs byte-for-byte from a local one while computing the
+      # identical PoW (same Rust source). The committed pkg/ remains for local dev + the sdk parity tests.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - run: cargo install wasm-pack --locked
+
+      # build the JS packages in dependency order (core <- sdk <- cosign <- petition <- history <- relayer);
+      # hardhat ships its tsc output. history's tsc imports @msgboard/cosign AND @msgboard/petition, so both
+      # must be built first. petition itself imports cosign + sdk, so it builds after them, and it IS
+      # published in the loop below (browser apps — msgboard-ui, petition-web — depend on it).
       - run: npm run build --workspace @msgboard/core
       - run: npm run build --workspace @msgboard/sdk
       - run: npm run build --workspace @msgboard/cosign
+      - run: npm run build --workspace @msgboard/petition
       - run: npm run build --workspace @msgboard/history
       - run: (cd packages/hardhat && npx tsc)
       - run: npm run build --workspace @msgboard/relayer
@@ -62,9 +75,11 @@ jobs:
       # No NODE_AUTH_TOKEN: authentication is OpenID Connect. Provenance is automatic.
       - name: Publish public @msgboard/* (idempotent)
         run: |
-          # Dependency order: @msgboard/cosign is published before @msgboard/history (which depends on
-          # it at runtime), and @msgboard/history before @msgboard/relayer (which depends on it).
-          for entry in "@msgboard/core:packages/core" "@msgboard/sdk:packages/sdk" "@msgboard/cosign:packages/cosign" "@msgboard/history:packages/history" "@msgboard/hardhat:packages/hardhat" "@msgboard/relayer:packages/relayer"; do
+          # Dependency order (leaves first): core + pow-grinder before sdk (sdk depends on BOTH at
+          # runtime), cosign before history (history depends on it), history before relayer. pow-grinder
+          # rebuilds its WASM from source via its own prepublishOnly hook (the Rust toolchain is installed
+          # above), so its published binary is built in CI — no --ignore-scripts.
+          for entry in "@msgboard/core:packages/core" "@msgboard/pow-grinder:packages/pow-grinder" "@msgboard/sdk:packages/sdk" "@msgboard/cosign:packages/cosign" "@msgboard/petition:packages/petition" "@msgboard/history:packages/history" "@msgboard/hardhat:packages/hardhat" "@msgboard/relayer:packages/relayer"; do
             pkg="${entry%%:*}"
             dir="${entry##*:}"
             ver=$(node -p "require('./$dir/package.json').version")

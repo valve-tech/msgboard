@@ -6,7 +6,10 @@
     "packages/core",
     "packages/sdk",
     "packages/cosign",
+    "packages/petition",
+    "packages/petition-web",
     "packages/history",
+    "packages/node-check",
     "packages/hardhat",
     "packages/relayer",
     "packages/indexer",
@@ -28,9 +31,10 @@
     "games/msgboard-games",
     "games/msgboard-settle",
     "games/msgboard-settle-relayer",
-    "games/pow-grinder",
+    "packages/pow-grinder",
     "games/zk-core",
     "games/zk-settle",
+    "games/zk-table-settle",
     "games/zk-skill",
     "games/e2e",
     "games/web"
@@ -55,6 +59,9 @@
     "cosign-archive:start": "npm run start --workspace=packages/cosign-archive"
   },
   "overrides": {
-    "viem": "2.52.2"
+    "viem": "2.52.2",
+    "@noble/curves": "^1.9.7",
+    "@types/node": "22.15.2",
+    "typescript": "5.8.3"
   }
 }

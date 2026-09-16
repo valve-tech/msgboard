@@ -10,10 +10,25 @@ const doc = JSON.parse(readFileSync(join(here, '..', 'openrpc.json'), 'utf8'))
 describe('renderReference', () => {
   const md = renderReference(doc)
 
-  it('renders a heading for every method', () => {
-    for (const name of ['msgboard_status', 'msgboard_categories', 'msgboard_content', 'msgboard_addMessage', 'msgboard_getMessage']) {
-      expect(md).toContain(`### ${name}`)
+  // Derived from the spec, not a hand-written list. The list version could not
+  // fail when a method was added to openrpc.json and left unrendered, which is
+  // the only way this renderer breaks.
+  it('renders a heading for every method in the spec', () => {
+    expect(doc.methods.length).toBeGreaterThan(0)
+    for (const method of doc.methods) {
+      expect(md).toContain(`### ${method.name}`)
     }
+  })
+
+  // The subscription is the one part of the surface OpenRPC cannot fully
+  // describe: it has no notification concept, so `msgboard_subscription`
+  // lives in the hand-written README section. The two methods still belong in
+  // the spec, and they were absent from it until 2026-08-24 while the feature
+  // was live. Pin them so the reference cannot lose them again.
+  it('documents the subscription pair', () => {
+    const names = doc.methods.map((m: { name: string }) => m.name)
+    expect(names).toContain('msgboard_subscribe')
+    expect(names).toContain('msgboard_unsubscribe')
   })
 
   it('renders the shared schemas', () => {

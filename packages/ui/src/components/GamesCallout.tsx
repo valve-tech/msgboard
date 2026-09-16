@@ -22,7 +22,7 @@ export function GamesCallout() {
           </div>
           <h2 className="text-3xl font-bold">
             MsgBoard{' '}
-            <span className="bg-gradient-to-br from-amber-200 via-amber-400 to-orange-500 bg-clip-text text-transparent">
+            <span className="gradient-text bg-gradient-to-br from-amber-200 via-amber-400 to-orange-500">
               Games
             </span>
           </h2>

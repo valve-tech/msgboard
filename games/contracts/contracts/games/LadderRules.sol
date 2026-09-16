@@ -26,6 +26,7 @@ library LadderRules {
     uint8 internal constant TOWERS_GAME_ID = 14;
     uint8 internal constant CHICKEN_GAME_ID = 15;
     uint8 internal constant GREED_DICE_GAME_ID = 19;
+    uint8 internal constant CIPHER_GAME_ID = 26;
 
     uint256 internal constant HUNDREDTHS = 100;
     uint256 internal constant ONE_MINUS_EDGE_X100 = 99; // (10000 - 100)/100
@@ -131,6 +132,15 @@ library LadderRules {
             if (rolls != claim.maxSteps || bustFaces < 1 || bustFaces >= GREED_FACES) revert BadConfig();
             safe = (_subRandom(claim.seed, uint64(step)) % GREED_FACES) >= bustFaces;
             multX100 = _compoundFairEdgedX100(GREED_FACES, GREED_FACES - bustFaces, step + 1);
+        } else if (claim.gameId == CIPHER_GAME_ID) {
+            // CIPHER config: abi.encode(uint256 rungs, uint256 symbols). The correct code digit on a rung
+            // is subRandom(seed, rung) % symbols; a step is safe iff the guess (`choice`) equals it. The
+            // per-rung fair factor is symbols/1 (a 1-in-`symbols` guess). Mirror src/games/cipher.ts.
+            (uint256 rungs, uint256 symbols) = abi.decode(claim.config, (uint256, uint256));
+            if (rungs != claim.maxSteps || symbols < 2) revert BadConfig();
+            if (choice >= symbols) revert IllegalMove();
+            safe = (_subRandom(claim.seed, uint64(step)) % symbols) == choice;
+            multX100 = _compoundFairEdgedX100(symbols, 1, step + 1);
         } else {
             revert UnknownGame();
         }

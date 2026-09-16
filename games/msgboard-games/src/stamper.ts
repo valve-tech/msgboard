@@ -14,17 +14,19 @@ import type { Stamper, StampInput, Stamp } from './board'
  *   3. (none)  — if neither loads, `loadDefaultStamper` returns `null` and the adapter falls back to the
  *                SDK's JS grind (`board.doPoW`).
  *
- * Both engines expose the same `stamp(req)` → 40-byte `nonce_be(8) ‖ hash(32)` (or null/undefined when
- * `maxIters` is exhausted) contract, so a single wrapper adapts either to the `Stamper` surface.
+ * Both engines expose the same `stamp(req)` → 40-byte `nonce_be(8) ‖ hash(32)` (or null/undefined
+ * when `maxIters` is exhausted) contract, so a single wrapper adapts either to the `Stamper` surface.
  */
 
-/** The low-level engine call both native and WASM expose. */
+/** The low-level engine call both native and WASM expose (the grinder's `stamp`). `version` is the
+ *  message version hashed into the scalar transcript — always 1. */
 type EngineStamp = (req: {
   category: Uint8Array
   data: Uint8Array
   workMultiplier: number
   workDivisor: number
   blockHash: Uint8Array
+  version: number
   startNonce: number
   maxIters: number
 }) => Uint8Array | null | undefined
@@ -105,7 +107,7 @@ async function tryWasm(): Promise<EngineStamp | null> {
   try {
     const wasm: {
       default: (arg?: { module_or_path: BufferSource }) => Promise<unknown>
-      stamp: EngineStamp
+      stamp?: EngineStamp
     } = await import('@msgboard/pow-grinder/wasm')
     if (isNode()) {
       // In Node, `init()` with no arg fetches a file:// URL and FAILS. Hand it the wasm bytes via the
@@ -148,6 +150,7 @@ export async function loadDefaultStamper(): Promise<Stamper | null> {
       workMultiplier: Number(input.workMultiplier),
       workDivisor: Number(input.workDivisor),
       blockHash: hexToBytes(input.blockHash, { size: 32 }),
+      version: 1, // stamp REQUIRES the field — the one and only message version
       startNonce: 0,
       maxIters: MAX_ITERS,
     })

@@ -176,6 +176,81 @@
           }
         }
       ]
+    },
+    {
+      "name": "msgboard_subscribe",
+      "summary": "Subscribe over WebSocket to messages as the board accepts them. Notifications arrive with the method name `msgboard_subscription`.",
+      "params": [
+        {
+          "name": "kind",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/SubscriptionKind"
+          }
+        },
+        {
+          "name": "filter",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/NewMessagesFilter"
+          }
+        }
+      ],
+      "result": {
+        "name": "subscriptionId",
+        "schema": {
+          "$ref": "#/components/schemas/Hex"
+        }
+      },
+      "examples": [
+        {
+          "name": "every new message",
+          "params": [
+            {
+              "name": "kind",
+              "value": "newMessages"
+            }
+          ],
+          "result": {
+            "name": "subscriptionId",
+            "value": "0xd5c19c3a8649b1dbfcda600653729417"
+          }
+        }
+      ]
+    },
+    {
+      "name": "msgboard_unsubscribe",
+      "summary": "Cancel a subscription. Returns `true` if this connection held that subscription id, and `false` if it did not.",
+      "params": [
+        {
+          "name": "subscriptionId",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/Hex"
+          }
+        }
+      ],
+      "result": {
+        "name": "unsubscribed",
+        "schema": {
+          "type": "boolean"
+        }
+      },
+      "examples": [
+        {
+          "name": "cancel",
+          "params": [
+            {
+              "name": "subscriptionId",
+              "value": "0xd5c19c3a8649b1dbfcda600653729417"
+            }
+          ],
+          "result": {
+            "name": "unsubscribed",
+            "value": true
+          }
+        }
+      ]
     }
   ],
   "components": {
@@ -304,6 +379,25 @@
           "type": "array",
           "items": {
             "$ref": "#/components/schemas/RPCMessage"
+          }
+        }
+      },
+      "SubscriptionKind": {
+        "title": "SubscriptionKind",
+        "type": "string",
+        "enum": [
+          "newMessages"
+        ],
+        "description": "Always the string `newMessages`. It is the only kind the board supports, and any other value is rejected with JSON-RPC error -32602."
+      },
+      "NewMessagesFilter": {
+        "title": "NewMessagesFilter",
+        "type": "object",
+        "description": "Optional second parameter to msgboard_subscribe. Omit it to receive every message the board accepts.",
+        "properties": {
+          "category": {
+            "$ref": "#/components/schemas/Hex",
+            "description": "Deliver only messages in this 32-byte category hash."
           }
         }
       }

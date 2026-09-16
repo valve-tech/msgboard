@@ -1,0 +1,53 @@
+# Is our board alive?
+#
+# TWO QUESTIONS, AND ONLY ONE GATES THIS JOB.
+#
+# Alive is ours. An empty board means every writer is down or the node stopped
+# accepting; it cannot be blamed on anyone else and we can fix it. That has actually
+# happened — a proof-of-work cutover broke every writer on 2026-08-21, all three
+# boards drained to zero inside their ~20 minute retention, and nobody noticed for
+# eighteen days. This job catches that within the hour, which is why it runs hourly.
+#
+# Agreement with the wider network is real and unowned. Our PulseChain board shares
+# nothing with rpc.pulsechain.com's. That is worth knowing and nobody has taken it, so
+# it is REPORTED and never gated. An hourly failure on a finding no one has agreed to
+# act on is exactly how a check trains people to ignore it — and this job has to stay
+# believable for the day the liveness half fires. It shipped gating on that finding
+# and failed five times on day one, which is the mistake this comment exists to record.
+#
+# Replica-versus-replica disagreement DOES gate, but only where it can be measured.
+# one.valve.city pins each API key to one upstream, so from GitHub we reach one of our
+# replicas and cannot address the other. Set CONVERGENCE_<chain> to per-replica URLs
+# and run it inside the fleet for that. The mainnet split of 2026-09-08, where two
+# nodes held completely disjoint boards for weeks, is NOT visible from here.
+
+name: board convergence
+
+on:
+  schedule:
+    - cron: '41 * * * *'
+  pull_request:
+    paths:
+      - 'packages/node-check/**'
+  workflow_dispatch:
+
+concurrency:
+  group: board-convergence-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  convergence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+      - run: npm ci
+      - run: npm run build --workspace @msgboard/node-check
+      - run: npm run test --workspace @msgboard/node-check
+      # Exit 1 when our board is partitioned, unreadable, or unverifiable.
+      - run: node packages/node-check/dist/convergence-cli.js

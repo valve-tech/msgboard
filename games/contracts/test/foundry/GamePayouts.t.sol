@@ -162,4 +162,92 @@ contract GamePayoutsTest is Test {
         assertEq(bP, 0);
         assertEq(bH, ESCROW_PLAYER + DICEX2_ESCROW_HOUSE);
     }
+
+    // ============================== roulette (gameId 25) ==============================
+    // European single-zero. Winning pocket = r % 37, so raw == pocket for these vectors. All payouts are
+    // printed by the REAL msgboard-games roulette reference (stake 200 total). Params are the abi.encode
+    // of the RouletteBet[] the TS side commits (viem tuple[] == the library's RouletteBet struct).
+
+    /// external wrapper so vm.expectRevert can catch reverts from the inlined library call.
+    function settleExt(uint8 gameId, uint256 r, bytes calldata params, uint256 eP, uint256 eH)
+        external
+        pure
+        returns (uint256, uint256)
+    {
+        return GamePayouts.settle(gameId, r, params, eP, eH);
+    }
+
+    function _bet(uint8 t, uint8 sel, uint256 stake) internal pure returns (GamePayouts.RouletteBet memory b) {
+        b.betType = t;
+        b.selection = sel;
+        b.stake = stake;
+    }
+
+    // A: single straight-up on 17 (stake 200). Ceiling 3600 -> escrowHouse 7000, pot 7200 == win payout.
+    function test_roulette_straightWin_matchesTs() public pure {
+        GamePayouts.RouletteBet[] memory bets = new GamePayouts.RouletteBet[](1);
+        bets[0] = _bet(0, 17, 200);
+        bytes memory params = abi.encode(bets);
+        (uint256 bP, uint256 bH) = GamePayouts.settle(25, 17, params, 200, 7000);
+        assertEq(bP, 7200); // 200 * 36
+        assertEq(bP + bH, 200 + 7000);
+        // pocket 18 loses
+        (uint256 bP2,) = GamePayouts.settle(25, 18, params, 200, 7000);
+        assertEq(bP2, 0);
+    }
+
+    // B: red(100) + straight-19(100). Ceiling 1900 -> escrowHouse 3600, pot 3800.
+    function test_roulette_multiBet_matchesTs() public pure {
+        GamePayouts.RouletteBet[] memory bets = new GamePayouts.RouletteBet[](2);
+        bets[0] = _bet(1, 0, 100); // red
+        bets[1] = _bet(0, 19, 100); // straight 19 (also red)
+        bytes memory params = abi.encode(bets);
+        // pocket 19: red 200 + straight 3600 = 3800 (full pot)
+        (uint256 bP, uint256 bH) = GamePayouts.settle(25, 19, params, 200, 3600);
+        assertEq(bP, 3800);
+        assertEq(bH, 0);
+        assertEq(bP + bH, 3800);
+        // pocket 3 (red, not 19): red 200 only
+        (uint256 bP2,) = GamePayouts.settle(25, 3, params, 200, 3600);
+        assertEq(bP2, 200);
+        // pocket 4 (black): both lose
+        (uint256 bP3,) = GamePayouts.settle(25, 4, params, 200, 3600);
+        assertEq(bP3, 0);
+    }
+
+    // C: dozen-0(100) + column-2(100). Ceiling 300 -> escrowHouse 400, pot 600.
+    function test_roulette_dozenColumn_matchesTs() public pure {
+        GamePayouts.RouletteBet[] memory bets = new GamePayouts.RouletteBet[](2);
+        bets[0] = _bet(7, 0, 100); // dozen 0 (1-12)
+        bets[1] = _bet(8, 2, 100); // column 2 (3,6,9,...)
+        bytes memory params = abi.encode(bets);
+        // pocket 3: dozen0 (300) + column2 (300) = 600 (full pot)
+        (uint256 bP,) = GamePayouts.settle(25, 3, params, 200, 400);
+        assertEq(bP, 600);
+        // pocket 1: dozen0 only
+        (uint256 bP2,) = GamePayouts.settle(25, 1, params, 200, 400);
+        assertEq(bP2, 300);
+        // pocket 6: both
+        (uint256 bP3,) = GamePayouts.settle(25, 6, params, 200, 400);
+        assertEq(bP3, 600);
+        // pocket 0 (green): both lose
+        (uint256 bP4,) = GamePayouts.settle(25, 0, params, 200, 400);
+        assertEq(bP4, 0);
+    }
+
+    function test_roulette_rejects_stakeMismatch() public {
+        GamePayouts.RouletteBet[] memory bets = new GamePayouts.RouletteBet[](1);
+        bets[0] = _bet(1, 0, 100);
+        bytes memory params = abi.encode(bets);
+        vm.expectRevert(bytes("roulette: stake must equal sum of bets"));
+        this.settleExt(25, 0, params, 200, 400);
+    }
+
+    function test_roulette_rejects_badSelection() public {
+        GamePayouts.RouletteBet[] memory bets = new GamePayouts.RouletteBet[](1);
+        bets[0] = _bet(0, 37, 200); // straight selection out of range
+        bytes memory params = abi.encode(bets);
+        vm.expectRevert(bytes("roulette: bad straight selection"));
+        this.settleExt(25, 0, params, 200, 7000);
+    }
 }

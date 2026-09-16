@@ -86,6 +86,16 @@ export type RelayerConfig<T> = {
   /** Historical recording; runs in observe and live modes. */
   sink?: RelayerSink<T>
   condition?: RelayerCondition<T>
+  /**
+   * Called once after every tick that finished, with that tick's report. Use it
+   * for liveness: a per-tick record separates "the loop is dead" from "the source
+   * had nothing", which per-item logging cannot do. A tick that throws does not
+   * call this, so a stale heartbeat is the failure signal.
+   *
+   * An error thrown here is logged and swallowed. Observability must never take
+   * down the loop it observes.
+   */
+  onTick?: (report: TickReport, context: RelayerContext) => void | Promise<void>
   logger?: Logger
   /** Run `store.prune` / `sink.prune` every N ticks. Defaults to 30. */
   pruneEveryTicks?: number

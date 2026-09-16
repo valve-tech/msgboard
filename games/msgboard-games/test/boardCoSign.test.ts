@@ -5,6 +5,7 @@ import { MsgBoardTransport, type BoardClient } from '../src/msgboardTransport'
 import { makeBoardHouseCoSign, makeBoardPlayerCoSign } from '../src/boardCoSign'
 import { runHouseSide, runPlayerSide } from '../src/coSignTransport'
 import { verifyFinishedSession } from '../src/session'
+import { TEST_DOMAIN, verifyCloseSig, closeFromBody } from '../src/sessionState'
 import { fixedDiceConfig } from './helpers'
 
 /** In-memory BoardClient: a shared append-only log keyed by category. Both transports built on the
@@ -49,6 +50,16 @@ describe('board-backed co-sign transport', () => {
     // If the bigint codec were wrong, JSON.stringify would have thrown or the revived state would
     // mis-hash and verifyFinishedSession would be false. True ⇒ nonce/balances/stake/params all survived.
     expect(await verifyFinishedSession(transcriptJson, ctx)).toBe(true)
+
+    // The house drove a mutual CLOSE over the SAME board (close-req/close-rep), and both close-sigs
+    // survived the wire codec — this is the auth EscrowedSettlement.settle() submits on-chain.
+    const t = JSON.parse(transcriptJson)
+    const closeEnv = t.entries.find((e: { kind: string }) => e.kind === 'CLOSE')
+    expect(closeEnv).toBeDefined()
+    const close = closeFromBody(closeEnv.body.close)
+    expect(close.nonce).toBe(1n)
+    expect(await verifyCloseSig(ctx.parties.player, TEST_DOMAIN, close, closeEnv.body.sigs.player)).toBe(true)
+    expect(await verifyCloseSig(ctx.parties.house, TEST_DOMAIN, close, closeEnv.body.sigs.house)).toBe(true)
   })
 
   it('a house-substituted clientSeed makes the player refuse → the house request times out', async () => {

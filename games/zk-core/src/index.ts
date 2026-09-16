@@ -8,7 +8,9 @@ export * from './attestedDeck'
 // lazily on first use, so importing this barrel does NOT pull the WASM. NOT for ship until
 // licensing clears — selectable explicitly alongside the secp256k1 path.
 export * from './zypherDeck'
+export * from './deckBinding'
 export * from './stateSig'
+export * from './relayIntents'
 export * from './channel'
 export * from './transcript'
 export * from './transport'

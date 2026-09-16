@@ -129,6 +129,9 @@ export const selectRpcValid = (s: RawChain): boolean =>
 export const selectFaucetIsActive = (s: RawChain): boolean =>
   s.chainOption === 'custom' || !!selectSelectedOption(s)?.gasSponsor
 
+export const selectChipFaucetActive = (s: RawChain): boolean =>
+  s.chainOption !== 'custom' && !!selectSelectedOption(s)?.chipFaucet
+
 // ── store ────────────────────────────────────────────────────────────────
 
 const persist = (key: string, value: string) => {

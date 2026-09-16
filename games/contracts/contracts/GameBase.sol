@@ -20,6 +20,8 @@ abstract contract GameBase is ConsumerReceiver {
     error BadSubset();
     error SubsetMismatch();
     error StakeMismatch();
+    error PriceMismatch();
+    error TokenMismatch();
 
     event OwnerTransferred(address indexed previousOwner, address indexed newOwner);
     event ValidatorAdded(address indexed validator);
@@ -137,10 +139,30 @@ abstract contract GameBase is ConsumerReceiver {
         internal
         returns (bytes32 key)
     {
+        return _heatBoundStaked(subset, locations, HEAT_TOKEN, 0);
+    }
+
+    /// @notice Like _heatBound, but binds each location to an expected staking `token` and `price`. At
+    /// (native, 0) this is the legacy behaviour (no validator stake). At price > 0 each provider's
+    /// preimage is STAKED with that price in that token, so a provider that WITHHOLDS its reveal
+    /// forfeits the stake on chop (Random's `chop` pays the non-revealer's staked price to the request
+    /// owner = this game). Binding BOTH token and price is essential: without it a player could pass
+    /// native/price-0 locations and heat a forfeit-free round, re-opening the selective-abort free-roll.
+    /// The provider must have inked a pool at exactly this (token, price) — that is what puts the
+    /// provider's OWN capital at stake, denominated in the same token as the bet so the forfeit is
+    /// value-comparable to (and routable into) the bankroll with no oracle.
+    function _heatBoundStaked(
+        address[] memory subset,
+        PreimageLocation.Info[] calldata locations,
+        address token,
+        uint256 price
+    ) internal returns (bytes32 key) {
         uint256 n = subset.length;
         if (locations.length != n) revert SubsetMismatch();
         for (uint256 i = 0; i < n; ++i) {
             if (locations[i].provider != subset[i]) revert SubsetMismatch();
+            if (locations[i].token != token) revert TokenMismatch();
+            if (locations[i].price != price) revert PriceMismatch();
             if (!_isAllowlisted(subset[i])) revert NotAllowlisted();
         }
         PreimageLocation.Info memory settings = PreimageLocation.Info({
@@ -148,7 +170,7 @@ abstract contract GameBase is ConsumerReceiver {
             callAtChange: true,
             durationIsTimestamp: DURATION_IS_TIMESTAMP,
             duration: HEAT_DURATION,
-            token: HEAT_TOKEN,
+            token: token,
             price: 0,
             offset: 0,
             index: 0
@@ -174,7 +196,18 @@ abstract contract GameBase is ConsumerReceiver {
         _onChop(instanceId);
     }
 
-    function onReverse(bytes32, address, uint256) external override {}
+    /// @notice Core Random calls this when it reverses charges into this game's custody — notably on
+    /// `chop`, where it credits the request owner (this game) the withheld stakes plus the fee refund and
+    /// passes the EXACT amount. Routed to a guarded hook so a game can capture the credit no matter WHO
+    /// called the public `chop` (a third party can front-run it). onlyRandom is essential: without it
+    /// anyone could forge a credit and trick the game into routing custody it never received.
+    function onReverse(bytes32 key, address token, uint256 amount) external override {
+        if (msg.sender != random) revert OnlyRandom();
+        _onReverse(instanceByKey[key], token, amount);
+    }
+
+    /// @notice Optional hook for a game to record a reverse-charge credit (e.g. a chop forfeit).
+    function _onReverse(bytes32 instanceId, address token, uint256 amount) internal virtual {}
 
     /// @notice The game-specific settlement, invoked by onCast (push) and the game's pull fallback.
     function _settle(bytes32 instanceId, bytes32 seed) internal virtual;
@@ -185,5 +218,21 @@ abstract contract GameBase is ConsumerReceiver {
     /// @notice True once `armedAtBlock + STALE_BLOCKS` has passed.
     function _isStale(uint256 armedAtBlock) internal view returns (bool) {
         return block.number >= armedAtBlock + STALE_BLOCKS;
+    }
+
+    // --- shared game guards ---
+
+    /// @notice The seed finalized for a Random request key, or bytes32(0) if it hasn't finalized
+    /// yet. Shared by every game's claim() pull-fallback and refundStale() seed-missing check.
+    function _seed(bytes32 key) internal view returns (bytes32) {
+        return IRandom(random).randomness(key).seed;
+    }
+
+    /// @notice True once a game instance may be refunded: its draw was chopped at expiry (a
+    /// liveness failure) or the liveness timeout has elapsed since it was armed. Callers must
+    /// additionally confirm the seed is still missing before refunding — an instance whose seed HAS
+    /// finalized is value-decided and must resolve via claim/onCast, never refundStale.
+    function _refundableNow(bytes32 instanceId, uint256 armedAtBlock) internal view returns (bool) {
+        return choppedInstance[instanceId] || _isStale(armedAtBlock);
     }
 }

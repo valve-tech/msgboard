@@ -27,7 +27,19 @@ import * as viem from 'viem'
 import { MsgBoardClient } from '@msgboard/sdk'
 import { randomAbi, poolLocationFor, type GamesChainId, type Info } from '@msgboard/games-core'
 import { seeds0Secret, SECRET_STRIDE } from './seeds0'
-import { loadDeployment, makeActor, sendAs, heatsSince, flooredFees } from './actor-common'
+import {
+  loadDeployment,
+  makeActor,
+  sendAs,
+  heatsSince,
+  heatsSincePriced,
+  flooredFees,
+  tierLadder,
+  operatorTables,
+  operatorSecret,
+  operatorLocationsAt,
+  inkValidatorStakedPool,
+} from './actor-common'
 
 const env = process.env
 const CHAIN = (env.CHAIN ? Number(env.CHAIN) : 943) as GamesChainId
@@ -42,8 +54,47 @@ const ZERO32 = viem.padHex('0x0', { size: 32 })
 const INK_AHEAD = 8n
 
 const OPS_INDEX = env.OPS_INDEX ? Number(env.OPS_INDEX) : 10
-const OPS_TOP_UP_BELOW = viem.parseEther('20')
-const OPS_TOP_UP_TO = viem.parseEther('100')
+// Top-up ceiling. The 943 defaults (refill to 100 when below 20) assume near-zero gas. On 369 the
+// base fee is ~730k gwei, so one cast RESERVES gas(1.5M) x maxFeePerGas (~2.5k PLS) up front — a
+// 100 PLS ops wallet fails every cast's balance check ("exceeds balance"). Raise these per chain in
+// the compose env (369 uses OPS_TOP_UP_TO=15000 / OPS_TOP_UP_BELOW=5000).
+const OPS_TOP_UP_BELOW = viem.parseEther(env.OPS_TOP_UP_BELOW || '20')
+const OPS_TOP_UP_TO = viem.parseEther(env.OPS_TOP_UP_TO || '100')
+
+// The operator game's validators are the canonicalSubset, derived from the SAME mnemonic at
+// addressIndex VALIDATOR_INDEX_BASE + i (matches ink-pools.ts / deploy.ts). The caster holds the
+// mnemonic so it can sign the stake deposit + ink AS each validator, staking each validator's OWN
+// capital in the table token.
+const VALIDATOR_INDEX_BASE = env.VALIDATOR_INDEX_BASE ? Number(env.VALIDATOR_INDEX_BASE) : 1
+
+/** Minimal OperatorCoinFlip surface the watcher needs beyond Random: map a heat key to its round, and
+ *  wrap Random.chop with the forfeit routing. instanceByKey is inherited from GameBase. */
+const operatorGameAbi = [
+  { type: 'function', name: 'instanceByKey', stateMutability: 'view', inputs: [{ name: '', type: 'bytes32' }], outputs: [{ type: 'bytes32' }] },
+  {
+    type: 'function',
+    name: 'chopAndRoute',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'roundId', type: 'bytes32' },
+      {
+        name: 'info',
+        type: 'tuple[]',
+        components: [
+          { name: 'provider', type: 'address' },
+          { name: 'callAtChange', type: 'bool' },
+          { name: 'durationIsTimestamp', type: 'bool' },
+          { name: 'duration', type: 'uint256' },
+          { name: 'token', type: 'address' },
+          { name: 'price', type: 'uint256' },
+          { name: 'offset', type: 'uint256' },
+          { name: 'index', type: 'uint256' },
+        ],
+      },
+    ],
+    outputs: [],
+  },
+] as const satisfies viem.Abi
 
 const main = async () => {
   if (!env.MNEMONIC) throw new Error('MNEMONIC (funded treasury) required')
@@ -100,6 +151,45 @@ const main = async () => {
       }
     })
 
+  // Read the FIRST committed preimage-hash inked at a pool location. The `pointer` is an SSTORE2 data
+  // contract: its runtime code is a 0x00 STOP byte followed by the raw 32-byte preimage hashes, so the
+  // first hash is code bytes [1..33). Returns null when the location is uninked.
+  const committedFirstHash = async (probe: Info): Promise<viem.Hex | null> => {
+    const ptr = (await publicClient.readContract({
+      address: config.random,
+      abi: randomAbi,
+      functionName: 'pointer',
+      args: [probe],
+    })) as viem.Hex
+    if (ptr === viem.zeroAddress) return null
+    const code = await publicClient.getCode({ address: ptr })
+    if (!code || code.length < 4 + 64) return null
+    return ('0x' + code.slice(4, 4 + 64)) as viem.Hex // skip '0x' + the leading 00 STOP byte, take 32 bytes
+  }
+
+  // A pool is DRIFTED when its on-chain commitment doesn't match the secret the cast reveals for that
+  // slot — i.e. it was inked with the WRONG pool's preimages (an append/offset drift; happened once at
+  // 943 pool 25 / slots 1600-1663). Such a pool can never be cast for any slot, so the caster must stop
+  // re-simulating it every tick (the failing sims otherwise spin forever and slow the tick), and those
+  // rounds settle via each game's own timeout/refund, not the caster. Cached per-process.
+  const driftedPools = new Set<string>()
+  const isPoolDrifted = async (poolStart: bigint): Promise<boolean> => {
+    if (driftedPools.has(poolStart.toString())) return true
+    for (const [i, provider] of config.canonicalSubset.entries()) {
+      const base = BigInt(config.poolOffsets[provider.toLowerCase()] ?? '0')
+      const pool = poolLocationFor(poolStart, base, poolSize)
+      const probe: Info = { provider, callAtChange: false, durationIsTimestamp: false, duration: 12n, token: viem.zeroAddress, price: 0n, offset: pool.offset, index: 0n }
+      const got = await committedFirstHash(probe)
+      if (got === null) return false // uninked (not drifted) — maintainPools will ink it
+      const expected = viem.keccak256(seeds0Secret(env.SEEDS0!, i * SECRET_STRIDE + Number(poolStart)))
+      if (got !== expected) {
+        driftedPools.add(poolStart.toString())
+        return true
+      }
+    }
+    return false
+  }
+
   /**
    * Ensure the pool the CURRENT heat slot lives in exists, and pre-ink pool n+1 when the live
    * pool is nearly spent. The current-pool check is the recovery path: if this watcher was down
@@ -132,6 +222,28 @@ const main = async () => {
           args: [probe],
         })) as viem.Hex
         if (pointer !== viem.zeroAddress) continue // this pool already inked
+
+        // DRIFT PREVENTION. The caster IGNORES the passed offset and APPENDS at its own internal
+        // cursor; `poolLocationFor` only PREDICTS this pool lands at base + poolStart, and that holds
+        // ONLY if appends are strictly ordered with no gap. If the PREDECESSOR pool (poolStart -
+        // poolSize) isn't inked yet, appending now would land THIS pool's preimages in the
+        // predecessor's slot — the exact off-by-64 drift that wedged 943 pool 25. Refuse to append
+        // into a gap; the predecessor must be inked first (this pass inks [current, n+1] in order, so
+        // the normal boundary case is fine; a multi-pool gap from long downtime needs ordered backfill).
+        if (poolStart >= poolSize) {
+          const predOffset = poolLocationFor(poolStart - poolSize, base, poolSize).offset
+          const predPtr = (await publicClient.readContract({
+            address: config.random,
+            abi: randomAbi,
+            functionName: 'pointer',
+            args: [{ ...probe, offset: predOffset }],
+          })) as viem.Hex
+          if (predPtr === viem.zeroAddress) {
+            console.error(`INK SKIPPED slot ${poolStart} validator ${i}: predecessor pool at offset ${predOffset} is not inked — appending now would drift into the gap; backfill the predecessor first`)
+            continue
+          }
+        }
+
         const vault = await publicClient.getBalance({ address: treasury.account.address })
         if (vault < VAULT_FLOOR) {
           console.log(`vault below floor (${viem.formatEther(vault)} < ${viem.formatEther(VAULT_FLOOR)}) — pool inking paused until refilled`)
@@ -148,6 +260,113 @@ const main = async () => {
           args: [{ ...probe, offset: 0n }, viem.concatHex(preimages)],
         })
         console.log(`inked pool at slot ${poolStart} for validator ${i} (${provider}) at offset ${pool.offset}`)
+        // Read back what ACTUALLY landed. Despite the contiguity guard, a concurrent append (e.g. an
+        // RPC-lagged pointer read that missed a just-mined ink) can still land this pool off-target.
+        // If committed[0] doesn't match this pool's first secret, the append DRIFTED: record it (so
+        // casts drop the pool), alarm, and ABORT the rest of this pass so the drift can never compound
+        // across the remaining pools/validators.
+        const committed = await committedFirstHash(probe)
+        const expected = viem.keccak256(seeds0Secret(env.SEEDS0!, i * SECRET_STRIDE + firstSecretIndex))
+        if (committed !== expected) {
+          driftedPools.add(poolStart.toString())
+          console.error(`POOL INK DRIFT slot ${poolStart} validator ${i}: committed[0] ${committed} != expected ${expected} — append landed off-target; aborting further inking this pass to avoid compounding. Manual repair needed.`)
+          return
+        }
+      }
+    }
+  }
+
+  // Keys past the point of casting — finalized (already settled) OR expired (window closed, can
+  // never be cast). Both are terminal, so once a key lands here we never read it again. Without this
+  // the per-tick scan re-reads EVERY heat since the origin, and fanning those reads out concurrently
+  // (below) would hammer the RPC as history grows. With it, each tick reads only the handful of
+  // still-in-flight rounds. Process-lifetime cache; a restart re-scans once (harmless).
+  const resolved = new Set<string>()
+
+  // The validator wallets for the operator game, derived from the mnemonic. The caster signs the stake
+  // deposit + ink AS each validator so the staked capital is the validator's own.
+  const validatorWallets = config.operatorCoinFlip
+    ? config.canonicalSubset.map((addr, i) => {
+        const v = makeActor(CHAIN, env.MNEMONIC!, VALIDATOR_INDEX_BASE + i, env.RPC)
+        if (v.account.address.toLowerCase() !== addr.toLowerCase()) {
+          console.warn(`validator ${i} mnemonic index ${VALIDATOR_INDEX_BASE + i} = ${v.account.address} != canonicalSubset ${addr}`)
+        }
+        return v.wallet
+      })
+    : []
+
+  /**
+   * The operator game runs on its OWN staked (token, tierPrice) pool ladders (heatsSincePriced), NEVER
+   * the shared price-0 counter. Each pass: (1) keeps each validator's staked pool inked for every open
+   * table tier (self-inked from the validator's key, so the stake is the validator's own capital); (2)
+   * casts live operator rounds on their priced ladder; (3) chops any round left unfinalized past its cast
+   * window — first casting whatever secrets exist (flicking honest stakes back), then chopAndRoute, which
+   * wraps Random.chop and routes the withholder's forfeited stake into the operator's bankroll.
+   */
+  const operatorPass = async () => {
+    if (!config.operatorCoinFlip) return
+    const game = config.operatorCoinFlip
+    const tables = await operatorTables(publicClient, config)
+    // The distinct (token, price) tiers in play across all OPEN tables.
+    const tiers = new Map<string, { token: viem.Hex; price: bigint }>()
+    for (const t of tables) {
+      if (!t.open) continue
+      for (const price of tierLadder(t.minStake, t.maxStake)) tiers.set(`${t.token.toLowerCase()}:${price}`, { token: t.token, price })
+    }
+
+    for (const { token, price } of tiers.values()) {
+      // (1) keep each validator's staked pool inked ahead of the ladder boundary.
+      const heats = await heatsSincePriced(publicClient, config, token, price)
+      const k = BigInt(heats.length)
+      const remaining = poolSize - (k % poolSize)
+      const poolStarts = [(k / poolSize) * poolSize]
+      if (remaining <= INK_AHEAD) poolStarts.push(((k / poolSize) + 1n) * poolSize)
+      for (const poolStart of poolStarts) {
+        for (let i = 0; i < config.canonicalSubset.length; i++) {
+          try {
+            const result = await inkValidatorStakedPool(
+              publicClient, validatorWallets[i]!, config.random, env.SEEDS0!, i, token, price, poolStart, Number(poolSize),
+            )
+            if (result === 'inked') console.log(`validator ${i} inked staked pool ${token}@${price} slot ${poolStart}`)
+            else if (result === 'underfunded') console.warn(`validator ${i} underfunded for ${token}@${price} — pool not inked`)
+          } catch (error) {
+            console.error(`ink ${token}@${price} slot ${poolStart} validator ${i} failed: ${(error as Error).message?.split('\n').slice(0, 2).join(' ¦ ')}`)
+          }
+        }
+      }
+
+      // (2)+(3) cast live rounds, chop the stalled ones.
+      for (let idx = 0; idx < heats.length; idx++) {
+        const heat = heats[idx]!
+        if (resolved.has(heat.key)) continue
+        const randomness = (await publicClient.readContract({ address: config.random, abi: randomAbi, functionName: 'randomness', args: [heat.key] })) as { seed: viem.Hex; timeline: bigint }
+        if (randomness.seed !== ZERO32) { resolved.add(heat.key); continue }
+        const slot = BigInt(idx)
+        const locations = operatorLocationsAt(config.canonicalSubset, slot, poolSize, token, price)
+        const secrets = config.canonicalSubset.map((_v, i) => operatorSecret(env.SEEDS0!, i, token, price, slot))
+        const isExpired = (await publicClient.readContract({ address: config.random, abi: randomAbi, functionName: 'expired', args: [randomness.timeline] })) as boolean
+        // Best-effort cast: settles a live round, or flicks the honest stakes back on a stalled one.
+        // Explicit gas: Random._call swallows an onCast revert, so eth_estimateGas can under-provision
+        // the push-settlement sub-call (starved by EIP-150 63/64), leaving the round Pending after a
+        // "successful" cast that the receipt.status guard won't catch. A generous limit funds onCast;
+        // you pay for gas USED, not the limit. claim() is still the backstop if a cast is ever short.
+        try {
+          await sendAs(publicClient, wallet, { address: config.random, abi: randomAbi, functionName: 'cast', args: [heat.key, locations, secrets], gas: 1_500_000n })
+        } catch (error) {
+          if (!isExpired) console.error(`operator cast ${heat.key} slot ${slot} failed: ${(error as Error).message?.split('\n').slice(0, 2).join(' ¦ ')}`)
+        }
+        const after = (await publicClient.readContract({ address: config.random, abi: randomAbi, functionName: 'randomness', args: [heat.key] })) as { seed: viem.Hex }
+        if (after.seed !== ZERO32) { resolved.add(heat.key); console.log(`operator round settled ${heat.key} slot ${slot}`); continue }
+        if (!isExpired) continue // still castable next tick
+        // Stalled past its window: route the forfeit through the game (chop + bank the withheld stake).
+        try {
+          const roundId = (await publicClient.readContract({ address: game, abi: operatorGameAbi, functionName: 'instanceByKey', args: [heat.key] })) as viem.Hex
+          await sendAs(publicClient, wallet, { address: game, abi: operatorGameAbi, functionName: 'chopAndRoute', args: [roundId, locations] })
+          resolved.add(heat.key)
+          console.log(`operator round chopped + forfeit routed ${heat.key} slot ${slot}`)
+        } catch (error) {
+          console.error(`chopAndRoute ${heat.key} slot ${slot} failed: ${(error as Error).message?.split('\n').slice(0, 2).join(' ¦ ')}`)
+        }
       }
     }
   }
@@ -156,30 +375,110 @@ const main = async () => {
     await topUpOps()
     const heats = await heatsSince(publicClient, config)
     await maintainPools(BigInt(heats.length))
-    for (const [index, heat] of heats.entries()) {
-      const k = BigInt(index)
-      const randomness = (await publicClient.readContract({
-        address: config.random,
-        abi: randomAbi,
-        functionName: 'randomness',
-        args: [heat.key],
-      })) as { seed: viem.Hex }
-      if (randomness.seed !== ZERO32) continue
-      const secrets = config.canonicalSubset.map((_v, i) =>
-        seeds0Secret(env.SEEDS0!, i * SECRET_STRIDE + Number(k)),
+    await operatorPass()
+    // Decide which heats are castable this tick — unfinalized AND with the cast window still open.
+    // These reads are independent, so fan them out: a serial per-heat scan of a long backlog is
+    // itself slow enough to let fresh heats expire before the caster reaches them.
+    //
+    // A stuck/expired request can NEVER be cast, so re-attempting it every tick (a failing simulate
+    // + revert) only wastes time — and a slow tick makes FRESH heats expire before they're cast, the
+    // exact death spiral that wedged this watcher for 10 days. Dropping dead keys keeps the tick short
+    // enough to hit the ~12-block window.
+    const castable = (
+      await Promise.all(
+        heats.map(async (heat, index) => {
+          const k = BigInt(index)
+          if (resolved.has(heat.key)) return null // finalized or expired on an earlier tick
+          const randomness = (await publicClient.readContract({
+            address: config.random,
+            abi: randomAbi,
+            functionName: 'randomness',
+            args: [heat.key],
+          })) as { seed: viem.Hex; timeline: bigint }
+          if (randomness.seed !== ZERO32) {
+            resolved.add(heat.key) // already finalized
+            return null
+          }
+          const isExpired = (await publicClient.readContract({
+            address: config.random,
+            abi: randomAbi,
+            functionName: 'expired',
+            args: [randomness.timeline],
+          })) as boolean
+          if (isExpired) {
+            resolved.add(heat.key) // dead key — can never be cast
+            return null
+          }
+          const secrets = config.canonicalSubset.map((_v, i) =>
+            seeds0Secret(env.SEEDS0!, i * SECRET_STRIDE + Number(k)),
+          )
+          return { key: heat.key, k, secrets }
+        }),
       )
-      try {
-        const receipt = await sendAs(publicClient, wallet, {
-          address: config.random,
-          abi: randomAbi,
-          functionName: 'cast',
-          args: [heat.key, locationsAt(k), secrets],
-        })
-        console.log(`cast key ${heat.key} (slot ${k}) in block ${receipt.blockNumber}`)
-        await postNotice(`cast ${heat.key.slice(0, 10)} blk ${receipt.blockNumber} chain ${CHAIN}`)
-      } catch (error) {
-        // expired window, raced by another caster, etc. — log and keep watching
-        console.error(`cast ${heat.key} failed: ${(error as Error).message?.split('\n').slice(0, 3).join(' ¦ ')}`)
+    ).filter((c): c is { key: viem.Hex; k: bigint; secrets: viem.Hex[] } => c !== null)
+    if (castable.length === 0) return
+
+    // Simulate every castable cast concurrently. A sim failure (raced by another caster, or the
+    // window closing between the expired-check and now) drops just that one — the rest still go out.
+    // Simulating BEFORE assigning nonces means only viable casts consume a nonce, so a dropped cast
+    // can't leave a nonce gap that strands every later cast in the batch as unminable-pending.
+    const fees = await flooredFees(publicClient)
+    const simulated = (
+      await Promise.all(
+        castable.map(async (c) => {
+          try {
+            const { request } = await publicClient.simulateContract({
+              address: config.random,
+              abi: randomAbi,
+              functionName: 'cast',
+              args: [c.key, locationsAt(c.k), c.secrets],
+              account,
+              ...fees,
+              gas: 1_500_000n, // fund the swallowed onCast sub-call (see the operator-cast note above)
+            })
+            return { c, request }
+          } catch (error) {
+            const msg = (error as Error).message ?? ''
+            // A drifted pool (wrong preimages inked) can NEVER be cast — drop the heat so the caster
+            // stops re-simulating it every tick (the death-spiral). Its round settles via the game's
+            // own timeout/refund, not here. Only SecretMismatch is treated as terminal, and only once
+            // the pool is verified drifted (a transient race still retries next tick).
+            if (msg.includes('SecretMismatch') && (await isPoolDrifted((c.k / poolSize) * poolSize))) {
+              resolved.add(c.key)
+              console.error(`cast ${c.key} (slot ${c.k}) DROPPED: pool ${(c.k / poolSize) * poolSize} inked with the wrong preimages (drift) — cannot be cast; settle via the game's timeout`)
+            } else {
+              console.error(`cast ${c.key} (slot ${c.k}) sim failed: ${msg.split('\n').slice(0, 3).join(' ¦ ')}`)
+            }
+            return null
+          }
+        }),
+      )
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ).filter(Boolean) as { c: { key: viem.Hex; k: bigint; secrets: viem.Hex[] }; request: any }[]
+    if (simulated.length === 0) return
+
+    // All casts fire from the one ops wallet, so they MUST carry explicit, contiguous nonces — viem
+    // would otherwise fetch the same 'pending' count for every concurrent send and they'd collide on
+    // a single slot. topUpOps/maintainPools already awaited their ops-wallet sends above, so the
+    // pending count here is a clean base for the batch.
+    const baseNonce = await publicClient.getTransactionCount({ address: account.address, blockTag: 'pending' })
+    const results = await Promise.allSettled(
+      simulated.map(async ({ c, request }, i) => {
+        const hash = await wallet.writeContract({ ...request, nonce: baseNonce + i })
+        const receipt = await publicClient.waitForTransactionReceipt({ hash })
+        if (receipt.status !== 'success') throw new Error(`cast ${c.key} reverted`)
+        console.log(`cast key ${c.key} (slot ${c.k}) in block ${receipt.blockNumber}`)
+        return { c, receipt }
+      }),
+    )
+    // PoW-stamp the settlement notices sequentially AFTER the batch lands — grinding several stamps
+    // at once would spike CPU and stall the concurrent sends' receipts.
+    for (const r of results) {
+      if (r.status === 'fulfilled') {
+        resolved.add(r.value.c.key) // our cast finalized it — don't re-read next tick
+        await postNotice(`cast ${r.value.c.key.slice(0, 10)} blk ${r.value.receipt.blockNumber} chain ${CHAIN}`)
+      } else {
+        console.error(`cast failed: ${(r.reason as Error)?.message?.split('\n').slice(0, 3).join(' ¦ ')}`)
       }
     }
   }

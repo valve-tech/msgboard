@@ -11,6 +11,11 @@
 # READ side ONLY: the box's existing `indexer` container is the WRITE side and owns the message_archive
 # schema. This service reads that same table (+ the live board over RPC).
 #
+# Task H: this play also enables the `petition` read-side group (packages/cosign-archive/src/index.ts)
+# on the SAME cosign-archive process/port and folds /petition/* into the SAME Caddy block alongside
+# /cosign/* + /health — no new service, no new domain. petition-web's VITE_PETITION_READ_BASE points
+# here.
+#
 #   SSH_AUTH_SOCK="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock" \
 #     ansible-playbook deploy-cosign-archive.yml
 - name: Deploy cosign archivist read API (msgboard box)
@@ -124,9 +129,12 @@
             remote_src: true
           register: caddy_backup
 
-        # Only the cosign GET routes + /health are proxied; the bearer is injected upstream (the browser
-        # calls token-free; the server requires it for the non-loopback bind). Everything else 404s.
-        # Managed by a marker so this converges regardless of the box snapshot's inline block.
+        # Only the cosign + petition GET routes + /health are proxied; the bearer is injected upstream
+        # (the browser calls token-free; the server requires it for the non-loopback bind). Everything
+        # else 404s. Managed by a marker so this converges regardless of the box snapshot's inline block.
+        # /petition/* (Task H): the SAME cosign-archive process now also answers the petition read-side
+        # group (see packages/cosign-archive/src/index.ts's `petition:` option) — petition-web's
+        # VITE_PETITION_READ_BASE points at this same domain.
         - name: Add / update the cosign-archive.msgboard.xyz block (idempotent)
           ansible.builtin.blockinfile:
             path: "{{ caddyfile }}"
@@ -135,7 +143,7 @@
               cosign-archive.msgboard.xyz {
               	tls /etc/caddy/origin.pem /etc/caddy/origin.key
               	encode gzip
-              	@api path /cosign/* /health
+              	@api path /cosign/* /petition/* /health
               	handle @api {
               		reverse_proxy cosign-archive:4040 {
               			header_up Authorization "Bearer {env.COSIGN_ARCHIVE_TOKEN}"
@@ -191,6 +199,21 @@
           delay: 5
           until: '"signatures" in sigsmoke.stdout'
 
+        # Positive smoke #3 (Task H) — the petition index route answers a petition body: proves the
+        # newly-enabled `petition` group + the /petition/* Caddy matcher together (a wrong route/token
+        # would 401/404/502 with NO "petitions" key; an empty directory still returns {"petitions":[]}).
+        - name: Smoke the petition index route (expects a "petitions" body)
+          ansible.builtin.command: >-
+            docker run --rm --network host curlimages/curl:latest -sk
+            --resolve {{ domain }}:443:127.0.0.1
+            "https://{{ domain }}/petition/index?days=7"
+          register: petitionsmoke
+          changed_when: false
+          failed_when: '"petitions" not in petitionsmoke.stdout'
+          retries: 12
+          delay: 5
+          until: '"petitions" in petitionsmoke.stdout'
+
         # Regression smoke — the cosign SPA + msgboard root still serve, i.e. recreating caddy didn't
         # break the other hosts.
         - name: Regression smoke — msgboard.xyz still serves 200 + a body
@@ -219,4 +242,4 @@
 
     - name: Done
       ansible.builtin.debug:
-        msg: "cosign-archive live at https://{{ domain }} (/health + /cosign/*, token-injected upstream). Read side of the cosign archive; the indexer keeps writing shares."
+        msg: "cosign-archive live at https://{{ domain }} (/health + /cosign/* + /petition/*, token-injected upstream). Read side of the cosign archive + petition read-side; the indexer keeps writing shares."

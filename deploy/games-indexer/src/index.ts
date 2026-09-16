@@ -1,5 +1,5 @@
 import { ponder } from 'ponder:registry'
-import { gameEvent, settlement, solveAttestation } from 'ponder:schema'
+import { gameEvent, petitionSignature, settlement, solveAttestation } from 'ponder:schema'
 import { openedRow, settledUpdate } from './settlement'
 import { solveRow } from './solves'
 
@@ -87,4 +87,25 @@ ponder.on('EAS:Attested', async ({ event, context }: any) => {
   const row = solveRow(context.chain.id, event)
   if (!row) return
   await context.db.insert(solveAttestation).values(row).onConflictDoNothing()
+})
+
+// PetitionSignatures (Task H): only registered (see ponder.config.ts's petitionChain) once
+// PETITION_ADDR_{943,369} is set, so this handler is simply never invoked before then. One row per
+// distinct (chainId, petitionId, signer) — keyed by signer, not by log, so a signer can never be
+// double-counted across transactions.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ponder.on('PetitionSignatures:Signed', async ({ event, context }: any) => {
+  const { petitionId, signer } = event.args
+  await context.db
+    .insert(petitionSignature)
+    .values({
+      id: `${context.chain.id}-${petitionId}-${signer}`,
+      chainId: context.chain.id,
+      petitionId,
+      signer,
+      blockNumber: event.block.number,
+      blockTimestamp: event.block.timestamp,
+      txHash: event.transaction.hash,
+    })
+    .onConflictDoNothing()
 })

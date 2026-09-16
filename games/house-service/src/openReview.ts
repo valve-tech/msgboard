@@ -1,7 +1,7 @@
 import type { Hex } from 'viem'
 import type { GameDomain, StateSigner, Game } from '@msgboard/games'
 import { escrowFor } from '@msgboard/games'
-import { signOpenTerms, paramsHashOf, type OpenTerms } from '@msgboard/settle'
+import { signOpenTerms, paramsHashForGame, type OpenTerms } from '@msgboard/settle'
 
 export type OpenRequest = {
   tableId: Hex; player: Hex; playerKey: Hex; gameId: number
@@ -37,12 +37,23 @@ export async function reviewOpen(
   }
   const { escrowPlayer, escrowHouse } = escrowFor(req.stake, maxMult)
   if (escrowHouse > ctx.limits.maxEscrowHouse) return { ok: false, reason: 'escrow exceeds house cap' }
+  // paramsHash is routed by gameId over the FULL canonical per-game params encoding — the exact bytes
+  // GamePayouts._<game> decodes and settleWithSeeds checks (keccak256(params) == paramsHash). This is
+  // what lets non-single-target games (plinko/keno/roulette/…) open at all; a single-uint256 hash only
+  // ever matched dice/limbo/crash. Malformed params or an unsupported gameId decline, never crash.
+  let paramsHash: Hex
+  try {
+    paramsHash = paramsHashForGame(req.gameId, req.params)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return { ok: false, reason: 'invalid params: ' + message }
+  }
   const terms: OpenTerms = {
     tableId: req.tableId, player: req.player, playerKey: req.playerKey,
     escrowPlayer, escrowHouse, gameId: req.gameId, rngCommit: ctx.rngCommit,
     clockBlocks: ctx.limits.clockBlocks, expiry: ctx.headBlock + ctx.limits.expiryBlocks,
     clientSeedCommit: req.clientSeedCommit,
-    paramsHash: paramsHashOf((req.params as { targetX100: bigint }).targetX100),
+    paramsHash,
   }
   const houseSig = await signOpenTerms(ctx.houseKey, ctx.domain, terms)
   return { ok: true, terms, houseSig }

@@ -45,6 +45,8 @@ interface ZReveal { card: [string, string]; proof: string }
 interface ZypherEngine {
   generate_key(): ZKeyPair
   aggregate_keys(pubs: string[]): string
+  public_uncompress(pk: string): [string, string]
+  public_compress(publics: [string, string]): string
   init_prover_key(num: number): void
   init_reveal_key(): void
   refresh_joint_key(joint: string, num: number): string[]
@@ -83,6 +85,64 @@ function ensureProverKey(z: ZypherEngine) {
     z.init_reveal_key()
     _proverKeyReady = true
   }
+}
+
+// ---- deck-key-binding support (deckkey-binding-spec B1/B3/B4) --------------------------------
+//
+// Two standalone helpers on top of the raw WASM, used by `deckBinding.ts` to build/verify the
+// on-chain-checkable `jointKeyCommit`. Both are exported here (not in deckBinding.ts) because
+// they need the module-private `engine()`/`ensureProverKey()` plumbing above.
+
+/**
+ * Decompresses a packed Zypher pubkey/aggregate (as returned by `generate_key().pk` or
+ * `aggregate_keys(...)`) into its raw EdOnBN254 affine coordinates `(x, y)`.
+ *
+ * Empirically confirmed (see `deckBinding.test.ts`) that
+ * `public_uncompress(aggregate_keys(pubs)) == raw EdOnBN254 point-sum of the individual pubs'
+ * own affine coordinates` — i.e. this matches the on-chain `RevealVerifier.aggregateKeys` /
+ * `DeckConstants` point-sum semantics exactly, byte-for-byte. That equivalence is what lets
+ * `jointKeyCommit` (computed off-chain from this `(aggX, aggY)`) be re-derived on-chain from
+ * `Σ registered deckKeys` without reimplementing any WASM logic in Solidity.
+ */
+export function uncompressPoint(packed: Hex): { x: bigint; y: bigint } {
+  const [x, y] = engine().public_uncompress(packed as unknown as string)
+  return { x: BigInt(x), y: BigInt(y) }
+}
+
+/**
+ * The 24-word on-chain public-key commitment (`pkc`) for joint key `agg` — Zypher's
+ * `refresh_joint_key(agg, 52)`, which is a PURE function of `(agg, DECK_SIZE)` (empirically
+ * confirmed deterministic across repeated calls — see `deckBinding.test.ts`).
+ *
+ * Exposed standalone (not only as `ZypherDeckProvider.lastPkc`, a side effect of `.shuffle()`)
+ * so a validator can recompute `pkc` from an INDEPENDENTLY-derived aggregate (e.g. the
+ * aggregate of the table's REGISTERED deck keys) without trusting any peer-supplied pkc and
+ * without needing to have already run a shuffle.
+ */
+export function computePkc(agg: Hex): bigint[] {
+  const z = engine()
+  ensureProverKey(z)
+  return z.refresh_joint_key(agg as unknown as string, DECK_SIZE).map((h) => BigInt(h))
+}
+
+/**
+ * Compresses raw EdOnBN254 affine coordinates `(x, y)` into the packed Zypher pubkey hex format
+ * (the exact shape `generate_key().pk` / `aggregate_keys(...)` produce, and `uncompressPoint`
+ * consumes) — the inverse of `uncompressPoint`.
+ *
+ * Used by a client's on-chain deck-key reader (deckkey-binding-spec §B3, audit gap H-2) to turn
+ * `ZkTable.sol`'s `deckKeys[tableId][seat]` — stored as a raw `uint256[2]` affine point, NOT a
+ * packed key — back into the packed form `provider.aggregate(...)` (and `verifyDealBinding`'s
+ * `registeredKeys`) expects. Sourcing `registeredKeys` from chain (via this + a `deckKeys` read)
+ * rather than from the gossiped KEYGEN pubkey is what catches a seat that registers key X
+ * on-chain but gossips a different key Y over the wire (the "wrong-agg decoy").
+ */
+export function compressPoint(x: bigint, y: bigint): Hex {
+  // public_compress expects the SAME 32-byte 0x-hex string shape public_uncompress returns
+  // (empirically confirmed) — a bare decimal string throws inside the WASM ("Odd number of
+  // digits", it tries to hex-decode the string as-is).
+  const toHex32 = (v: bigint): Hex => pad(`0x${v.toString(16)}` as Hex, { size: 32 })
+  return engine().public_compress([toHex32(x), toHex32(y)]) as unknown as Hex
 }
 
 // ---- point (de)serialization between the seam wire and Zypher 4-tuples ----

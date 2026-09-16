@@ -52,6 +52,7 @@ export const deploy = async () => {
   //   '0x000000000000D9ECebf3C23529de49815Dac1c4c',
   // )
   const coinFlip = await hre.viem.deployContract(contractName.CoinFlip, [random.address])
+  const coinFlipTables = await hre.viem.deployContract(contractName.CoinFlipTables, [random.address, _ERC20.address])
   const raffle = await hre.viem.deployContract(contractName.Raffle, [random.address])
   const gameBaseHarness = await hre.viem.deployContract(contractName.GameBaseHarness, [random.address])
   const deployedContracts = {
@@ -67,6 +68,7 @@ export const deploy = async () => {
     consumerIncomplete,
     consumerEmitter,
     coinFlip,
+    coinFlipTables,
     raffle,
     gameBaseHarness,
   }

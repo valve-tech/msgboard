@@ -42,7 +42,8 @@ contract PoWMint {
     /// @return minted the amount minted to the caller
     function mintWithWork(MsgPow.Message calldata m) external returns (uint256 minted) {
         require(MsgPow.verify(m, minDifficulty), "PoWMint: invalid work");
-        bytes32 workHash = MsgPow.workHash(m);
+        // verify() passed, so the revised work hash is in range (ok is always true here).
+        (, bytes32 workHash) = MsgPow.workHash(m);
         require(!claimed[workHash], "PoWMint: work already claimed");
         claimed[workHash] = true;
 

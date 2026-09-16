@@ -1,0 +1,38 @@
+# Compose override that adds the @msgboard/petition-web UI (petition.msgboard.xyz) to the msgboard
+# stack. Run alongside the base:  docker compose -f docker-compose.prod.yml -f docker-compose.petition.yml ...
+# Kept as an override (not folded into docker-compose.prod.yml), same reasoning as docker-compose.cosign.yml:
+# the prod box's copy of the base file is maintained out-of-band; the ansible runbook
+# (ansible/deploy-petition.yml) layers this on top.
+#
+# Same monorepo image as `ui` / `cosign-web` (the root Dockerfile builds every workspace), just a
+# different start command: petition-web's `start` runs `vite preview --host` on 4173 + its own
+# /api/rpc-proxy (mirrors cosign-web's). Caddy reaches it by name over the compose network; no host port.
+#
+# VITE_PETITION_* are build-time (vite inlines `import.meta.env.VITE_*` into the static bundle — there is
+# no runtime-substitution seam here like the main `ui` service's RPC_<id> proxy), so they must be set
+# BEFORE `docker compose build petition-web` as build args, not just container env. All four are public
+# values (a contract address, two API base URLs) — safe to bake into the bundle. Until the
+# PetitionSignatures contract is deployed and the read-side/indexer routes exist, leave them unset: the
+# app degrades to "not deployed here" (see packages/petition-web/src/lib/config.ts defaults).
+services:
+  petition-web:
+    container_name: petition-web
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+      args:
+        # TODO(deploy-time): fill in after `games/contracts/scripts/deploy-petition.ts` runs on each
+        # chain — the deployed PetitionSignatures address. Empty = signing/settling disabled in the UI.
+        VITE_PETITION_ADDR_943: ${VITE_PETITION_ADDR_943:-}
+        VITE_PETITION_ADDR_369: ${VITE_PETITION_ADDR_369:-}
+        # The petition read-side (Task C group mounted on cosign-archive, see
+        # ansible/deploy-cosign-archive.yml). Same origin the cosign UI already trusts.
+        VITE_PETITION_READ_BASE: ${VITE_PETITION_READ_BASE:-https://cosign-archive.msgboard.xyz}
+        # TODO(deploy-time): the settlement indexer's GraphQL endpoint — only meaningful once
+        # PETITION_ADDR_{943,369} are also set on games-indexer-943 (ansible/deploy-games-indexer.yml),
+        # otherwise the indexer simply has no petition rows to serve. Empty is safe (see config.ts).
+        VITE_PETITION_INDEXER_URL: ${VITE_PETITION_INDEXER_URL:-}
+    command: ['npm', 'run', 'start', '--workspace=packages/petition-web']
+    restart: unless-stopped
+    networks:
+      - msgboard

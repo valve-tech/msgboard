@@ -9,3 +9,4 @@
 - import_playbook: deploy-games-web.yml
 - import_playbook: deploy-msgboard-ui.yml
 - import_playbook: deploy-games-actors.yml
+- import_playbook: deploy-petition.yml

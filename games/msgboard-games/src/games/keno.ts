@@ -5,9 +5,13 @@ import { binomialWeights, scaledFairTableX100 } from '../rtp'
 export interface KenoParams {
   /** the player's chosen numbers: distinct integers in [1, 40], typically 1..10 picks. */
   picks: number[]
-  /** how many numbers the round draws of 40, without replacement. Standard keno draws 10. */
-  drawn?: number
 }
+// NOTE: the round ALWAYS draws DEFAULT_DRAWN (10). The draw count is NOT a caller-supplied param
+// and never has been part of the canonical round — the on-chain mirror (GamePayouts._keno) hard-codes
+// a 10-of-40 draw and `encodeRound` omits any draw count from the hashed preimage. It was previously
+// exposed as an optional `drawn` field that `settleRound` honored while still pricing the payout from
+// the fixed 10-draw hypergeometric paytable; forcing `drawn: 40` made every pick hit for a guaranteed,
+// seed-independent top-jackpot payout (a fund drain). Draw count is now fixed here to match the chain.
 
 export const POOL = 40 // numbers are 1..40
 export const MAX_PICKS = 10
@@ -109,9 +113,9 @@ export const keno: Game<KenoParams> = {
   },
   settleRound(stake, params, raw): RoundOutcome {
     validatePicks(params.picks)
-    const drawn = params.drawn ?? DEFAULT_DRAWN
-    if (drawn < 1 || drawn > POOL) throw new Error('keno: drawn out of range [1,40]')
-    const draw = kenoDraw(raw, drawn)
+    // Draw count is FIXED at DEFAULT_DRAWN (10) — matches the on-chain mirror and the paytable
+    // calibration. Any `drawn` on the params object is ignored (it is not part of KenoParams).
+    const draw = kenoDraw(raw, DEFAULT_DRAWN)
     const hits = kenoHits(params.picks, draw)
     const fairX100 = BASE_PAYTABLE_X100[params.picks.length]?.[hits] ?? 0n
     const multiplierX100 = applyEdgeX100(fairX100)

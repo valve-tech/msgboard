@@ -5,6 +5,11 @@
 # browser bundle stops carrying vk_demo). Replaces the GH-workflow path for this service so deploys
 # go through the runbook like everything else on this box.
 #
+# Task H: also carries PetitionSignatures indexing — deploy/games-indexer/ponder.config.ts only
+# registers that contract on a chain whose PETITION_ADDR_<chain>/PETITION_START_<chain> are set in the
+# box .env (docker-compose.prod.yml reads them with an empty default, so no env at all is a no-op, not
+# an error). Set them there once games/contracts/scripts/deploy-petition.ts has run on that chain.
+#
 # The Caddy block itself is written by deploy/games-indexer/install-caddy-route.sh — the canonical
 # writer (brace-balanced replace + backup + validate + reload + body-aware smokes + auto-restore),
 # shared with the GH workflow so both paths converge on the same block.
@@ -152,6 +157,21 @@
       retries: 60
       delay: 10
       until: ready.stdout == "200"
+
+    # Informational only (Task H) — whether this run's box .env has PetitionSignatures configured on
+    # either chain. `grep` intentionally not asserted against; an unset var is a valid, inert state.
+    - name: Check petition indexing status (informational)
+      ansible.builtin.shell: >-
+        (grep -q '^PETITION_ADDR_943=.' {{ deploy_dir }}/.env && echo '943=on' || echo '943=off');
+        (grep -q '^PETITION_ADDR_369=.' {{ deploy_dir }}/.env && echo '369=on' || echo '369=off')
+      args:
+        executable: /bin/bash
+      register: petition_status
+      changed_when: false
+
+    - name: Petition indexing status
+      ansible.builtin.debug:
+        msg: "PetitionSignatures indexing: {{ petition_status.stdout_lines | join(', ') }} (set PETITION_ADDR_{943,369}/PETITION_START_{943,369} in {{ deploy_dir }}/.env and rerun to enable)"
 
     - name: Sync status
       ansible.builtin.debug:

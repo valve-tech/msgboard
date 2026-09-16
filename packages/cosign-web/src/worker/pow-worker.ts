@@ -15,6 +15,7 @@
  */
 
 import * as msgboard from '@msgboard/sdk'
+import initPowGrinder, { stamp as grinderStamp } from '@msgboard/pow-grinder/wasm'
 import { createPublicClient, http, type PublicClient } from 'viem'
 import { mainnet, pulsechain, pulsechainV4 } from 'viem/chains'
 import type { StartWorkReq, WorkerRequestMsg, WorkerResponseMsg } from './types'
@@ -36,6 +37,16 @@ const chainFor = (chainId: number) => {
   }
 }
 
+/**
+ * The fast WASM grinder (~1-2s/stamp vs tens of seconds for the JS grind), resolved once per
+ * worker. Imported HERE — not via the SDK's dynamic cascade — so vite sees the module statically
+ * and bundles pow_grinder_bg.wasm into this worker chunk. On any load failure the promise
+ * resolves null and the SDK keeps its JS grind (`stamper: null`), so this can only be faster.
+ */
+const stamperPromise: Promise<msgboard.Stamper | null> = initPowGrinder()
+  .then(() => msgboard.wrapEngineStamp(grinderStamp))
+  .catch(() => null)
+
 let boardClient: msgboard.MsgBoardClient | undefined
 
 const post = (msg: WorkerResponseMsg) => ctx.postMessage(msg)
@@ -47,6 +58,7 @@ const doWork = async (req: StartWorkReq) => {
   }) as PublicClient
 
   boardClient = new msgboard.MsgBoardClient(provider as unknown as msgboard.Provider, {
+    stamper: await stamperPromise,
     difficultyFactors: {
       workMultiplier: BigInt(req.workMultiplier),
       workDivisor: BigInt(req.workDivisor),

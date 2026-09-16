@@ -1,3 +1,4 @@
+import { Toggle } from './Menu'
 import { useEffect, useMemo, useState } from 'react'
 import { type Hex, getAddress, isAddress, isAddressEqual } from 'viem'
 import { Icon } from '@iconify/react'
@@ -229,14 +230,9 @@ export function CreateSafe(props: { wallet: UseWallet; onCreated: (safe: Hex, ch
 
           {gaslessAvailable && (
             <div className="field">
-              <label className="lbl" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: busy ? 'default' : 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={gasless}
-                  disabled={busy}
-                  onChange={(e) => setGasless(e.target.checked)} />
+              <Toggle checked={gasless} disabled={busy} onChange={setGasless}>
                 Gasless deploy (relay-sponsored)
-              </label>
+              </Toggle>
               <p className="hint">
                 The relay pays gas — you sign the request and solve a small proof of work (~{relayPowBits} bits) instead.
               </p>

@@ -59,6 +59,8 @@ describe('Integration tests msgboard', () => {
         task: 'reset',
       })
       hre.msgboard.setDifficultyFactors(workMultiplier, workDivisor)
+      // The sdk client's pow-grinder engine produces LEGACY stamps, and the board defaults to the
+      // legacy scheme (the live 943 board runs it), so the two match without extra config.
       setNodeConstraints({
         workMultiplier,
         workDivisor,
@@ -117,6 +119,7 @@ describe('Integration tests msgboard', () => {
           message: JSON.stringify(msgboard.toRPCMessage(work.message)),
         })
         const difficulty = hre.msgboard.getDifficulty(work.message.data)
+        // the client grinds version 1, so the work hash comes from checkWork
         expect(message).toEqual(msgboard.checkWork(work.message, difficulty))
       })
     })
@@ -132,6 +135,7 @@ describe('Integration tests msgboard', () => {
         // by the time this hits, a new block should not have been mined
         const work = await hre.msgboard.doPoW('test123', 'test123')
         const difficulty = hre.msgboard.getDifficulty(work.message.data)
+        // the client grinds version 1, so the work hash comes from checkWork
         expect(message).toEqual(msgboard.checkWork(work.message, difficulty))
       })
     })

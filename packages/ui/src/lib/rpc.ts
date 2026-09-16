@@ -1,9 +1,15 @@
 import { parseEther } from 'viem'
 import { mainnet, pulsechain, pulsechainV4, type Chain } from 'viem/chains'
 
-const VITE_RPC_943 = import.meta.env.VITE_RPC_943 as string | undefined
-const VITE_RPC_369 = import.meta.env.VITE_RPC_369 as string | undefined
-const VITE_RPC_1 = import.meta.env.VITE_RPC_1 as string | undefined
+/**
+ * The board RPC url for a built-in chain: ALWAYS the key-safe, same-origin proxy path
+ * (`/api/rpc-proxy?chain=<id>`). The preview server substitutes the keyed valve endpoint from its
+ * RUNTIME env there, so the unlimited RPC key NEVER reaches the browser bundle. We deliberately do NOT
+ * read `import.meta.env.VITE_RPC_*` here: vite inlines any referenced build-time env value into the
+ * public bundle, so reading a keyed `VITE_RPC_*` would ship the key to every visitor. Custom absolute
+ * endpoints go through the `custom` chain option instead. See the `?chain=` handler in vite.config.ts.
+ */
+const boardRpcUrl = (chainId: number): string => `/api/rpc-proxy?chain=${chainId}`
 
 export const chainOptions = ['pulsechainV4', 'pulsechain', 'ethereum', 'custom'] as const
 
@@ -28,6 +34,14 @@ export type ChainConfig = {
     address: string
     amount: bigint
   }
+  /** info regarding chip faucet sponsorship - when users ask for chips
+   * the following token address, category, and amount will be used to sponsor them
+   */
+  chipFaucet?: {
+    chips: `0x${string}`
+    category: string
+    amount: bigint
+  }
 }
 
 /** default block range limit for message expiry on the msgboard */
@@ -48,10 +62,15 @@ export const rpcs = new Map<ChainOption, ChainConfig>([
     'pulsechainV4',
     {
       chain: pulsechainV4,
-      rpcUrl: VITE_RPC_943 ?? 'https://one.valve.city/rpc/vk_demo/evm/943',
+      rpcUrl: boardRpcUrl(943),
       gasSponsor: {
         address: '0x5891148fFBea957c1C183313Dc8F63AbEf0f3958',
         amount: parseEther('10'),
+      },
+      chipFaucet: {
+        chips: '0x81f130c7d9ff020f46f3b01918424173f8d5ca64',
+        category: 'chipsplease:943',
+        amount: 1000n * 10n ** 18n,
       },
     },
   ],
@@ -59,14 +78,14 @@ export const rpcs = new Map<ChainOption, ChainConfig>([
     'pulsechain',
     {
       chain: pulsechain,
-      rpcUrl: VITE_RPC_369 ?? 'https://one.valve.city/rpc/vk_demo/evm/369',
+      rpcUrl: boardRpcUrl(369),
     },
   ],
   [
     'ethereum',
     {
       chain: mainnet,
-      rpcUrl: VITE_RPC_1 ?? 'https://one.valve.city/rpc/vk_demo/evm/1',
+      rpcUrl: boardRpcUrl(1),
     },
   ],
 ])

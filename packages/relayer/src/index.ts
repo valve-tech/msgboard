@@ -22,6 +22,10 @@ export { noopStore } from './stores/noop.js'
 export { postgresStore } from './stores/postgres.js'
 export type { Queryable } from './stores/postgres.js'
 
+export { redactSecrets, installConsoleRedactor, sourceLabel } from './redact.js'
+export { postgresHeartbeat, HEARTBEAT_TABLE } from './heartbeat.js'
+export type { Heartbeat, HeartbeatOptions, HeartbeatWriter } from './heartbeat.js'
+
 export { postgresArchiveSink } from './sinks/postgres-archive.js'
 export type { ArchiveQuery, ArchivedMessage, ArchiveRetention } from './sinks/postgres-archive.js'
 export { postgresSink } from './sinks/postgres.js'
@@ -33,6 +37,12 @@ export { generatedSource } from './sources/generated.js'
 export { submitMessageAction } from './actions/submit-message.js'
 export { forwardMessageAction } from './actions/forward-message.js'
 export { sendValueAction } from './actions/send-value.js'
+export {
+  sendValueRepricingAction,
+  type SendValueRepricingActionOptions,
+} from './actions/send-value-repricing.js'
+export { estimateFees, type FeeEstimateOptions } from './fees.js'
+export { mintChipsAction, type MintChipsActionOptions } from './actions/mint-chips.js'
 export { webhookAction } from './actions/webhook.js'
 export { noopAction } from './actions/noop.js'
 

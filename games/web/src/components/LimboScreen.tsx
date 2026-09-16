@@ -115,7 +115,7 @@ export const LimboScreen = ({
               type="number"
               min={MIN_TARGET_MULT}
               max={MAX_TARGET_MULT}
-              step={0.01}
+              step="any"
               value={targetMult}
               onChange={(e) => setTargetMult(e.target.value)}
               style={{ width: '5.5rem' }}
@@ -177,7 +177,7 @@ export const LimboScreen = ({
       {myAddress && session.history.length > 0 && (
         <>
           <h2>Your book</h2>
-          <details className="history" open>
+          <details className="history">
             <summary>
               {session.history.length} roll{session.history.length === 1 ? '' : 's'}
               <span className="muted">
