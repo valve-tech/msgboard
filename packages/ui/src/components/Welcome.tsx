@@ -11,11 +11,11 @@ const chains = [
 ]
 const chainIcon = (id: string) => `https://gib.show/image/${id}?w=48&h=48&format=webp`
 
+// Scroll to the "Try it" section. Target `#try-it`, the section in Home.tsx, because it is always
+// in the DOM. The old target `#interactive` lives inside the Mechanics tab, so it was absent on the
+// default Chat tab and the `?? 0` fallback sent the reader back to the top of the page instead.
 const scrollToInteractive = () => {
-  document.scrollingElement?.scrollTo({
-    top: document.querySelector('#interactive')?.getBoundingClientRect().top ?? 0,
-    behavior: 'smooth',
-  })
+  document.querySelector('#try-it')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 /** Ported from `Welcome.svelte` — the ink hero with a rotating prefix word. */
