@@ -64,6 +64,39 @@
       register: ws_patch
       changed_when: "'ADDED' in ws_patch.stdout"
 
+    # The box builds with NO lockfile (dropped below), so `npm i` floats every
+    # transitive to whatever is newest that day. @noble/curves 2.x removed the
+    # `./utils` export and the UI build died on it — `Missing "./utils"
+    # specifier in "@noble/curves"` — while the same tree built locally, where
+    # the lockfile holds 1.9.7. Pin the box to the version we actually test
+    # against. Same reason the repo already pins viem.
+    #
+    # @types/node joined the list on 2026-09-08: the box floated to 22.20.1, whose
+    # Buffer<ArrayBufferLike> and node:module types stop packages/sdk's grinder.ts
+    # from compiling. The repo lockfile holds 22.15.2, so the same tree built
+    # locally and died on the box. typescript joined for the same reason: ^5.8.2
+    # floats to 5.9.3, which made ArrayBufferView generic, and the same file stops
+    # compiling. Both are TOOLCHAIN versions — a floating compiler is not a
+    # reproducible build. Keep this dict identical to the one in
+    # deploy-msgboard-core.yml — either play may run first.
+    - name: Pin floating transitives the box would otherwise resolve fresh
+      ansible.builtin.shell: |
+        cd {{ deploy_dir }}
+        python3 - <<'PY'
+        import json
+        p = json.load(open('package.json'))
+        ov = p.setdefault('overrides', {})
+        want = {'@noble/curves': '^1.9.7', '@types/node': '22.15.2', 'typescript': '5.8.3'}
+        add = {k: v for k, v in want.items() if ov.get(k) != v}
+        if add:
+            ov.update(add)
+            json.dump(p, open('package.json', 'w'), indent=2)
+            open('package.json', 'a').write('\n')
+            print('PINNED ' + ', '.join(add))
+        PY
+      register: override_patch
+      changed_when: "'PINNED' in override_patch.stdout"
+
     # The box's package-lock.json predates these workspaces (it's a packages-only snapshot), so `npm i`
     # in the image would resolve @msgboard/games et al. from the stale lock → registry 404. Drop it so
     # `npm i` regenerates from the patched package.json and links all workspaces. Regenerable; the box's

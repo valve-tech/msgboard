@@ -4,8 +4,10 @@ A Ponder indexer for the **CoinFlip** + **Raffle** game contracts on PulseChain 
 `games.msgboard.xyz` can read rounds from a database/GraphQL instead of scraping `eth_getLogs` from
 every browser (which was flooding the RPC into 429s).
 
-Separate from the entropy indexer (`packages/indexer` / the box's `random-indexer-943`), which indexes
-the `Random`/`Reader`/`Consumer` beacon — this one indexes only the game contracts.
+Separate from the entropy indexer (`deploy/random-indexer`, the box's `random-indexer-943`), which
+indexes the `Random`/`Reader`/`Consumer` beacon — this one indexes only the game contracts. Both are
+also separate from `packages/indexer`, which archives off-chain msgboard messages and touches no
+contract at all.
 
 ## What it indexes
 

@@ -24,7 +24,22 @@ export {
   type Finding,
   type Target,
 } from './check.js'
-export { ALL_TARGETS, FLEET, PUBLIC_PEERS } from './targets.js'
+export { ALL_TARGETS, FLEET, PUBLIC_PEERS, CONVERGENCE_GROUPS, groupFromEnv, type ConvergenceGroup } from './targets.js'
+export {
+  CONVERGENCE_SAMPLES,
+  MIN_OVERLAP,
+  SAMPLE_INTERVAL_MS,
+  checkConvergence,
+  endpointsDiffer,
+  gradeBoardLiveness,
+  snapshotBoard,
+  type BoardSnapshot,
+  type LivenessResult,
+  type LivenessVerdict,
+  type ConvergenceDeps,
+  type ConvergenceReport,
+  type ConvergenceVerdict,
+} from './convergence.js'
 export {
   DriftExit,
   checkDrift,

@@ -310,7 +310,6 @@ export const App = () => {
       {tab === 'operator' && deployment.operator && (
         <OperatorCoinFlipScreen
           deployment={deployment}
-          data={data}
           walletClient={wallet.walletClient}
           trustAcknowledged={trustAcknowledged}
           myAddress={wallet.address}

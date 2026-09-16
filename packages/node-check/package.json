@@ -35,7 +35,8 @@
     "test:watch": "vitest",
     "lint": "prettier --check .",
     "check": "npm run build && node dist/cli.js",
-    "drift": "npm run build && node dist/drift-cli.js"
+    "drift": "npm run build && node dist/drift-cli.js",
+    "convergence": "npm run build && node dist/convergence-cli.js"
   },
   "files": [
     "dist/"
