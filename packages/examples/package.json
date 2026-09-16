@@ -27,7 +27,7 @@
     "@msgboard/relayer": "^0.4.0",
     "@msgboard/sdk": "^0.4.0",
     "circomlibjs": "^0.1.7",
-    "pg": "^8.14.1",
+    "pg": "^8.22.0",
     "snarkjs": "^0.7.6",
     "tsx": "^4.19.3",
     "viem": "^2.25.0"

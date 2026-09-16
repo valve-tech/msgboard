@@ -44,7 +44,7 @@
     "viem": "^2.25.0"
   },
   "peerDependencies": {
-    "pg": "^8.14.1"
+    "pg": "^8.22.0"
   },
   "peerDependenciesMeta": {
     "pg": {
@@ -52,7 +52,7 @@
     }
   },
   "devDependencies": {
-    "@types/pg": "^8.11.11",
+    "@types/pg": "^8.20.0",
     "typescript": "^5.8.2",
     "vitest": "^3.2.6"
   }
