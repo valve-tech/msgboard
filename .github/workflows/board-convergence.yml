@@ -8,12 +8,14 @@
 # boards drained to zero inside their ~20 minute retention, and nobody noticed for
 # eighteen days. This job catches that within the hour, which is why it runs hourly.
 #
-# Agreement with the wider network is real and unowned. Our PulseChain board shares
-# nothing with rpc.pulsechain.com's. That is worth knowing and nobody has taken it, so
-# it is REPORTED and never gated. An hourly failure on a finding no one has agreed to
-# act on is exactly how a check trains people to ignore it — and this job has to stay
-# believable for the day the liveness half fires. It shipped gating on that finding
-# and failed five times on day one, which is the mistake this comment exists to record.
+# Agreement with the wider network is REPORTED and never gated. Our PulseChain board
+# shares nothing with rpc.pulsechain.com's, and we know why: that node runs erigon-pulse
+# v2.4.1, which keeps the legacy proof of work. We cut over to the revised scheme on
+# 2026-08-21, so each board rejects the other's messages. Their nodes also refuse
+# msgboard_addMessage, so nobody writes across. The boards can converge only after the
+# public PulseChain nodes ship a revised proof-of-work build. This job once gated on
+# that finding and failed five times on day one, which is the mistake this comment
+# exists to record.
 #
 # Replica-versus-replica disagreement DOES gate, but only where it can be measured.
 # one.valve.city pins each API key to one upstream, so from GitHub we reach one of our

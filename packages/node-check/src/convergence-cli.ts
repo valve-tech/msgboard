@@ -12,11 +12,23 @@
  * retention, and nobody noticed for eighteen days. An hourly run of this catches that
  * within the hour. So it fails the job.
  *
- * "Does our board match the wider network" is real and unowned. Our PulseChain board
- * shares nothing with rpc.pulsechain.com's, which is worth knowing and is nobody's
- * assignment yet. It is REPORTED, never gated. An hourly failure on a finding no one
- * has agreed to act on is exactly how a check trains people to ignore it — and this
- * job has to stay believable for the day the liveness half fires.
+ * "Does our board match the wider network" is REPORTED, never gated. For chain 369 it
+ * reads zero, and on 2026-09-15 we found the cause. rpc.pulsechain.com runs
+ * erigon-pulse v2.4.1, which keeps the LEGACY proof of work: it builds the challenge
+ * from HardFactor and EasyFactor, then accepts a message when
+ * sha256(challenge || category || data) mod difficulty is 0. We cut over to the
+ * REVISED scheme on 2026-08-21. It hashes the version, block hash, payload hash, M, D
+ * and the nonce into a scalar, then accepts a work hash below 2^256/D. So each board
+ * rejects the messages the other accepts — our own 369 node answers "powmsg: invalid
+ * work" to a legacy message.
+ *
+ * Their board takes no writes either. rpc.pulsechain.com returned -32601 for
+ * msgboard_addMessage on 70 of 70 tries, and no other public endpoint takes the call.
+ * The gap is not a fault of ours, and no redeploy moves it. The two boards can share
+ * content only after the public PulseChain nodes ship a revised proof-of-work build.
+ * Until then this job prints the finding and stays green. An hourly failure nobody can
+ * act on is exactly how a check trains people to ignore it — and this job has to stay
+ * believable for the day the liveness half fires.
  *
  * REPLICA CONVERGENCE GATES WHEN IT CAN BE MEASURED. Set `CONVERGENCE_<chain>` to two
  * or more per-replica URLs and disagreement between OUR OWN nodes fails the run: that
@@ -99,8 +111,10 @@ const main = async (): Promise<void> => {
         console.log(`  note  ${peer}: agrees, ${r.shared}/${r.union} shared`)
       } else {
         console.log(
-          `  NOTE  ${peer}: shares ${r.shared}/${r.union} with us — our board may not be ` +
-            'reaching the public network. Real, unassigned, deliberately not failing this job.',
+          `  NOTE  ${peer}: shares ${r.shared}/${r.union} with us — expected. That node ` +
+            'runs erigon-pulse v2.4.1 and keeps the legacy proof of work, so each board ' +
+            'rejects the messages the other accepts. Nothing on our side is broken, and ' +
+            'this job deliberately does not fail on it.',
         )
       }
     }
