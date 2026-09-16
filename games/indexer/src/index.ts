@@ -8,7 +8,7 @@ import { gameEvent } from 'ponder:schema'
  * bigint); the frontend re-hydrates. The `id` is unique per log, so re-indexing is idempotent.
  */
 const store =
-  (game: 'coinflip' | 'raffle' | 'flipbook', name: string) =>
+  (game: 'coinflip' | 'raffle' | 'flipbook' | 'operator', name: string) =>
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async ({ event, context }: any) => {
     const args = JSON.parse(JSON.stringify(event.args ?? {}, (_k, v) => (typeof v === 'bigint' ? v.toString() : v)))
@@ -60,3 +60,31 @@ on('FlipBook:OfferTaken', store('flipbook', 'OfferTaken'))
 on('FlipBook:Revealed', store('flipbook', 'Revealed'))
 on('FlipBook:Forfeited', store('flipbook', 'Forfeited'))
 on('FlipBook:Withdrawn', store('flipbook', 'Withdrawn'))
+
+// Operator substrate (943 only): the game, the shared escrow, the registry, the validator policy.
+// LEAK BOUNDARY (spec §5 rule 2): this indexes ONLY the game/escrow/registry/policy events below.
+// Do NOT register a Random reveal/cast handler and do NOT store per-round reveal progress here —
+// what the backend never materializes, a UI regression cannot leak.
+for (const c of ['OperatorCoinFlip', 'OperatorCoinFlipRetired']) {
+  on(`${c}:TableCreated`, store('operator', 'TableCreated'))
+  on(`${c}:OpenSet`, store('operator', 'OpenSet'))
+  on(`${c}:ValidatorPolicySet`, store('operator', 'ValidatorPolicySet'))
+  on(`${c}:TableCapSet`, store('operator', 'TableCapSet'))
+  on(`${c}:FeesDeposited`, store('operator', 'FeesDeposited'))
+  on(`${c}:FeesWithdrawn`, store('operator', 'FeesWithdrawn'))
+  on(`${c}:RoundOpened`, store('operator', 'RoundOpened'))
+  on(`${c}:RoundSettled`, store('operator', 'RoundSettled'))
+  on(`${c}:RoundRefunded`, store('operator', 'RoundRefunded'))
+  on(`${c}:ForfeitRouted`, store('operator', 'ForfeitRouted'))
+}
+on('GameEscrow:BankrollDeposited', store('operator', 'BankrollDeposited'))
+on('GameEscrow:BankrollWithdrawn', store('operator', 'BankrollWithdrawn'))
+on('GameEscrow:ExposureLocked', store('operator', 'ExposureLocked'))
+on('GameEscrow:Settled', store('operator', 'Settled'))
+on('GameEscrow:Refunded', store('operator', 'Refunded'))
+on('GameEscrow:RakeWithdrawn', store('operator', 'RakeWithdrawn'))
+on('OperatorRegistry:Registered', store('operator', 'Registered'))
+on('OperatorRegistry:RakeSet', store('operator', 'RakeSet'))
+on('OperatorRegistry:RakeRecipientSet', store('operator', 'RakeRecipientSet'))
+on('OperatorRegistry:MetadataSet', store('operator', 'MetadataSet'))
+on('DefaultValidatorPolicy:ConfigSet', store('operator', 'ConfigSet'))

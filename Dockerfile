@@ -2,12 +2,32 @@ FROM node:lts AS builder
 WORKDIR /app
 COPY package*.json ./
 COPY packages packages
-ARG VITE_RPC_1
-ENV VITE_RPC_1=$VITE_RPC_1
-ARG VITE_RPC_369
-ENV VITE_RPC_369=$VITE_RPC_369
-ARG VITE_RPC_943
-ENV VITE_RPC_943=$VITE_RPC_943
+# The landing Arcade lazy-loads @msgboard/games + @msgboard/settle (workspaces under games/), so the
+# games workspaces must be present for `npm i` to resolve the workspace symlinks and for vite to bundle
+# the engine. These packages export TS source (main = src/index.ts), so no prebuild step is needed.
+COPY games games
+# NOTE: there are deliberately NO VITE_RPC_* build args. The board RPC url must NEVER be a build-time
+# value — vite inlines referenced build-time env into the PUBLIC bundle, so a keyed valve endpoint would
+# ship the RPC key to every visitor. The browser instead posts to /api/rpc-proxy?chain=<id> and the
+# vite-preview server substitutes the keyed endpoint from its RUNTIME env (RPC_<id>). See rpc.ts /
+# vite.config.ts. Keeping the key out of the build is the whole point.
+# The landing house bot's signing address, pinned so the player verifies its OpenTerms signature and the
+# public feed only trusts this house's transcripts. Unset → those pinned checks are skipped (fair either way).
+ARG VITE_LANDING_HOUSE_ADDRESS
+ENV VITE_LANDING_HOUSE_ADDRESS=$VITE_LANDING_HOUSE_ADDRESS
+# packages/petition-web build-time config (Task H). These are all PUBLIC values (a deployed contract
+# address, and the base URLs of the petition read-side / settlement-indexer HTTP APIs) — safe to inline
+# into the bundle, unlike the board RPC key above. Unset until the PetitionSignatures contract is
+# deployed (games/contracts/scripts/deploy-petition.ts); the app degrades cleanly to "not deployed here"
+# (see packages/petition-web/src/lib/config.ts) with these empty.
+ARG VITE_PETITION_ADDR_943
+ARG VITE_PETITION_ADDR_369
+ARG VITE_PETITION_READ_BASE
+ARG VITE_PETITION_INDEXER_URL
+ENV VITE_PETITION_ADDR_943=$VITE_PETITION_ADDR_943
+ENV VITE_PETITION_ADDR_369=$VITE_PETITION_ADDR_369
+ENV VITE_PETITION_READ_BASE=$VITE_PETITION_READ_BASE
+ENV VITE_PETITION_INDEXER_URL=$VITE_PETITION_INDEXER_URL
 RUN npm i
 RUN npm run build
 

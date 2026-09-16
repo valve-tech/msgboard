@@ -5,6 +5,8 @@ import * as msgboard from '@msgboard/sdk'
 
 import type { MsgBoardSettings } from './types'
 
+// There is ONE message version — version 1 — verified by ONE algorithm (msgboard.checkWork). The
+// pre-revision scheme is gone: the node rejects it.
 export const globalDefaultSettings: MsgBoardSettings = {
   enabled: true,
   workMultiplier: 10_000n,
@@ -79,7 +81,10 @@ export class MsgBoardProvider extends ProviderWrapper {
     if (bytes.length > this.settings.messageSizeLimit) {
       throw new Error('msgboard: message too large')
     }
-    if (m.version !== 1) {
+    // There is one message version — version 1. The scheme (legacy or revised) does NOT come from
+    // the version field; the board selects it by config. Accept version 1; reject 0 or any other
+    // value, and a non-integer.
+    if (!Number.isInteger(m.version) || m.version !== 1) {
       throw new Error('powmsg: invalid version')
     }
     if (hexToBytes(m.category).length !== 32) {

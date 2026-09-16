@@ -54,6 +54,20 @@ export interface BoardPlayerSessionOpts {
    * derived from the state both parties signed — never a fabricated literal.
    */
   onAccept?: (state: SessionState, proof?: RoundProof<unknown>) => void
+  /**
+   * Invoked the instant one of the player's request POSTS actually reaches the board (after `rpc.send`
+   * resolves), NOT when the call is issued. `open-request` = the sealed clientSeed commit; `round-request`
+   * = the seed-revealing round post. Consumers (the landing Arcade) use this to timestamp the "you commit"
+   * / "you reveal" handshake milestones at the moment they land, rather than before the send — so the
+   * on-screen per-step timing reflects real board latency instead of reading 0.0s / the grant time.
+   */
+  onSent?: (kind: 'open-request' | 'round-request') => void
+  /**
+   * Optional board category override. Defaults to `houseCategory(chainId)` (the real arcade). The
+   * landing coin-flip demo passes `landingHouseCategory(chainId)` so it runs on its own isolated feed.
+   * The house side must pass the SAME category for the two to communicate.
+   */
+  category?: { category: string }
 }
 
 /** What the round driver needs from the caller to post a round-request. */
@@ -85,7 +99,7 @@ export function makeBoardPlayerSession(opts: BoardPlayerSessionOpts): BoardPlaye
   const { board, chainId, tableId } = opts
   const pollMs = opts.pollMs ?? 1000
   const timeoutMs = opts.timeoutMs ?? 120_000
-  const cat = houseCategory(chainId)
+  const cat = opts.category ?? houseCategory(chainId)
 
   // Two transports on the SAME shared category: `rpc` carries open/round request-response, `cosignT`
   // carries the co-sign halves. Each MsgBoardTransport holds a single handler, hence two instances.
@@ -116,7 +130,7 @@ export function makeBoardPlayerSession(opts: BoardPlayerSessionOpts): BoardPlaye
    * nulls the single pending slot on settle, so a guard can reject overlapping calls without
    * permanently blocking sequential reuse.
    */
-  async function exchange<T>(out: unknown, set: (p: Pending<T>) => void, clear: () => void): Promise<T> {
+  async function exchange<T>(out: unknown, set: (p: Pending<T>) => void, clear: () => void, onSent?: () => void): Promise<T> {
     let settled = false
     const finish = () => { settled = true; clear() }
     const result = new Promise<T>((resolve, reject) => {
@@ -129,6 +143,7 @@ export function makeBoardPlayerSession(opts: BoardPlayerSessionOpts): BoardPlaye
       }, timeoutMs)
     })
     await rpc.send(toWire(out))
+    onSent?.() // the post has landed on the board — fire the "sent" milestone before we begin polling
     void (async () => {
       while (!settled) {
         try { await rpc.poll() } catch { /* transient poll failure — keep trying until timeout */ }
@@ -149,6 +164,7 @@ export function makeBoardPlayerSession(opts: BoardPlayerSessionOpts): BoardPlaye
         { kind: 'open-request', ...req } satisfies OpenRequestMsg,
         (p) => { openPending = p },
         () => { openPending = undefined },
+        () => opts.onSent?.('open-request'),
       )
     },
 
@@ -165,7 +181,12 @@ export function makeBoardPlayerSession(opts: BoardPlayerSessionOpts): BoardPlaye
         // house uses this as the player address for co-sig verification (see houseLoop sessionCfg).
         playerKey: input.playerAddress,
       }
-      return exchange<string>(roundReq, (p) => { roundPending = p }, () => { roundPending = undefined })
+      return exchange<string>(
+        roundReq,
+        (p) => { roundPending = p },
+        () => { roundPending = undefined },
+        () => opts.onSent?.('round-request'),
+      )
     },
   }
 }

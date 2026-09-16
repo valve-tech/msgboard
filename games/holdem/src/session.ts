@@ -232,6 +232,17 @@ export async function runHand(args: RunHandArgs): Promise<HandResult> {
   // Pre-blinds SETUP-equivalent game (its preimage backs the genesis snapshot slot; the genesis
   // co-signed state uses a ZERO gameStateHash, so this preimage is informational only).
   let game = initHoldem({ nSeats: n, stacks: stacks0, button, sb, bb, rakeBps, rakeCap })
+  // C3 HOOK (holdem-hardening-blueprint.md §10, "client MUST retain deck+gameState until
+  // Settled"): a REAL client MUST call `dealBindingN.ts#verifyDealBinding` — with the table's
+  // REGISTERED per-seat deck pubkeys, `finalDeck`, `deckCommitment`, and whatever dealt-slot
+  // shares it can legitimately see (its own hole slots + the community slots) — and confirm
+  // `{ok: true}` BEFORE co-signing this genesis state. This harness skips the call because it
+  // drives every seat itself (there is no adversarial peer to distrust here); a production
+  // client sitting at one seat must not skip it. The same client MUST also retain `finalDeck`
+  // and every `gameState` preimage for the full life of the hand — every showdown entrypoint on
+  // HoldemTableN (`postShowdownReveals`, `finalizeShowdownN`, `resolveShowdownTimeout`) is
+  // deck/gameState hash-pinned, so discarding them early forfeits the ability to answer a
+  // showdown dispute opened later.
   // Genesis: balances = each seat's buy-in, pot 0.
   await coSignState(channels, 0, {
     tableId,

@@ -48,3 +48,16 @@ export const settlement = onchainTable('settlement', (t) => ({
   blockTimestamp: t.bigint().notNull(),    // timestamp of the Opened event
   txHash:         t.hex().notNull(),       // tx of the Opened event
 }))
+
+// One row per distinct (chainId, petitionId, signer) — PetitionSignatures.Signed (Task D). Keyed by
+// signer, not by log, so row count directly answers "how many distinct signers have settled on-chain"
+// and a signer can never be double-counted across transactions. Mirrors games/indexer/ponder.schema.ts.
+export const petitionSignature = onchainTable('petition_signature', (t) => ({
+  id:             t.text().primaryKey(), // `${chainId}-${petitionId}-${signer}`
+  chainId:        t.integer().notNull(),
+  petitionId:     t.hex().notNull(),
+  signer:         t.hex().notNull(),
+  blockNumber:    t.bigint().notNull(),
+  blockTimestamp: t.bigint().notNull(),
+  txHash:         t.hex().notNull(),
+}))

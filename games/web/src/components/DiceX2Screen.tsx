@@ -114,7 +114,7 @@ export const DiceX2Screen = ({
               type="number"
               min={MIN_TARGET_PCT}
               max={MAX_TARGET_PCT}
-              step={0.5}
+              step="any"
               value={targetPct}
               onChange={(e) => setTargetPct(e.target.value)}
               style={{ width: '5.5rem' }}
@@ -190,7 +190,7 @@ export const DiceX2Screen = ({
       {myAddress && session.history.length > 0 && (
         <>
           <h2>Your book</h2>
-          <details className="history" open>
+          <details className="history">
             <summary>
               {session.history.length} roll{session.history.length === 1 ? '' : 's'}
               <span className="muted">

@@ -1,0 +1,875 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="description" content="All 38 games on the platform compared by trust model, custody, fairness, layer, and boost support. Pick a network to scope to testnet 943 or mainnet 369.">
+<title>The Games Ledger</title>
+<style>
+  :root {
+    /* light — cool green-grey paper, felt-green accent, brass */
+    --bg: #EDEFEA;
+    --surface: #FAFBF8;
+    --surface-2: #F1F3EE;
+    --ink: #16211B;
+    --ink-soft: #4C584F;
+    --ink-faint: #78837B;
+    --line: #D4D9CF;
+    --line-soft: #E2E6DC;
+    --felt: #1C5E43;
+    --felt-bright: #227A56;
+    --brass: #8C6E24;
+
+    --t-validator-bg: #DCEBDF; --t-validator-fg: #1F5B3C;
+    --t-p2p-bg: #EFE4C8;       --t-p2p-fg: #7A5C15;
+    --t-zk-bg: #E4DFF6;        --t-zk-fg: #4A3A9E;
+    --t-cosigned-bg: #DBE6EE;  --t-cosigned-fg: #2C5876;
+    --t-none-bg: #E4E7E1;      --t-none-fg: #616B62;
+
+    --boost-bg: #F6E7B8; --boost-fg: #7E5E0E; --boost-line: #D8B85A;
+
+    --ff-display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --ff-body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --ff-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  :root:not([data-theme="light"]) {
+    @media (prefers-color-scheme: dark) {
+      --bg: #0E1512;
+      --surface: #15201A;
+      --surface-2: #111A15;
+      --ink: #E7EDE6;
+      --ink-soft: #A6B2A8;
+      --ink-faint: #7B877D;
+      --line: #263029;
+      --line-soft: #1C2620;
+      --felt: #52B489;
+      --felt-bright: #6ECBA0;
+      --brass: #C6A24A;
+      --t-validator-bg: #17301F; --t-validator-fg: #74C795;
+      --t-p2p-bg: #322813;       --t-p2p-fg: #D6B45F;
+      --t-zk-bg: #241E3D;        --t-zk-fg: #A594F0;
+      --t-cosigned-bg: #16303F;  --t-cosigned-fg: #7FB8D9;
+      --t-none-bg: #232B22;      --t-none-fg: #97A198;
+      --boost-bg: #33280E; --boost-fg: #E4C46A; --boost-line: #6A5416;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0E1512;
+    --surface: #15201A;
+    --surface-2: #111A15;
+    --ink: #E7EDE6;
+    --ink-soft: #A6B2A8;
+    --ink-faint: #7B877D;
+    --line: #263029;
+    --line-soft: #1C2620;
+    --felt: #52B489;
+    --felt-bright: #6ECBA0;
+    --brass: #C6A24A;
+    --t-validator-bg: #17301F; --t-validator-fg: #74C795;
+    --t-p2p-bg: #322813;       --t-p2p-fg: #D6B45F;
+    --t-zk-bg: #241E3D;        --t-zk-fg: #A594F0;
+    --t-cosigned-bg: #16303F;  --t-cosigned-fg: #7FB8D9;
+    --t-none-bg: #232B22;      --t-none-fg: #97A198;
+    --boost-bg: #33280E; --boost-fg: #E4C46A; --boost-line: #6A5416;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--ff-body);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px 96px; }
+
+  /* ---- header ---- */
+  header.masthead {
+    border-bottom: 2px solid var(--ink);
+    padding: 56px 0 24px;
+    margin-bottom: 40px;
+  }
+  .eyebrow {
+    font-family: var(--ff-mono);
+    font-size: 12px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--felt);
+    margin: 0 0 18px;
+  }
+  h1.title {
+    font-family: var(--ff-display);
+    font-weight: 600;
+    font-size: clamp(40px, 8vw, 76px);
+    line-height: 0.98;
+    letter-spacing: -0.01em;
+    margin: 0 0 20px;
+    text-wrap: balance;
+  }
+  .lede {
+    font-size: clamp(16px, 2.2vw, 19px);
+    color: var(--ink-soft);
+    max-width: 64ch;
+    margin: 0 0 28px;
+  }
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 16px 28px;
+    padding-top: 22px;
+    border-top: 1px solid var(--line);
+  }
+  .stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 24px;
+    font-family: var(--ff-mono);
+    font-size: 12.5px;
+    color: var(--ink-faint);
+    letter-spacing: 0.04em;
+  }
+  .stats b { color: var(--ink); font-weight: 600; }
+
+  /* ---- network picker (custom, not a native select) ---- */
+  .netpick { position: relative; margin-left: auto; }
+  .netpick-label {
+    font-family: var(--ff-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    display: block;
+    margin-bottom: 6px;
+  }
+  .netpick-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-family: var(--ff-mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 9px 14px;
+    cursor: pointer;
+    min-width: 210px;
+    justify-content: space-between;
+  }
+  .netpick-btn:hover { border-color: var(--felt); }
+  .netpick-btn:focus-visible { outline: 2px solid var(--felt); outline-offset: 2px; }
+  .netpick-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--felt-bright); flex: none; }
+  .netpick-btn .caret { color: var(--ink-faint); transition: transform 0.15s ease; }
+  .netpick[data-open="true"] .caret { transform: rotate(180deg); }
+  .netpick-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    left: 0;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 5px;
+    box-shadow: 0 12px 28px rgba(0,0,0,0.16);
+    display: none;
+    z-index: 20;
+  }
+  .netpick[data-open="true"] .netpick-menu { display: block; }
+  .netpick-opt {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    border-radius: 4px;
+    padding: 8px 10px;
+    cursor: pointer;
+    color: var(--ink);
+    font-family: var(--ff-body);
+  }
+  .netpick-opt:hover { background: var(--surface-2); }
+  .netpick-opt[aria-selected="true"] { background: var(--t-validator-bg); }
+  .netpick-opt .n { font-family: var(--ff-mono); font-weight: 600; font-size: 13px; }
+  .netpick-opt .d { font-size: 11.5px; color: var(--ink-faint); margin-top: 1px; }
+
+  /* ---- section framing ---- */
+  section { margin-top: 56px; }
+  .sec-head {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 10px;
+    margin-bottom: 22px;
+  }
+  .sec-num { font-family: var(--ff-mono); font-size: 13px; color: var(--brass); font-weight: 600; }
+  h2 {
+    font-family: var(--ff-display);
+    font-weight: 600;
+    font-size: clamp(24px, 4vw, 32px);
+    margin: 0;
+    letter-spacing: -0.01em;
+  }
+  .sec-note { color: var(--ink-soft); max-width: 72ch; margin: -6px 0 26px; font-size: 15px; }
+
+  /* mainnet-availability tag on a section header */
+  .avail-tag {
+    font-family: var(--ff-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 3px 9px;
+    border-radius: 100px;
+    align-self: center;
+    display: none;
+  }
+  [data-net="369"] .avail-tag.only943 {
+    display: inline-flex;
+    background: var(--t-none-bg);
+    color: var(--t-none-fg);
+  }
+  /* dim testnet-only content while mainnet is selected */
+  [data-net="369"] [data-avail="943"] .table-scroll,
+  [data-net="369"] [data-avail="943"] .shared-banner,
+  [data-net="369"] [data-avail="943"] .sec-note,
+  [data-net="369"] [data-avail="943"] .callout,
+  [data-net="369"] .sys-card[data-avail="943"] { opacity: 0.42; }
+  [data-net="369"] tr[data-avail="943"] { opacity: 0.42; }
+
+  /* ---- legend ---- */
+  .legend {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 22px 40px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 26px 28px;
+  }
+  .legend h3 {
+    font-family: var(--ff-mono);
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--ink-faint);
+    margin: 0 0 12px;
+    font-weight: 600;
+  }
+  .legend ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
+  .legend li { display: flex; align-items: center; gap: 10px; font-size: 13.5px; color: var(--ink-soft); }
+
+  /* ---- chips ---- */
+  .chip {
+    display: inline-flex; align-items: center;
+    font-family: var(--ff-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    padding: 3px 9px;
+    border-radius: 100px;
+    white-space: nowrap;
+    text-transform: uppercase;
+  }
+  .chip.validator { background: var(--t-validator-bg); color: var(--t-validator-fg); }
+  .chip.p2p       { background: var(--t-p2p-bg);       color: var(--t-p2p-fg); }
+  .chip.zk        { background: var(--t-zk-bg);        color: var(--t-zk-fg); }
+  .chip.cosigned  { background: var(--t-cosigned-bg);  color: var(--t-cosigned-fg); }
+  .chip.none      { background: var(--t-none-bg);      color: var(--t-none-fg); }
+  .chip.boost {
+    background: var(--boost-bg); color: var(--boost-fg);
+    border: 1px solid var(--boost-line);
+    padding: 2px 8px;
+  }
+  .chip.layer {
+    background: var(--surface-2);
+    color: var(--ink-soft);
+    border: 1px solid var(--line);
+    text-transform: none;
+    letter-spacing: 0.02em;
+  }
+  .dash { color: var(--ink-faint); }
+
+  /* ---- overview grid ---- */
+  .systems {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 18px;
+  }
+  .sys-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-top: 3px solid var(--felt);
+    border-radius: 4px;
+    padding: 20px 22px 22px;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+  .sys-card .g-tag {
+    font-family: var(--ff-mono);
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--brass);
+    font-weight: 600;
+  }
+  .sys-card h3 {
+    font-family: var(--ff-display);
+    font-size: 20px;
+    font-weight: 600;
+    margin: 4px 0 4px;
+    letter-spacing: -0.01em;
+  }
+  .sys-card .count { font-family: var(--ff-mono); font-size: 12px; color: var(--ink-faint); margin-bottom: 14px; }
+  .sys-card dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 7px 12px; font-size: 13px; }
+  .sys-card dt {
+    font-family: var(--ff-mono); font-size: 10.5px; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--ink-faint); padding-top: 1px;
+  }
+  .sys-card dd { margin: 0; color: var(--ink-soft); }
+  .sys-card dd b { color: var(--ink); font-weight: 600; }
+  .sys-card .net-badge {
+    position: absolute; top: 16px; right: 16px;
+    font-family: var(--ff-mono); font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase;
+    padding: 2px 7px; border-radius: 100px; display: none;
+  }
+  [data-net="943"] .sys-card .net-badge.both,
+  [data-net="369"] .sys-card[data-avail="both"] .net-badge.both {
+    display: inline-flex; background: var(--t-validator-bg); color: var(--t-validator-fg);
+  }
+  [data-net="369"] .sys-card[data-avail="943"] .net-badge.only943 {
+    display: inline-flex; background: var(--t-none-bg); color: var(--t-none-fg);
+  }
+
+  /* ---- tables ---- */
+  .table-scroll {
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: var(--surface);
+  }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; min-width: 620px; }
+  thead th {
+    text-align: left;
+    font-family: var(--ff-mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-faint);
+    font-weight: 600;
+    padding: 12px 16px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+    position: sticky; top: 0;
+  }
+  tbody td { padding: 13px 16px; border-bottom: 1px solid var(--line-soft); vertical-align: top; color: var(--ink-soft); }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover td { background: var(--surface-2); }
+  td .gname { color: var(--ink); font-weight: 600; }
+  td .tab { font-family: var(--ff-mono); font-size: 11.5px; color: var(--ink-faint); display: block; margin-top: 2px; }
+  .mono { font-family: var(--ff-mono); font-variant-numeric: tabular-nums; font-size: 12.5px; color: var(--ink); }
+  .addr { font-family: var(--ff-mono); font-size: 11.5px; color: var(--ink-faint); white-space: nowrap; }
+  .addr.addr-empty { font-style: italic; opacity: 0.75; }
+
+  .shared-banner {
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--felt);
+    border-radius: 4px;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+    font-size: 13.5px;
+    color: var(--ink-soft);
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px 26px;
+  }
+  .shared-banner .k { font-family: var(--ff-mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-faint); display: block; }
+  .shared-banner b { color: var(--ink); font-weight: 600; }
+
+  .callout {
+    margin-top: 14px;
+    font-size: 13px;
+    color: var(--ink-soft);
+    border-left: 3px solid var(--brass);
+    padding: 4px 0 4px 16px;
+  }
+  .callout b { color: var(--ink); }
+
+  footer {
+    margin-top: 72px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    font-family: var(--ff-mono);
+    font-size: 12px;
+    color: var(--ink-faint);
+    letter-spacing: 0.03em;
+  }
+  footer a { color: var(--felt); }
+
+  @media (max-width: 640px) {
+    .wrap { padding: 0 16px 64px; }
+    header.masthead { padding-top: 40px; }
+    .netpick { margin-left: 0; width: 100%; }
+    .netpick-btn { width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">On-chain Casino · PulseChain</p>
+    <h1 class="title">The Games Ledger</h1>
+    <p class="lede">Every game on the platform, sorted by the trust machine underneath it — from validator-entropy flips to zero-knowledge card tables to the operator bonus economy. The differences that matter are not the themes; they are who holds the money and who proves the outcome.</p>
+
+    <div class="controls">
+      <div class="stats">
+        <span><b id="game-count">38</b> games <span id="net-name">on testnet 943</span></span>
+        <span><b>6</b> trust systems</span>
+        <span><b>1</b> boost-capable game</span>
+      </div>
+
+      <div class="netpick" id="netpick" data-open="false">
+        <span class="netpick-label">Network</span>
+        <button class="netpick-btn" id="netpick-btn" aria-haspopup="listbox" aria-expanded="false">
+          <span><span class="netpick-dot"></span> <span id="netpick-current">943 · Testnet</span></span>
+          <span class="caret">▾</span>
+        </button>
+        <div class="netpick-menu" role="listbox" aria-label="Network">
+          <button class="netpick-opt" role="option" data-net="943" aria-selected="true">
+            <span class="n">943 · Testnet</span>
+            <span class="d">PulseChain v4 — the full catalog, all 38 games</span>
+          </button>
+          <button class="netpick-opt" role="option" data-net="369" aria-selected="false">
+            <span class="n">369 · Mainnet</span>
+            <span class="d">PulseChain — the 6 games live with real money</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- LEGEND -->
+  <section id="legend" style="margin-top:0;">
+    <div class="sec-head"><span class="sec-num">00</span><h2>How to read the ledger</h2></div>
+    <div class="legend">
+      <div>
+        <h3>Trust model (shown to the player)</h3>
+        <ul>
+          <li><span class="chip validator">validator</span> Outcome from the validator set entropy</li>
+          <li><span class="chip p2p">p2p</span> No house, no RNG — matching pennies</li>
+          <li><span class="chip zk">zk</span> Zero-knowledge proof of the outcome</li>
+          <li><span class="chip cosigned">cosigned</span> Co-signed session, replayable dispute</li>
+          <li><span class="chip none">none</span> Not a wagering surface</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Layer</h3>
+        <ul>
+          <li><span class="chip layer">on-chain</span> Solidity contract only</li>
+          <li><span class="chip layer">both</span> Web screen + on-chain mirror</li>
+          <li><span class="chip layer">web-only</span> Co-signed path, no mirror yet</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Bonus economy</h3>
+        <ul>
+          <li><span class="chip boost">◆ boost</span> Accepts the ERC-1155 bonus charge</li>
+          <li><span class="dash">—</span> No boost support</li>
+        </ul>
+        <h3 style="margin-top:18px;">Network scope</h3>
+        <ul>
+          <li style="color:var(--ink-faint);">Pick a network above. Mainnet 369 dims the testnet-only systems and shows each game's mainnet address.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- SIX SYSTEMS -->
+  <section id="systems">
+    <div class="sec-head"><span class="sec-num">01</span><h2>The six systems at a glance</h2></div>
+    <p class="sec-note">Games differ far more by system than by name. These six cards hold the shared traits of each system; the tables below list the individual games and where they part ways.</p>
+    <div class="systems">
+
+      <div class="sys-card" data-avail="both">
+        <span class="net-badge both">on 369</span><span class="net-badge only943">943 only</span>
+        <span class="g-tag">Group A</span>
+        <h3>Validator-entropy games</h3>
+        <p class="count">3 games · native / Chips</p>
+        <dl>
+          <dt>Model</dt><dd>Player-matched or pooled</dd>
+          <dt>Fairness</dt><dd><b>Validator-set seed</b>, game adds nothing</dd>
+          <dt>Custody</dt><dd>Escrow inside the contract</dd>
+          <dt>Boost</dt><dd><span class="dash">—</span></dd>
+          <dt>Trust</dt><dd><span class="chip validator">validator</span></dd>
+        </dl>
+      </div>
+
+      <div class="sys-card" data-avail="both">
+        <span class="net-badge both">on 369</span><span class="net-badge only943">943 only</span>
+        <span class="g-tag">Group B</span>
+        <h3>P2P coin flips</h3>
+        <p class="count">2 games · native / x402PLS</p>
+        <dl>
+          <dt>Model</dt><dd>2-player maker / taker</dd>
+          <dt>Fairness</dt><dd><b>No RNG</b> — matching-pennies commit-reveal</dd>
+          <dt>Custody</dt><dd>Maker bond, or fully off-chain signed</dd>
+          <dt>Boost</dt><dd><span class="dash">—</span></dd>
+          <dt>Trust</dt><dd><span class="chip p2p">p2p</span></dd>
+        </dl>
+      </div>
+
+      <div class="sys-card" data-avail="943">
+        <span class="net-badge both">on 369</span><span class="net-badge only943">943 only</span>
+        <span class="g-tag">Group C</span>
+        <h3>House casino games</h3>
+        <p class="count">28 games · Chips</p>
+        <dl>
+          <dt>Model</dt><dd>Single player vs the house</dd>
+          <dt>Fairness</dt><dd><b>Co-signed</b> commit-then-bet, optional ZK settle</dd>
+          <dt>Custody</dt><dd>Shared house Chips pool</dd>
+          <dt>Boost</dt><dd><span class="dash">—</span></dd>
+          <dt>Trust</dt><dd><span class="chip cosigned">cosigned</span></dd>
+        </dl>
+      </div>
+
+      <div class="sys-card" data-avail="943">
+        <span class="net-badge both">on 369</span><span class="net-badge only943">943 only</span>
+        <span class="g-tag">Group D</span>
+        <h3>ZK masked-deck tables</h3>
+        <p class="count">2 games · x402Pls</p>
+        <dl>
+          <dt>Model</dt><dd>2-party and N-seat channels</dd>
+          <dt>Fairness</dt><dd><b>ZK shuffle</b> + on-chain dispute machine</dd>
+          <dt>Custody</dt><dd>State-channel escrow</dd>
+          <dt>Boost</dt><dd><span class="dash">—</span></dd>
+          <dt>Trust</dt><dd><span class="chip cosigned">cosigned</span></dd>
+        </dl>
+      </div>
+
+      <div class="sys-card" data-avail="both">
+        <span class="net-badge both">on 369</span><span class="net-badge only943">943 only</span>
+        <span class="g-tag">Group E</span>
+        <h3>ZK skill games</h3>
+        <p class="count">2 games · no wager</p>
+        <dl>
+          <dt>Model</dt><dd>Leaderboard, non-adversarial</dd>
+          <dt>Fairness</dt><dd><b>ZK PLONK</b> solve proof</dd>
+          <dt>Custody</dt><dd><b>None</b> — no escrow, no payout</dd>
+          <dt>Boost</dt><dd><span class="dash">—</span></dd>
+          <dt>Trust</dt><dd><span class="chip zk">zk</span></dd>
+        </dl>
+      </div>
+
+      <div class="sys-card" data-avail="943" style="border-top-color: var(--brass);">
+        <span class="net-badge both">on 369</span><span class="net-badge only943">943 only</span>
+        <span class="g-tag" style="color:var(--brass);">Group F</span>
+        <h3>Operator substrate</h3>
+        <p class="count">1 game · any ERC-20</p>
+        <dl>
+          <dt>Model</dt><dd>Player vs bonded operator house</dd>
+          <dt>Fairness</dt><dd>Validator entropy + random staking</dd>
+          <dt>Custody</dt><dd>Shared isolated GameEscrow ledgers</dd>
+          <dt>Boost</dt><dd><span class="chip boost">◆ boost</span> the only one</dd>
+          <dt>Trust</dt><dd><span class="chip validator">validator</span></dd>
+        </dl>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- GROUP A -->
+  <section>
+    <div class="sec-head"><span class="sec-num">02</span><h2>Group A · Validator-entropy games</h2></div>
+    <p class="sec-note">These inherit <span class="mono">GameBase</span>: an owner-managed validator allowlist supplies the whole seed. The game itself contributes no entropy.</p>
+    <div class="table-scroll">
+      <table>
+        <thead><tr>
+          <th>Game</th><th>Layer</th><th>Type</th><th>Player model</th><th>Custody</th><th>Currency</th><th>Trust</th><th>Address</th>
+        </tr></thead>
+        <tbody>
+          <tr data-avail="both">
+            <td><span class="gname">CoinFlip</span></td>
+            <td><span class="chip layer">on-chain</span></td>
+            <td>Coin flip</td>
+            <td>2-player, opposite-side FIFO match, equal stake</td>
+            <td>Native escrow in contract</td>
+            <td class="mono">PLS</td>
+            <td><span class="chip validator">validator</span></td>
+            <td><span class="addr" data-a943="0x8d3a…2b2a" data-a369="0x66bd…8f4d"></span></td>
+          </tr>
+          <tr data-avail="both">
+            <td><span class="gname">Raffle</span><span class="tab">🎟 The Numbers</span></td>
+            <td><span class="chip layer">both</span></td>
+            <td>Closest-guess lottery</td>
+            <td>N-party pool — closest revealed guess takes the pot</td>
+            <td>Equal per-guess stake escrowed</td>
+            <td class="mono">PLS</td>
+            <td><span class="chip validator">validator</span></td>
+            <td><span class="addr" data-a943="0x33f5…da36" data-a369="0x0045…6b10"></span></td>
+          </tr>
+          <tr data-avail="943">
+            <td><span class="gname">CoinFlipTables</span><span class="tab">🎲 Tables</span></td>
+            <td><span class="chip layer">both</span></td>
+            <td>Coin flip</td>
+            <td>Player vs operator-run bankroll (permissionless tables)</td>
+            <td>Two-tier hot/cold Chips bankroll per table</td>
+            <td class="mono">Chips</td>
+            <td><span class="chip validator">validator</span></td>
+            <td><span class="addr" data-a943="0xcB71…c6bd" data-a369=""></span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="callout">The web <b>🪙 Coin Flip</b> tab does <b>not</b> render this <span class="mono">CoinFlip</span> contract — it renders <b>FlipBook</b> (Group B).</p>
+  </section>
+
+  <!-- GROUP B -->
+  <section>
+    <div class="sec-head"><span class="sec-num">03</span><h2>Group B · P2P coin flips</h2></div>
+    <p class="sec-note">A "guessing duel" — matching pennies. There is no house, no validator, and no randomness at all. Each side's own guess protects its expected value; a commit-reveal bond closes the free option.</p>
+    <div class="table-scroll">
+      <table>
+        <thead><tr>
+          <th>Game</th><th>Layer</th><th>Player model</th><th>Fairness</th><th>Custody</th><th>Currency</th><th>Trust</th><th>Address</th>
+        </tr></thead>
+        <tbody>
+          <tr data-avail="both">
+            <td><span class="gname">FlipBook</span><span class="tab">🪙 Coin Flip · Variant A</span></td>
+            <td><span class="chip layer">both</span></td>
+            <td>2-player maker / taker</td>
+            <td>No RNG; maker commit-reveal with bond</td>
+            <td>Maker escrows <span class="mono">stake + bond</span>; un-yankable offers</td>
+            <td class="mono">PLS</td>
+            <td><span class="chip p2p">p2p</span></td>
+            <td><span class="addr" data-a943="0xb009…6832" data-a369="0x603e…9eee"></span></td>
+          </tr>
+          <tr data-avail="both">
+            <td><span class="gname">FlipBookX</span><span class="tab">✍️ Signed Flips · Variant B</span></td>
+            <td><span class="chip layer">both</span></td>
+            <td>2-player, both guesses hidden (two-phase reveal)</td>
+            <td>No RNG; two-sided commit-reveal, two bonds</td>
+            <td><b>Fully off-chain signed offers</b> (EIP-3009/7598) — zero locked capital until <span class="mono">take</span></td>
+            <td class="mono">x402PLS</td>
+            <td><span class="chip p2p">p2p</span></td>
+            <td><span class="addr" data-a943="0x9e23…1275" data-a369="0x28Ef…2CD8"></span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- GROUP C -->
+  <section data-avail="943">
+    <div class="sec-head"><span class="sec-num">04</span><h2>Group C · House casino games</h2><span class="avail-tag only943">Testnet 943 only</span></div>
+    <p class="sec-note">The large catalog: one player against the house, on an EIP-712 co-signed session. The RNG commit lands before the bet; disputes replay the transcript on-chain. Twenty games carry a pure on-chain recompute mirror; eight ride the co-signed path only. The house pool (<span class="mono">HouseChannel</span>) is deployed on 943 only — none of these run on mainnet yet.</p>
+
+    <div class="shared-banner">
+      <span><span class="k">Shared model</span><b>Single player vs house</b></span>
+      <span><span class="k">Shared fairness</span>Co-signed commit-then-bet, optional ZK-Honk settle</span>
+      <span><span class="k">Shared custody</span>House Chips pool (<span class="mono">HouseChannel</span> 943 0xd0fe…fc94)</span>
+      <span><span class="k">Currency / Boost / Trust</span><span class="mono">Chips</span> · <span class="dash">no boost</span> · <span class="chip cosigned">cosigned</span></span>
+    </div>
+
+    <h3 style="font-family:var(--ff-display);font-weight:600;font-size:18px;margin:26px 0 12px;">C1 — With an on-chain recompute mirror <span style="color:var(--ink-faint);font-weight:400;font-size:14px;">(20 games)</span></h3>
+    <div class="table-scroll">
+      <table style="min-width:520px;">
+        <thead><tr><th>Game</th><th>gameId</th><th>On-chain mirror</th><th>Settlement shape</th></tr></thead>
+        <tbody>
+          <tr><td><span class="gname">Dice</span></td><td class="mono">1</td><td>GamePayouts._dice</td><td>Single-draw</td></tr>
+          <tr><td><span class="gname">Limbo</span></td><td class="mono">2</td><td>GamePayouts._limbo</td><td>Single-draw</td></tr>
+          <tr><td><span class="gname">Plinko</span></td><td class="mono">3</td><td>GamePayouts._plinko</td><td>Single-draw (table)</td></tr>
+          <tr><td><span class="gname">Keno</span></td><td class="mono">4</td><td>GamePayouts._keno</td><td>Single-draw (table)</td></tr>
+          <tr><td><span class="gname">Mines</span></td><td class="mono">5</td><td><b>MinesRules.sol</b></td><td>Stateful replay</td></tr>
+          <tr><td><span class="gname">Crash</span></td><td class="mono">6</td><td>GamePayouts (limbo curve)</td><td>Single-draw + auto-cashout</td></tr>
+          <tr><td><span class="gname">Pachinko</span></td><td class="mono">7</td><td>GamePayouts._pachinko</td><td>Single-draw (table)</td></tr>
+          <tr><td><span class="gname">Wheel</span></td><td class="mono">8</td><td>GamePayouts._wheel</td><td>Single-draw</td></tr>
+          <tr><td><span class="gname">Monte</span> <span style="color:var(--ink-faint);">(3-card)</span></td><td class="mono">9</td><td>GamePayouts._monte</td><td>Single-draw</td></tr>
+          <tr><td><span class="gname">Dice X2</span></td><td class="mono">10</td><td>GamePayouts._dicex2</td><td>Single-draw</td></tr>
+          <tr><td><span class="gname">Baccarat</span></td><td class="mono">11</td><td>GamePayouts._baccarat</td><td>Seeded deck</td></tr>
+          <tr><td><span class="gname">Dragon Tiger</span></td><td class="mono">12</td><td>GamePayouts._dragonTiger</td><td>Single-draw</td></tr>
+          <tr><td><span class="gname">Andar Bahar</span></td><td class="mono">13</td><td>GamePayouts._andarBahar</td><td>Single-draw</td></tr>
+          <tr><td><span class="gname">Towers</span></td><td class="mono">14</td><td><b>LadderRules.sol</b></td><td>Stateful replay</td></tr>
+          <tr><td><span class="gname">Chicken</span></td><td class="mono">15</td><td><b>LadderRules.sol</b></td><td>Stateful replay</td></tr>
+          <tr><td><span class="gname">Greed Dice</span></td><td class="mono">19</td><td><b>LadderRules.sol</b></td><td>Stateful replay</td></tr>
+          <tr><td><span class="gname">Cascade</span> <span style="color:var(--ink-faint);">(tumbling slot)</span></td><td class="mono">24</td><td>GamePayouts._cascade</td><td>Single-draw</td></tr>
+          <tr><td><span class="gname">Roulette</span></td><td class="mono">25</td><td>GamePayouts._roulette</td><td>Single-draw</td></tr>
+          <tr><td><span class="gname">Cipher</span></td><td class="mono">26</td><td><b>LadderRules.sol</b></td><td>Stateful replay</td></tr>
+          <tr><td><span class="gname">Pai Gow Poker</span></td><td class="mono">27</td><td><b>PaiGowRules.sol</b></td><td>Stateful (vs-house card)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 style="font-family:var(--ff-display);font-weight:600;font-size:18px;margin:30px 0 12px;">C2 — Web-only, no mirror yet <span style="color:var(--ink-faint);font-weight:400;font-size:14px;">(8 games)</span></h3>
+    <div class="table-scroll">
+      <table style="min-width:420px;">
+        <thead><tr><th>Game</th><th>Web screen</th><th>Note</th></tr></thead>
+        <tbody>
+          <tr><td><span class="gname">Blackjack</span></td><td class="mono">BlackjackScreen</td><td>Co-signed path only</td></tr>
+          <tr><td><span class="gname">Three Card Poker</span></td><td class="mono">ThreeCardPokerScreen</td><td>Co-signed path only</td></tr>
+          <tr><td><span class="gname">Video Poker</span></td><td class="mono">VideoPokerScreen</td><td>Co-signed path only</td></tr>
+          <tr><td><span class="gname">Craps</span></td><td class="mono">CrapsScreen</td><td>Co-signed path only</td></tr>
+          <tr><td><span class="gname">Firewalk</span></td><td class="mono">FirewalkScreen</td><td>Ladder reskin</td></tr>
+          <tr><td><span class="gname">Heist</span></td><td class="mono">HeistScreen</td><td>Ladder reskin</td></tr>
+          <tr><td><span class="gname">Hi-Lo</span> <span style="color:var(--ink-faint);">(ladder)</span></td><td class="mono">HiLoScreen</td><td>Ladder reskin — distinct from Hi-Lo War</td></tr>
+          <tr><td><span class="gname">Lottery</span></td><td class="mono">LotteryScreen</td><td>Pool model, co-signed</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- GROUP D -->
+  <section data-avail="943">
+    <div class="sec-head"><span class="sec-num">05</span><h2>Group D · ZK masked-deck card tables</h2><span class="avail-tag only943">Testnet 943 only</span></div>
+    <p class="sec-note">State-channel card games with private cards. A ZK shuffle and per-seat decryption shares hide the deck; the channel state is co-signed and an on-chain dispute machine enforces every legal transition. Escrow is denominated in the x402Pls wrapper. Deployed on 943 only.</p>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Game</th><th>Layer</th><th>Player model</th><th>Fairness</th><th>Custody</th><th>Trust</th><th>Address</th></tr></thead>
+        <tbody>
+          <tr data-avail="943">
+            <td><span class="gname">Hi-Lo War</span><span class="tab">⚔️ Hi-Lo War</span></td>
+            <td><span class="chip layer">both</span></td>
+            <td>2-party fixed channel</td>
+            <td>ZK shuffle + commit-reveal; on-chain dispute machine</td>
+            <td>Two fixed channel escrows</td>
+            <td><span class="chip cosigned">cosigned</span></td>
+            <td><span class="addr" data-a943="0x8857…29c4" data-a369=""></span></td>
+          </tr>
+          <tr data-avail="943">
+            <td><span class="gname">Hold'em</span><span class="tab">Texas Hold'em · poker</span></td>
+            <td><span class="chip layer">on-chain</span></td>
+            <td>N-party, 3–9 seats</td>
+            <td>ZK masked deck (secp256k1 ElGamal), per-seat shares</td>
+            <td>N-seat channel escrow, side-pots + rake at settle</td>
+            <td><span class="chip cosigned">cosigned</span></td>
+            <td><span class="addr" data-a943="0x7da2…4f46" data-a369=""></span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="callout"><b>Hold'em is not yet a playable web tab.</b> The contracts and TS engine exist and are wired in config, but there is no entry in the web <span class="mono">GAMES</span> array. Also, multiway showdown winner-selection and rake are <b>not fully implemented</b> — only an uncontested (single live seat) showdown resolves today.</p>
+  </section>
+
+  <!-- GROUP E -->
+  <section>
+    <div class="sec-head"><span class="sec-num">06</span><h2>Group E · ZK skill games</h2></div>
+    <p class="sec-note">Non-wagered puzzle games. A zero-knowledge PLONK proof shows a valid solution without revealing it. There is no Chips balance, no escrow, and no payout — only a timed leaderboard and EAS attestations. Both are live on mainnet.</p>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Game</th><th>Layer</th><th>Type</th><th>Player model</th><th>Fairness</th><th>Custody</th><th>Trust</th><th>Address</th></tr></thead>
+        <tbody>
+          <tr data-avail="both">
+            <td><span class="gname">ZK Sudoku</span><span class="tab">🧩 ZK Sudoku</span></td>
+            <td><span class="chip layer">both</span></td>
+            <td>Puzzle speedrun</td>
+            <td>Single-player timed leaderboard</td>
+            <td>PLONK solve proof + nullifier anti-replay</td>
+            <td><b>None</b></td>
+            <td><span class="chip zk">zk</span></td>
+            <td><span class="addr" data-a943="0xf700…163c" data-a369="0x939c…0ba7"></span></td>
+          </tr>
+          <tr data-avail="both">
+            <td><span class="gname">ZK Wordle</span><span class="tab">🟩 ZK Wordle</span></td>
+            <td><span class="chip layer">both</span></td>
+            <td>Word · play with friends</td>
+            <td>N friends per challenge, ranked by guesses used</td>
+            <td>PLONK clue-honesty + solve proof</td>
+            <td><b>None</b></td>
+            <td><span class="chip zk">zk</span></td>
+            <td><span class="addr" data-a943="0xcd57…a8cb" data-a369="0x2022…b32b"></span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- GROUP F -->
+  <section data-avail="943">
+    <div class="sec-head"><span class="sec-num">07</span><h2>Group F · Operator substrate</h2><span class="avail-tag only943">Testnet 943 only</span></div>
+    <p class="sec-note">The table-maintainer system: permissionless, bonded operators run their own house, and cannot rug players because the rules live in code. This is the <b>only</b> game that supports the tradeable bonus economy. Deployed on 943 only — mainnet has no operator substrate yet.</p>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Game</th><th>Layer</th><th>Player model</th><th>Fairness</th><th>Custody</th><th>Currency</th><th>Boost</th><th>Trust</th></tr></thead>
+        <tbody>
+          <tr data-avail="943">
+            <td><span class="gname">OperatorCoinFlip</span><span class="tab">coin flip · 943 0x0c80…1833</span></td>
+            <td><span class="chip layer">on-chain</span></td>
+            <td>Player vs bonded operator house</td>
+            <td>Validator entropy + <span class="mono">IRandomStaking</span></td>
+            <td>Shared <span class="mono">GameEscrow</span>, per-(operator, token) isolated ledgers</td>
+            <td class="mono">any ERC-20</td>
+            <td><span class="chip boost">◆ boost</span></td>
+            <td><span class="chip validator">validator</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="callout">The boost is an ERC-1155 charge (<span class="mono">BonusChips1155</span>) that narrows the house-vs-player win rate. It is collateralized by <span class="mono">BackingPool</span>, sold through <span class="mono">MintSale</span>, and resold non-custodially on <span class="mono">Marketplace</span>. Fee and validator policy are pluggable; operator rake is capped at 5%.</p>
+  </section>
+
+  <footer>
+    Compiled from the games catalog (<span style="color:var(--ink);">games/web/src/App.tsx</span>) and contracts (<span style="color:var(--ink);">games/contracts/contracts/</span>). Addresses are truncated; switch the network above to see each game's testnet-943 or mainnet-369 deployment. Trust tags mirror the strip shown to players in the app.
+  </footer>
+
+</div>
+
+<script>
+  (function () {
+    var root = document.documentElement;
+    var pick = document.getElementById('netpick');
+    var btn = document.getElementById('netpick-btn');
+    var current = document.getElementById('netpick-current');
+    var count = document.getElementById('game-count');
+    var netName = document.getElementById('net-name');
+    var opts = Array.prototype.slice.call(document.querySelectorAll('.netpick-opt'));
+
+    var LABELS = { '943': '943 · Testnet', '369': '369 · Mainnet' };
+    var COUNTS = { '943': 38, '369': 6 };
+    var NAMES = { '943': 'on testnet 943', '369': 'live on mainnet 369' };
+
+    function applyNet(net) {
+      root.setAttribute('data-net', net);
+      current.textContent = LABELS[net];
+      count.textContent = COUNTS[net];
+      netName.textContent = NAMES[net];
+      opts.forEach(function (o) {
+        o.setAttribute('aria-selected', o.getAttribute('data-net') === net ? 'true' : 'false');
+      });
+      // fill each address cell with the selected network's value
+      document.querySelectorAll('.addr[data-a943]').forEach(function (el) {
+        var v = net === '369' ? el.getAttribute('data-a369') : el.getAttribute('data-a943');
+        if (v) { el.textContent = v; el.classList.remove('addr-empty'); }
+        else { el.textContent = 'not on mainnet'; el.classList.add('addr-empty'); }
+      });
+    }
+
+    function openMenu(open) {
+      pick.setAttribute('data-open', open ? 'true' : 'false');
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      openMenu(pick.getAttribute('data-open') !== 'true');
+    });
+    opts.forEach(function (o) {
+      o.addEventListener('click', function () {
+        applyNet(o.getAttribute('data-net'));
+        openMenu(false);
+      });
+    });
+    document.addEventListener('click', function () { openMenu(false); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') openMenu(false); });
+
+    applyNet('943');
+  })();
+</script>
+</body>
+</html>

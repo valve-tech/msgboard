@@ -33,8 +33,22 @@ const config: HardhatUserConfig = {
     // reverts on 943 as "invalid opcode: MCOPY". Target Shanghai so the deployed bytecode runs
     // there. (Core Random was compiled cancun but happens not to emit MCOPY in its live paths.)
     overrides: {
-      // Generated UltraHonk verifier: needs solc >= 0.8.26 + viaIR:false (mirrors foundry zkverify).
+      // Generated UltraHonk verifiers: need solc >= 0.8.26 + viaIR:false (mirrors foundry zkverify).
+      // DiceSettle is the per-game M2 verifier; TableSettle is the generic table-driven one that
+      // collapses the whole pure-RNG family into a single verifier (games/zk-table-settle). Both
+      // ~50KiB bytecode (over EIP-170) — deferred from HouseChannel wiring, but must still compile.
       'contracts/zk/generated/DiceSettleHonkVerifier.sol': {
+        version: '0.8.27',
+        settings: {
+          viaIR: false,
+          evmVersion: 'shanghai',
+          optimizer: {
+            enabled: true,
+            runs: 200,
+          },
+        },
+      },
+      'contracts/zk/generated/TableSettleHonkVerifier.sol': {
         version: '0.8.27',
         settings: {
           viaIR: false,
@@ -52,7 +66,20 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
+          },
+        },
+      },
+      // CoinFlipTables deploys to 943 like the other games contracts — pin Shanghai so the emitted
+      // bytecode has no MCOPY (943 is pre-Cancun and reverts on it as "invalid opcode: MCOPY").
+      'contracts/games/CoinFlipTables.sol': {
+        version: '0.8.25',
+        settings: {
+          viaIR: true,
+          evmVersion: 'shanghai',
+          optimizer: {
+            enabled: true,
+            runs: 700,
           },
         },
       },
@@ -63,7 +90,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -74,7 +101,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -85,11 +112,25 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
       // ZkTable family targets 943 like the other games contracts — Shanghai, no MCOPY.
+      //
+      // EIP-170 SIZE FIX (2026-08-08): every override below down through PetitionSignatures.sol
+      // shares this exact settings shape (0.8.25 / viaIR:true / shanghai / runs) — they mirror
+      // foundry.toml's [profile.default], per that file's header comment, and get compiled
+      // together. HoldemTableN.sol grew to 25,203 deployed bytes (627 over EIP-170's 24,576
+      // limit) after a full library-extraction pass (heavy dispute-machine logic already lives in
+      // the external HoldemShowdownLib — see that file's header); further calldata-struct
+      // externalization was proven net-negative. The only remaining lever was optimizer runs:
+      // lowered 1000 -> 700 for the whole shanghai family (empirically the highest value that
+      // gets HoldemTableN under the 24,300-byte safety-margin ceiling — see
+      // test/foundry/HoldemTableNSize.t.sol / test/ZkTableSize.test.ts). Tradeoff: slightly less
+      // inlining/aggressive optimization across this whole family = marginally higher gas on
+      // hot repeat-call paths, in exchange for both HoldemTableN and ZkTable staying deployable.
+      // Bump this back toward 1000 only alongside a fresh size-budget review of both contracts.
       'contracts/zk/ChannelState.sol': {
         version: '0.8.25',
         settings: {
@@ -97,7 +138,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -108,7 +149,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -119,7 +160,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -130,9 +171,117 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
+      },
+      // MCOPY FIX (2026-08-08): these deployed zk libs/contracts were missing a Shanghai override
+      // and fell through to the default cancun block, which emits MCOPY — REVERTS on 943/369
+      // (pre-Cancun) as "invalid opcode: MCOPY". HoldemShowdownLib was confirmed broken live
+      // (postShowdownReveals delegatecall reverted on 943); HoldemRules had a latent MCOPY; the
+      // ZkTable decode libs (DeckChallengeLib/DeckConstants/ShowdownDecodeLib) are deployed but were
+      // never exercised on live 943 (HiLoWar hit disputes, not showdown-decode) — pinned defensively
+      // so no deployed zk bytecode can ever carry MCOPY. Same settings shape as the family above.
+      'contracts/zk/HoldemRules.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/zk/HoldemShowdownLib.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/zk/CardTableSecp.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/zk/DeckChallengeLib.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/zk/DeckConstants.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/zk/ChannelTableBase.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/zk/SignedIntentBase.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/vendor/uzkge/ShowdownDecodeLib.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      // Table-maintainer substrate (Slice A) — deploys to 943 like the other games contracts, so it
+      // MUST target Shanghai (943/369 are pre-Cancun; the default cancun block above emits MCOPY,
+      // which reverts on-chain as "invalid opcode: MCOPY"). Same 0.8.25/viaIR/shanghai/runs-700
+      // shape as the games family. Foundry (foundry.toml) already pins shanghai globally; these
+      // mirror it so the HARDHAT artifacts the deploy script broadcasts are equally MCOPY-free.
+      'contracts/games/operator/ReentrancyGuard.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/games/operator/EscrowLib.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      // Shared measured-delta token-pull library (code-review §1): GameEscrow + OperatorCoinFlip both call
+      // it, so it MUST target shanghai like the rest of the operator family (no MCOPY/TSTORE on 943/369).
+      'contracts/games/operator/TokenPull.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/games/operator/OperatorRegistry.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/games/operator/GameEscrow.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/games/operator/OperatorBond.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/games/operator/OperatorVault.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/games/operator/OperatorVaultFactory.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/games/operator/OperatorCoinFlip.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      // Slice 0 fee-policy seam (I7): same 0.8.25/viaIR/shanghai/runs-700 shape as the rest of the
+      // operator family, so both new contracts deploy on pre-Cancun 943 (no MCOPY/TSTORE).
+      'contracts/games/operator/IFeePolicy.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/games/operator/BurnFeePolicy.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      // System 2 slice S2a (bonus economy foundation, I7): the consumable charge token, the
+      // co-operator collateral pool, and its hook interface — same 0.8.25/viaIR/shanghai/runs-700
+      // shape as the rest of the operator family, so all three deploy on pre-Cancun 943 (no
+      // MCOPY/TSTORE). BackingPool holds the collateralization; it MUST stay shanghai.
+      'contracts/games/operator/BonusChips1155.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/games/operator/IBackingPool.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
+      },
+      'contracts/games/operator/BackingPool.sol': {
+        version: '0.8.25',
+        settings: { viaIR: true, evmVersion: 'shanghai', optimizer: { enabled: true, runs: 700 } },
       },
       'contracts/games/SessionState.sol': {
         version: '0.8.25',
@@ -141,7 +290,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -152,7 +301,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -163,7 +312,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -174,7 +323,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -189,7 +338,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -200,7 +349,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -211,7 +360,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -222,7 +371,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -233,7 +382,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -244,7 +393,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -255,7 +404,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -266,7 +415,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -277,7 +426,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -288,7 +437,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -300,7 +449,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -311,7 +460,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -322,7 +471,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -333,7 +482,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -344,7 +493,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -356,7 +505,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -367,7 +516,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -378,7 +527,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -389,7 +538,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -402,7 +551,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -414,7 +563,7 @@ const config: HardhatUserConfig = {
           evmVersion: 'shanghai',
           optimizer: {
             enabled: true,
-            runs: 1_000,
+            runs: 700,
           },
         },
       },
@@ -549,6 +698,21 @@ const config: HardhatUserConfig = {
           viaIR: false,
           evmVersion: 'shanghai',
           optimizer: { enabled: true, runs: 200 },
+        },
+      },
+      // PetitionSignatures deploys to 943/369 like the other games contracts — pin Shanghai (no
+      // MCOPY/TSTORE) so the deployed bytecode runs there. OZ is pinned to 5.0.2 in package.json
+      // precisely so its EIP712/ECDSA sources stay Shanghai-compatible (see the `eas` foundry
+      // profile note in foundry.toml).
+      'contracts/PetitionSignatures.sol': {
+        version: '0.8.25',
+        settings: {
+          viaIR: true,
+          evmVersion: 'shanghai',
+          optimizer: {
+            enabled: true,
+            runs: 700,
+          },
         },
       },
     },

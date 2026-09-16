@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {IGameRulesN} from "./IGameRulesN.sol";
 import {HoldemHandEval} from "./HoldemHandEval.sol";
+import {SidePot as ChannelSidePot} from "./ChannelStateN.sol";
 
 /// @notice Pure mirror of @gibs/holdem src/rules.ts applyMove (betting half) — consulted only
 /// by HoldemTableN's per-seat dispute machine. The TS module is normative; test/HoldemParity
@@ -115,13 +116,15 @@ contract HoldemRules is IGameRulesN, HoldemHandEval {
         (uint8 kind, bytes memory payload) = abi.decode(move, (uint8, bytes));
 
         if (kind == MOVE_DEAL_DONE) {
-            return abi.encode(_dealDone(s));
+            _dealDone(s);
+            return abi.encode(s);
         }
 
         if (kind == MOVE_SHOWDOWN) {
             if (s.phase != SHOWDOWN) revert WrongPhase();
             (uint8[2][] memory holes, uint8[5] memory board) = abi.decode(payload, (uint8[2][], uint8[5]));
-            return abi.encode(_showdown(s, holes, board));
+            _showdown(s, holes, board);
+            return abi.encode(s);
         }
 
         if (s.phase != BET_PREFLOP && s.phase != BET_FLOP && s.phase != BET_TURN && s.phase != BET_RIVER) {
@@ -133,7 +136,8 @@ contract HoldemRules is IGameRulesN, HoldemHandEval {
 
         if (kind == MOVE_POST_BLIND) {
             (, uint256 amount) = abi.decode(payload, (uint8, uint256));
-            return abi.encode(_postBlind(s, seat, amount));
+            _postBlind(s, seat, amount);
+            return abi.encode(s);
         }
 
         // Real betting action: in turn, seat able to act. PRE-FLOP additionally requires both
@@ -148,30 +152,96 @@ contract HoldemRules is IGameRulesN, HoldemHandEval {
         if (kind == MOVE_FOLD) {
             s.folded[seat] = true;
             s.actedSinceAggression[seat] = true;
-            return abi.encode(_advance(s, seat));
+            _advance(s, seat);
+            return abi.encode(s);
         }
         if (kind == MOVE_CHECK) {
             if (toCall != 0) revert CannotCheck();
             s.actedSinceAggression[seat] = true;
-            return abi.encode(_advance(s, seat));
+            _advance(s, seat);
+            return abi.encode(s);
         }
         if (kind == MOVE_CALL) {
             if (toCall == 0) revert NothingToCall();
             uint256 pay = toCall < s.stacks[seat] ? toCall : s.stacks[seat];
             _putIn(s, seat, pay);
             s.actedSinceAggression[seat] = true;
-            return abi.encode(_advance(s, seat));
+            _advance(s, seat);
+            return abi.encode(s);
         }
         if (kind == MOVE_BET || kind == MOVE_RAISE) {
             (, uint256 to) = abi.decode(payload, (uint8, uint256));
-            return abi.encode(_betRaise(s, seat, to));
+            _betRaise(s, seat, to);
+            return abi.encode(s);
         }
         revert IllegalMove();
     }
 
+    // ----- on-chain showdown adjudication seam (IGameRulesN, Task C2) -----
+
+    /// Non-reverting eligibility + structural-membership check. `eligible` requires: phase ==
+    /// SHOWDOWN; `nSeats` (from gameState) == balances.length; `stacks` == `balances`
+    /// elementwise; `pot` == `pot`; `sidePots` == `sidePots` elementwise (amount+eligibleMask).
+    /// `liveMask` is the non-folded bitmask regardless of `eligible` (0 when nSeats==0 is moot -
+    /// a real table always has >=2 seats). `stub` = exactly one live seat (the STUB uncontested
+    /// path already swept the pot(s) in `_finishHand`, so holes/board don't matter to settlement).
+    function showdownEligible(bytes calldata gameState, uint256[] calldata balances, uint256 pot, ChannelSidePot[] calldata sidePots)
+        external
+        pure
+        returns (bool eligible, uint8 nSeats, uint256 liveMask, bool stub)
+    {
+        Holdem memory s = abi.decode(gameState, (Holdem));
+        nSeats = s.nSeats;
+
+        uint256 live = 0;
+        for (uint256 i = 0; i < s.nSeats; i++) {
+            if (!s.folded[i]) {
+                liveMask |= (uint256(1) << i);
+                live++;
+            }
+        }
+        stub = (live == 1);
+
+        if (s.phase != SHOWDOWN) return (false, nSeats, liveMask, stub);
+        if (uint256(s.nSeats) != balances.length) return (false, nSeats, liveMask, stub);
+        if (s.stacks.length != balances.length) return (false, nSeats, liveMask, stub);
+        for (uint256 i = 0; i < balances.length; i++) {
+            if (s.stacks[i] != balances[i]) return (false, nSeats, liveMask, stub);
+        }
+        if (s.pot != pot) return (false, nSeats, liveMask, stub);
+        if (s.sidePots.length != sidePots.length) return (false, nSeats, liveMask, stub);
+        for (uint256 i = 0; i < sidePots.length; i++) {
+            if (s.sidePots[i].amount != sidePots[i].amount || s.sidePots[i].eligibleMask != sidePots[i].eligibleMask) {
+                return (false, nSeats, liveMask, stub);
+            }
+        }
+
+        eligible = true;
+    }
+
+    /// Run the EXISTING `_showdown` (same code MOVE_SHOWDOWN drives via `applyMove`) and return
+    /// the settled money vector, so a caller that only needs the payout (not the re-encoded
+    /// gameState) doesn't have to re-decode it. `extraFoldMask` answer-aware-masks seats out of
+    /// ranking (bit i set => seat i treated as folded for this settlement only); `_showdown`
+    /// never reads a folded seat's holes (pot masks intersect `!folded` and hand scoring is
+    /// lazy/memoized per eligible seat), so the caller may pass zeros for masked/folded seats.
+    function settleShowdown(bytes calldata gameState, uint8[2][] calldata holes, uint8[5] calldata board, uint256 extraFoldMask)
+        external
+        pure
+        returns (uint256[] memory balances, uint256 rakeAccrued)
+    {
+        Holdem memory s = abi.decode(gameState, (Holdem));
+        if (s.phase != SHOWDOWN) revert WrongPhase();
+        for (uint256 i = 0; i < s.nSeats; i++) {
+            if (((extraFoldMask >> i) & 1) == 1) s.folded[i] = true;
+        }
+        _showdown(s, holes, board);
+        return (s.stacks, s.rakeAccrued);
+    }
+
     // ----- transitions (mirror rules.ts) -----
 
-    function _dealDone(Holdem memory s) internal pure returns (Holdem memory) {
+    function _dealDone(Holdem memory s) internal pure {
         if (s.phase != DEAL_HOLE && s.phase != DEAL_FLOP && s.phase != DEAL_TURN && s.phase != DEAL_RIVER) {
             revert WrongPhase();
         }
@@ -181,10 +251,9 @@ contract HoldemRules is IGameRulesN, HoldemHandEval {
         // Run-out: no betting on a street where <=1 seat can voluntarily act and all are
         // matched — close it through to the next deal phase / showdown.
         if (_actableCount(s) <= 1 && _allMatchedOrAllIn(s)) _closeStreet(s);
-        return s;
     }
 
-    function _postBlind(Holdem memory s, uint8 seat, uint256 amount) internal pure returns (Holdem memory) {
+    function _postBlind(Holdem memory s, uint8 seat, uint256 amount) internal pure {
         if (s.phase != BET_PREFLOP) revert WrongPhase();
         if (seat != s.toAct) revert NotYourTurn();
         bool expectSb = _allZero(s.committed);
@@ -203,10 +272,9 @@ contract HoldemRules is IGameRulesN, HoldemHandEval {
         } else {
             s.toAct = _nextToAct(s, seat);
         }
-        return s;
     }
 
-    function _betRaise(Holdem memory s, uint8 seat, uint256 to) internal pure returns (Holdem memory) {
+    function _betRaise(Holdem memory s, uint8 seat, uint256 to) internal pure {
         // incomplete-raise reopen guard
         if (s.actedSinceAggression[seat] && s.currentBet > s.committed[seat]) revert CannotReopen();
         uint256 already = s.committed[seat];
@@ -232,7 +300,7 @@ contract HoldemRules is IGameRulesN, HoldemHandEval {
             for (uint256 i = 0; i < s.nSeats; i++) s.actedSinceAggression[i] = false;
         }
         s.actedSinceAggression[seat] = true;
-        return _advance(s, seat);
+        _advance(s, seat);
     }
 
     // ----- helpers (mirror rules.ts) -----
@@ -302,19 +370,17 @@ contract HoldemRules is IGameRulesN, HoldemHandEval {
         return true;
     }
 
-    function _advance(Holdem memory s, uint8 from) internal pure returns (Holdem memory) {
+    function _advance(Holdem memory s, uint8 from) internal pure {
         _recomputePots(s);
         if (_roundClosed(s)) {
             _closeStreet(s);
-            return s;
+            return;
         }
-        uint8 next = _nextToAct(s, from);
-        if (next == NONE) {
-            _closeStreet(s);
-            return s;
-        }
-        s.toAct = next;
-        return s;
+        // Reaching here means _roundClosed(s) was false. _roundClosed returns true whenever
+        // _actableCount(s) == 0, and _actableCount counts exactly the seats _nextToAct scans for
+        // (!folded && !allIn) — so _actableCount(s) > 0 here and _nextToAct always returns a real
+        // seat, never NONE. No no-next-actor guard is needed (it would be unreachable dead code).
+        s.toAct = _nextToAct(s, from);
     }
 
     function _closeStreet(Holdem memory s) internal pure {
@@ -397,7 +463,6 @@ contract HoldemRules is IGameRulesN, HoldemHandEval {
     function _showdown(Holdem memory s, uint8[2][] memory holes, uint8[5] memory board)
         internal
         pure
-        returns (Holdem memory)
     {
         if (s.stubWinner != NONE) {
             // Uncontested: rake on the whole collected pot (== Σ totalContributed; uncalled
@@ -410,10 +475,10 @@ contract HoldemRules is IGameRulesN, HoldemHandEval {
             s.rakeAccrued = rakeU;
             s.phase = SETTLED;
             s.toAct = NONE;
-            return s;
+            return;
         }
 
-        require(board.length == 5, "showdown: board");
+        // (board is uint8[5] memory — its length is a compile-time constant 5, no runtime check needed)
         require(holes.length == s.nSeats, "showdown: holes");
 
         uint8 n = s.nSeats;
@@ -500,7 +565,6 @@ contract HoldemRules is IGameRulesN, HoldemHandEval {
         s.sidePots = new SidePot[](0);
         s.phase = SETTLED;
         s.toAct = NONE;
-        return s;
     }
 
     /// Split `amount` among the seats in `winMask`, odd chips to the earliest seat clockwise
@@ -545,7 +609,7 @@ contract HoldemRules is IGameRulesN, HoldemHandEval {
             uint256 v = s.totalContributed[i];
             if (v == 0) continue;
             // insert if new
-            bool seen = false;
+            bool seen;
             for (uint256 j = 0; j < lc; j++) if (levels[j] == v) { seen = true; break; }
             if (!seen) { levels[lc++] = v; }
         }

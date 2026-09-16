@@ -15,8 +15,6 @@ pragma solidity ^0.8.24;
 /// Cards are deck indices 0..51 with rank = index/4 + 2 (2..14, ace high) and suit = index%4.
 /// Best-5-of-7 is the max score over all C(7,5)=21 5-card subsets.
 contract HoldemHandEval {
-    error BadCardCount();
-
     // Categories (mirror handEval.ts Category enum).
     uint256 internal constant HIGH_CARD = 0;
     uint256 internal constant PAIR = 1;

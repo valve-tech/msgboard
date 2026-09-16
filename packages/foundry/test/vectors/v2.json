@@ -1,0 +1,13 @@
+{
+  "_comment": "The node's Go golden vector (vector B) — a passing message-version-1 stamp. category = 'chatter' (padded), data = 'golden vector', workHash = 0x00037212834e250723dc736508d445a0dbc01398040a980807641b4be2d1e361. Consumed by the PoWGate/PoWMint example tests; MsgPow.t.sol pins the same vector inline.",
+  "stamp": {
+    "version": "1",
+    "nonce": "57602",
+    "blockHash": "0x3a2ca760216c5cb648c32aab73cbc1cdfdbcf02f77a4cd190995e3c46f3932b5",
+    "category": "0x6368617474657200000000000000000000000000000000000000000000000000",
+    "data": "0x676f6c64656e20766563746f72",
+    "workMultiplier": "1",
+    "workDivisor": "1000",
+    "difficulty": "16907"
+  }
+}

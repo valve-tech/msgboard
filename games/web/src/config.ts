@@ -61,6 +61,11 @@ export type GameDeployment = {
   flipBookX?: viem.Hex
   /** Scan FlipBookX events from here (its deploy block). */
   flipBookXDeployBlock?: string
+  /** CoinFlipTables contract address — permissionless player-run coin-flip tables (players bet
+   *  against an operator's Chips bankroll; validators settle on-chain). Unset until deployed. */
+  coinFlipTables?: viem.Hex
+  /** Scan CoinFlipTables events from here (its deploy block); unset until deployed. */
+  coinFlipTablesDeployBlock?: string
   /** The x402PLS wrapper (EIP-3009+7598 wrapped native PLS; valve's canonical deployment). */
   x402Pls?: viem.Hex
   /** The Provex-controlled EAS instance (EAS has no canonical PulseChain deployment; @provex/eas). */
@@ -73,6 +78,27 @@ export type GameDeployment = {
   wordleSolveResolver?: viem.Hex
   /** The registered wordle-solve schema UID on THIS chain's SchemaRegistry (revocable=false). */
   wordleSchemaUid?: viem.Hex
+  /** ZkTable contract — the two-peer masked-deck channel anchor (EIP-712 `verifyingContract` for
+   *  Hi-Lo War / Hold'em co-signed channel states; domain is `{name:"ZkTable",version:"1"}`, see
+   *  zk-core/stateSig.ts `makeDomain`). Escrow is denominated in the chain's `x402Pls` wrapper. */
+  zkTable?: viem.Hex
+  /** HiLoWarRules contract — the on-chain Hi-Lo War flip/showdown rules ZkTable defers to. */
+  hiLoWarRules?: viem.Hex
+  /** HoldemTableN contract — the N-party Hold'em table (separate channel contract from ZkTable). */
+  holdemTableN?: viem.Hex
+  /** The operator substrate (backroom-B security room + backroom-A ops CLI). 943 only — 369 has no
+   *  operator substrate yet, so this stays unset there and the `backroom` tab hides itself (Task 5
+   *  populates the 943 entry's concrete addresses; this type lets useBackroomData typecheck now). */
+  operator?: {
+    coinFlip: viem.Hex
+    escrow: viem.Hex
+    registry: viem.Hex
+    policy: viem.Hex
+    /** Scan operator substrate events from here (the live game's deploy block). */
+    deployBlock: string
+    /** Retired OperatorCoinFlip addresses (spec G7) — same ABI, real history, earlier start block. */
+    retired: viem.Hex[]
+  }
 }
 
 /**
@@ -103,12 +129,15 @@ export const deployments: GameDeployment[] = [
       '0x2a638D7135966a5cA1973c930bD0317cd7d6874c',
       '0x0D3148A85608708Fe944EE71E13B4C9181b7cc83',
     ],
+    // Fresh validator pools inked 2026-08-02 (reset off the corrupted section — the old pools were
+    // inked with a stuck secret index, wedging cast settlement for all games; see randomness-recovery).
+    // deployBlock = the fresh pools' block so the web app + cast-watcher count heats from the same origin.
     poolOffsets: {
-      '0xae96b0748f933914867d59486251043790cb2896': '34',
-      '0x2a638d7135966a5ca1973c930bd0317cd7d6874c': '34',
-      '0x0d3148a85608708fe944ee71e13b4c9181b7cc83': '18',
+      '0xae96b0748f933914867d59486251043790cb2896': '7970',
+      '0x2a638d7135966a5ca1973c930bd0317cd7d6874c': '6434',
+      '0x0d3148a85608708fe944ee71e13b4c9181b7cc83': '6418',
     },
-    deployBlock: '24645214',
+    deployBlock: '25024811',
     poolSize: 64,
     explorer: 'https://scan.v4.testnet.pulsechain.com/#',
     archive: 'https://archive.msgboard.xyz',
@@ -117,10 +146,16 @@ export const deployments: GameDeployment[] = [
     // GraphQL under the already-resolving games host, so the lobby/round views read from one indexed
     // query per poll instead of scanning the chain (was hammering the RPC into 429s). Full GraphQL URL.
     gamesIndexer: 'https://games.msgboard.xyz/games-indexer/graphql',
-    // Chips ERC-20 token (deployed 2026-06-10 gate run).
-    chips: '0xA5276259e544C86438566cB28cc87daCce060910',
-    // patched HouseChannel (gameId-binding + disputeFromOpen + gameId-in-Opened), deployed 943 @ block 24708662
-    houseChannel: '0x74bbc31e77c02593c0a7aad0cadadb5b6bff3948',
+    // Chips ERC-20 token — fresh valve-deployer-owned token (2026-07-24 valve migration off gibs).
+    chips: '0x81f130c7d9ff020f46f3b01918424173f8d5ca64',
+    // CoinFlipTables — permissionless player-run coin-flip tables (validator-settled); valve_deployer-owned.
+    // Redeployed 2026-08-02 to add on-chain table names (setName/TableNamed) — prior addresses
+    // 0xe10be94d… (Refunded event) + 0x659602cE… are retired in 943-deployment.json so the caster keeps
+    // counting their past rounds (pool slot integrity). Continuity-verified (delta +0) before the swap.
+    coinFlipTables: '0xcB71E7124F89a4078F683AFaa8681E3532f8c6bd',
+    coinFlipTablesDeployBlock: '25032044',
+    // HouseChannel — close-authorization settle + walk-away forfeiture; valve_deployer-owned, 943 @ block 24957355
+    houseChannel: '0xd0fe186fd3ad3d5766d2fd8af35215ab5d3dfc94',
     // ZK skill games — full real-dictionary set (Sudoku leaderboard + Wordle over Chips escrow).
     sudokuLog: '0xf700e0c1fd235719738cca1cdef6f41bfaef163c',
     sudokuRules: '0x6f9045512ddd9d5a8db4c90377cb4eb052fd940f',
@@ -134,9 +169,11 @@ export const deployments: GameDeployment[] = [
     // P2P guessing-game coinflip offer book (deployed + all 4 paths exercised on-chain 2026-07-20).
     flipBook: '0xb009bd8b849dd33d9c5081ec6e53f29a947f6832',
     flipBookDeployBlock: '24921235',
-    // Variant-B flip book over x402PLS (deployed + live-exercised 2026-07-21).
-    flipBookX: '0x9e232e84E80FCaC3c78dE0820dABccf660511275',
-    flipBookXDeployBlock: '24932217',
+    // Variant-B flip book over x402PLS. REDEPLOYED 2026-08-15 with the guessCommit-binding
+    // takerNonce fix (034d2c3, HIGH relayer-theft hole). Prior 0x9e23…1275 (block 24932217) is the
+    // retired VULNERABLE build — kept indexable for in-flight flips; never point players at it.
+    flipBookX: '0xdfa2f37167c524ff05d075cce7d099aee9f21f39',
+    flipBookXDeployBlock: '25140838',
     x402Pls: '0xeb274050cb029288B8A4F232Da8d23F393d54A1E',
     // EAS leaderboard layer (deployed + schemas registered 2026-07-20; SolveResolvers.t.sol).
     eas: '0x9e84Aa4BD0C1931A34B14C1EC918A53C33e2B0F8',
@@ -144,6 +181,35 @@ export const deployments: GameDeployment[] = [
     sudokuSchemaUid: '0x0de9a3bb2e72a1116f44d1a4a5e612d315143af9916e27572d073663e9877fc5',
     wordleSolveResolver: '0x603e32ddaf5f4b6ada77e04bb7c44c4603f59eee',
     wordleSchemaUid: '0x68880687b7c28fa1618ad4f612173b23aef8443fc5df354d2e6693f6df243f37',
+    // ZK card tables (redeployed 2026-08-08 — MCOPY-fix redeploy: HoldemShowdownLib/HoldemRules/
+    // CardTableSecp/DeckChallengeLib/DeckConstants/ChannelTableBase/SignedIntentBase/
+    // ShowdownDecodeLib were missing their Shanghai evmVersion override in hardhat.config.ts and
+    // fell through to cancun, emitting MCOPY (0x5e) — REVERT on pre-Cancun 943/369
+    // ("invalid opcode: MCOPY"), confirmed live on postShowdownReveals(). Fix + full redeploy;
+    // games/contracts/deployments/943-zkcards.json, block 25082616. Escrow denominated in
+    // x402Pls (already set above) — see zk-x402-escrow-conversion. Supersedes the 2026-08-08
+    // (block 25082049) addresses this redeploy retired.
+    zkTable: '0x8857779acb9529d583911b0dedc456dd1f0829c4',
+    hiLoWarRules: '0x567f431af18eb32c88e747eea1ccf84fe66dc865',
+    holdemTableN: '0x7da24fcc5b0754ca075c41fad594a5234c4f4f46',
+    // Operator substrate (backroom-A ops CLI + backroom-B security room). 943 only — 369 has no
+    // operator substrate, so its entry omits this field and the `backroom` tab hides itself.
+    // Addresses from games/contracts/deployments/943-operator-substrate.json (deploy block 25121394).
+    operator: {
+      coinFlip: '0x0c80607ec07999cdab97d4374d6b7a3b5a6f1833',
+      escrow: '0xb572481635904fe2e3957bc45d81be07337e0838',
+      registry: '0xb202144ed8f2ae1c8a6262c241714c171b039cbc',
+      policy: '0xe821380fee740210a51503ec086c4ba3074cb63e',
+      deployBlock: '25121394',
+      // Retired OperatorCoinFlip addresses (spec G7) — same ABI, real history, earlier start block.
+      retired: [
+        '0x360f22c4b6b0a31cbff91226f20f557dbd0a6353',
+        '0xbb9bc6851998bc979889a6d31c1994160a219d04',
+        '0xb22ad173ee0ca5f9a3d36dc647d67bafa0e49e87',
+        '0x30b855799990fa9c2d0dff461bfb905a269efe8e',
+        '0xc3a4edb9601b55df3e25893a4e28971883a4b475',
+      ],
+    },
   },
   // Deployed by the 2026-06-11 mainnet bring-up (gate run + ink-pools; e2e/scripts/369-deployment.json).
   // deployBlock = the web pools' ink block so the site and the cast watcher count heats
@@ -189,9 +255,11 @@ export const deployments: GameDeployment[] = [
     // P2P guessing-game coinflip offer book (deployed + exercised on-chain 2026-07-20; Sourcify exact_match).
     flipBook: '0x603e32ddaf5f4b6ada77e04bb7c44c4603f59eee',
     flipBookDeployBlock: '27080922',
-    // Variant-B flip book over x402PLS (deployed 2026-07-21; Sourcify exact_match).
-    flipBookX: '0x28EfA8fA6c956C0b49f6Cdc6273b1eBe76382CD8',
-    flipBookXDeployBlock: '27091482',
+    // Variant-B flip book over x402PLS. REDEPLOYED 2026-08-15 with the guessCommit-binding
+    // takerNonce fix (034d2c3, HIGH relayer-theft hole). Prior 0x28Ef…2CD8 (block 27091482) is the
+    // retired VULNERABLE build — kept indexable for in-flight flips; never point players at it.
+    flipBookX: '0x823A85BBcBc94c6322812161058132b7BCf226fd',
+    flipBookXDeployBlock: '27296644',
     x402Pls: '0xeb274050cb029288B8A4F232Da8d23F393d54A1E',
     // EAS leaderboard layer (deployed + schemas registered 2026-07-20; SolveResolvers.t.sol).
     eas: '0x9e84Aa4BD0C1931A34B14C1EC918A53C33e2B0F8',

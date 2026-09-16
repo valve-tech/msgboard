@@ -56,7 +56,7 @@ describe('msgboard', () => {
 
         // create message and do work
         const cat = 'category'
-        const data = 'test'
+        const data = `test ${Date.now()}-${i}`
         const encodedData = msgboard.encodeData(data)
         boardClient.log('category: %o <- %o', msgboard.categoryHash(cat), cat)
         boardClient.log('message:  %o <- %o', encodedData, data)

@@ -59,9 +59,13 @@ services:
       context: .
       dockerfile: ./Dockerfile
       args:
-        VITE_RPC_1: ${VITE_RPC_1:-}
-        VITE_RPC_369: ${VITE_RPC_369:-}
-        VITE_RPC_943: ${VITE_RPC_943:-}
+        # No VITE_RPC_* build args on purpose — a keyed RPC url must never be inlined into the public
+        # bundle. The browser uses /api/rpc-proxy?chain=<id> and the server injects RPC_<id> at runtime.
+        VITE_LANDING_HOUSE_ADDRESS: ${VITE_LANDING_HOUSE_ADDRESS:-}
+    environment:  # ui-runtime-rpc (key-safe proxy): the preview server substitutes these; NOT build args
+      RPC_1: ${RPC_1:-}
+      RPC_369: ${RPC_369:-}
+      RPC_943: ${RPC_943:-}
     restart: unless-stopped
     networks:
       - msgboard
@@ -103,8 +107,14 @@ services:
 
   # spam: posts random lorem-style messages so each board shows activity. Submission
   # is proof-of-work gated, so it needs only an msgboard-enabled RPC — no wallet,
-  # no database. One writer per network (SPAM_CHAIN_ID selects 1, 369, or 943);
-  # SPAM_INTERVAL_MS / SPAM_CATEGORIES tune cadence and categories for all of them.
+  # no database. One writer per network (SPAM_CHAIN_ID selects 1, 369, 943 or
+  # 11155111); SPAM_INTERVAL_MS / SPAM_CATEGORIES tune cadence and categories for all.
+  #
+  # THESE WRITERS MUST BE REBUILT AFTER A PROOF-OF-WORK CUTOVER. They grind the
+  # algorithm baked into their image. After the 2026-08-21 cutover the pre-cutover
+  # images kept running, kept reporting healthy, and had every post rejected with
+  # `powmsg: invalid work` for 17 days. Deploy them with ansible/deploy-msgboard-core.yml,
+  # which checks for exactly that.
   spam-943:
     <<: *spam-writer
     container_name: spam-943
@@ -132,6 +142,18 @@ services:
     environment:
       SPAM_CHAIN_ID: '1'
       RPC_1: ${RPC_1:-}
+      SPAM_INTERVAL_MS: ${SPAM_INTERVAL_MS:-60000}
+      SPAM_CATEGORIES: ${SPAM_CATEGORIES:-lorem,musings,chatter}
+      SPAM_WORKERS: ${SPAM_WORKERS:-2}
+
+  # Sepolia. Verified serving msgboard on 2026-09-08 (msgboard_status enabled=true).
+  # Its board starts empty, so this writer is what puts anything on it at all.
+  spam-11155111:
+    <<: *spam-writer
+    container_name: spam-11155111
+    environment:
+      SPAM_CHAIN_ID: '11155111'
+      RPC_11155111: ${RPC_11155111:-}
       SPAM_INTERVAL_MS: ${SPAM_INTERVAL_MS:-60000}
       SPAM_CATEGORIES: ${SPAM_CATEGORIES:-lorem,musings,chatter}
       SPAM_WORKERS: ${SPAM_WORKERS:-2}
@@ -173,10 +195,11 @@ services:
       - msgboard
     environment:
       DATABASE_URL: postgres://msgboard-postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@msgboard-postgres:5432/msgboard-postgres
-      INDEXER_CHAINS: ${INDEXER_CHAINS:-1,369,943}
+      INDEXER_CHAINS: ${INDEXER_CHAINS:-1,369,943,11155111}
       RPC_1: ${RPC_1:-}
       RPC_369: ${RPC_369:-}
       RPC_943: ${RPC_943:-}
+      RPC_11155111: ${RPC_11155111:-}
       INDEXER_INTERVAL_MS: ${INDEXER_INTERVAL_MS:-20000}
       RETENTION_DAYS: ${RETENTION_DAYS:-365}
     command: ['npm', 'run', 'indexer:start']
@@ -223,6 +246,15 @@ services:
       PONDER_RPC_URL_369: ${PONDER_RPC_URL_369:?PONDER_RPC_URL_369 must be set (one.valve.city/rpc/<key>/evm/369)}
       PONDER_SCHEMA: ${GAMES_943_SCHEMA:?GAMES_943_SCHEMA must be set (games_943_<n>)}
       PONDER_TELEMETRY_DISABLED: 'true'
+      # TODO(deploy-time): PetitionSignatures (Task H) — deploy/games-indexer/ponder.config.ts only
+      # registers the contract on a chain whose PETITION_ADDR_<chain> is set here; leave both unset
+      # until games/contracts/scripts/deploy-petition.ts has run on that chain. A set PETITION_ADDR_*
+      # WITHOUT its matching PETITION_START_* fails the indexer loudly at startup (refuses to backfill
+      # from genesis) rather than silently defaulting to block 0.
+      PETITION_ADDR_943: ${PETITION_ADDR_943:-}
+      PETITION_START_943: ${PETITION_START_943:-}
+      PETITION_ADDR_369: ${PETITION_ADDR_369:-}
+      PETITION_START_369: ${PETITION_START_369:-}
 
   # hasura: GraphQL over the message_archive table. Published on LOOPBACK ONLY
   # (127.0.0.1:8081) — Caddy proxies the public GraphQL endpoint at archive.msgboard.xyz,

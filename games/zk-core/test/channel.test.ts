@@ -11,6 +11,8 @@ const base: ChannelState = {
   nonce: 0n, balanceA: 100n, balanceB: 100n, pot: 0n,
   deckCommitment: ('0x' + '00'.repeat(32)) as `0x${string}`,
   phase: 0, gameStateHash: ('0x' + '00'.repeat(32)) as `0x${string}`,
+  jointKeyCommit: ('0x' + '00'.repeat(32)) as `0x${string}`,
+  shuffleRoot: ('0x' + '00'.repeat(32)) as `0x${string}`,
 }
 const next = (s: ChannelState, patch: Partial<ChannelState>): ChannelState =>
   ({ ...s, ...patch, nonce: s.nonce + 1n })

@@ -25,104 +25,6 @@ const ec = new EC('secp256k1')
 const g = ec.g as elliptic.curve.base.BasePoint
 
 /**
- * Computes the message hash and checks it against the given difficulty.
- * @param msg the message seed
- * @param msgDifficulty the message difficulty
- * @returns the message hash
- * @throws error if the message nonce/work is not valid
- */
-export function checkWork(msg: types.MessageSeed, msgDifficulty: bigint) {
-  const bytes = new Uint8Array([
-    ...getChallenge(msg),
-    ...hexToBytes(msg.category, { size: 32 }),
-    ...hexToBytes(msg.data),
-  ])
-  const hash = sha256(bytes)
-  if (BigInt(hash) % msgDifficulty !== 0n) {
-    return null
-  }
-  return hash
-}
-
-/**
- * Returns the challenge component of the message hash calculation.
- * @param msg the message seed
- * @returns the challenge component
- * @throws error if the challenge is invalid
- */
-export function getChallenge(msg: types.MessageSeed) {
-  const digest = BigInt(difficultyDigest(msg))
-  // nonce = msg.nonce * msg.difficultyDigest() + msg.blockHash
-  const nonce = new BN((msg.nonce * digest + BigInt(msg.blockHash)).toString())
-  const challenge = g.mul(nonce)
-  if (challenge.isInfinity()) {
-    throw new Error('unable to create challenge')
-  }
-  return Uint8Array.from(challenge.getX().toArray())
-}
-
-/**
- * A stateful, fast proof-of-work search over consecutive nonces.
- *
- * {@link checkWork} recomputes `challenge = g·(nonce·digest + blockHash)` from scratch
- * every nonce — a full elliptic-curve scalar MULTIPLICATION, which dominates the grind
- * (~0.6 ms each in JS, capping a naive loop near ~1.5k hashes/s). But across consecutive
- * nonces the scalar grows by a constant `digest` (nonce increments by 1), so the challenge
- * POINT advances by a constant point `D = g·digest`. Replacing the per-nonce scalar MULTIPLY
- * with a single point ADDITION makes the search ~20-50x faster while producing bit-identical
- * challenges: `g·a + g·b = g·(a+b)`, and `g·x` depends only on `x mod n`, so the running point
- * after k additions equals `g·(nonce·digest + blockHash)` exactly. The constant message bytes
- * (32-byte category + data) are concatenated once.
- *
- * `next(msgDifficulty)` advances `message.nonce` by 1, steps (or rebases) the running point,
- * and returns the work hash if `hash % msgDifficulty === 0n`, else null. It reads
- * `message.blockHash` live every call: if it changed since the running point was based (the
- * {@link MsgBoardClient.doPoW} block poller updates it mid-grind), the point is rebased with a
- * single scalar multiply before continuing. {@link checkWork} remains the canonical verifier;
- * this only accelerates finding a winning nonce, and must stay byte-for-byte equivalent to it.
- *
- * @param message the message to grind; its `nonce` is mutated in place as the search advances.
- * @returns an object whose `next(msgDifficulty)` performs one nonce step.
- */
-export function createChallengeSearch(message: types.MessageSeed) {
-  const digest = BigInt(difficultyDigest(message))
-  const stepPoint = g.mul(new BN(digest.toString())) // D = g·digest, constant for this grind
-  const suffix = new Uint8Array([
-    ...hexToBytes(message.category, { size: 32 }),
-    ...hexToBytes(message.data),
-  ])
-  let point: elliptic.curve.base.BasePoint | undefined
-  let basedBlockHash: Hex | undefined
-
-  // (Re)anchor the running point to the current nonce + blockHash with one scalar multiply.
-  const rebase = () => {
-    const scalar = message.nonce * digest + BigInt(message.blockHash)
-    point = g.mul(new BN(scalar.toString()))
-    basedBlockHash = message.blockHash
-  }
-
-  return {
-    next(msgDifficulty: bigint): Hex | null {
-      message.nonce += 1n
-      if (point === undefined || message.blockHash !== basedBlockHash) {
-        rebase()
-      } else {
-        point = point.add(stepPoint)
-      }
-      if (point!.isInfinity()) {
-        throw new Error('unable to create challenge')
-      }
-      const challenge = Uint8Array.from(point!.getX().toArray())
-      const hash = sha256(new Uint8Array([...challenge, ...suffix]))
-      if (BigInt(hash) % msgDifficulty !== 0n) {
-        return null
-      }
-      return hash
-    },
-  }
-}
-
-/**
  * Returns the modulus used for the PoW verification = (2^24)+(10k*dataLen).
  * @param factors the message difficulty factors
  * @param dataLen the length of message data
@@ -133,15 +35,75 @@ export function difficulty({ workMultiplier, workDivisor }: types.DifficultyFact
   return ((2n ** 24n + BigInt(dataLen) * 10_000n) * workMultiplier) / workDivisor
 }
 
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// The msgboard PoW algorithm — message version 1. This is the one and only scheme: the spec defines
+// exactly one algorithm and every example carries version 0x1. (The only `msg/2` in the spec is a
+// devp2p wire-capability bump reserved for changing the packet limits — NOT a message-version bump —
+// so there is no "message version 2".) The node verifies with this scheme; a pre-revision scheme once
+// existed but the node now rejects it, so it is gone from this repo.
+//
+// The scheme: the scalar is a SHA256 of the whole transcript; the work hash is over the COMPRESSED
+// point (33 bytes, so no leading-zero encoding hazard); an out-of-range scalar is REJECTED, not
+// reduced (mirrors Go ScalarBaseMult); and acceptance is `workHash < 2^256 / D`.
+
+/** The acceptance target: a work hash is valid iff it is below 2^256 / D. */
+export function powTarget(d: bigint): bigint {
+  return d === 0n ? 0n : (2n ** 256n) / d
+}
+
+/** Revised algo, step 3: SHA256(category ‖ data). Commits category + data once per message body. */
+export function payloadHash(msg: types.MessageSeed): Hex {
+  return sha256(concatBytes([hexToBytes(msg.category, { size: 32 }), hexToBytes(msg.data)]))
+}
+
 /**
- * Returns a partial digest from the combined difficulty factors.
- * @param factors the message difficulty factors
- * @returns a 16-byte partial digest in HEX form
+ * Revised algo, step 4: SHA256(version ‖ blockHash ‖ payloadHash ‖ workMultiplier ‖ workDivisor ‖ nonce).
+ * Fixed-width big-endian: 1-byte version, 32-byte blockHash, 32-byte payloadHash, 8-byte M / D / nonce.
  */
-export function difficultyDigest({ workMultiplier, workDivisor }: types.DifficultyFactors) {
-  return `0x${sha256(
-    concatBytes([numberToBytes(workMultiplier, { size: 8 }), numberToBytes(workDivisor, { size: 8 })]),
-  ).slice(34)}`
+export function scalarHash(msg: types.MessageSeed, payloadHashBytes: Uint8Array): Hex {
+  return sha256(
+    concatBytes([
+      numberToBytes(msg.version, { size: 1 }),
+      hexToBytes(msg.blockHash, { size: 32 }),
+      payloadHashBytes,
+      numberToBytes(msg.workMultiplier, { size: 8 }),
+      numberToBytes(msg.workDivisor, { size: 8 }),
+      numberToBytes(msg.nonce, { size: 8 }),
+    ]),
+  )
+}
+
+/**
+ * The msgboard PoW verifier — message version 1, the one and only scheme. scalar =
+ * SHA256(version ‖ blockHash ‖ payloadHash ‖ M ‖ D ‖ nonce), rejected unless 1 <= scalar < n (reject,
+ * do NOT reduce — matches Go ScalarBaseMult); the work hash is SHA256 of the COMPRESSED point; accept
+ * iff workHash < 2^256 / D. Returns the work hash, or null when it does not pass.
+ */
+export function checkWork(msg: types.MessageSeed, msgDifficulty: bigint): Hex | null {
+  const payloadHashBytes = hexToBytes(payloadHash(msg))
+  const scalar = new BN(hexToBytes(scalarHash(msg, payloadHashBytes)))
+  // Reject rather than reduce: must match Go's secp256k1 ScalarBaseMult behaviour.
+  if (scalar.isZero() || scalar.gte(ec.n as BN)) return null
+  const point = g.mul(scalar)
+  if (point.isInfinity()) return null
+  const compressed = Uint8Array.from(point.encodeCompressed()) // 0x02/0x03 ‖ x (33 bytes)
+  const hash = sha256(compressed)
+  if (BigInt(hash) >= powTarget(msgDifficulty)) return null
+  return hash
+}
+
+/**
+ * The msgboard PoW grind — pairs with {@link checkWork}. Each nonce's scalar is an independent hash, so
+ * there is no constant point step to exploit; every nonce pays a full scalar multiply. Mutates
+ * `message.nonce`; returns the work hash when a nonce passes, else null.
+ */
+export function createChallengeSearch(message: types.MessageSeed) {
+  return {
+    next(msgDifficulty: bigint): Hex | null {
+      message.nonce += 1n
+      return checkWork(message, msgDifficulty)
+    },
+  }
 }
 
 /**

@@ -1,5 +1,5 @@
 import { encodeAbiParameters, keccak256, recoverTypedDataAddress, type Hex } from 'viem'
-import { makeDomain, type GameDomain, type StateSigner } from '@msgboard/games'
+import { makeDomain, encodeGameParams, type GameDomain, type StateSigner } from '@msgboard/games'
 
 /** Mirrors HouseChannel.sol OpenTermsLib TYPEHASH field order exactly. */
 export interface OpenTerms {
@@ -37,6 +37,18 @@ export const OPEN_TERMS_TYPES = {
 export function paramsHashOf(targetX100: bigint): Hex {
   const encoded = encodeAbiParameters([{ type: 'uint256' }], [targetX100])
   return keccak256(encoded)
+}
+
+/**
+ * paramsHash routed by gameId — the general form of `paramsHashOf` that works for EVERY game, not just
+ * the single-uint256 targets. `keccak256` of the canonical per-game `params` bytes (see
+ * `encodeGameParams`), i.e. exactly what `HouseChannel.settleWithSeeds` recomputes and checks on-chain
+ * (`keccak256(params) == terms.paramsHash`). Use this everywhere the house signs OpenTerms so that
+ * non-single-target games (plinko/keno/roulette/…) can open and settle. Throws on an unsupported gameId
+ * or malformed params, which open-review surfaces as a decline rather than a crash.
+ */
+export function paramsHashForGame(gameId: number, params: unknown): Hex {
+  return keccak256(encodeGameParams(gameId, params))
 }
 
 /** The EIP-712 domain for the settlement contracts (same name/version as SessionState).

@@ -18,11 +18,13 @@ export const Menu = ({
   options,
   value,
   onChange,
+  disabled,
 }: {
   label: string
   options: (string | MenuOption)[]
   value: number
   onChange: (index: number) => void
+  disabled?: boolean
 }) => {
   const [open, setOpen] = useState(false)
   const [highlight, setHighlight] = useState(value)
@@ -94,6 +96,7 @@ export const Menu = ({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={label}
+        disabled={disabled}
         onClick={() => {
           setHighlight(value)
           setOpen((o) => !o)

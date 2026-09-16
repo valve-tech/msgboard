@@ -23,6 +23,166 @@
           - "--exclude=dist"
       register: ui_sync
 
+    # The landing Arcade lazy-loads @msgboard/games (games/msgboard-games) + @msgboard/settle
+    # (games/msgboard-settle). Their remaining deps (@msgboard/pow-grinder, @msgboard/sdk) already live
+    # in packages/ on the box, and neither games package has an install script — so ship ONLY those two
+    # workspaces (source; no hardhat/zk/contracts weight) and register them in the box's otherwise
+    # packages-only root workspaces so `npm i` in the docker build links them. Ships coinflip (gameId 5)
+    # + landingHouseCategory that the UI imports.
+    - name: Ensure the games/ parent dir exists (the box is otherwise a packages-only snapshot)
+      ansible.builtin.file:
+        path: "{{ deploy_dir }}/games"
+        state: directory
+        mode: "0755"
+
+    - name: Rsync the two games workspaces the UI build needs (source only)
+      ansible.posix.synchronize:
+        src: "{{ repo_root }}/games/{{ item }}/"
+        dest: "{{ deploy_dir }}/games/{{ item }}/"
+        delete: true
+        use_ssh_args: true
+        rsync_opts:
+          - "--exclude=node_modules"
+          - "--exclude=dist"
+      loop: [msgboard-games, msgboard-settle, house-service]
+      register: games_sync
+
+    - name: Register those workspaces in the box root package.json (idempotent, python3 — no host node)
+      ansible.builtin.shell: |
+        cd {{ deploy_dir }}
+        python3 - <<'PY'
+        import json
+        p = json.load(open('package.json'))
+        ws = p.get('workspaces', [])
+        add = [w for w in ('games/msgboard-games', 'games/msgboard-settle', 'games/house-service') if w not in ws]
+        if add:
+            p['workspaces'] = ws + add
+            json.dump(p, open('package.json', 'w'), indent=2)
+            open('package.json', 'a').write('\n')
+            print('ADDED ' + ', '.join(add))
+        PY
+      register: ws_patch
+      changed_when: "'ADDED' in ws_patch.stdout"
+
+    # The box builds with NO lockfile (dropped below), so `npm i` floats every
+    # transitive to whatever is newest that day. @noble/curves 2.x removed the
+    # `./utils` export and the UI build died on it — `Missing "./utils"
+    # specifier in "@noble/curves"` — while the same tree built locally, where
+    # the lockfile holds 1.9.7. Pin the box to the version we actually test
+    # against. Same reason the repo already pins viem.
+    #
+    # @types/node joined the list on 2026-09-08: the box floated to 22.20.1, whose
+    # Buffer<ArrayBufferLike> and node:module types stop packages/sdk's grinder.ts
+    # from compiling. The repo lockfile holds 22.15.2, so the same tree built
+    # locally and died on the box. typescript joined for the same reason: ^5.8.2
+    # floats to 5.9.3, which made ArrayBufferView generic, and the same file stops
+    # compiling. Both are TOOLCHAIN versions — a floating compiler is not a
+    # reproducible build. Keep this dict identical to the one in
+    # deploy-msgboard-core.yml — either play may run first.
+    - name: Pin floating transitives the box would otherwise resolve fresh
+      ansible.builtin.shell: |
+        cd {{ deploy_dir }}
+        python3 - <<'PY'
+        import json
+        p = json.load(open('package.json'))
+        ov = p.setdefault('overrides', {})
+        want = {'@noble/curves': '^1.9.7', '@types/node': '22.15.2', 'typescript': '5.8.3'}
+        add = {k: v for k, v in want.items() if ov.get(k) != v}
+        if add:
+            ov.update(add)
+            json.dump(p, open('package.json', 'w'), indent=2)
+            open('package.json', 'a').write('\n')
+            print('PINNED ' + ', '.join(add))
+        PY
+      register: override_patch
+      changed_when: "'PINNED' in override_patch.stdout"
+
+    # The box's package-lock.json predates these workspaces (it's a packages-only snapshot), so `npm i`
+    # in the image would resolve @msgboard/games et al. from the stale lock → registry 404. Drop it so
+    # `npm i` regenerates from the patched package.json and links all workspaces. Regenerable; the box's
+    # root Dockerfile uses `npm i` (not `npm ci`), so no reproducibility guarantee is being relied on.
+    - name: Drop the stale root package-lock.json so npm i resolves the new workspaces fresh
+      ansible.builtin.file:
+        path: "{{ deploy_dir }}/package-lock.json"
+        state: absent
+
+    # The box's root Dockerfile is a packages-only version (no `COPY games games`), so the image never
+    # got the engine source → npm i 404'd on @msgboard/games. Ship the updated Dockerfile (it now COPYs
+    # games/ + declares the VITE_LANDING_HOUSE_ADDRESS build arg). Shared with the sponsor build, where
+    # `COPY games games` is harmless (the 3 light workspaces, no install scripts).
+    - name: Ship the updated root Dockerfile (COPY games + VITE_LANDING_HOUSE_ADDRESS arg)
+      ansible.builtin.copy:
+        src: "{{ repo_root }}/Dockerfile"
+        dest: "{{ deploy_dir }}/Dockerfile"
+        mode: "0644"
+
+    # Normalize the ui build args (targeted, not a whole-file overwrite — other services' box config must
+    # survive): (1) STRIP any VITE_RPC_1/369/943 build args — a keyed RPC url must NEVER be a build-time
+    # value (vite inlines it into the PUBLIC bundle → the key leaks). The Dockerfile no longer declares
+    # those ARGs and the browser uses /api/rpc-proxy?chain=<id> with the key injected server-side (see the
+    # runtime RPC_* env task below). (2) ensure the pinned house address build arg is present.
+    - name: Normalize ui build args (strip keyed VITE_RPC_*, keep VITE_LANDING_HOUSE_ADDRESS)
+      ansible.builtin.shell: |
+        cd {{ deploy_dir }}
+        python3 - <<'PY'
+        import re
+        path = 'docker-compose.prod.yml'
+        s = open(path).read()
+        out = re.sub(r'^ +VITE_RPC_(?:1|369|943): .*\n', '', s, flags=re.M)  # drop the leak-prone build args
+        if 'VITE_LANDING_HOUSE_ADDRESS: ' not in out:
+            out = out.replace('      args:\n', '      args:\n        VITE_LANDING_HOUSE_ADDRESS: ${VITE_LANDING_HOUSE_ADDRESS:-}\n', 1)
+        if out != s:
+            open(path, 'w').write(out); print('PATCHED')
+        PY
+      register: ui_args_patch
+      changed_when: "'PATCHED' in ui_args_patch.stdout"
+
+    # Give the ui CONTAINER the keyed valve endpoints at RUNTIME. The client bundle never carries a key:
+    # the browser posts to /api/rpc-proxy?chain=<id> and the vite-preview server (this container) reads
+    # RPC_<id> from its runtime env and substitutes it there (see packages/ui/vite.config.ts). These are
+    # runtime env vars, NOT build args, so they are never inlined into the public JS. Idempotent (marker).
+    - name: Give the ui container the keyed RPC endpoints at runtime (proxy substitutes them server-side)
+      ansible.builtin.shell: |
+        cd {{ deploy_dir }}
+        python3 - <<'PY'
+        path = 'docker-compose.prod.yml'
+        s = open(path).read()
+        marker = '# ui-runtime-rpc (key-safe proxy)'
+        if marker not in s:
+            anchor = '        VITE_LANDING_HOUSE_ADDRESS: ${VITE_LANDING_HOUSE_ADDRESS:-}\n'
+            block = ('    environment:  ' + marker + '\n'
+                     '      RPC_1: ${RPC_1:-}\n'
+                     '      RPC_369: ${RPC_369:-}\n'
+                     '      RPC_943: ${RPC_943:-}\n')
+            assert anchor in s, 'ui build-args anchor not found in compose'
+            s = s.replace(anchor, anchor + block, 1)
+            open(path, 'w').write(s)
+            print('PATCHED')
+        PY
+      register: ui_env_patch
+      changed_when: "'PATCHED' in ui_env_patch.stdout"
+
+    # The root build script `npm run build --workspace=*` shell-globs `*` against /app, which after
+    # `npm i` includes node_modules + package.json + the new games/ dir → `npm run build
+    # --workspace=node_modules …` → npm errors on the non-workspace entries. Replace it with npm's
+    # proper all-workspaces flag (no shell glob, skips workspaces without a build script). Idempotent;
+    # strictly more correct for the shared ui+sponsor builds. python3 (no host node).
+    - name: Make the root build script glob-proof (npm run build --workspaces --if-present)
+      ansible.builtin.shell: |
+        cd {{ deploy_dir }}
+        python3 - <<'PY'
+        import json
+        p = json.load(open('package.json'))
+        want = 'npm run build --workspaces --if-present'
+        if p.get('scripts', {}).get('build') != want:
+            p.setdefault('scripts', {})['build'] = want
+            json.dump(p, open('package.json', 'w'), indent=2)
+            open('package.json', 'a').write('\n')
+            print('PATCHED')
+        PY
+      register: build_script_patch
+      changed_when: "'PATCHED' in build_script_patch.stdout"
+
     - name: Rebuild the ui image
       ansible.builtin.command:
         cmd: docker compose -f docker-compose.prod.yml build ui
@@ -36,6 +196,24 @@
         chdir: "{{ deploy_dir }}"
       register: up
       changed_when: "'Started' in up.stderr or 'Recreated' in up.stderr"
+
+    # SECURITY GATE: the built client bundle must NEVER contain the raw RPC key. We read the key segment
+    # from the container's runtime RPC_943 and assert it appears ZERO times in the served dist. The key
+    # value itself is never printed (only the occurrence count). Fails the deploy loudly on any leak.
+    - name: Security gate — assert the served client bundle contains no raw RPC key
+      ansible.builtin.shell: |
+        cd {{ deploy_dir }}
+        KEY=$(docker compose -f docker-compose.prod.yml exec -T ui sh -c 'printf %s "$RPC_943"' | sed -nE 's#.*/rpc/([^/]+)/evm/.*#\1#p')
+        if [ -z "$KEY" ] || [ "$KEY" = "vk_demo" ]; then
+          echo "RPC_943 unset or vk_demo — no private key to leak; gate passes trivially"; exit 0
+        fi
+        HITS=$(docker compose -f docker-compose.prod.yml exec -T ui sh -c "grep -rlF -- '$KEY' dist 2>/dev/null | wc -l" | tr -d '[:space:]')
+        echo "raw-key occurrences in served dist: ${HITS:-unknown}"
+        test "${HITS:-1}" -eq 0
+      args:
+        chdir: "{{ deploy_dir }}"
+      register: security_gate
+      changed_when: false
 
     # Body-aware, from the box itself (bypasses Cloudflare via --resolve): the container may take a
     # few seconds to come back after the recreate.

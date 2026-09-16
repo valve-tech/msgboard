@@ -6,7 +6,10 @@
  * per-UTC-day cosign categories) into the shared `message_archive` table. THIS service is the
  * read side — it serves @msgboard/history's `archiveServer` with the opt-in `cosign` endpoint
  * group, so the cosign UI's archive fallback (`GET /cosign/:namespace/:scope/signatures?days=N`)
- * can still count shares that have aged out of the live board toward the quorum.
+ * can still count shares that have aged out of the live board toward the quorum. It also serves the
+ * opt-in `petition` group (Task H) on the SAME server/port — petition-web's read-side calls this same
+ * host for `/petition/index`, `/petition/:id/signatures`, `/petition/:id/tally` (see
+ * ansible/deploy-cosign-archive.yml, which routes both groups under cosign-archive.msgboard.xyz).
  *
  * There is NO relayer/write-side here — the box's `indexer` container owns the write path and
  * the schema. This process only reads: the shared Postgres archive (aged-out shares) plus the
@@ -92,6 +95,11 @@ const server = archiveServer({
   host,
   token,
   cosign: { teamFile, board, boardRetentionDays },
+  // Petition read-side (Task C's @msgboard/history petition group, Task H wiring): reuses the SAME
+  // board seam + archive + board-retention split as cosign — a petition signature is literally a
+  // cosign SignatureRecord under a different category namespace, so nothing petition-specific is
+  // needed here. No team-file/owners concept for petitions, so PetitionOption is just these three.
+  petition: { board, boardRetentionDays },
 })
 
 console.log(`archive:        ${databaseUrl.replace(/:[^:@/]+@/, ':****@')}`)
@@ -100,6 +108,7 @@ console.log(`team-file:      ${teamFilePath} (namespace=${teamFile.namespace}, w
 console.log(`board cutoff:   ${boardRetentionDays} day(s)`)
 console.log(`listening:      http://${host}:${port}  (health: /health)`)
 console.log(`cosign route:   GET /cosign/${teamFile.namespace}/:scope/signatures?days=N`)
+console.log('petition route: GET /petition/index?days=N, /petition/:id/signatures?days=N, /petition/:id/tally?days=N')
 console.log(token ? 'auth:           Authorization: Bearer <COSIGN_ARCHIVE_TOKEN> required' : 'auth:           OPEN (loopback bind — no token)')
 
 const shutdown = async (signal: string) => {

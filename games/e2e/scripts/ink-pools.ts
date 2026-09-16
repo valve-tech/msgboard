@@ -46,8 +46,10 @@ const main = async () => {
   const random = (env.RANDOM_ADDRESS as viem.Hex | undefined) ?? knownRandom[CHAIN]
   if (!random) throw new Error('no Random address; set RANDOM_ADDRESS')
 
-  const { flooredFees } = await import('./actor-common')
-  const fees = await flooredFees(publicClient)
+  // 943's node quotes an absurd ~8.8M-gwei getGasPrice(); flooredFees uses it and the txs never mine.
+  // Match the block base fee (near-0 on 943) with a 1-gwei floor, legacy type-0 — like the deploy scripts.
+  const _baseFee = (await publicClient.getBlock()).baseFeePerGas ?? 0n
+  const fees = { gasPrice: _baseFee * 2n > viem.parseGwei('2') ? _baseFee * 2n : viem.parseGwei('2') }
 
   console.log(`inking ${VALIDATOR_COUNT} pools of ${POOL_SIZE} on chain ${CHAIN} (payer ${account.address})`)
   const poolOffsets: Record<string, string> = {}

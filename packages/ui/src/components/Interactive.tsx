@@ -259,8 +259,8 @@ export function Interactive({ workerFactory }: Props) {
       <div className="flex flex-col grow justify-center items-center">
         <div id="interactive" className="flex w-full grow flex-col">
           <SelectChain
-            onChange={(e) => {
-              useChainStore.getState().setChainOption(e.target.value as ChainOption)
+            onChange={(value) => {
+              useChainStore.getState().setChainOption(value as ChainOption)
             }}
           />
           <div className="container flex flex-col md:flex-row max-w-5xl items-start gap-4 justify-center grow">

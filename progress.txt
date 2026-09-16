@@ -1,6 +1,76 @@
 # MsgBoard — Progress
 
-Updated: 2026-06-14
+Updated: 2026-07-25
+
+## LANDING UI SHIPPED + TWO GREENLIT PLANS (2026-07-25, latest)
+
+Context: msgboard.xyz landing (packages/ui, React + Tailwind v4). This session polished the
+landing + Arcade and teed up two builds. See ~/.claude memory checkpoint-2026-07-25-landing-
+ui-polish + tailwind-v4-gradient-text-clip-bug + deploys-via-ansible-runbook.
+
+SHIPPED THIS SESSION (branch feat/landing-ui-arcade-timer-polish, commit 3685f3c; LIVE on
+msgboard.xyz via ansible/deploy-msgboard-ui.yml; NOT merged to master, NOT pushed):
+- gradient-text Tailwind-v4 block fix (.gradient-text util); SideToc overlap (min-[1680px]);
+  removed TryIt "Copy link"; chat wording "messages aren't signed"; chat demo keeps-text +
+  ciphertext toggle; chat padding pass (Direct + RoomPane); Arcade "playing as 0x.."
+  (loadPlayerAddress); Arcade timer freezes at the DECIDED outcome (engine onDecided callback
+  at the co-signed ROUND, before the transcript) + fixed the "You flip" 0.0s anchor.
+- VERIFY (user, needs live 943 house bot): flip on msgboard.xyz → Arcade; coin+total freeze at
+  "you won", then "settling…" tail. Local RPC has no house bot so a real flip won't complete.
+- Deploy: cd ansible && ansible-playbook deploy-msgboard-ui.yml (box 88.99.62.98, on-disk key
+  in inventory.ini). 5 clean deploys this session, all smoke-verified 200 through Cloudflare.
+
+═══ GREENLIT TASK 1 — MINT FUN-CHIPS ON REQUEST ═══
+User: "mint chips for users when they ask, via msgboard" — like gas-sponsorship on v4: a
+sponsored, PoW-stamped BOARD WRITE earns chips (no user gas; the PoW stamp is the Sybil cost).
+Testnet play-chips on msgboard.xyz ONLY; real chips stay games.msgboard.xyz.
+FACTS (verified): Chips ERC-20 on 943 = 0x81f130c7d9ff020f46f3b01918424173f8d5ca64, now
+VALVE-DEPLOYER-OWNED (2026-07-24 migration off gibs) → minting UNBLOCKED (old 0xaf2ce018 owner
+in memory is stale for Chips). Owner-mint lib EXISTS: games/house-service/src/faucet.ts
+faucetMint({walletClient,chips,to,amount,cap})→capped owner mint(); house-service derives the
+owner from its mnemonic (liveConfig.ts). NO HTTP faucet route yet = the build.
+BUILD: (1) house-service: add POST /faucet/chips {player, boardProof} — verify a fresh PoW board
+post from player to a "chip-request" category (Sybil gate), enforce per-address + per-window +
+global-budget caps, dedup by post-hash (one post = one grant), call faucetMint, return tx.
+(2) Arcade (packages/ui/src/components/Arcade.tsx): read on-chain Chips balanceOf(playerAddr) on
+943; "Get chips" = post PoW board msg → call /faucet/chips → refresh; keep a "memory-only"
+opt-out toggle (local ephemeral counter, no mint). (3) Deploy house-service + UI; smoke on live.
+CONFIRM w/ user: does the zero-stakes landing flip STAKE these chips, or are chips a mintable
+"take them to the full arcade" grant while the landing flip stays zero-stakes? (lean: latter.)
+NEVER expose the owner key to the client — minting is server-side in house-service only.
+
+═══ GREENLIT TASK 2 — COSIGN "PETITION" APP (featured on msgboard.xyz) ═══
+Censorship-resistant petition: people co-sign a statement over the board; the count is a tamper-
+proof, public, PoW-stamped tally anyone recounts from the chain (beats a Web2 form — no server
+can fake/delete sigs). Threshold actions fire at milestones.
+MODEL: Petition = {id, statement, creator, category (derived), thresholds[], actionConfig},
+published as a genesis board msg. Signature = a board msg: NAMED (EIP-712 over {petitionId,
+statementHash} by wallet OR the walletless ephemeral key) or ANONYMOUS (Semaphore ZK membership
+proof — reuse the anonymous-chat/Whisper stack — + nullifier=hash(identitySecret,petitionId) to
+stop double-sign). Both PoW-stamped. Count = unique valid sigs (dedup by address OR nullifier),
+fully client-recomputable.
+FLOWS: Sign (open by id/link → live count → Named/Anon toggle → post signature). Create
+(statement + threshold-action config → publish genesis). Verify (fetch category, verify each sig,
+dedup, count; "verify on-chain" recomputes).
+THRESHOLD ACTIONS (watcher in house-service or a small svc; every N sigs): post a summary board
+msg; optional webhook/email (creator-set); SOCIAL (X/Bluesky) NEUTRAL-INFRA ONLY — the app posts
+"N people signed: '<stmt>' — verify <link>" (reporting), OR hands the signer a PRE-FILLED post
+they publish from THEIR OWN account. The app NEVER asserts the claim in its own voice (this is
+the defamation/ToS guardrail — keep msgboard as infra, not publisher).
+CONTENT (agreed): for the featured demo, curate civic / clearly-opinion political-criticism
+examples (e.g. "X is a dictator", "City should fund Y"). Do NOT ship "kim jong un is gay" — reads
+as a homophobic slur (uses "gay" as the insult), makes it a slur-generator. Mechanism stays
+content-neutral (users write their own text); this is only about what WE feature.
+ANTI-ABUSE: PoW stamp per signature; dedup by address/nullifier.
+REUSE: board PoW posts, walletless identity, Semaphore ZK (in anonymous chat/Whisper), EIP-712.
+@msgboard/cosign is Safe-multisig-threshold-assembly (cosign-strategy memory) — a petition is
+simpler (append-only sigs over ONE statement); likely a NEW lightweight app, confirm during build.
+DEPLOY: new tab in the TryIt shell OR a subdomain (petition.msgboard.xyz) via ansible + a Caddy
+block (valve-caddy-config skill; caddy needs RESTART not reload for NEW hosts — waku-relay memory).
+
+ON HOLD (user): generative/NFT/AI-art mint. If revisited: seed-driven algorithmic from board
+randomness (verifiable) over AI-diffusion (not reproducible → breaks "verify it yourself").
+SUGGESTED ORDER: Task 1 (smaller, infra exists) → Task 2. Confirm the design Qs as you start each.
 
 ## MSGBOARD GAMES — PLAN 3 (ASYNC SETTLEMENT RELAYER) EXECUTED (2026-06-14, latest)
 

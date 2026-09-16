@@ -7,7 +7,7 @@ import { onchainTable } from 'ponder'
 export const gameEvent = onchainTable('game_event', (t) => ({
   id: t.text().primaryKey(), // `${chainId}-${txHash}-${logIndex}` — unique per log; re-indexing is idempotent
   chainId: t.integer().notNull(), // games are indexed on both chains now — the frontend filters by this
-  game: t.text().notNull(), // 'coinflip' | 'raffle' | 'flipbook'
+  game: t.text().notNull(), // 'coinflip' | 'raffle' | 'flipbook' | 'operator'
   name: t.text().notNull(), // event name: Entered, Paired, Settled, RoundOpened, Drawn, OfferPosted, …
   args: t.json().notNull(), // decoded args; bigints as decimal strings
   blockNumber: t.bigint().notNull(),
@@ -38,5 +38,19 @@ export const sudokuPuzzle = onchainTable('sudoku_puzzle', (t) => ({
   puzzleId: t.bigint().notNull(),
   openedAt: t.bigint().notNull(),
   blockNumber: t.bigint().notNull(),
+  txHash: t.hex().notNull(),
+}))
+
+// One row per settled PetitionSignatures `Signed` log — one signer counted once per petition, per
+// chain. Keyed by `${chainId}-${petitionId}-${signer}` (not `${chainId}-${txHash}-${logIndex}` like
+// gameEvent) so re-indexing AND a signer somehow appearing in two txs both settle onto the same row —
+// the count the frontend reads is the number of distinct signers, not the number of logs.
+export const petitionSignature = onchainTable('petition_signature', (t) => ({
+  id: t.text().primaryKey(), // `${chainId}-${petitionId}-${signer}` — idempotent
+  chainId: t.integer().notNull(),
+  petitionId: t.hex().notNull(),
+  signer: t.hex().notNull(),
+  blockNumber: t.bigint().notNull(),
+  blockTimestamp: t.bigint().notNull(),
   txHash: t.hex().notNull(),
 }))

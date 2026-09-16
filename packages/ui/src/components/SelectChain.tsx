@@ -7,6 +7,7 @@ import {
   selectMustProxy,
 } from '../stores/chain'
 import { Copy } from './Copy'
+import { Menu } from './Menu'
 import { Info } from './Info'
 import { ToggleButton } from './ToggleButton'
 
@@ -18,7 +19,7 @@ import { ToggleButton } from './ToggleButton'
  * blur/Enter (mirrors the Svelte `commitCustomUrl`).
  */
 type Props = {
-  onChange: (e: React.ChangeEvent<HTMLSelectElement>) => void
+  onChange: (value: string) => void
 }
 
 export function SelectChain({ onChange }: Props) {
@@ -48,36 +49,12 @@ export function SelectChain({ onChange }: Props) {
   return (
     <div className="flex flex-row gap-4 my-2 w-full items-center">
       <div className="flex flex-row shrink-0 items-center gap-2">
-        <div className="grid grid-cols-1">
-          <select
-            id="location"
-            name="location"
-            aria-label="chain"
-            value={chainOption}
-            className="col-start-1 row-start-1 w-full appearance-none rounded-md bg-white dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100 py-1 pl-3 pr-8 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 dark:outline-gray-600 focus:-outline-offset-2 focus:outline-indigo-600 sm:text-sm/6"
-            onChange={onChange}
-          >
-            {[...rpcs.entries()].map(([key, value]) => (
-              <option key={key} value={key} disabled={!!value.disabled}>
-                {value.chain.name}
-              </option>
-            ))}
-            <option value="custom">Custom</option>
-          </select>
-          <svg
-            className="pointer-events-none col-start-1 row-start-1 mr-2 size-5 self-center justify-self-end text-gray-500 dark:text-gray-400 sm:size-4"
-            viewBox="0 0 16 16"
-            fill="currentColor"
-            aria-hidden="true"
-            data-slot="icon"
-          >
-            <path
-              fillRule="evenodd"
-              d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z"
-              clipRule="evenodd"
-            />
-          </svg>
-        </div>
+        <Menu
+          label="chain"
+          options={[...[...rpcs.values()].map((v) => ({ label: v.chain.name, disabled: !!v.disabled })), { label: 'Custom' }]}
+          value={Math.max(0, [...rpcs.keys(), 'custom'].indexOf(chainOption))}
+          onChange={(i) => onChange([...rpcs.keys(), 'custom'][i]!)}
+        />
       </div>
       <div className="flex-1 min-w-0">
         {isCustom ? (

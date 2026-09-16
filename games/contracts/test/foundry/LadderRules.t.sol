@@ -35,6 +35,9 @@ contract LadderRulesTest is Test {
     function _u16x6(uint16 a, uint16 b, uint16 c, uint16 d, uint16 e, uint16 f) internal pure returns (uint16[] memory r) {
         r = new uint16[](6); r[0] = a; r[1] = b; r[2] = c; r[3] = d; r[4] = e; r[5] = f;
     }
+    function _u16x5(uint16 a, uint16 b, uint16 c, uint16 d, uint16 e) internal pure returns (uint16[] memory r) {
+        r = new uint16[](5); r[0] = a; r[1] = b; r[2] = c; r[3] = d; r[4] = e;
+    }
 
     function _claim(
         uint8 gameId,
@@ -206,6 +209,88 @@ contract LadderRulesTest is Test {
         h.settle(
             _claim(19, _greedConfig(), GREED_WIN_COMMIT, 1, 10, _u16x3(0, 0, 0), true, 500),
             STAKE, GREED_ESCROW_HOUSE
+        );
+    }
+
+    // ============================== CIPHER (gameId 26) ==============================
+    // difficulty=hard (symbols=4), rungs=5, seed=12345. Correct code digits = [1,2,3,2,3].
+    //   cipher-climb  : choices [1,2,3,2,3] cash out (top) -> multX100 101376, payout 202752
+    //   cipher-cashout: choices [1,2,3]     cash out       -> multX100 6336,   payout 12672
+    //   cipher-bust   : choices [1,2,0]     (wrong at rung 2) -> multX100 0, payout 0
+    // Escrow ceiling 101376 -> escrowHouse 202552, pot 202752.
+    bytes32 internal constant CIPHER_COMMIT = 0xe546b0a52c2879744f6def0fb483d581dc6d205de83af8440456804dd8b62380;
+    uint256 internal constant CIPHER_SEED = 12345;
+    uint256 internal constant CIPHER_ESCROW_HOUSE = 202552;
+
+    function _cipherConfig() internal pure returns (bytes memory) {
+        return abi.encode(uint256(5), uint256(4)); // rungs, symbols
+    }
+
+    function test_cipher_commit_matchesTs() public pure {
+        assertEq(LadderRules.commitLayout(CIPHER_SEED), CIPHER_COMMIT);
+    }
+
+    function test_cipher_climb_top_forcedWin_matchesTs() public pure {
+        (uint256 bP, uint256 bH) = LadderRules.settle(
+            _claim(26, _cipherConfig(), CIPHER_COMMIT, CIPHER_SEED, 5, _u16x5(1, 2, 3, 2, 3), true, 101376),
+            STAKE, CIPHER_ESCROW_HOUSE
+        );
+        assertEq(bP, 202752); // full pot: top of ladder reached
+        assertEq(bH, 0);
+        assertEq(bP + bH, STAKE + CIPHER_ESCROW_HOUSE);
+    }
+
+    function test_cipher_cashout_matchesTs() public pure {
+        (uint256 bP, uint256 bH) = LadderRules.settle(
+            _claim(26, _cipherConfig(), CIPHER_COMMIT, CIPHER_SEED, 5, _u16x3(1, 2, 3), true, 6336),
+            STAKE, CIPHER_ESCROW_HOUSE
+        );
+        assertEq(bP, 12672);
+        assertEq(bP + bH, STAKE + CIPHER_ESCROW_HOUSE);
+    }
+
+    function test_cipher_bust_matchesTs() public pure {
+        (uint256 bP, uint256 bH) = LadderRules.settle(
+            _claim(26, _cipherConfig(), CIPHER_COMMIT, CIPHER_SEED, 5, _u16x3(1, 2, 0), false, 0),
+            STAKE, CIPHER_ESCROW_HOUSE
+        );
+        assertEq(bP, 0);
+        assertEq(bH, STAKE + CIPHER_ESCROW_HOUSE);
+    }
+
+    // REJECT: a wrong seed no longer matches the code commitment.
+    function test_cipher_reject_forgedSeed() public {
+        vm.expectRevert(LadderRules.CommitMismatch.selector);
+        h.settle(
+            _claim(26, _cipherConfig(), CIPHER_COMMIT, CIPHER_SEED + 1, 5, _u16x5(1, 2, 3, 2, 3), true, 101376),
+            STAKE, CIPHER_ESCROW_HOUSE
+        );
+    }
+
+    // REJECT: inflated multiplier over an honest cash-out.
+    function test_cipher_reject_inflatedMultiplier() public {
+        vm.expectRevert(LadderRules.MultiplierMismatch.selector);
+        h.settle(
+            _claim(26, _cipherConfig(), CIPHER_COMMIT, CIPHER_SEED, 5, _u16x3(1, 2, 3), true, 101376),
+            STAKE, CIPHER_ESCROW_HOUSE
+        );
+    }
+
+    // REJECT: claiming a cash-out over a sequence that actually busted (wrong guess at rung 2).
+    function test_cipher_reject_cashOutOverBust() public {
+        vm.expectRevert(LadderRules.IllegalMove.selector);
+        h.settle(
+            _claim(26, _cipherConfig(), CIPHER_COMMIT, CIPHER_SEED, 5, _u16x3(1, 2, 0), true, 6336),
+            STAKE, CIPHER_ESCROW_HOUSE
+        );
+    }
+
+    // REJECT: a guess outside the symbol range is an illegal move.
+    function test_cipher_reject_guessOutOfRange() public {
+        vm.expectRevert(LadderRules.IllegalMove.selector);
+        h.settle(
+            _claim(26, _cipherConfig(), CIPHER_COMMIT, CIPHER_SEED, 5, _u16(9), false, 0),
+            STAKE, CIPHER_ESCROW_HOUSE
         );
     }
 

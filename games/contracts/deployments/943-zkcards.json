@@ -1,0 +1,17 @@
+{
+  "chainId": 943,
+  "deployBlock": "25082616",
+  "wrapperFactory": "0xB10A088ea04B261371Edc9Fe9e6121B8355aDe70",
+  "holdemTreasury": "0x5182574eE268ABD0A48f97DcfcdE65234E8422E2",
+  "vk1": "0xe36d3f2c9d50fb6ac7fb8bf649585e86e658029e",
+  "vk2": "0x53a3021ebd0dc77554b73bee6ea5aa32aeb6a364",
+  "shuffleVerifier": "0x35e6cd82d2ef06c564b7f917d780fe061d1964e1",
+  "revealVerifier": "0xf93dc548127acdd60c018d7ae70d9729da4bc17f",
+  "showdownDecodeLib": "0xacce157c26448ceb30a59915abc7cbe5531d069c",
+  "deckConstants": "0x515cca8ab56fd7d48f1e26e3019795d8692e0070",
+  "deckChallengeLib": "0x402dd5e41077cebd6e187d1e08f694c834a7f7c8",
+  "zkTable": "0x8857779acb9529d583911b0dedc456dd1f0829c4",
+  "hiLoWarRules": "0x567f431af18eb32c88e747eea1ccf84fe66dc865",
+  "holdemShowdownLib": "0x2699785fe757686636b222ce2168deaaad02dd7c",
+  "holdemTableN": "0x7da24fcc5b0754ca075c41fad594a5234c4f4f46"
+}
