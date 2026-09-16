@@ -138,13 +138,26 @@
         - name: Add / update the cosign-archive.msgboard.xyz block (idempotent)
           ansible.builtin.blockinfile:
             path: "{{ caddyfile }}"
+            # Write IN PLACE: the Caddyfile is a single-FILE bind mount, so an atomic replace leaves
+            # the running caddy bound to the old, unlinked inode and every later edit is inert.
+            unsafe_writes: true
             marker: "# {mark} ANSIBLE cosign-archive.msgboard.xyz"
             block: |
               cosign-archive.msgboard.xyz {
               	tls /etc/caddy/origin.pem /etc/caddy/origin.key
               	encode gzip
               	@api path /cosign/* /petition/* /health
+              	# cosign-web (cosign.msgboard.xyz) and petition-web (petition.msgboard.xyz) read this
+              	# domain from the browser, so every answer needs an Access-Control-Allow-Origin header or
+              	# the browser discards it. Echo the request Origin, but only for those two sites, and add
+              	# Vary so a cache never serves one site's header to the other. Both apps send GET with
+              	# only `accept`, a CORS-safelisted header, so there is no preflight to answer.
+              	@allowed_origin header_regexp Origin ^https://(cosign|petition)\.msgboard\.xyz$
               	handle @api {
+              		header @allowed_origin {
+              			Access-Control-Allow-Origin "{http.request.header.Origin}"
+              			Vary Origin
+              		}
               		reverse_proxy cosign-archive:4040 {
               			header_up Authorization "Bearer {env.COSIGN_ARCHIVE_TOKEN}"
               		}
@@ -162,15 +175,26 @@
         # Caddy must be RECREATED (not just reloaded) so it picks up COSIGN_ARCHIVE_TOKEN from the
         # override's env — env is fixed at container-create time. Recreating also re-reads the Caddyfile,
         # which reliably applies the new host block (reload is unreliable for new hosts on this box).
+        # `up -d caddy` alone is a NO-OP when the service definition has not changed: compose reports
+        # "up-to-date" and leaves the container running, so it never re-reads the Caddyfile and never
+        # re-resolves the single-file bind mount. That silently cost one deploy on 2026-09-16 — the
+        # play reported success while caddy kept serving a 3-week-old config. Force the recreate.
         - name: Recreate caddy so it carries the token + fresh Caddyfile
           ansible.builtin.command:
-            cmd: "{{ compose }} up -d caddy"
+            cmd: "{{ compose }} up -d --force-recreate caddy"
             chdir: "{{ deploy_dir }}"
           changed_when: true
 
         - name: Settle after recreate
           ansible.builtin.pause:
             seconds: 5
+
+        # Prove the RUNNING caddy can see this block before any smoke is trusted. `caddy adapt` runs
+        # inside the container, so when the container is bound to a stale inode it validates the OLD
+        # file and passes — a false green. Grep for a string only the managed block carries.
+        - name: The running caddy must actually see the new block
+          ansible.builtin.command: docker exec caddy grep -qF Access-Control-Allow-Origin /etc/caddy/Caddyfile
+          changed_when: false
 
         # Positive smoke #1 — /health answers {"ok":true} (open, no token).
         - name: Smoke /health (expects {"ok":true})
@@ -233,7 +257,7 @@
           when: caddy_backup.dest is defined
         - name: Recreate caddy after restore
           ansible.builtin.command:
-            cmd: "{{ compose }} up -d caddy"
+            cmd: "{{ compose }} up -d --force-recreate caddy"
             chdir: "{{ deploy_dir }}"
           when: caddy_backup.dest is defined
         - name: Fail loudly

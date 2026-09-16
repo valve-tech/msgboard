@@ -74,6 +74,9 @@
         - name: Add / update the waku.msgboard.xyz block (idempotent)
           ansible.builtin.blockinfile:
             path: "{{ caddyfile }}"
+            # Write IN PLACE: the Caddyfile is a single-FILE bind mount, so an atomic replace leaves
+            # the running caddy bound to the old, unlinked inode and every later edit is inert.
+            unsafe_writes: true
             marker: "# {mark} ANSIBLE waku.msgboard.xyz"
             block: |
               waku.msgboard.xyz {
