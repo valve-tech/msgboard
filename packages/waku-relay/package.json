@@ -51,7 +51,7 @@
     "@waku/sdk": "^0.0.30"
   },
   "devDependencies": {
-    "@types/node": "^22.10.0",
+    "@types/node": "^26.5.1",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2",
     "vitest": "^3.2.6"

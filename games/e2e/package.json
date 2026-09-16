@@ -33,7 +33,7 @@
     "viem": "^2.25.0"
   },
   "devDependencies": {
-    "@types/node": "^22.10.0",
+    "@types/node": "^26.5.1",
     "esbuild": "0.24.2",
     "tsx": "^4.19.3",
     "typescript": "~5.8.3",
