@@ -41,9 +41,9 @@
   ],
   "scripts": {
     "docker:build": "docker compose build",
-    "build": "npm run build --workspace=*",
-    "lint": "npm run lint --workspace=*",
-    "test": "npm run build && npm run test --workspace=*",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run build && npm run test --workspaces --if-present",
     "test:client": "npm run test --workspace=packages/sdk",
     "test:hh": "npm run test --workspace=packages/hardhat",
     "start": "npm run start --workspace=packages/ui",

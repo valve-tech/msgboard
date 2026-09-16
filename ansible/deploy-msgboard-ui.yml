@@ -162,12 +162,17 @@
       register: ui_env_patch
       changed_when: "'PATCHED' in ui_env_patch.stdout"
 
-    # The root build script `npm run build --workspace=*` shell-globs `*` against /app, which after
-    # `npm i` includes node_modules + package.json + the new games/ dir → `npm run build
-    # --workspace=node_modules …` → npm errors on the non-workspace entries. Replace it with npm's
-    # proper all-workspaces flag (no shell glob, skips workspaces without a build script). Idempotent;
-    # strictly more correct for the shared ui+sponsor builds. python3 (no host node).
-    - name: Make the root build script glob-proof (npm run build --workspaces --if-present)
+    # DRIFT GUARD, not the fix. The repo's root package.json now ships this exact script, so on a fresh
+    # tree this task prints nothing and changes nothing. It stays because /opt/msgboard/package.json is
+    # a PRUNED workspace list this playbook maintains by hand — that file is never synced from the repo,
+    # so the box copy keeps whatever build script it was last written with and drifts on its own.
+    #
+    # What it drifted into before: `npm run build --workspace=*` shell-globs `*` against /app, which
+    # after `npm i` includes node_modules + package.json + the new games/ dir → `npm run build
+    # --workspace=node_modules …` → npm errors on the non-workspace entries. `--workspaces` is npm's
+    # own all-workspaces flag, so the shell never sees a glob, and `--if-present` skips the 13
+    # workspaces that declare no build script. python3 (no host node).
+    - name: Drift guard — the box build script matches the repo (npm run build --workspaces --if-present)
       ansible.builtin.shell: |
         cd {{ deploy_dir }}
         python3 - <<'PY'
