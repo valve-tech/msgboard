@@ -1,0 +1,126 @@
+# Deploy the testnet faucet (packages/faucet: Go server + the Svelte UI in web/) onto the msgboard box.
+# The faucet is the `faucet` service in the box's docker-compose.prod.yml (compose project `msgboard`).
+# Its Dockerfile builds web/ in a node stage and embeds public/ into the Go binary, so ANY change to
+# web/ or its dependencies needs an image rebuild. Caddy already routes faucet.v4.testnet.pulsechain.com
+# to faucet:8080, so this play never touches the Caddyfile.
+#
+# Steps: copy the source in (the box holds a non-git snapshot), tag the running image :prev, rebuild,
+# recreate ONLY the faucet, then prove the NEW bundle is live. If any check fails, the play puts the
+# :prev image back and fails loudly.
+#
+# Proof of a new bundle: rollup names its output bundle.css with no content hash, so this play checks
+# the bulma banner instead. The served CSS must contain "bulma.io v<version in web/package-lock.json>".
+#
+#   ansible-playbook -i inventory.ini deploy-faucet.yml 2>&1 | tee faucet.log | tail -40
+- name: Deploy the testnet faucet (msgboard box)
+  hosts: msgboard
+  gather_facts: false
+  vars:
+    deploy_dir: /opt/msgboard
+    repo_root: "{{ playbook_dir }}/.."
+    compose: "docker compose -f docker-compose.prod.yml"
+    image: msgboard-faucet
+    public_url: https://faucet.v4.testnet.pulsechain.com
+  tasks:
+    - name: Read the locked bulma version (the marker the live CSS must carry)
+      ansible.builtin.command:
+        cmd: >-
+          python3 -c "import json;print(json.load(open('{{ repo_root }}/packages/faucet/web/package-lock.json'))['packages']['node_modules/bulma']['version'])"
+      delegate_to: localhost
+      register: bulma
+      changed_when: false
+
+    # Exclude node_modules and public/build. The Dockerfile has no .dockerignore and runs
+    # `COPY ./web .` AFTER `npm install`, so a local (darwin) node_modules in the context would
+    # overwrite the linux install inside the image.
+    - name: Archive the faucet source locally
+      ansible.builtin.command:
+        cmd: >-
+          tar czf /tmp/faucet-src.tgz -C {{ repo_root }}/packages
+          --exclude=node_modules --exclude=public/build faucet
+      delegate_to: localhost
+      changed_when: false
+
+    - name: Copy the archive to the box
+      ansible.builtin.copy:
+        src: /tmp/faucet-src.tgz
+        dest: "{{ deploy_dir }}/faucet-src.tgz"
+        mode: "0644"
+
+    - name: Extract the faucet source into packages/
+      ansible.builtin.command:
+        cmd: tar xzf faucet-src.tgz -C packages
+        chdir: "{{ deploy_dir }}"
+      changed_when: true
+
+    - name: Tag the running image :prev (the rollback target)
+      ansible.builtin.command:
+        cmd: docker tag {{ image }}:latest {{ image }}:prev
+      changed_when: true
+
+    - name: Build and verify, roll back on any failure
+      block:
+        - name: Build the faucet image (node stage + Go stage)
+          ansible.builtin.command:
+            cmd: "{{ compose }} build faucet"
+            chdir: "{{ deploy_dir }}"
+          changed_when: true
+
+        # --no-deps: recreate the faucet alone, never its neighbours in docker-compose.prod.yml.
+        - name: Recreate the faucet container on the new image
+          ansible.builtin.command:
+            cmd: "{{ compose }} up -d --no-deps faucet"
+            chdir: "{{ deploy_dir }}"
+          changed_when: true
+
+        - name: Inside the network — the container serves the new bulma
+          ansible.builtin.shell: >-
+            docker exec caddy wget -q -T 5 -O - http://faucet:8080/build/bundle.css
+            | grep -o 'bulma\.io v[0-9.]*' | head -1
+          register: inner
+          changed_when: false
+          retries: 10
+          delay: 3
+          until: inner.stdout == 'bulma.io v' ~ bulma.stdout
+
+        - name: Public — the hostname serves the new bulma
+          ansible.builtin.shell: >-
+            curl -sS -m 15 {{ public_url }}/build/bundle.css | grep -o 'bulma\.io v[0-9.]*' | head -1
+          register: outer
+          changed_when: false
+          retries: 5
+          delay: 3
+          until: outer.stdout == 'bulma.io v' ~ bulma.stdout
+
+        - name: Public — the page and the JS bundle answer 200
+          ansible.builtin.shell: >-
+            echo "page=$(curl -sS -m 15 -o /dev/null -w '%{http_code}' {{ public_url }}/)
+            js=$(curl -sS -m 15 -o /dev/null -w '%{http_code}' {{ public_url }}/build/bundle.js)"
+          register: pages
+          changed_when: false
+          failed_when: "'page=200' not in pages.stdout or 'js=200' not in pages.stdout"
+
+        # /api/info proves the Go server still reads its chain config. Print key names only.
+        - name: Public — /api/info answers with its three keys
+          ansible.builtin.shell: >-
+            curl -sS -m 20 {{ public_url }}/api/info
+            | python3 -c "import json,sys;print(','.join(sorted(json.load(sys.stdin))))"
+          register: info
+          changed_when: false
+          failed_when: info.stdout != 'account,network,payout'
+
+      rescue:
+        - name: ROLLBACK — put the :prev image back
+          ansible.builtin.shell: >-
+            docker tag {{ image }}:prev {{ image }}:latest &&
+            {{ compose }} up -d --no-deps --force-recreate faucet
+          args:
+            chdir: "{{ deploy_dir }}"
+
+        - name: Fail after the rollback
+          ansible.builtin.fail:
+            msg: "The faucet deploy failed its checks, and the play restored the :prev image."
+
+    - name: Deployed
+      ansible.builtin.debug:
+        msg: "faucet serves bulma v{{ bulma.stdout }} · {{ pages.stdout }} · /api/info keys {{ info.stdout }}"

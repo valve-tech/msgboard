@@ -10,6 +10,10 @@ hand-maintained on the box, and nwaku is **co-located** on the box's `edge` netw
   smoke** → block/rescue auto-rollback).
 - **`deploy-waku.yml`** → the **nwaku WSS node** (`waku.msgboard.xyz`) co-located on the box, on the
   `edge` network, route in the shared Caddyfile; persistent nodekey; standalone cluster-0 (no RLN).
+- **`deploy-faucet.yml`** → the testnet faucet (`faucet.v4.testnet.pulsechain.com`): copy the
+  `packages/faucet` source in, tag the running image `:prev`, rebuild, recreate only the `faucet`
+  service, and check that the live CSS carries the locked bulma version. Any failed check restores
+  `:prev`. The Caddy route already exists, so the play does not touch the Caddyfile.
 - **`deploy-petition.yml`** → the `@msgboard/petition-web` UI (`petition.msgboard.xyz`): same recipe as
   `deploy-cosign.yml` (rsync source, register workspace, build + start, safe-reload Caddy route).
   `VITE_PETITION_ADDR_{943,369}` / `VITE_PETITION_READ_BASE` / `VITE_PETITION_INDEXER_URL` are **build
@@ -51,6 +55,7 @@ export SSH_AUTH_SOCK="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/t/
 ```bash
 ansible-playbook deploy-cosign.yml     # cosign UI (cosign.msgboard.xyz)
 ansible-playbook deploy-waku.yml       # nwaku WSS node (waku.msgboard.xyz)
+ansible-playbook deploy-faucet.yml     # testnet faucet (faucet.v4.testnet.pulsechain.com)
 ansible-playbook site.yml              # both
 ```
 
