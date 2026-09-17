@@ -30,37 +30,37 @@
     iconUrls: [],
   }
   const updateChainId = async () => {
-    if (!ethereum) {
+    if (!window.ethereum) {
       return
     }
-    const chainId = await ethereum.request({
+    const chainId = await window.ethereum.request({
       method: 'eth_chainId',
     })
     network = chainId
   }
   const requestAccounts = async () => {
-    if (!ethereum) {
+    if (!window.ethereum) {
       return
     }
-    const accounts = await ethereum.request({
+    const accounts = await window.ethereum.request({
       method: 'eth_requestAccounts',
     })
     address = accounts[0]
   }
   if (window.ethereum) {
-    network = ethereum.chainId
+    network = window.ethereum.chainId
     const requestAccountsOnce = (canRun = true) => () => {
-      // ethereum.off('connect', requestAccountsOnce)
+      // window.ethereum.off('connect', requestAccountsOnce)
       if (!canRun) {
         return
       }
       requestAccounts()
       canRun = false
     }
-    ethereum.on('connect', requestAccountsOnce)
-    ethereum.on('connect', updateChainId)
-    ethereum.on('chainChanged', updateChainId)
-    ethereum.on('accountsChanged', (accounts) => {
+    window.ethereum.on('connect', requestAccountsOnce)
+    window.ethereum.on('connect', updateChainId)
+    window.ethereum.on('chainChanged', updateChainId)
+    window.ethereum.on('accountsChanged', (accounts) => {
       address = accounts[0]
     })
   }
@@ -91,15 +91,19 @@
   });
 
   async function addTestnetToMetamask () {
+    if (!window.ethereum) {
+      toast({ message: 'No wallet found. Install MetaMask or another browser wallet, then try again.', type: 'is-warning' });
+      return
+    }
     try {
-      await ethereum.request({
+      await window.ethereum.request({
         method: 'wallet_switchEthereumChain',
         params: [{ chainId: testnetConfig.chainId }],
       })
     } catch (switchError) {
       if (switchError.code === 4902) {
         try {
-          await ethereum.request({
+          await window.ethereum.request({
             method: 'wallet_addEthereumChain',
             params: [testnetConfig],
           })
@@ -227,6 +231,16 @@
     -moz-background-size: cover;
     -o-background-size: cover;
     background-size: cover;
+  }
+  /* bulma 1.0 derives .hero.is-info text from the info colour, which is dark on this darkened photo.
+     Keep the white text that bulma 0.9 gave this hero. */
+  .hero.is-info,
+  .hero.is-info .title,
+  .hero.is-info .navbar-item {
+    color: #fff;
+  }
+  .hero.is-info .subtitle {
+    color: rgba(255, 255, 255, 0.9);
   }
   .hero .subtitle {
     padding: 3rem 0;
