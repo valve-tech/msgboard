@@ -95,18 +95,20 @@ describe('MVP vertical slice (Interactive flow)', () => {
   it('grinds in the worker seam (fake worker), posts, then reloads board content', async () => {
     const { Interactive } = await import('../src/components/Interactive')
     const { useChainStore } = await import('../src/stores/chain')
+    const { keccak256, stringToHex: s2h } = await import('viem')
 
-    // start on a non-faucet chain so the compose flow is the plain "input" message path
+    // gas demo requires a faucet-supported chain
     act(() => {
-      useChainStore.setState({ chainOption: 'pulsechain', content: null })
+      useChainStore.setState({ chainOption: 'pulsechainV4', content: null })
     })
 
     render(<Interactive workerFactory={() => new FakeWorker() as unknown as Worker} />)
 
-    // type a message
-    const textarea = (await screen.findByPlaceholderText(/any text can go here/i)) as HTMLTextAreaElement
+    // enter a recipient address
+    const recipient = '0x0000000000000000000000000000000000000001'
+    const input = (await screen.findByPlaceholderText(/0x… recipient/i)) as HTMLInputElement
     act(() => {
-      fireEvent.input(textarea, { target: { value: 'hello board' } })
+      fireEvent.change(input, { target: { value: recipient } })
     })
 
     // submit
@@ -121,8 +123,9 @@ describe('MVP vertical slice (Interactive flow)', () => {
     expect(lastWorker).not.toBeNull()
 
     // resolve the grind from the worker → seam resolves → flow reloads content
+    const gasCategory = keccak256(s2h('gasmoneyplease'))
     sdkContent = {
-      [stringToHex('input', { size: 32 })]: [],
+      [gasCategory]: [],
     }
     await act(async () => {
       lastWorker!.emit({
@@ -133,6 +136,21 @@ describe('MVP vertical slice (Interactive flow)', () => {
 
     // worker was terminated (cleanup) after completing
     await waitFor(() => expect(lastWorker!.terminated).toBe(true))
+  })
+
+  it('shows a clear empty state when the faucet is inactive (no freeform messaging)', async () => {
+    const { Interactive } = await import('../src/components/Interactive')
+    const { useChainStore } = await import('../src/stores/chain')
+
+    act(() => {
+      useChainStore.setState({ chainOption: 'pulsechain', content: null })
+    })
+
+    render(<Interactive workerFactory={() => new FakeWorker() as unknown as Worker} />)
+
+    expect(await screen.findByText(/faucet unavailable on this chain/i)).toBeTruthy()
+    expect(screen.queryByPlaceholderText(/0x… recipient/i)).toBeNull()
+    expect(screen.queryByPlaceholderText(/any text can go here/i)).toBeNull()
   })
 
   it('does NOT call doPoW on the main thread — the grind goes through the worker module', async () => {
