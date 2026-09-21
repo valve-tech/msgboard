@@ -46,8 +46,8 @@ const renderAt = async (hash: string) => {
 describe('hash-router route coverage (parity with the Svelte App.svelte)', () => {
   it('#/ → Home (landing) renders the hero + interactive board', async () => {
     await renderAt('#/')
-    // the interactive board (with the chain selector) lives on the Mechanics tab of the Try-it section
-    fireEvent.click(await screen.findByRole('tab', { name: /mechanics/i }))
+    // the interactive board (with the chain selector) lives on the Gas tab of the Try-it section
+    fireEvent.click(await screen.findByRole('tab', { name: /gas/i }))
     expect(await screen.findByRole('button', { name: 'chain' })).toBeTruthy()
     // hero word(s) from Welcome — "MsgBoard" appears across several sections
     expect((await screen.findAllByText('MsgBoard')).length).toBeGreaterThan(0)
