@@ -38,6 +38,7 @@ const relayer = new Relayer({
   node: { transport: http('https://rpc.pulsechain.com') },
   // chain auto-detected via eth_chainId; pass node.chain to override
   // mode defaults to 'observe' — no on-chain writes
+  // plain category strings are UTF-8 zero-padded to 32 bytes; pass 0x…32 (e.g. categoryHash) for keccak buckets
   source: msgboardContentSource({ category: 'myapp' }),
   key: (msg) => msg.hash,
   action: noopAction(),

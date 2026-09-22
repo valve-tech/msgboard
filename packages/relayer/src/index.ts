@@ -30,7 +30,7 @@ export { postgresArchiveSink } from './sinks/postgres-archive.js'
 export type { ArchiveQuery, ArchivedMessage, ArchiveRetention } from './sinks/postgres-archive.js'
 export { postgresSink } from './sinks/postgres.js'
 
-export { msgboardContentSource } from './sources/msgboard-content.js'
+export { msgboardContentSource, toCategoryHex } from './sources/msgboard-content.js'
 export { bridgeAffirmationSource } from './sources/bridge-affirmation.js'
 export { generatedSource } from './sources/generated.js'
 
