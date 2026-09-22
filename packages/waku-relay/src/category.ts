@@ -5,9 +5,9 @@ import { keccak256, stringToBytes, stringToHex, type Hex } from 'viem'
  * for the same channel name — so a relay MUST pin one explicitly or it will silently split a channel:
  *
  *   - 'keccak256' (DEFAULT): keccak256(utf8 bytes of name). This is the `@msgboard/sdk` `categoryHash`
- *      convention, and what the games platform (`@gibs/msgboard-games`) uses.
- *   - 'ascii32': stringToHex(name, { size: 32 }) — the raw ASCII bytes right-padded to 32. This is the
- *      `@msgboard/relayer` `toCategoryHex` convention.
+ *      / `@msgboard/relayer` `toCategoryHex` convention, and what the games platform uses.
+ *   - 'ascii32': stringToHex(name, { size: 32 }) — raw ASCII bytes right-padded to 32. Legacy only
+ *      (older posts / explicit opt-in); not the SDK or relayer default.
  *
  * Default is 'keccak256'; flip to 'ascii32' with the `--category-encoding ascii32` flag (or
  * RELAY_CATEGORY_ENCODING=ascii32).
