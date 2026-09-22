@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@msgboard/zk-cards-core": "*",
-    "@noble/curves": "^1.6.0",
+    "@noble/curves": "^2.4.0",
     "viem": "^2.25.0"
   },
   "devDependencies": {
