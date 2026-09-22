@@ -71,9 +71,8 @@ const startGrinder = (): void => {
     key: (post) => `${post.category}:${post.text}`,
     store: noopStore<Post>(),
     action: submitMessageAction<Post>({
-      // direct utf8-encode the category into 32 bytes (e.g. "lorem") so the board stores a
-      // readable name rather than keccak256(name) — categoryHash() leaves an already-hex
-      // value untouched, so this skips the hashing path.
+      // UTF-8 zero-pad to 32 bytes — same as relayer toCategoryHex for plain strings
+      // (readable on-board). For keccak buckets, pass categoryHash(...) as 0x hex instead.
       category: (post) => stringToHex(post.category, { size: 32 }),
       data: (post) => post.text,
     }),
