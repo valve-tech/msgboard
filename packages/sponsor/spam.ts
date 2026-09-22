@@ -71,9 +71,8 @@ const startGrinder = (): void => {
     key: (post) => `${post.category}:${post.text}`,
     store: noopStore<Post>(),
     action: submitMessageAction<Post>({
-      // INTENTIONAL ascii32 (legacy pad), not SDK/relayer categoryHash — so spam categories
-      // stay human-readable on-board during load tests. Production watchers that use keccak
-      // will not see these posts unless they also opt into ascii32 / pass the padded hex.
+      // UTF-8 zero-pad to 32 bytes — same as relayer toCategoryHex for plain strings
+      // (readable on-board). For keccak buckets, pass categoryHash(...) as 0x hex instead.
       category: (post) => stringToHex(post.category, { size: 32 }),
       data: (post) => post.text,
     }),

@@ -24,7 +24,7 @@
   "dependencies": {
     "@gibs/random": "^0.0.19",
     "@msgboard/history": "^0.4.0",
-    "@msgboard/relayer": "^0.5.0",
+    "@msgboard/relayer": "^0.4.1",
     "@msgboard/sdk": "^0.4.0",
     "circomlibjs": "^0.1.7",
     "pg": "^8.22.0",

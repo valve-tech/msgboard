@@ -11,7 +11,7 @@ describe('category encoding', () => {
     }
   })
 
-  it('ascii32 right-pads ASCII to 32 bytes (legacy opt-in, not SDK/relayer default)', () => {
+  it('ascii32 matches the relayer toCategoryHex convention (right-pad to 32 bytes)', () => {
     expect(categoryFor('lobby', 'ascii32')).toBe(stringToHex('lobby', { size: 32 }))
     expect(categoryFor('369', 'ascii32')).toBe(stringToHex('369', { size: 32 }))
   })

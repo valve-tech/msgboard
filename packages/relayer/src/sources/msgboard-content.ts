@@ -1,19 +1,26 @@
-import { type Hex } from 'viem'
-import { categoryHash, type RPCMessage } from '@msgboard/sdk'
+import { stringToHex, type Hex } from 'viem'
+import type { RPCMessage } from '@msgboard/sdk'
 import type { RelayerSource } from '../types.js'
+
+const BYTES32_HEX = /^0x[0-9a-fA-F]{64}$/
 
 export type MsgboardContentSourceOptions = {
   /**
-   * Category to watch. Congruent with `@msgboard/sdk` / `MsgBoardClient.doPoW`:
-   * - plain string → `keccak256(utf8)` via `categoryHash`
-   * - `0x` + 32-byte hex → passed through as-is (Valaxy and others may pre-hash)
+   * Category to watch:
+   * - plain string → UTF-8 bytes zero-padded to 32 (`stringToHex(..., { size: 32 })`)
+   * - `0x` + 32-byte hex → passed through as-is (e.g. `categoryHash('name')` from the SDK)
    * Omit to watch all categories.
+   *
+   * For keccak buckets, pass the pre-hashed hex — do not expect plaintext strings to be hashed here.
    */
   category?: string
 }
 
-/** Normalizes a category name or hex into a bytes32 hex category (SDK-congruent). */
-export const toCategoryHex = (category: string): Hex => categoryHash(category)
+/** Normalizes a category name or hex into a bytes32 hex category. */
+export const toCategoryHex = (category: string): Hex => {
+  if (BYTES32_HEX.test(category)) return category as Hex
+  return stringToHex(category, { size: 32 })
+}
 
 /** Polls msgboard content. With no category, flattens messages across every category. */
 export const msgboardContentSource = (
