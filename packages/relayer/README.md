@@ -38,6 +38,7 @@ const relayer = new Relayer({
   node: { transport: http('https://rpc.pulsechain.com') },
   // chain auto-detected via eth_chainId; pass node.chain to override
   // mode defaults to 'observe' — no on-chain writes
+  // category strings are keccak256'd (same as MsgBoardClient.doPoW); pass 0x…32 bytes to skip hashing
   source: msgboardContentSource({ category: 'myapp' }),
   key: (msg) => msg.hash,
   action: noopAction(),

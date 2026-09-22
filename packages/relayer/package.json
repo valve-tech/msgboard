@@ -1,6 +1,6 @@
 {
   "name": "@msgboard/relayer",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Controllable, safe-by-default pool-watcher relayer for the msgboard board",
   "repository": "github:valve-tech/msgboard",
   "author": "MsgBoard",
