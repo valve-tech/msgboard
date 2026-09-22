@@ -8,7 +8,7 @@
     "start": "tsx src/index.ts"
   },
   "dependencies": {
-    "@msgboard/relayer": "^0.4.0",
+    "@msgboard/relayer": "^0.5.0",
     "@msgboard/sdk": "^0.4.0",
     "pg": "^8.22.0",
     "tsx": "^4.19.3",
