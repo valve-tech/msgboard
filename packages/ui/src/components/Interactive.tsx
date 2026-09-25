@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { numberToHex, isHex, stringToHex, isAddress, keccak256, type Hex } from 'viem'
+import { Icon } from '@iconify/react'
+import { formatEther, isAddress, keccak256, stringToHex, type Hex } from 'viem'
 import {
   useChainStore,
   selectChain,
@@ -16,23 +17,16 @@ import { useAccount } from '../hooks/useAccount'
 import { getScope, load, save, collectLabels } from '../lib/persist'
 import { toTree } from '../lib/tree'
 import { makeWorkerBoard } from '../seams/worker-board'
+import { connectInjectedWallet, getInjectedProvider } from '../lib/wallet'
 import { SelectChain } from './SelectChain'
-import { Category } from './Category'
-import { MessageInput } from './MessageInput'
-import { PresetButtons } from './PresetButtons'
 import { Summary } from './Summary'
 import { Terminal } from './Terminal'
 import { TreeView, loadTreeNodeState, pruneTreeNodeState } from './TreeView'
 import { RequestSnapshot, type WorkSnapshot } from './RequestSnapshot'
 
-type CategoryKey = 'gas-request' | 'input'
+/** Persisted gas-demo state (legacy `categoryType` / messaging fields ignored on load). */
 type InteractiveState = {
-  categoryType: CategoryKey
-  categoryValue: string
   text: string
-  showHexResult: boolean
-  showCategoryHexResult: boolean
-  useKeccak: boolean
 }
 
 type Props = {
@@ -44,20 +38,23 @@ type Props = {
   workerFactory?: () => Worker
 }
 
+const GAS_CATEGORY = 'gasmoneyplease'
+const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`
+
 const scopeFromStore = (): string => {
   const s = useChainStore.getState()
   return getScope(selectChain(s)?.id, selectRpcUrl(s))
 }
 
 /**
- * Ported from `Interactive.svelte` — the MVP vertical slice.
+ * Gas / faucet demo (formerly the dual-mode Mechanics laboratory).
  *
- * Compose a message → grind PoW in the Web Worker seam (Task 2) → the worker posts it → reload
- * board content (chain store) → Terminal + TreeView render. The grind is dispatched to the
- * worker via `makeWorkerBoard.addMessage`; it NEVER runs on the main thread.
+ * Request testnet gas via category `gasmoneyplease` + recipient address → grind PoW in the
+ * Web Worker seam → worker posts → reload board. Freeform messaging was removed from this tab
+ * (Chat covers compose). When the faucet is inactive the panel shows a clear empty state —
+ * it does NOT fall back to raw messaging.
  */
 export function Interactive({ workerFactory }: Props) {
-  // chain-store reads (each a former Svelte `$derived`)
   const transportUrl = useChainStore((s) => selectTransportUrl(s))
   const fullTransportUrl = useChainStore((s) => selectFullTransportUrl(s))
   const chainId = useChainStore((s) => selectChain(s)?.id ?? 0)
@@ -71,41 +68,29 @@ export function Interactive({ workerFactory }: Props) {
   const globalWorkDivisor = useChainStore((s) => s.globalWorkDivisor)
 
   const account = useAccount()
+  const hasInjectedWallet = typeof getInjectedProvider() !== 'undefined'
 
   const initialScope = scopeFromStore()
   const stored = load<Partial<InteractiveState>>(initialScope, 'interactive', {})
 
   const [text, setText] = useState(stored.text ?? '')
-  const [categoryType, setCategoryType] = useState<CategoryKey>(
-    stored.categoryType ?? 'gas-request',
-  )
-  const [categoryValue, setCategoryValue] = useState(stored.categoryValue ?? 'gasmoneyplease')
-  const [showHexResult, setShowHexResult] = useState(stored.showHexResult ?? false)
-  const [showCategoryHexResult, setShowCategoryHexResult] = useState(
-    stored.showCategoryHexResult ?? false,
-  )
-  const [useKeccak, setUseKeccak] = useState(stored.useKeccak ?? true)
-
   const [working, setWorking] = useState(false)
   const [workSnapshot, setWorkSnapshot] = useState<WorkSnapshot | null>(null)
+  const [result, setResult] = useState<'success' | 'error' | null>(null)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [showInspect, setShowInspect] = useState(false)
+  const [pasteHint, setPasteHint] = useState<string | null>(null)
   const cancelRef = useRef<() => void>(() => {})
 
-  // the persist scope tracks the active chain + rpc; recompute it reactively so a mid-session
-  // chain switch reloads the right slice of persisted state (the Svelte scope-change `$effect`).
   const chainOption = useChainStore((s) => s.chainOption)
   const customRpcUrl = useChainStore((s) => s.customRpcUrl)
   const scope = useChainStore((s) => getScope(selectChain(s)?.id, selectRpcUrl(s)))
 
-  // load persisted tree state once on mount
   useEffect(() => {
     loadTreeNodeState(initialScope)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Reload persisted interactive + tree state when the scope changes mid-session (a chain
-  // switch). Skip the very first run — mount already seeded state from `initialScope` above and
-  // from the `useState` initializers; re-applying here would clobber unsaved edits. Tracking the
-  // previous scope in a ref keeps this a focused "on change" effect (Task-4 review carry-forward).
   const prevScopeRef = useRef(initialScope)
   useEffect(() => {
     if (scope === prevScopeRef.current) return
@@ -113,48 +98,15 @@ export function Interactive({ workerFactory }: Props) {
     loadTreeNodeState(scope)
     const next = load<Partial<InteractiveState>>(scope, 'interactive', {})
     setText(next.text ?? '')
-    setCategoryType(next.categoryType ?? 'gas-request')
-    setCategoryValue(next.categoryValue ?? 'gasmoneyplease')
-    setShowHexResult(next.showHexResult ?? false)
-    setShowCategoryHexResult(next.showCategoryHexResult ?? false)
-    setUseKeccak(next.useKeccak ?? true)
+    setResult(null)
+    setErrorMessage(null)
+    setWorkSnapshot(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope, chainOption, customRpcUrl])
 
-  // if the faucet is not active, force out of gas-request mode (Svelte $effect)
-  useEffect(() => {
-    if (categoryType === 'gas-request' && !faucetIsActive) {
-      setCategoryType('input')
-    }
-  }, [categoryType, faucetIsActive])
+  const hexdText = (isAddress(text) ? (text as Hex) : stringToHex(text)).toLowerCase() as Hex
+  const addressValid = isAddress(text)
 
-  const categoryByteLength = new TextEncoder().encode(categoryValue).byteLength
-  const categoryExceedsLimit = categoryByteLength > 32
-  const effectiveUseDirectEncoding =
-    categoryType !== 'gas-request' && !useKeccak && !categoryExceedsLimit
-  const hexdText = (isHex(text) ? text : stringToHex(text)).toLowerCase() as Hex
-
-  const oncategoryupdate = (type: CategoryKey, category: string) => {
-    const modeChanged = type !== categoryType
-    if (type === 'gas-request') {
-      if (modeChanged) setUseKeccak(true)
-      if (account.address) {
-        setText(account.address)
-      }
-    } else if (modeChanged) {
-      setUseKeccak(false)
-      setText('')
-    }
-    setCategoryType(type)
-    setCategoryValue(category)
-  }
-
-  /**
-   * Memoize the worker board on `transportUrl` / chainId / factors so we don't construct a new
-   * read client per render (carry-forward from the Task-3 review: `selectClient`/
-   * `selectBoardClient` build a NEW client per call — keep them out of hot render paths). The
-   * grind is dispatched through `board.addMessage` → the Web Worker seam.
-   */
   const board = useMemo(() => {
     if (!transportUrl) return null
     return makeWorkerBoard({
@@ -175,33 +127,32 @@ export function Interactive({ workerFactory }: Props) {
   }, [transportUrl, chainId, globalWorkMultiplier, globalWorkDivisor, workerFactory])
 
   const workAndSend = async () => {
-    if (!transportUrl || !board) return
+    if (!transportUrl || !board || !addressValid || !faucetIsActive) return
     setWorking(true)
-    const category = (
-      effectiveUseDirectEncoding
-        ? stringToHex(categoryValue, { size: 32 })
-        : keccak256(stringToHex(categoryValue))
-    ) as Hex
+    setResult(null)
+    setErrorMessage(null)
+    const category = keccak256(stringToHex(GAS_CATEGORY)) as Hex
     setWorkSnapshot({
       chainName,
       chainId,
       rpc: fullTransportUrl ?? transportUrl,
-      categoryType,
-      categoryValue,
-      categoryEncoding: effectiveUseDirectEncoding ? 'direct' : 'keccak256',
+      categoryType: 'gas-request',
+      categoryValue: GAS_CATEGORY,
+      categoryEncoding: 'keccak256',
       categoryHex: category,
       messageText: text,
       messageHex: hexdText,
       messageByteLength: (hexdText.length - 2) / 2,
     })
     try {
-      // the grind + post both run INSIDE the worker (Task-2 seam folds `send` into the worker)
       await board.addMessage({ category, data: hexdText })
-      setWorkSnapshot(null)
+      setResult('success')
       await new Promise((resolve) => setTimeout(resolve, 1000))
       await useChainStore.getState().loadContent()
     } catch (err) {
       if (err) console.error(err)
+      setResult('error')
+      setErrorMessage(err instanceof Error ? err.message : 'Request failed')
     } finally {
       cancelRef.current = () => {}
       setWorking(false)
@@ -209,32 +160,53 @@ export function Interactive({ workerFactory }: Props) {
   }
 
   const setInputValue = (value: string) => {
-    setText(value)
-    if (categoryType === 'gas-request') {
-      if (isAddress(value)) account.setAddress(value as Hex)
-    } else {
-      account.setAddress(null)
+    setText(value.trim())
+    setResult(null)
+    setErrorMessage(null)
+    if (isAddress(value.trim())) account.setAddress(value.trim() as Hex)
+    else account.setAddress(null)
+  }
+
+  const pasteAddress = async () => {
+    try {
+      const clip = await navigator.clipboard.readText()
+      const next = clip.trim()
+      if (!next) {
+        setPasteHint('Clipboard is empty.')
+        return
+      }
+      setInputValue(next)
+      setPasteHint(isAddress(next) ? null : 'Pasted value is not a valid address.')
+    } catch {
+      setPasteHint('Could not read clipboard.')
     }
   }
-  const setRandomText = () => setText(keccak256(numberToHex(Date.now())))
 
-  const disabled = working || !rpcValid
-  const submitDisabled = disabled || (categoryType === 'gas-request' && !isAddress(text))
+  const useConnectedWallet = async () => {
+    try {
+      const { address } = await connectInjectedWallet()
+      setInputValue(address)
+      setPasteHint(null)
+    } catch (err) {
+      setPasteHint(err instanceof Error ? err.message : 'No injected wallet found.')
+    }
+  }
 
-  // persist interactive state on change (Svelte $effect)
+  const disabled = working || !rpcValid || !faucetIsActive
+  const submitDisabled = disabled || !addressValid
+  const disableReason = !faucetIsActive
+    ? 'Faucet is not available on this chain.'
+    : !rpcValid
+      ? 'Select a valid chain / RPC.'
+      : !addressValid
+        ? 'Enter a valid address to request gas.'
+        : null
+
   useEffect(() => {
     const scope = scopeFromStore()
-    save(scope, 'interactive', {
-      categoryType,
-      categoryValue,
-      text,
-      showHexResult,
-      showCategoryHexResult,
-      useKeccak,
-    } satisfies InteractiveState)
-  }, [categoryType, categoryValue, text, showHexResult, showCategoryHexResult, useKeccak])
+    save(scope, 'interactive', { text } satisfies InteractiveState)
+  }, [text])
 
-  // derive the render tree from the store's message list
   const tree = useMemo(
     () =>
       toTree({
@@ -248,7 +220,6 @@ export function Interactive({ workerFactory }: Props) {
     [content, latestBlockNumber, globalWorkMultiplier, globalWorkDivisor],
   )
 
-  // prune stale TreeView entries when content changes
   useEffect(() => {
     if (!tree.children.length) return
     pruneTreeNodeState(collectLabels(tree.children))
@@ -257,87 +228,166 @@ export function Interactive({ workerFactory }: Props) {
   return (
     <div className="flex flex-col max-w-5xl pb-4 px-4 mx-auto w-full bg-white dark:bg-gray-950 lg:rounded-2xl shadow-sm gap-4">
       <div className="flex flex-col grow justify-center items-center">
-        <div id="interactive" className="flex w-full grow flex-col">
+        <div id="interactive" className="flex w-full grow flex-col gap-3">
+          <p className="text-base text-gray-700 dark:text-gray-200 pt-2">
+            Prove you’re not a bot, get a little gas.
+          </p>
+
           <SelectChain
+            preferFaucet
             onChange={(value) => {
               useChainStore.getState().setChainOption(value as ChainOption)
             }}
           />
-          <div className="container flex flex-col md:flex-row max-w-5xl items-start gap-4 justify-center grow">
-            <div className="container flex flex-col p-3 gap-2 rounded-lg border border-gray-300 dark:border-gray-600 shadow bg-gray-50 dark:bg-gray-900">
-              <div className="container m-auto flex-col flex">
-                <Category
-                  type={categoryType}
-                  value={categoryValue}
-                  oncategoryupdate={oncategoryupdate}
-                  disabled={disabled}
-                  cancel={() => cancelRef.current()}
+
+          {!faucetIsActive ? (
+            <div className="rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 p-4 text-sm text-amber-900 dark:text-amber-100">
+              <p className="font-medium">Faucet unavailable on this chain</p>
+              <p className="mt-1 text-amber-800 dark:text-amber-200/90">
+                Pick a faucet-supported network (e.g. PulseChain V4) to request testnet gas. Freeform
+                messaging lives in the Chat tab.
+              </p>
+            </div>
+          ) : (
+            <div className="container flex flex-col md:flex-row max-w-5xl items-start gap-4 justify-center grow">
+              <div className="container flex flex-col p-3 gap-3 rounded-lg border border-gray-300 dark:border-gray-600 shadow bg-gray-50 dark:bg-gray-900 flex-1 min-w-0">
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex flex-row items-center justify-between gap-2">
+                    <label
+                      htmlFor="gas-recipient"
+                      className="text-sm font-medium text-gray-800 dark:text-gray-100">
+                      Recipient
+                    </label>
+                    <span className="flex flex-row items-center gap-x-2 text-xs italic text-gray-500 dark:text-gray-400">
+                      <Icon icon="fe:wallet" className="size-4" />
+                      {formatEther(account.balance ?? 0n)} {account.gasSymbol ?? ''}
+                    </span>
+                  </div>
+                  <input
+                    id="gas-recipient"
+                    type="text"
+                    name="recipient"
+                    value={text}
+                    disabled={disabled}
+                    onChange={(e) => setInputValue(e.target.value)}
+                    placeholder="0x… recipient"
+                    spellCheck={false}
+                    autoComplete="off"
+                    className={`font-mono p-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100 dark:placeholder-gray-500 w-full outline-none text-sm ${
+                      text && !addressValid ? 'border-red-500' : 'border-gray-300'
+                    } disabled:opacity-70 disabled:pointer-events-none`}
+                  />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void pasteAddress()}
+                      disabled={disabled}
+                      className="text-xs px-2.5 py-1 rounded-full ring-1 ring-gray-300 dark:ring-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50">
+                      Paste
+                    </button>
+                    {hasInjectedWallet && (
+                      <button
+                        type="button"
+                        onClick={() => void useConnectedWallet()}
+                        disabled={disabled}
+                        className="text-xs px-2.5 py-1 rounded-full ring-1 ring-gray-300 dark:ring-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50">
+                        Use connected wallet
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Your browser does the work. No wallet signature required to grind.
+                  </p>
+                  {pasteHint && (
+                    <p className="text-xs text-amber-700 dark:text-amber-300">{pasteHint}</p>
+                  )}
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex flex-row items-center gap-2">
+                    <button
+                      type="button"
+                      className="bg-white dark:bg-gray-800 flex-grow text-center justify-center py-3 px-4 inline-flex items-center gap-x-2 text-sm font-semibold text-gray-900 dark:text-gray-100 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:pointer-events-none"
+                      onClick={() => void workAndSend()}
+                      disabled={submitDisabled}>
+                      {working ? 'Working…' : 'Work + Send It!'}
+                    </button>
+                    {working && (
+                      <button
+                        type="button"
+                        className="bg-red-500 text-slate-100 px-4 py-3 rounded-lg text-sm leading-6 cursor-pointer shrink-0"
+                        onClick={() => {
+                          cancelRef.current()
+                          setWorking(false)
+                          setWorkSnapshot(null)
+                        }}>
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                  {submitDisabled && disableReason && !working && (
+                    <p className="text-xs text-gray-500 dark:text-gray-400">{disableReason}</p>
+                  )}
+                </div>
+
+                <Terminal working={!!working} />
+
+                <RequestSnapshot
+                  snapshot={workSnapshot}
                   working={working}
-                  showHexResult={showCategoryHexResult}
-                  onToggleShowHex={setShowCategoryHexResult}
-                  useKeccak={useKeccak}
-                  categoryExceedsLimit={categoryExceedsLimit}
-                  onToggleKeccak={setUseKeccak}
+                  onClose={() => {
+                    cancelRef.current()
+                    setWorkSnapshot(null)
+                  }}
                 />
+
+                {result === 'success' && addressValid && (
+                  <div className="rounded-lg border border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-950/40 p-3 text-sm text-green-900 dark:text-green-100">
+                    Gas requested for {shortAddr(text)} on {chainName}.
+                  </div>
+                )}
+                {result === 'error' && (
+                  <div className="rounded-lg border border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-950/40 p-3 text-sm text-red-900 dark:text-red-100 flex flex-col gap-2">
+                    <span>{errorMessage ?? 'Something went wrong requesting gas.'}</span>
+                    <button
+                      type="button"
+                      className="self-start text-xs px-2.5 py-1 rounded-full ring-1 ring-red-400 text-red-800 dark:text-red-100 hover:bg-red-100 dark:hover:bg-red-900/40"
+                      onClick={() => void workAndSend()}
+                      disabled={submitDisabled}>
+                      Retry
+                    </button>
+                  </div>
+                )}
               </div>
-              <div className="container m-auto flex flex-col text-center">
-                <MessageInput
-                  disabled={disabled}
-                  text={text}
-                  onChange={setInputValue}
-                  type={categoryType}
-                  setToRandom={setRandomText}
-                  showHexResult={showHexResult}
-                  onToggleShowHex={setShowHexResult}
-                  balance={account.balance}
-                  gasSymbol={account.gasSymbol}
-                />
-              </div>
-              <div className="container m-auto flex flex-row justify-between">
-                <PresetButtons workAndSend={workAndSend} disabled={submitDisabled} />
+
+              <div className="container flex flex-col mx-auto md:max-w-sm align-top overflow-hidden w-full md:w-auto">
+                <button
+                  type="button"
+                  className="md:hidden mb-2 text-sm text-indigo-600 dark:text-indigo-400 underline-offset-2 hover:underline self-start"
+                  onClick={() => setShowInspect((v) => !v)}
+                  aria-expanded={showInspect}>
+                  {showInspect ? 'Hide inspect' : 'Under the hood'}
+                </button>
+                <div className={`${showInspect ? 'flex' : 'hidden'} md:flex flex-col gap-2`}>
+                  <p className="hidden md:block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    Under the hood
+                  </p>
+                  <div className="relative rounded-lg border border-gray-200 dark:border-gray-700 p-2 bg-white dark:bg-gray-950">
+                    {loading && (
+                      <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/70 dark:bg-gray-900/70 rounded-lg backdrop-blur-[1px]">
+                        <span className="text-sm text-gray-500 dark:text-gray-400 font-mono">
+                          Loading…
+                        </span>
+                      </div>
+                    )}
+                    <Summary />
+                    <TreeView childrenNodes={tree.children} label="Message Board" isRoot hideContent />
+                  </div>
+                </div>
               </div>
             </div>
-            <div className="container flex flex-col mx-auto md:max-w-sm align-top overflow-hidden">
-              <Terminal working={!!working} />
-            </div>
-          </div>
-          <RequestSnapshot
-            snapshot={workSnapshot}
-            working={working}
-            onClose={() => {
-              cancelRef.current()
-              setWorkSnapshot(null)
-            }}
-          />
+          )}
         </div>
-      </div>
-      <div className="flex flex-col relative">
-        {loading && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/70 dark:bg-gray-900/70 rounded-lg backdrop-blur-[1px] transition-opacity duration-200">
-            <div className="flex flex-col items-center gap-2">
-              <svg
-                className="animate-spin h-6 w-6 text-gray-400"
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24">
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="4"></circle>
-                <path
-                  className="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-              </svg>
-              <span className="text-sm text-gray-500 dark:text-gray-400 font-mono">Loading…</span>
-            </div>
-          </div>
-        )}
-        <Summary />
-        <TreeView childrenNodes={tree.children} label="Message Board" isRoot hideContent />
       </div>
     </div>
   )

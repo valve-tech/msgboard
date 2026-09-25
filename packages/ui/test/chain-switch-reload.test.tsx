@@ -29,11 +29,11 @@ beforeEach(() => {
 /**
  * Task-4 review carry-forward: a mid-session chain switch must reload the persisted
  * "interactive" state for the new scope (the Svelte scope-change `$effect`). We seed a
- * persisted message body for the second chain's scope, switch to it, and assert the
+ * persisted recipient address for the second chain's scope, switch to it, and assert the
  * textarea adopts the persisted value.
  */
 describe('Interactive reloads persisted state on a mid-session chain switch', () => {
-  it('adopts the persisted interactive text for the newly selected chain scope', async () => {
+  it('adopts the persisted recipient address for the newly selected chain scope', async () => {
     const { useChainStore, selectChain, selectRpcUrl } = await import('../src/stores/chain')
     const { getScope, save } = await import('../src/lib/persist')
     const { Interactive } = await import('../src/components/Interactive')
@@ -45,9 +45,7 @@ describe('Interactive reloads persisted state on a mid-session chain switch', ()
     const v4 = useChainStore.getState()
     const v4Scope = getScope(selectChain(v4)?.id, selectRpcUrl(v4))
     save(v4Scope, 'interactive', {
-      text: 'persisted-on-v4',
-      categoryType: 'input',
-      categoryValue: 'x',
+      text: '0x00000000000000000000000000000000000000aa',
     })
     // reset back to the original chain so the switch happens AFTER mount
     useChainStore.getState().setChainOption(initialOption)
@@ -69,8 +67,10 @@ describe('Interactive reloads persisted state on a mid-session chain switch', ()
     useChainStore.getState().setChainOption('pulsechainV4')
 
     await waitFor(() => {
-      const textareas = screen.getAllByRole('textbox')
-      const adopted = textareas.some((t) => (t as HTMLTextAreaElement).value === 'persisted-on-v4')
+      const fields = screen.getAllByRole('textbox')
+      const adopted = fields.some(
+        (t) => (t as HTMLInputElement).value === '0x00000000000000000000000000000000000000aa',
+      )
       expect(adopted).toBe(true)
     })
   })

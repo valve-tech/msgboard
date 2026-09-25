@@ -8,11 +8,9 @@ import { Cosign } from './Cosign'
 import { readDeepLink, writeDeepLink } from '../lib/deeplink'
 
 /**
- * The "Try it" shell — flippable sections over one board. The room comes first: a visitor's first
- * question is "what is everyone saying?", not "how is a message encoded?" So Chat (a live room with
- * a privacy-mode toggle — Public / Anonymous / Encrypted, absorbing the former Channel + Whisper)
- * leads, and the raw compose-and-inspect mechanics move to their own tab for people who want to see
- * the wire format.
+ * The "Try it" shell — flippable sections over one board. Chat leads (live room). The former
+ * Mechanics tab is now a gas/faucet demo (section id stays `mechanics` so `?tab=mechanics`
+ * deeplinks keep working; the visible label is "Gas").
  *
  * Each tab is a self-contained experience that drives the shared chain store; switching is free
  * (the board content is polled once for the whole page).
@@ -22,7 +20,7 @@ type SectionId = 'chat' | 'mechanics' | 'arcade' | 'petitions' | 'cosign'
 
 const SECTIONS: { id: SectionId; label: string; icon: string; blurb: string }[] = [
   { id: 'chat', label: 'Chat', icon: 'mdi:chat-outline', blurb: 'a live room — pick a privacy mode (public, anonymous, or encrypted) and say something' },
-  { id: 'mechanics', label: 'Mechanics', icon: 'mdi:cog-outline', blurb: 'compose a raw message and watch the proof-of-work + wire format' },
+  { id: 'mechanics', label: 'Gas', icon: 'mdi:fuel', blurb: 'Request testnet gas with a PoW grind' },
   { id: 'arcade', label: 'Arcade', icon: 'mdi:dice-multiple', blurb: 'a provably-fair coin flip over the board — the arcade\'s whole thesis in one tab' },
   { id: 'petitions', label: 'Petitions', icon: 'mdi:file-sign-outline', blurb: 'sign a featured petition with your wallet — a co-signed statement, PoW-stamped to the board' },
   { id: 'cosign', label: 'Cosign', icon: 'mdi:shield-key-outline', blurb: 'watch a 2-of-3 Safe reach its threshold over the board — the bot fleet holds the other keys' },

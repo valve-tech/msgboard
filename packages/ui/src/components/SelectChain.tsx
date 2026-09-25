@@ -17,12 +17,17 @@ import { ToggleButton } from './ToggleButton'
  * `onChange` is supplied by the parent (Interactive) so the chain-option write goes through
  * `useChainStore.getState().setChainOption`. The custom-url input commits to the store on
  * blur/Enter (mirrors the Svelte `commitCustomUrl`).
+ *
+ * When `preferFaucet` is set (Gas tab), chains without a gas faucet are listed as disabled with a
+ * clear reason so visitors stay on faucet-supported networks.
  */
 type Props = {
   onChange: (value: string) => void
+  /** Prefer / highlight faucet-supported chains; disable others with a reason. */
+  preferFaucet?: boolean
 }
 
-export function SelectChain({ onChange }: Props) {
+export function SelectChain({ onChange, preferFaucet = false }: Props) {
   const chainOption = useChainStore((s) => s.chainOption)
   const storedCustomUrl = useChainStore((s) => s.customRpcUrl)
   const rpcUrl = useChainStore((s) => selectRpcUrl(s))
@@ -46,12 +51,28 @@ export function SelectChain({ onChange }: Props) {
 
   const shownUrl = isCustom ? customUrl : rpcUrl
 
+  const chainMenuOptions = [
+    ...[...rpcs.entries()].map(([key, v]) => {
+      const offline = !!v.disabled
+      const noFaucet = preferFaucet && !v.gasSponsor
+      const disabled = offline || noFaucet
+      const reason = offline ? ' (offline)' : noFaucet ? ' (no faucet)' : ''
+      return {
+        label: `${v.chain.name}${reason}`,
+        disabled,
+        // keep key association via index into [...rpcs.keys(), 'custom']
+        _key: key,
+      }
+    }),
+    { label: 'Custom', disabled: false, _key: 'custom' as const },
+  ]
+
   return (
     <div className="flex flex-row gap-4 my-2 w-full items-center">
       <div className="flex flex-row shrink-0 items-center gap-2">
         <Menu
           label="chain"
-          options={[...[...rpcs.values()].map((v) => ({ label: v.chain.name, disabled: !!v.disabled })), { label: 'Custom' }]}
+          options={chainMenuOptions.map(({ label, disabled }) => ({ label, disabled }))}
           value={Math.max(0, [...rpcs.keys(), 'custom'].indexOf(chainOption))}
           onChange={(i) => onChange([...rpcs.keys(), 'custom'][i]!)}
         />

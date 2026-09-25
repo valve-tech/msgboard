@@ -25,9 +25,9 @@ describe('scaffold', () => {
   it('renders the app shell with the interactive board flow', async () => {
     const { App } = await import('../src/App')
     render(<App />)
-    // The interactive board (with the chain selector) lives on the Mechanics tab; open it, then
+    // The interactive board (with the chain selector) lives on the Gas tab; open it, then
     // assert the chain picker (a house Menu button, aria-label "chain") renders.
-    fireEvent.click(await screen.findByRole('tab', { name: /mechanics/i }))
+    fireEvent.click(await screen.findByRole('tab', { name: /gas/i }))
     expect(await screen.findByRole('button', { name: 'chain' })).toBeTruthy()
   })
 })
