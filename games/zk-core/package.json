@@ -18,7 +18,7 @@
     "viem": "^2.25.0"
   },
   "devDependencies": {
-    "@types/node": "^22.10.0",
+    "@types/node": "^26.6.2",
     "@zypher-game/secret-engine": "0.3.0",
     "typescript": "~5.8.3",
     "vitest": "^3.2.6"

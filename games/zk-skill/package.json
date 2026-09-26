@@ -27,7 +27,7 @@
     "snarkjs": "^0.7.6"
   },
   "devDependencies": {
-    "@types/node": "^22.10.0",
+    "@types/node": "^26.6.2",
     "circomlib": "^2.0.5",
     "tsx": "^4.22.4",
     "typescript": "~5.8.3",
