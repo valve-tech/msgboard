@@ -17,6 +17,12 @@ updates:
         update-types:
           - minor
           - patch
+      # The noir compiler, its runtime and the prover share one serialization
+      # format. Bumping one alone breaks every proof, so they move as a set.
+      noir-toolchain:
+        patterns:
+          - "@noir-lang/*"
+          - "@aztec/bb.js"
 
   # faucet/web has its own lockfile, not part of the root workspace.
   - package-ecosystem: npm
