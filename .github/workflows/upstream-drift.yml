@@ -40,4 +40,8 @@ jobs:
       - run: npm run test --workspace @msgboard/node-check
       # Exit 1 drift, 2 cannot check, 3 pin invalid, 4 a watched path vanished.
       # Every one of them fails the job.
+      # GitLab refuses anonymous git reads from runner IPs, so this needs a
+      # GitLab token with read_repository scope. Without it the job exits 2.
       - run: node packages/node-check/dist/drift-cli.js
+        env:
+          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
