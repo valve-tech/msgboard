@@ -6,7 +6,7 @@ import {
   hashDisputeSetupIntent, hashOpenDisputeIntent, hashRespondMoveIntent, hashReclaimTopUpIntent,
   hashCancelIntent, channelStateStructHash,
 } from '@msgboard/zk-cards-core'
-import { deployZkTable } from './x402'
+import { chainNow, deployZkTable } from './x402'
 
 describe('ZkChannelSig', () => {
   it('TS hashState matches the on-chain EIP-712 digest for a fully populated state', async () => {
@@ -146,7 +146,7 @@ describe('ZkChannelSig — signed-intent relay end-to-end', () => {
     await zk.write.join([tableId, viem.zeroAddress, [0n, 0n], joinAuth], { account: relayer!.account })
 
     const intentNonce = 0n
-    const intentDeadline = BigInt(Math.floor(Date.now() / 1000) + 3600)
+    const intentDeadline = (await chainNow()) + 3600n
     const sig = await hashDisputeSetupIntentAndSign(aSigner as any, domain, { tableId, nonce: intentNonce, deadline: intentDeadline })
 
     await zk.write.disputeSetupFor([tableId, intentNonce, intentDeadline, sig], { account: relayer!.account })
