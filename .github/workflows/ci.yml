@@ -78,6 +78,10 @@ jobs:
       - run: npm run build --workspace @msgboard/core
       - run: npm run build --workspace @msgboard/sdk
       - run: npm run test --workspace @msgboard/games
+      # The ZK settle circuits compile with noir_wasm and execute with noir_js.
+      # Their serialization formats must match, and only these suites prove it.
+      - run: npm run test --workspace @msgboard/zk-settle
+      - run: npm run test --workspace @msgboard/zk-table-settle
       - run: npm run typecheck --workspace @msgboard/games
 
   games-foundry:
