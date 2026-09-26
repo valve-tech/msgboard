@@ -7,7 +7,7 @@ import {
   hashOpenDisputeIntentN, hashRespondMoveIntentN, channelStateNStructHash,
   signStartIntentN, type IntentDomainN,
 } from '@msgboard/zk-cards-core'
-import { deployHoldemTableN } from './x402'
+import { chainNow, deployHoldemTableN } from './x402'
 
 // HoldemTableN's constructor takes (treasury, factory) — see HoldemTableN.sol's
 // IWrapperFactory; factory=zeroAddress skips the create()-time clone-check, matching the
@@ -227,7 +227,7 @@ describe('ChannelN signed-intent relay — end-to-end', () => {
     await zk.write.join([tableId, viem.zeroAddress, [GX, GY], joinAuth], { account: relayer!.account })
 
     const intentNonce = 0n
-    const intentDeadline = BigInt(Math.floor(Date.now() / 1000) + 3600)
+    const intentDeadline = (await chainNow()) + 3600n
     const sig = await signStartIntentN(aSigner as any, domain, { tableId, nonce: intentNonce, deadline: intentDeadline })
 
     await zk.write.startFor([tableId, intentNonce, intentDeadline, sig], { account: relayer!.account })

@@ -84,6 +84,26 @@ jobs:
       - run: npm run test --workspace @msgboard/zk-table-settle
       - run: npm run typecheck --workspace @msgboard/games
 
+  games-hardhat:
+    # The games/contracts hardhat + mocha suite. It exercises the x402 deposit paths, the ZK
+    # tables and the N-seat Hold'em through viem, which the Foundry jobs do not cover. It runs
+    # about 17 minutes. Deadlines in these tests come from the chain clock (see
+    # test/x402.ts chainNow), because earlier files advance chain time.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+      - run: npm ci
+      # The suite imports @msgboard/games and @msgboard/settle, which resolve through dist/.
+      - run: npm run build --workspace @msgboard/core
+      - run: npm run build --workspace @msgboard/sdk
+      - run: npm run build --workspace @msgboard/games
+      - run: npm run build --workspace @msgboard/settle
+      - run: npm run build --workspace @msgboard/games-contracts
+      - run: npm run test --workspace @msgboard/games-contracts
+
   games-foundry:
     # The games contracts' fuzz + invariant suite (HouseChannel/GamePayouts/… — incl. the
     # settle() nonce-0 free-roll regression). Default profile remaps forge-std -> repo-root lib

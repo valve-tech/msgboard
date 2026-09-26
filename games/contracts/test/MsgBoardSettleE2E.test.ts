@@ -4,6 +4,7 @@ import hre from 'hardhat'
 import { privateKeyToAccount } from 'viem/accounts'
 import { HouseSession, dice, makeDomain, hashSessionClose, closeFromState, type SessionClose } from '@msgboard/games'
 import { OptimisticSettlement, EscrowedSettlement, signOpenTerms, paramsHashOf, type OpenTerms } from '@msgboard/settle'
+import { chainNow } from './x402'
 
 const playerKey = privateKeyToAccount(`0x${'11'.repeat(32)}`)
 const houseKey = privateKeyToAccount(`0x${'22'.repeat(32)}`)
@@ -94,7 +95,7 @@ describe('MsgBoard settlement E2E', () => {
     const terms: OpenTerms = {
       tableId, player: playerKey.address, playerKey: playerKey.address,
       escrowPlayer: 200n, escrowHouse: 200n, gameId: 1, rngCommit: s.chain.commit,
-      clockBlocks: 30n, expiry: BigInt(Math.floor(Date.now() / 1000) + 3600),
+      clockBlocks: 30n, expiry: (await chainNow()) + 3600n,
       // clientSeedCommit + paramsHash are bound into the house-signed terms (recompute-settle,
       // mode 1). This escrow path settles from the both-signed final state, so they are recorded
       // here, not recomputed; paramsHash matches the dice targetX100=5000 the session played.
