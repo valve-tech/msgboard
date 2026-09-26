@@ -117,7 +117,11 @@ const signDepositAuth = async (
 
 // A near-future (not far-future — see ZkTable.sol's DepositAuth @dev note on topUp) default
 // expiry: 1 hour out, plenty for a synchronous hardhat test but nowhere near a "live landmine".
-export const defaultValidBefore = () => BigInt(Math.floor(Date.now() / 1000) + 3600)
+// Measured from the CHAIN clock, not the wall clock: earlier suites in the same run advance chain
+// time (evm_increaseTime), so a wall-clock expiry can already lie in the chain's past.
+export const chainNow = async (): Promise<bigint> =>
+  (await (await hre.viem.getPublicClient()).getBlock()).timestamp
+export const defaultValidBefore = async () => (await chainNow()) + 3600n
 
 // The ZkTable contract handle from hardhat-viem's `deployContract`/`getContractAt`. Typed `any`
 // deliberately: viem's generated contract type carries a broad `read` index signature that a
@@ -144,7 +148,7 @@ export const buildCreateAuth = async (
 ): Promise<DepositAuth> => {
   const from = signerAddress(signer)
   const salt = opts.salt ?? viem.zeroHash
-  const validBefore = opts.validBefore ?? defaultValidBefore()
+  const validBefore = opts.validBefore ?? (await defaultValidBefore())
   const nonce = await zk.read.createNonce([
     from,
     tokenAddress,
@@ -179,7 +183,7 @@ export const buildJoinAuth = async (
 ): Promise<DepositAuth> => {
   const from = signerAddress(signer)
   const salt = opts.salt ?? viem.zeroHash
-  const validBefore = opts.validBefore ?? defaultValidBefore()
+  const validBefore = opts.validBefore ?? (await defaultValidBefore())
   const nonce = await zk.read.joinNonce([opts.tableId, from, opts.channelKey, opts.deckKey])
   return await signDepositAuth(
     signer,
@@ -205,7 +209,7 @@ export const buildTopUpAuth = async (
   // bearer-submittable for as long as it's valid, so tests mirror the real client obligation
   // instead of defaulting to a far-future expiry.
   const salt = opts.salt ?? viem.zeroHash
-  const validBefore = opts.validBefore ?? BigInt(Math.floor(Date.now() / 1000) + 300)
+  const validBefore = opts.validBefore ?? (await chainNow()) + 300n
   const nonce = await zk.read.topUpNonce([opts.tableId, from, opts.amount, salt])
   return await signDepositAuth(
     signer,
@@ -265,7 +269,7 @@ export const buildCreateAuthN = async (
 ): Promise<DepositAuth> => {
   const from = signerAddress(signer)
   const salt = opts.salt ?? viem.zeroHash
-  const validBefore = opts.validBefore ?? defaultValidBefore()
+  const validBefore = opts.validBefore ?? (await defaultValidBefore())
   const nonce = await zk.read.createNonce([
     from,
     tokenAddress,
@@ -308,7 +312,7 @@ export const buildJoinAuthN = async (
   // would already be burned forever). Defaults to zeroHash for the common case (first join);
   // callers doing a rejoin after `leaveBeforeStart` must pass a FRESH salt.
   const salt = opts.salt ?? viem.zeroHash
-  const validBefore = opts.validBefore ?? defaultValidBefore()
+  const validBefore = opts.validBefore ?? (await defaultValidBefore())
   const nonce = await zk.read.joinNonce([opts.tableId, from, opts.channelKey, opts.deckKey, salt])
   return await signDepositAuth(
     signer,
