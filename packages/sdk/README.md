@@ -338,6 +338,40 @@ All messages on the board, grouped by category hash. Optionally filtered.
 }
 ```
 
+### msgboard_contentPage
+
+One page of the board, in ascending hash order. reth extension, v2.7.0.2-pulse and later.
+
+| Parameter | Type | Required |
+| --- | --- | --- |
+| `request` | `ContentPageRequest` | yes |
+
+**Returns:** `ContentPage`
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "msgboard_contentPage",
+  "params": [
+    {
+      "limit": 1000
+    }
+  ]
+}
+```
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "content": {},
+    "next": null
+  }
+}
+```
+
 ### msgboard_addMessage
 
 Submit a proof-of-work message (RLP-encoded) to the board.
@@ -492,6 +526,25 @@ Array of `Hex`.
 | `category` | `Hex` | Restrict to one category hash. |
 | `fromBlock` | `Hex` | Lower block bound (hex quantity). |
 | `toBlock` | `Hex` | Upper block bound (hex quantity). |
+| `limit` | `integer` | Most messages in the answer, counted over every category. reth extension. Without it, the node sends every matching message. To page, use msgboard_contentPage. |
+| `offset` | `integer` | Messages to skip. reth extension. Deprecated: not stable while the board changes. Use msgboard_contentPage. |
+
+### ContentPageRequest
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `limit` (required) | `integer` | Most messages in the page, counted over every category. Required. |
+| `after` | `Hex` | The previous page's `next`, unchanged. Leave it out for the first page. The page starts at the first hash above it. |
+| `category` | `Hex` | Restrict to one category hash. |
+| `fromBlock` | `integer` | Lower block bound, inclusive, as a JSON number. |
+| `toBlock` | `integer` | Upper block bound, inclusive, as a JSON number. |
+
+### ContentPage
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `content` (required) | `Content` |  |
+| `next` (required) | `any` | The last hash in this page, or null when no message is left. Pass it back unchanged as `after`. |
 
 ### RPCMessage
 

@@ -18,13 +18,15 @@ describe('openrpc.json', () => {
   // An exact list on purpose. This test guards the spec against gaining a
   // method nobody meant to publish, so deriving it from the document would
   // defeat it. The subscription pair joined the list on 2026-08-24; it had
-  // been live on nodes and absent from the spec until then.
+  // been live on nodes and absent from the spec until then. msgboard_contentPage
+  // joined on 2026-09-29, reth v2.7.0.2-pulse.
   it('documents exactly the wire methods', () => {
     const names = (doc.methods as Array<{ name: string }>).map((m) => m.name).sort()
     expect(names).toEqual([
       'msgboard_addMessage',
       'msgboard_categories',
       'msgboard_content',
+      'msgboard_contentPage',
       'msgboard_getMessage',
       'msgboard_status',
       'msgboard_subscribe',
