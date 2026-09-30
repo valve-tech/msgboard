@@ -384,6 +384,39 @@ describe('snapshotBoard pages each node', () => {
     expect(s.mode).toBe('whole')
     expect([...s.hashes]).toEqual(['0xaa'])
   })
+
+  it('restarts with the whole-board fallback when a reth rollout moves a gateway pin mid-walk', async () => {
+    // Page 1 answers from a v2.7.0.2 node; the gateway pin then moves to an
+    // older node, so page 2 answers -32601. One page-2 failure must not make
+    // the run unreadable: read the board once more with msgboard_content.
+    let pageCalls = 0
+    const fetcher: Fetcher = async (_url, init) => {
+      const { method, params } = JSON.parse(String(init?.body))
+      if (method === 'msgboard_contentPage') {
+        pageCalls += 1
+        if (pageCalls === 1) {
+          return new Response(
+            JSON.stringify({ result: { content: { cat: [{ hash: '0xAA' }] }, next: '0xAA' } }),
+            { status: 200 },
+          )
+        }
+        return new Response(
+          JSON.stringify({ error: { code: -32601, message: 'the method msgboard_contentPage does not exist/is not available' } }),
+          { status: 200 },
+        )
+      }
+      if (method === 'msgboard_content') {
+        expect(params).toEqual([{}])
+        return new Response(JSON.stringify({ result: { cat: { '0xBB': {} } } }), { status: 200 })
+      }
+      throw new Error(`unexpected ${method}`)
+    }
+    const s = await snapshotBoard(fetcher, 'http://mixed')
+    expect(s.ok).toBe(true)
+    expect(s.mode).toBe('whole')
+    // The partial page-1 read is discarded, not merged with the whole board.
+    expect([...s.hashes]).toEqual(['0xbb'])
+  })
 })
 
 describe('the replica gate refuses a gateway', () => {

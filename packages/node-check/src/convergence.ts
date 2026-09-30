@@ -27,7 +27,7 @@
 // endpoints, or at distinct keys known to land on different homes. `endpointsDiffer`
 // below is the guard against that mistake, not a substitute for configuring it right.
 
-import { contentPages, type ContentPage } from '@msgboard/core'
+import { contentPages, isMethodNotFound, type ContentPage, type RpcCall } from '@msgboard/core'
 
 import type { Fetcher } from './check.js'
 
@@ -123,6 +123,20 @@ const rpc = async (
 /** The valve.city gateway balances calls over replicas. It is not one node. */
 export const isGatewayUrl = (url: string): boolean => /^https?:\/\/one\.valve\.city\//i.test(url)
 
+/** Adds every hash in one page's content to `hashes`, lower-cased. */
+const addHashes = (hashes: Set<string>, content: Record<string, unknown> | undefined): void => {
+  for (const messages of Object.values(content ?? {})) {
+    if (Array.isArray(messages)) {
+      for (const message of messages) {
+        const hash = (message as { hash?: unknown } | null)?.hash
+        if (typeof hash === 'string') hashes.add(hash.toLowerCase())
+      }
+    } else if (messages && typeof messages === 'object') {
+      for (const hash of Object.keys(messages)) hashes.add(hash.toLowerCase())
+    }
+  }
+}
+
 /**
  * Every message hash on one node's board.
  *
@@ -131,23 +145,29 @@ export const isGatewayUrl = (url: string): boolean => /^https?:\/\/one\.valve\.c
  * erigon-pulse, which refuses any argument — gets one legacy whole-board
  * call instead. `contentPages` from `@msgboard/core` handles both, and says
  * which one ran in `mode`.
+ *
+ * A reth rollout can move a gateway pin mid-walk, so page 1 answers from a
+ * v2.7.0.2 node and page 2 meets an older one. That later failure must not
+ * make the run "unreadable": discard the partial pages and read the board
+ * once more with the legacy whole-board call, with `mode: 'whole'`.
  */
 export const snapshotBoard = async (fetcher: Fetcher, endpoint: string): Promise<BoardSnapshot> => {
+  const call: RpcCall = (method, params) => rpc(fetcher, endpoint, method, params)
   try {
     const hashes = new Set<string>()
     let mode: ContentPage['mode'] = 'page'
-    for await (const page of contentPages((method, params) => rpc(fetcher, endpoint, method, params))) {
-      mode = page.mode
-      for (const messages of Object.values(page.content ?? {})) {
-        if (Array.isArray(messages)) {
-          for (const message of messages) {
-            const hash = (message as { hash?: unknown } | null)?.hash
-            if (typeof hash === 'string') hashes.add(hash.toLowerCase())
-          }
-        } else if (messages && typeof messages === 'object') {
-          for (const hash of Object.keys(messages)) hashes.add(hash.toLowerCase())
-        }
+    let pages = 0
+    try {
+      for await (const page of contentPages(call)) {
+        mode = page.mode
+        addHashes(hashes, page.content as Record<string, unknown>)
+        pages += 1
       }
+    } catch (error) {
+      if (pages === 0 || !isMethodNotFound(error)) throw error
+      hashes.clear()
+      mode = 'whole'
+      addHashes(hashes, (await call('msgboard_content', [{}])) as Record<string, unknown>)
     }
     return { endpoint, ok: true, hashes, mode }
   } catch (error) {
