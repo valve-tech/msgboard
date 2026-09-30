@@ -324,6 +324,39 @@ describe('Integration tests msgboard', () => {
         })
       })
     })
+    describe('msgboard:contentPage', () => {
+      it('walks every message once, in pages, with contentAll', async () => {
+        const posted: Hex[] = []
+        for (const data of ['page-1', 'page-2', 'page-3']) {
+          posted.push((await hre.run({
+            scope: 'msgboard',
+            task: 'work:send',
+          }, {
+            category: 'test123',
+            data,
+          })) as Hex)
+        }
+        // limit: 1 forces contentAll to walk more than one page for 3 messages.
+        const content = await hre.msgboard.contentAll({}, { limit: 1 })
+        const seen = Object.values(content).flat().map((m) => m.hash).sort()
+        expect(seen).toEqual([...posted].sort())
+      })
+
+      it('refuses a limit of 0 or 1001 on the raw call, per the node contract', async () => {
+        await expect(
+          hre.network.provider.request({ method: 'msgboard_contentPage', params: [{ limit: 0 }] }),
+        ).rejects.toMatchObject({ code: -32602 })
+        await expect(
+          hre.network.provider.request({ method: 'msgboard_contentPage', params: [{ limit: 1001 }] }),
+        ).rejects.toMatchObject({ code: -32602 })
+      })
+
+      it('answers an unknown method with code -32601', async () => {
+        await expect(
+          hre.network.provider.request({ method: 'msgboard_notAMethod', params: [] }),
+        ).rejects.toMatchObject({ code: -32601 })
+      })
+    })
     describe('msgboard:categories', () => {
       it('should get the categories', async () => {
         const categories = await hre.msgboard.categories()
