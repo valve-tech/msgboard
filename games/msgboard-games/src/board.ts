@@ -75,7 +75,7 @@ export function msgBoardClientAdapter(board: MsgBoardClient, opts?: { stamp?: St
       return board.addMessage(work.message)
     },
     async content(filter: { category?: Hex }) {
-      const out = await board.content(filter.category ? { category: filter.category } : {})
+      const out = await board.contentAll(filter.category ? { category: filter.category } : {})
       // SDK Content is Record<categoryHash, RPCMessage[]>; RPCMessage has `data: Hex` → structurally
       // the Record<string, {data: Hex}[]> the transport expects.
       return out as unknown as Record<string, Array<{ data: Hex }>>

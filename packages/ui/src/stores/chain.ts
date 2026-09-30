@@ -210,7 +210,7 @@ export const useChainStore = create<ChainState>((set, get) => ({
     try {
       const s = get()
       const [content, blockNumber] = await Promise.all([
-        selectBoardClient(s).content(),
+        selectBoardClient(s).contentAll(),
         selectClient(s).getBlockNumber(),
       ])
       set({ content, latestBlockNumber: blockNumber })

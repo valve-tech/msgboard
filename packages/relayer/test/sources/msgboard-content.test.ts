@@ -8,7 +8,7 @@ import type { Content, RPCMessage } from '@msgboard/sdk'
 const msg = (hash: string): RPCMessage => ({ hash } as RPCMessage)
 
 const ctxWithContent = (content: Content): RelayerContext =>
-  ({ client: { content: async () => content } } as unknown as RelayerContext)
+  ({ client: { contentAll: async () => content } } as unknown as RelayerContext)
 
 describe('toCategoryHex', () => {
   it('zero-pads plain UTF-8 category names to 32 bytes', () => {
@@ -38,7 +38,7 @@ describe('msgboardContentSource', () => {
     let requested: unknown
     const ctx = {
       client: {
-        content: async (filter: { category?: string }) => {
+        contentAll: async (filter: { category?: string }) => {
           requested = filter
           return { [cat]: [msg('0x3')] }
         },
@@ -55,7 +55,7 @@ describe('msgboardContentSource', () => {
     let requested: unknown
     const ctx = {
       client: {
-        content: async (filter: { category?: string }) => {
+        contentAll: async (filter: { category?: string }) => {
           requested = filter
           return { [cat]: [msg('0x4')] }
         },
@@ -73,7 +73,7 @@ describe('msgboardContentSource', () => {
     const requested: unknown[] = []
     const ctx = {
       client: {
-        content: async (filter: { category: string }) => {
+        contentAll: async (filter: { category: string }) => {
           requested.push(filter)
           return { [filter.category]: [msg(filter.category === padded ? '0x5' : '0x6')] }
         },
@@ -83,5 +83,15 @@ describe('msgboardContentSource', () => {
     const items = await source.poll(ctx)
     expect(items.map((m) => m.hash).sort()).toEqual(['0x5', '0x6'])
     expect(requested).toEqual([{ category: padded }, { category: hashed }])
+  })
+
+  it('never calls the unpaged content()', async () => {
+    const ctx = {
+      client: {
+        content: async () => { throw new Error('content() must not be called') },
+        contentAll: async () => ({}),
+      },
+    } as unknown as RelayerContext
+    await expect(msgboardContentSource().poll(ctx)).resolves.toEqual([])
   })
 })

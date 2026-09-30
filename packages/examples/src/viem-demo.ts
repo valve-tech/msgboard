@@ -28,12 +28,12 @@ try {
   const statusResult = await client.status()
   console.log('status():', statusResult)
 
-  const contentResult = await client.content()
+  const contentResult = await client.contentAll()
   const categories = Object.entries(contentResult)
   if (categories.length === 0) {
-    console.log('\ncontent(): board is empty (no messages yet)')
+    console.log('\ncontentAll(): board is empty (no messages yet)')
   } else {
-    console.log('\ncontent() — message count per category:')
+    console.log('\ncontentAll() — message count per category:')
     for (const [categoryHash, messages] of categories) {
       console.log(`  ${categoryHash}: ${messages.length} message(s)`)
     }
