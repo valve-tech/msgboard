@@ -36,7 +36,7 @@ jobs:
         with:
           node-version-file: '.nvmrc'
       - run: npm ci
-      - run: npm run build --workspace @msgboard/node-check
+      - run: npm run build --workspace @msgboard/core --workspace @msgboard/node-check
       - run: npm run test --workspace @msgboard/node-check
       # Exit 1 drift, 2 cannot check, 3 pin invalid, 4 a watched path vanished.
       # Every one of them fails the job.
