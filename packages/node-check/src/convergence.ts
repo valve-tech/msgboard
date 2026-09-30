@@ -27,6 +27,8 @@
 // endpoints, or at distinct keys known to land on different homes. `endpointsDiffer`
 // below is the guard against that mistake, not a substitute for configuring it right.
 
+import { contentPages, type ContentPage } from '@msgboard/core'
+
 import type { Fetcher } from './check.js'
 
 /** How much of the combined board two replicas must share to count as converged. */
@@ -47,6 +49,8 @@ export interface BoardSnapshot {
   reason?: string
   /** Every message hash the board holds, across every category. */
   hashes: ReadonlySet<string>
+  /** How the node answered: 'page' (msgboard_contentPage) or 'whole' (one legacy call). */
+  mode?: ContentPage['mode']
   /** The node's own identity, when it offers one. Used to catch self-comparison. */
   nodeId?: string
 }
@@ -82,6 +86,12 @@ export interface ConvergenceDeps {
    * The verdict becomes `cannot-check`, because that is what it is.
    */
   requireNonEmpty?: boolean
+  /**
+   * Refuse a load-balanced gateway. A paged walk through one can take each
+   * page from a different replica, so it compares a blend, not a node.
+   * Set it wherever replicas are compared against each other.
+   */
+  requireDirect?: boolean
   /** Injected so tests do not wait. */
   sleep?: (ms: number) => Promise<void>
 }
@@ -98,43 +108,48 @@ const rpc = async (
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
   })
   if (!response.ok) throw new Error(`HTTP ${response.status}`)
-  const body = (await response.json()) as { result?: unknown; error?: { message?: string } }
-  if (body.error) throw new Error(body.error.message ?? 'rpc error')
+  const body = (await response.json()) as {
+    result?: unknown
+    error?: { code?: number; message?: string; data?: unknown }
+  }
+  // Keep the JSON-RPC code: the page walker reads -32601 to find a node
+  // without msgboard_contentPage.
+  if (body.error) {
+    throw Object.assign(new Error(body.error.message ?? 'rpc error'), { code: body.error.code, data: body.error.data })
+  }
   return body.result
 }
+
+/** The valve.city gateway balances calls over replicas. It is not one node. */
+export const isGatewayUrl = (url: string): boolean => /^https?:\/\/one\.valve\.city\//i.test(url)
 
 /**
  * Every message hash on one node's board.
  *
- * `msgboard_content` returns a map of category to messages. Both shapes seen in the
- * wild are handled: a map keyed by hash, and an array of message objects.
+ * Pages the board on THIS endpoint with `msgboard_contentPage` (reth
+ * v2.7.0.2-pulse). A node without that method — an older reth, or
+ * erigon-pulse, which refuses any argument — gets one legacy whole-board
+ * call instead. `contentPages` from `@msgboard/core` handles both, and says
+ * which one ran in `mode`.
  */
 export const snapshotBoard = async (fetcher: Fetcher, endpoint: string): Promise<BoardSnapshot> => {
   try {
-    // Two signatures exist in the wild. Ours takes an optional filter object; the
-    // erigon-pulse reference takes no arguments and rejects one with "too many
-    // arguments, want at most 0". Try the filter form, fall back to the bare form,
-    // so a node is never recorded as unreachable over an argument-count difference.
-    let content: Record<string, unknown>
-    try {
-      content = (await rpc(fetcher, endpoint, 'msgboard_content', [{}])) as Record<string, unknown>
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      if (!/too many arguments|invalid.*param|at most 0/i.test(message)) throw error
-      content = (await rpc(fetcher, endpoint, 'msgboard_content', [])) as Record<string, unknown>
-    }
     const hashes = new Set<string>()
-    for (const messages of Object.values(content ?? {})) {
-      if (Array.isArray(messages)) {
-        for (const message of messages) {
-          const hash = (message as { hash?: unknown } | null)?.hash
-          if (typeof hash === 'string') hashes.add(hash.toLowerCase())
+    let mode: ContentPage['mode'] = 'page'
+    for await (const page of contentPages((method, params) => rpc(fetcher, endpoint, method, params))) {
+      mode = page.mode
+      for (const messages of Object.values(page.content ?? {})) {
+        if (Array.isArray(messages)) {
+          for (const message of messages) {
+            const hash = (message as { hash?: unknown } | null)?.hash
+            if (typeof hash === 'string') hashes.add(hash.toLowerCase())
+          }
+        } else if (messages && typeof messages === 'object') {
+          for (const hash of Object.keys(messages)) hashes.add(hash.toLowerCase())
         }
-      } else if (messages && typeof messages === 'object') {
-        for (const hash of Object.keys(messages)) hashes.add(hash.toLowerCase())
       }
     }
-    return { endpoint, ok: true, hashes }
+    return { endpoint, ok: true, hashes, mode }
   } catch (error) {
     return {
       endpoint,
@@ -209,6 +224,22 @@ export const checkConvergence = async (deps: ConvergenceDeps): Promise<Convergen
       union: 0,
       overlap: 0,
       report: describe('cannot-check', snapshots, 0, 0, 0),
+    }
+  }
+
+  if (deps.requireDirect) {
+    const gateway = deps.endpoints.find(isGatewayUrl)
+    if (gateway) {
+      return {
+        verdict: 'cannot-check',
+        snapshots: [],
+        shared: 0,
+        union: 0,
+        overlap: 0,
+        report:
+          `CANNOT CHECK — ${gateway} is a load-balanced gateway. A paged walk through it mixes ` +
+          'replicas. Set CONVERGENCE_<chain> to per-node URLs.',
+      }
     }
   }
 

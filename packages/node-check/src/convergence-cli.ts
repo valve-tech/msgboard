@@ -81,13 +81,21 @@ const main = async (): Promise<void> => {
         fetcher,
         endpoints: [group.ours, replica],
         requireNonEmpty: true,
+        requireDirect: true,
         samples: 4,
         intervalMs: 3_000,
       })
+      // Print each node's mode so the owner can see which ones still lack
+      // msgboard_contentPage and are falling back to a whole-board read.
+      const modes = r.snapshots.map((s) => `${s.endpoint} (${s.mode ?? 'unknown'})`).join(', ')
+      const suffix = modes ? ` — ${modes}` : ''
       if (r.verdict === 'converged') {
-        console.log(`  ok    replica agrees: ${r.shared}/${r.union} shared`)
+        console.log(`  ok    replica agrees: ${r.shared}/${r.union} shared${suffix}`)
+      } else if (r.verdict === 'cannot-check') {
+        console.error(`  FAIL  ${r.report}`)
+        failed += 1
       } else {
-        console.error(`  FAIL  our replicas disagree: ${r.shared}/${r.union} shared — not gossiping`)
+        console.error(`  FAIL  our replicas disagree: ${r.shared}/${r.union} shared — not gossiping${suffix}`)
         failed += 1
       }
     }
