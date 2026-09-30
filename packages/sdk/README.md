@@ -49,8 +49,10 @@ const hash = await board.addMessage(work.message)
 ```ts
 const status = await board.status()       // enabled, counts, difficulty factors
 const categories = await board.categories()
-const content = await board.content()      // messages grouped by category
+const content = await board.contentAll()   // every message, grouped by category, read in pages
 ```
+
+`contentAll()` reads the whole board in pages with `msgboard_contentPage`, so one big board never comes back as one oversized answer. `content()` still works, but it asks for the whole board in one call, which a gateway can refuse once the board is large. Prefer `contentAll()`.
 
 ## Finding a node
 
@@ -544,7 +546,7 @@ Array of `Hex`.
 | Field | Type | Description |
 | --- | --- | --- |
 | `content` (required) | `Content` |  |
-| `next` (required) | `any` | The last hash in this page, or null when no message is left. Pass it back unchanged as `after`. |
+| `next` (required) | `Hex | null` | The last hash in this page, or null when no message is left. Pass it back unchanged as `after`. |
 
 ### RPCMessage
 

@@ -10,6 +10,7 @@ type Schema = {
   properties?: Record<string, Schema>
   required?: string[]
   additionalProperties?: Schema | boolean
+  oneOf?: Schema[]
 }
 type Param = { name: string; required?: boolean; schema: Schema }
 type Method = {
@@ -24,6 +25,8 @@ type Doc = { methods: Method[]; components: { schemas: Record<string, Schema> } 
 const refName = (schema: Schema): string => {
   if (schema.$ref) return schema.$ref.split('/').pop() as string
   if (schema.type === 'array' && schema.items) return `${refName(schema.items)}[]`
+  if (schema.oneOf) return schema.oneOf.map(refName).join(' | ')
+  if (schema.type === 'null') return 'null'
   return schema.type ?? 'any'
 }
 
