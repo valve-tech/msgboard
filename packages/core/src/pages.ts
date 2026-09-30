@@ -24,13 +24,19 @@ type Hex = `0x${string}`
 
 type ErrorLike = { code?: unknown; message?: unknown; cause?: unknown }
 
-/** The error and up to four `cause` links below it. viem wraps the RPC error. */
+type ErrorLikeWithError = ErrorLike & { error?: unknown }
+
+/**
+ * The error and up to four `cause` or `.error` links below it. viem wraps
+ * the RPC error under `cause`; ethers puts it under `.error`.
+ */
 const errorChain = (e: unknown): ErrorLike[] => {
   const out: ErrorLike[] = []
   let cur: unknown = e
   for (let i = 0; i < 5 && cur && typeof cur === 'object'; i += 1) {
     out.push(cur as ErrorLike)
-    cur = (cur as ErrorLike).cause
+    const link = cur as ErrorLikeWithError
+    cur = link.cause ?? link.error
   }
   return out
 }
@@ -43,8 +49,13 @@ export const isMethodNotFound = (e: unknown): boolean =>
       (typeof x.message === 'string' && /method not found|does not exist\/is not available/i.test(x.message)),
   )
 
+// Used only in the unfiltered whole-board fallback. "too many arguments" and
+// "at most 0" are erigon-pulse's wording; "invalid.*param" is the wording
+// node-check's own fallback matched before this module replaced it.
 const isArgCountError = (e: unknown): boolean =>
-  errorChain(e).some((x) => typeof x.message === 'string' && /too many arguments|at most 0/i.test(x.message))
+  errorChain(e).some(
+    (x) => typeof x.message === 'string' && /too many arguments|at most 0|invalid.*param/i.test(x.message),
+  )
 
 const checkLimit = (limit: number, max: number, method: string): void => {
   if (!Number.isInteger(limit) || limit < 1 || limit > max) {

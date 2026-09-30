@@ -191,6 +191,32 @@ describe('contentPages on a node without msgboard_contentPage', () => {
   })
 })
 
+describe('isArgCountError, restored for the node-check unfiltered whole-board fallback', () => {
+  it('matches "invalid.*param", the wording node-check\'s old fallback used', async () => {
+    const call: RpcCall = async (method, params) => {
+      if (method === 'msgboard_contentPage') throw notFound()
+      if (method === 'msgboard_content' && params.length > 0) throw new Error('invalid params')
+      return {}
+    }
+    const pages = await collect(contentPages(call))
+    expect(pages[0]!.mode).toBe('whole')
+  })
+})
+
+describe('errorChain follows .error, the shape ethers puts the RPC error on', () => {
+  it('reads -32601 off .error, not just .cause', async () => {
+    const call: RpcCall = async (method, params) => {
+      if (method === 'msgboard_contentPage') {
+        throw Object.assign(new Error('Request failed'), { error: { code: -32601 } })
+      }
+      const inner = legacyNode(board(4))
+      return inner(method, params)
+    }
+    const pages = await collect(contentPages(call))
+    expect(pages[0]!.mode).toBe('whole')
+  })
+})
+
 describe('mixed fleet: page 1 from v2.7.0.2, page 2 from an older node', () => {
   const mixed = (msgs: M[], sent: Sent[]): RpcCall => {
     const fresh = pageNode(msgs, sent)
