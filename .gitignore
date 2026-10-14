@@ -51,3 +51,6 @@ baseline-*.png
 
 # Root-level Foundry fuzz/coverage cache (stale test corpus, never commit)
 /cache/
+
+# ansible/ removed from the public repo; keep deploy tooling private
+/ansible/
