@@ -5,7 +5,7 @@ Solidity helpers for the MsgBoard proof-of-work message board.
 ## Install
 
 ```sh
-forge install xxxxxxxxxxxxx/msgboard
+forge install valve-tech/msgboard
 ```
 
 Then remap to this package's `src` (the library lives under `packages/foundry/src`),

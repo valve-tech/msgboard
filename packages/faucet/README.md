@@ -53,15 +53,15 @@ or
 
 1. Clone the repository and navigate to the app’s directory
 ```bash
-git clone https://gitlab.com/xxxxxxxxxxxxx/pls-faucet.git
-cd pls-faucet
+git clone https://github.com/valve-tech/msgboard.git
+cd msgboard/packages/faucet
 ```
 
 2. Bundle Frontend web with Rollup
 ```bash
 npm run build
 ```
-_For more details, please refer to the [web readme](https://gitlab.com/xxxxxxxxxxxxx/pls-faucet/blob/main/web/README.md)_
+_For more details, please refer to the [web readme](https://github.com/valve-tech/msgboard/blob/master/packages/faucet/web/README.md)_
 
 3. Build binary application to run faucet
 ```bash
