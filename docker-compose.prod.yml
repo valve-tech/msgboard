@@ -30,11 +30,15 @@ services:
     image: caddy:2-alpine
     container_name: caddy
     restart: unless-stopped
+    # Read the Caddyfile through a DIRECTORY mount. A single-file bind mount pins the inode, so any
+    # writer that replaces the file (blockinfile, sed -i, an editor) leaves caddy serving the old,
+    # unlinked copy while validate/reload quietly check that stale copy too.
+    command: ['caddy', 'run', '--config', '/etc/caddy/msgboard/Caddyfile', '--adapter', 'caddyfile']
     ports:
       - '80:80'
       - '443:443'
     volumes:
-      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./deploy/caddy:/etc/caddy/msgboard:ro
       - ./deploy/caddy/origin.pem:/etc/caddy/origin.pem:ro
       - ./deploy/caddy/origin.key:/etc/caddy/origin.key:ro
       # GraphiQL explorer static page served at archive.msgboard.xyz
