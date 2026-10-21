@@ -90,10 +90,10 @@ EOF
 cp "$TMP" "$CF"
 rm -f "$TMP"
 
-restore() { echo "!! $1 — restoring $BAK"; cp "$BAK" "$CF"; docker exec caddy caddy reload --config /etc/caddy/Caddyfile || true; exit 1; }
+restore() { echo "!! $1 — restoring $BAK"; cp "$BAK" "$CF"; docker exec caddy caddy reload --config /etc/caddy/msgboard/Caddyfile || true; exit 1; }
 
-docker exec caddy caddy validate --config /etc/caddy/Caddyfile || restore "caddy validate failed"
-docker exec caddy caddy reload   --config /etc/caddy/Caddyfile || restore "caddy reload failed"
+docker exec caddy caddy validate --config /etc/caddy/msgboard/Caddyfile || restore "caddy validate failed"
+docker exec caddy caddy reload   --config /etc/caddy/msgboard/Caddyfile || restore "caddy reload failed"
 sleep 3
 
 SPA=$(curl -sS -o /dev/null -w '%{http_code}' https://games.msgboard.xyz/ || echo 000)
