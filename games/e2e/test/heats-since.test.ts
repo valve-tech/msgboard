@@ -142,4 +142,20 @@ describe('heatsSince / heatsSincePriced — slot-counter separation', () => {
     const tierC = await heatsSincePriced(client, deployment, TOKEN_C, PRICE_A)
     expect(tierC.map((h) => h.key)).toEqual([K6])
   })
+
+  it('heatsSince counts the pre-forfeit operator builds that heated the SHARED pool, in chain order', async () => {
+    const LEGACY = '0x8888888888888888888888888888888888888888' as viem.Hex
+    const legacyHeat = { address: LEGACY, args: { key: K3 }, blockNumber: 10n, logIndex: 5 }
+    const base = fakePublicClient({ coinFlipHeated, operatorRoundOpened, tables })
+    const withLegacy = {
+      ...base,
+      getContractEvents: async (args: { address: viem.Hex; eventName: string }) =>
+        args.address.toLowerCase() === LEGACY.toLowerCase() && args.eventName === 'RoundOpened'
+          ? [legacyHeat]
+          : base.getContractEvents(args as never),
+    } as ReturnType<typeof makePublicClient>
+    const heats = await heatsSince(withLegacy, { ...deployment, operatorCoinFlipSharedPool: [LEGACY] })
+    // K1 is block 10 logIndex 0, the legacy heat block 10 logIndex 5, K2 block 11.
+    expect(heats.map((h) => h.key)).toEqual([K1, K3, K2])
+  })
 })

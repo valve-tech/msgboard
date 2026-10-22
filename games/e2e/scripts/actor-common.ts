@@ -20,6 +20,25 @@ import {
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 
+/** RoundOpened as the pre-validator-forfeit OperatorCoinFlip emitted it: no `tierPrice` field. Only
+ *  heatsSince reads it, for the operatorCoinFlipSharedPool addresses. Only `key` is read. */
+const legacyOperatorRoundOpenedAbi = [
+  {
+    type: 'event',
+    name: 'RoundOpened',
+    inputs: [
+      { name: 'roundId', type: 'bytes32', indexed: true },
+      { name: 'tableId', type: 'bytes32', indexed: true },
+      { name: 'player', type: 'address', indexed: true },
+      { name: 'side', type: 'uint8', indexed: false },
+      { name: 'stake', type: 'uint256', indexed: false },
+      { name: 'payout', type: 'uint256', indexed: false },
+      { name: 'key', type: 'bytes32', indexed: false },
+      { name: 'openedAtBlock', type: 'uint256', indexed: false },
+    ],
+  },
+] as const satisfies viem.Abi
+
 /** OperatorCoinFlip.RoundOpened — its own signature (no subsetHash, unlike CoinFlipTables), so
  *  heatsSincePriced decodes its heats with this rather than reusing coinFlipTablesAbi. Since
  *  validator-forfeit (tiers + fee metering), the event also carries `tierPrice` — the round's
@@ -90,6 +109,12 @@ export type Deployment = {
   /** RETIRED OperatorCoinFlip addresses — same slot-permanence rule as coinFlipTablesRetired, but on the
    *  operator game's own priced ladders (see heatsSincePriced), never the shared price-0 counter. */
   operatorCoinFlipRetired?: viem.Hex[]
+  /** The EXCEPTION to the rule above: OperatorCoinFlip builds from BEFORE validator-forfeit heated the
+   *  SHARED price-0 pools, so their past heats consumed shared slots forever and heatsSince MUST count
+   *  them. On 943 that is 0x48f6… (3 heats) and 0x360f… (2 heats). Dropping them in 826138e left the
+   *  shared counter 5 short, and every CoinFlip open reverted UnableToService from mid-August 2026.
+   *  Their RoundOpened predates the `tierPrice` field, so it decodes with the legacy ABI below. */
+  operatorCoinFlipSharedPool?: viem.Hex[]
   random: viem.Hex
   canonicalSubset: viem.Hex[]
   /** BASE offsets; pools chain at base + n*poolSize (core poolLocationFor). */
@@ -211,6 +236,9 @@ export const heatsSince = async (
     chunkedEvents(publicClient, { address: config.raffle, abi: raffleAbi as viem.Abi, eventName: 'Armed', fromBlock: from }),
     ...tableAddresses.map((address) =>
       chunkedEvents(publicClient, { address, abi: coinFlipTablesAbi as viem.Abi, eventName: 'RoundOpened', fromBlock: from }),
+    ),
+    ...(config.operatorCoinFlipSharedPool ?? []).map((address) =>
+      chunkedEvents(publicClient, { address, abi: legacyOperatorRoundOpenedAbi, eventName: 'RoundOpened', fromBlock: from }),
     ),
   ])
   return [...heated, ...armed, ...rest.flat()]
