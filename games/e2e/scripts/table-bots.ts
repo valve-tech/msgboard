@@ -42,7 +42,7 @@
  */
 import * as viem from 'viem'
 import { coinFlipTablesAbi, poolLocationFor, type GamesChainId, type Info } from '@msgboard/games-core'
-import { loadDeployment, makeActor, sendAs, heatsSince, flooredFees } from './actor-common'
+import { loadDeployment, makeActor, sendAs, heatsSince, flooredFees, chunkedEvents } from './actor-common'
 
 const env = process.env
 const CHAIN = (env.CHAIN ? Number(env.CHAIN) : 943) as GamesChainId
@@ -128,7 +128,7 @@ const main = async () => {
 
   // ── the operator's table: reuse an open one it already operates, else create + fund a fresh one ──
   const ensureTable = async (): Promise<viem.Hex | null> => {
-    const logs = (await pc.getContractEvents({ address: CFT, abi: coinFlipTablesAbi, eventName: 'TableCreated', fromBlock: from })) as unknown as { args: { tableId: viem.Hex; operator: viem.Hex } }[]
+    const logs = (await chunkedEvents(pc, { address: CFT, abi: coinFlipTablesAbi as viem.Abi, eventName: 'TableCreated', fromBlock: from })) as unknown as { args: { tableId: viem.Hex; operator: viem.Hex } }[]
     for (const log of logs) {
       if (log.args.operator?.toLowerCase() !== operator.account.address.toLowerCase()) continue
       const t = await readTable(log.args.tableId)
@@ -226,7 +226,7 @@ const main = async () => {
   // ── settle assist: claim() a finalized-but-unpushed round; refundStale() a timed-out one. Both are
   //    permissionless fallbacks; the contract guards decide, so we just try and swallow TooEarly. ──
   const assistPending = async () => {
-    const opened = (await pc.getContractEvents({ address: CFT, abi: coinFlipTablesAbi, eventName: 'RoundOpened', fromBlock: from })) as unknown as { args: { roundId: viem.Hex } }[]
+    const opened = (await chunkedEvents(pc, { address: CFT, abi: coinFlipTablesAbi as viem.Abi, eventName: 'RoundOpened', fromBlock: from })) as unknown as { args: { roundId: viem.Hex } }[]
     for (const log of opened.slice(-25)) {
       const roundId = log.args.roundId
       const r = (await pc.readContract({ address: CFT, abi: coinFlipTablesAbi, functionName: 'rounds', args: [roundId] })) as unknown[]
