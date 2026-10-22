@@ -25,7 +25,6 @@ Ops / infra
 - [ ] Go faucet: no replace-by-fee loop (gas pricing is fixed). (08-09)
 
 Bots on the box (checked 2026-10-22)
-- [ ] cosign-bot: funded 0.05 tPLS on 10-22; confirm its next session logs a real exec.
 - [ ] petition-bot posts petitions built from tech headlines. Decide if that content is wanted.
 - NOT a todo: landing-house and chip-faucet log only when a player asks; silence = idle.
 
@@ -103,7 +102,7 @@ PRs / deps
   dropped the 2 pre-forfeit operator builds that used the shared pool. Minted 1,000 Chips to each
   validator (operator pools now ink); closed the 0x…dEaD operator table; cast-watcher stops retrying
   AlreadyResolved rounds; table-bots reads events in chunks (the RPC rejected its full-range
-  getLogs) and its operator got 500 Chips. PR #75.
+  getLogs) and its operator got 500 Chips (PR #75). cosign-bot funded 0.05 tPLS; it executes again.
 
 ## SHIPPED 2026-06-01 → 2026-07-25 (condensed; full detail is in git history of this file)
 
