@@ -365,7 +365,14 @@ const main = async () => {
           resolved.add(heat.key)
           console.log(`operator round chopped + forfeit routed ${heat.key} slot ${slot}`)
         } catch (error) {
-          console.error(`chopAndRoute ${heat.key} slot ${slot} failed: ${(error as Error).message?.split('\n').slice(0, 2).join(' ¦ ')}`)
+          const message = (error as Error).message ?? ''
+          // AlreadyResolved() (0x6d5703c2): the round settled some other way. Terminal, so stop retrying
+          // it; otherwise every pass re-simulates the chop forever.
+          if (message.includes('0x6d5703c2') || message.includes('AlreadyResolved')) {
+            resolved.add(heat.key)
+            continue
+          }
+          console.error(`chopAndRoute ${heat.key} slot ${slot} failed: ${message.split('\n').slice(0, 2).join(' ¦ ')}`)
         }
       }
     }
