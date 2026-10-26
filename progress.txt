@@ -18,8 +18,6 @@ category. Both fixed and live; first grants mined. UI now posts the padded categ
 - [ ] Unmerged work (decide each): PR #47 gas-only Mechanics tab (posts keccak: fix before merge);
       feat/content-page-walk (worktree, no PR, 6 commits); deps/dependabot-safe-overrides (npm
       override pins not in master); fix/landing-card-gap-and-ecosystem ("Built on MsgBoard").
-      Already in master, safe to delete: chore/sdk-grind-rename, fix/lint-if-present,
-      worktree-agent-a486273199a5544cd.
 
 ## SNOOZED — DO NOT RAISE BEFORE 2026-11-21
 
