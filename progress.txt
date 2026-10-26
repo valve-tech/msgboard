@@ -7,6 +7,13 @@ Updated: 2026-10-21
 caddy reads deploy/caddy through a directory mount at /etc/caddy/msgboard (PR #72, ef86a08).
 Cutover ran 2026-10-20 via ansible/caddy-dir-mount-cutover.yml; all 13 hosts kept their codes.
 
+## GAS SPONSOR NEVER SEES UI REQUESTS (found 2026-10-26)
+
+- [x] Fixed on branch fix/gas-sponsor-category: the UI posts only the zero-padded category; the
+      sponsor reads both (old UI builds posted keccak256). 2 keccak requests wait on 943.
+- [ ] Deploy: sponsor via ansible/deploy-msgboard-core.yml, UI via deploy-msgboard-ui.yml.
+- [ ] The 1Password service account is deleted; `op read` fails, so headless box access is down.
+
 ## SNOOZED — DO NOT RAISE BEFORE 2026-11-21
 
 - waku: the 502 on waku.msgboard.xyz, nwaku's 0 peers, the Waku→MsgBoard relay mirror. The owner

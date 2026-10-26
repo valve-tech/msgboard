@@ -41,7 +41,7 @@ export function Category({
   }
 
   const categoryInputDisabled = disabled || type !== 'input'
-  const effectiveDirectEncoding = type === 'input' && !useKeccak && !categoryExceedsLimit
+  const effectiveDirectEncoding = (type === 'gas-request' || !useKeccak) && !categoryExceedsLimit
   const encodingToggleDisabled = disabled || type !== 'input' || categoryExceedsLimit
   const categoryInputValueHex = isHash(value)
     ? value
@@ -69,7 +69,7 @@ export function Category({
               on="keccak"
               onIcon="mdi:fingerprint"
               iconClass="size-3.5"
-              checked={useKeccak}
+              checked={!effectiveDirectEncoding}
               disabled={encodingToggleDisabled}
               onClick={() => onToggleKeccak(!useKeccak)}
             />

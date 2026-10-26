@@ -19,10 +19,26 @@ const fakePool = (
 
 describe('postgresStore', () => {
   it('migrate creates the table', async () => {
-    const pool = fakePool([[]])
+    const pool = fakePool([[], []])
     const store = postgresStore({ pool, table: 'sponsored', maxAgeMs: 3_600_000 })
     await store.migrate()
-    expect(pool.calls[0].text).toMatch(/create table if not exists sponsored/i)
+    expect(pool.calls).toHaveLength(2)
+    expect(pool.calls[1].text).toMatch(/create table if not exists sponsored/i)
+  })
+
+  it('migrate keeps a table that already has the key column', async () => {
+    const pool = fakePool([[{ column_name: 'key' }, { column_name: 'ref' }], []])
+    const store = postgresStore({ pool, table: 'sponsored', maxAgeMs: 3_600_000 })
+    await store.migrate()
+    expect(pool.calls.some((c) => /alter table/i.test(c.text))).toBe(false)
+  })
+
+  it('migrate moves aside a legacy table without a key column', async () => {
+    const pool = fakePool([[{ column_name: 'work_hash' }, { column_name: 'address' }], [], []])
+    const store = postgresStore({ pool, table: 'sponsored', maxAgeMs: 3_600_000 })
+    await store.migrate()
+    expect(pool.calls[1].text).toMatch(/alter table sponsored rename to sponsored_legacy_\d+/i)
+    expect(pool.calls[2].text).toMatch(/create table if not exists sponsored/i)
   })
 
   it('has returns true when a row exists', async () => {

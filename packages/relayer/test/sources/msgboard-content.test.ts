@@ -66,4 +66,22 @@ describe('msgboardContentSource', () => {
     expect(items.map((m) => m.hash)).toEqual(['0x4'])
     expect(requested).toEqual({ category: cat })
   })
+
+  it('polls every category in an array and merges the messages', async () => {
+    const padded = stringToHex('gasmoneyplease', { size: 32 })
+    const hashed = categoryHash('gasmoneyplease')
+    const requested: unknown[] = []
+    const ctx = {
+      client: {
+        content: async (filter: { category: string }) => {
+          requested.push(filter)
+          return { [filter.category]: [msg(filter.category === padded ? '0x5' : '0x6')] }
+        },
+      },
+    } as unknown as RelayerContext
+    const source = msgboardContentSource({ category: ['gasmoneyplease', hashed] })
+    const items = await source.poll(ctx)
+    expect(items.map((m) => m.hash).sort()).toEqual(['0x5', '0x6'])
+    expect(requested).toEqual([{ category: padded }, { category: hashed }])
+  })
 })

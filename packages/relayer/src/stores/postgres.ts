@@ -21,6 +21,17 @@ export const postgresStore = <T>(
   const maxAgeSeconds = Math.floor(options.maxAgeMs / 1000)
   return {
     migrate: async () => {
+      // An older sponsor made this table with a different schema (work_hash, no key column).
+      // CREATE TABLE IF NOT EXISTS keeps it, and then every query fails. Move it aside.
+      const { rows: columns } = await pool.query(
+        `SELECT column_name FROM information_schema.columns
+         WHERE table_schema = current_schema() AND table_name = $1`,
+        [table],
+      )
+      const names = (columns as { column_name: string }[]).map((c) => c.column_name)
+      if (names.length > 0 && !names.includes('key')) {
+        await pool.query(`ALTER TABLE ${table} RENAME TO ${table}_legacy_${Date.now()}`)
+      }
       await pool.query(
         `CREATE TABLE IF NOT EXISTS ${table} (
           key TEXT PRIMARY KEY,

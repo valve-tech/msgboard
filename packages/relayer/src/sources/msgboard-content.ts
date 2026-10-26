@@ -12,8 +12,9 @@ export type MsgboardContentSourceOptions = {
    * Omit to watch all categories.
    *
    * For keccak buckets, pass the pre-hashed hex — do not expect plaintext strings to be hashed here.
+   * Pass an array to watch several categories at once (e.g. both encodings of one name).
    */
-  category?: string
+  category?: string | string[]
 }
 
 /** Normalizes a category name or hex into a bytes32 hex category. */
@@ -26,12 +27,14 @@ export const toCategoryHex = (category: string): Hex => {
 export const msgboardContentSource = (
   options: MsgboardContentSourceOptions = {},
 ): RelayerSource<RPCMessage> => {
-  const category = options.category ? toCategoryHex(options.category) : undefined
+  const categories = options.category
+    ? [...new Set([options.category].flat().map(toCategoryHex))]
+    : undefined
   return {
     poll: async (context) => {
-      const content = await context.client.content(category ? { category } : {})
-      const groups = Object.values(content)
-      return groups.flat()
+      const filters = categories ? categories.map((category) => ({ category })) : [{}]
+      const contents = await Promise.all(filters.map((filter) => context.client.content(filter)))
+      return contents.flatMap((content) => Object.values(content).flat())
     },
   }
 }
