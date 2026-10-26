@@ -1,4 +1,4 @@
-module gitlab.com/xxxxxxxxxxxxx/pls-faucet
+module github.com/valve-tech/msgboard/packages/faucet
 
 // +heroku goVersion go1.16
 go 1.16

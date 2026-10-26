@@ -12,8 +12,8 @@ import (
 	"github.com/urfave/negroni"
 	"golang.org/x/sync/semaphore"
 
-	"gitlab.com/xxxxxxxxxxxxx/pls-faucet/internal/chain"
-	"gitlab.com/xxxxxxxxxxxxx/pls-faucet/web"
+	"github.com/valve-tech/msgboard/packages/faucet/internal/chain"
+	"github.com/valve-tech/msgboard/packages/faucet/web"
 )
 
 const AddressKey string = "address"

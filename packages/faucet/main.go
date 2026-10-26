@@ -1,7 +1,7 @@
 package main
 
 import (
-	"gitlab.com/xxxxxxxxxxxxx/pls-faucet/cmd"
+	"github.com/valve-tech/msgboard/packages/faucet/cmd"
 )
 
 func main() {

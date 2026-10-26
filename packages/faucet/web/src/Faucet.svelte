@@ -164,7 +164,7 @@
               <span class="navbar-item">
                 <a
                   class="button is-white is-outlined"
-                  href="https://gitlab.com/xxxxxxxxxxxxx/pls-faucet"
+                  href="https://github.com/valve-tech/msgboard/tree/master/packages/faucet"
                 >
                   <span class="icon">
                     <i class="fa fa-github" />
