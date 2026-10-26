@@ -49,7 +49,7 @@ jobs:
         with:
           node-version-file: '.nvmrc'
       - run: npm ci
-      - run: npm run build --workspace @msgboard/node-check
+      - run: npm run build --workspace @msgboard/core --workspace @msgboard/node-check
       - run: npm run test --workspace @msgboard/node-check
       # Exit 1 when our board is partitioned, unreadable, or unverifiable.
       - run: node packages/node-check/dist/convergence-cli.js

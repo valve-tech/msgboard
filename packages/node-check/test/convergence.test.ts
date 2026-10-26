@@ -5,6 +5,7 @@ import {
   checkConvergence,
   endpointsDiffer,
   gradeBoardLiveness,
+  isGatewayUrl,
   snapshotBoard,
   type BoardSnapshot,
 } from '../src/convergence.js'
@@ -22,34 +23,48 @@ const board = (hashes: string[]) =>
     { status: 200 },
   )
 
+/** erigon-pulse or reth up to v2.7.0.1: it has no msgboard_contentPage. */
+const legacyNode = (inner: Fetcher): Fetcher => async (url, init) => {
+  const { method } = JSON.parse(String(init?.body ?? '{}'))
+  if (method === 'msgboard_contentPage') {
+    return new Response(
+      JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: -32601, message: 'the method msgboard_contentPage does not exist/is not available' } }),
+      { status: 200 },
+    )
+  }
+  return inner(url, init)
+}
+
 /** Serves a different board per endpoint. */
 const fleet = (boards: Record<string, string[]>): Fetcher =>
-  async (url) => {
+  legacyNode(async (url) => {
     const hashes = boards[String(url)]
     if (!hashes) return new Response('nope', { status: 502 })
     return board(hashes)
-  }
+  })
 
 const now = () => Promise.resolve()
 
 describe('snapshotBoard', () => {
   it('collects every message hash across every category', async () => {
-    const fetcher: Fetcher = async () =>
+    const fetcher: Fetcher = legacyNode(async () =>
       new Response(
         JSON.stringify({
           result: { catA: { '0xAA': {}, '0xBB': {} }, catB: { '0xCC': {} } },
         }),
         { status: 200 },
-      )
+      ),
+    )
     const s = await snapshotBoard(fetcher, 'http://a')
     expect([...s.hashes].sort()).toEqual(['0xaa', '0xbb', '0xcc'])
   })
 
   it('reads the array shape too, keying on each message hash', async () => {
-    const fetcher: Fetcher = async () =>
+    const fetcher: Fetcher = legacyNode(async () =>
       new Response(JSON.stringify({ result: { catA: [{ hash: '0xAA' }, { hash: '0xBB' }] } }), {
         status: 200,
-      })
+      }),
+    )
     const s = await snapshotBoard(fetcher, 'http://a')
     expect([...s.hashes].sort()).toEqual(['0xaa', '0xbb'])
   })
@@ -128,11 +143,11 @@ describe('checkConvergence', () => {
   it('clears a transient miss when a later sample overlaps', async () => {
     // One bad sample is not a partition. A pair that ever agrees is gossiping.
     let call = 0
-    const fetcher: Fetcher = async (url) => {
+    const fetcher: Fetcher = legacyNode(async (url) => {
       call += 1
       if (String(url) === 'http://b' && call <= 2) return board([])
       return board(['0x1', '0x2'])
-    }
+    })
     const r = await checkConvergence({
       fetcher,
       endpoints: ['http://a', 'http://b'],
@@ -335,5 +350,98 @@ describe('gradeBoardLiveness', () => {
 
   it('reports the count so the operator sees a number, not a boolean', () => {
     expect(gradeBoardLiveness(snap({ hashes: new Set(['0x1', '0x2', '0x3']) })).count).toBe(3)
+  })
+})
+
+describe('snapshotBoard pages each node', () => {
+  it('walks msgboard_contentPage on the endpoint until next is null', async () => {
+    const all = Array.from({ length: 2500 }, (_, i) => `0x${(i + 1).toString(16).padStart(64, '0')}`)
+    const urls: string[] = []
+    const fetcher: Fetcher = async (url, init) => {
+      urls.push(String(url))
+      const { method, params } = JSON.parse(String(init?.body))
+      expect(method).toBe('msgboard_contentPage')
+      const r = params[0] ?? {}
+      const rest = all.filter((h) => !r.after || h > r.after)
+      const page = rest.slice(0, r.limit)
+      const next = rest.length > page.length ? page[page.length - 1] : null
+      return new Response(JSON.stringify({ result: { content: { cat: page.map((hash) => ({ hash })) }, next } }), { status: 200 })
+    }
+    const s = await snapshotBoard(fetcher, 'http://replica-a:8545')
+    expect(s.ok).toBe(true)
+    expect(s.hashes.size).toBe(2500)
+    expect(s.mode).toBe('page')
+    expect(new Set(urls)).toEqual(new Set(['http://replica-a:8545']))
+  })
+
+  it('still reads an erigon node that has no page method and refuses any argument', async () => {
+    const fetcher = legacyNode(async (_url, init) => {
+      const { params } = JSON.parse(String(init?.body))
+      if (params.length) return new Response(JSON.stringify({ error: { message: 'too many arguments, want at most 0' } }), { status: 200 })
+      return new Response(JSON.stringify({ result: { cat: { '0xAA': {} } } }), { status: 200 })
+    })
+    const s = await snapshotBoard(fetcher, 'http://erigon')
+    expect(s.mode).toBe('whole')
+    expect([...s.hashes]).toEqual(['0xaa'])
+  })
+
+  it('restarts with the whole-board fallback when a reth rollout moves a gateway pin mid-walk', async () => {
+    // Page 1 answers from a v2.7.0.2 node; the gateway pin then moves to an
+    // older node, so page 2 answers -32601. One page-2 failure must not make
+    // the run unreadable: read the board once more with msgboard_content.
+    let pageCalls = 0
+    const fetcher: Fetcher = async (_url, init) => {
+      const { method, params } = JSON.parse(String(init?.body))
+      if (method === 'msgboard_contentPage') {
+        pageCalls += 1
+        if (pageCalls === 1) {
+          return new Response(
+            JSON.stringify({ result: { content: { cat: [{ hash: '0xAA' }] }, next: '0xAA' } }),
+            { status: 200 },
+          )
+        }
+        return new Response(
+          JSON.stringify({ error: { code: -32601, message: 'the method msgboard_contentPage does not exist/is not available' } }),
+          { status: 200 },
+        )
+      }
+      if (method === 'msgboard_content') {
+        expect(params).toEqual([{}])
+        return new Response(JSON.stringify({ result: { cat: { '0xBB': {} } } }), { status: 200 })
+      }
+      throw new Error(`unexpected ${method}`)
+    }
+    const s = await snapshotBoard(fetcher, 'http://mixed')
+    expect(s.ok).toBe(true)
+    expect(s.mode).toBe('whole')
+    // The partial page-1 read is discarded, not merged with the whole board.
+    expect([...s.hashes]).toEqual(['0xbb'])
+  })
+})
+
+describe('the replica gate refuses a gateway', () => {
+  it('names one.valve.city as a gateway and a node URL as direct', () => {
+    expect(isGatewayUrl('https://one.valve.city/rpc/vk_demo/evm/369')).toBe(true)
+    expect(isGatewayUrl('http://replica-a:8545')).toBe(false)
+  })
+
+  it('gives cannot-check, not a verdict, when requireDirect meets a gateway', async () => {
+    const r = await checkConvergence({
+      fetcher: fleet({ 'https://one.valve.city/rpc/vk_demo/evm/369': ['0x1'], 'http://replica-b:8545': ['0x1'] }),
+      endpoints: ['https://one.valve.city/rpc/vk_demo/evm/369', 'http://replica-b:8545'],
+      requireDirect: true,
+      sleep: now,
+    })
+    expect(r.verdict).toBe('cannot-check')
+    expect(r.report).toContain('gateway')
+  })
+
+  it('control: the same pair without requireDirect still compares', async () => {
+    const r = await checkConvergence({
+      fetcher: fleet({ 'https://one.valve.city/rpc/vk_demo/evm/369': ['0x1'], 'http://replica-b:8545': ['0x1'] }),
+      endpoints: ['https://one.valve.city/rpc/vk_demo/evm/369', 'http://replica-b:8545'],
+      sleep: now,
+    })
+    expect(r.verdict).toBe('converged')
   })
 })

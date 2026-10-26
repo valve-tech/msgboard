@@ -202,22 +202,34 @@ export class MsgBoardProvider extends ProviderWrapper {
     return !msg ? null : msgboard.toRPCMessage(msg)
   }
   /**
+   * True when a message matches a content filter
+   * @param msg The message to test
+   * @param filter The filter to apply
+   * @returns Whether the message matches every part of the filter
+   */
+  private matchesFilter(msg: msgboard.Message, filter: msgboard.ContentFilter) {
+    if (filter.category && msg.category !== filter.category) {
+      // message category does not match filter category
+      return false
+    }
+    if (!isNil(filter.fromBlock) && msg.blockNumber < filter.fromBlock) {
+      // message block number is below lower bound block number
+      return false
+    }
+    if (!isNil(filter.toBlock) && msg.blockNumber > filter.toBlock) {
+      // message block number is above upper bound block number
+      return false
+    }
+    return true
+  }
+  /**
    * Returns the content of the msgboard
    * @param filter The filter to apply to the content
    * @returns The content of the msgboard
    */
   private content(filter: msgboard.ContentFilter = {}) {
     return this.messages.reduce((content, msg) => {
-      if (filter.category && msg.category !== filter.category) {
-        // message category does not match filter category
-        return content
-      }
-      if (!isNil(filter.fromBlock) && msg.blockNumber < filter.fromBlock) {
-        // message block number is below lower bound block number
-        return content
-      }
-      if (!isNil(filter.toBlock) && msg.blockNumber > filter.toBlock) {
-        // message block number is above upper bound block number
+      if (!this.matchesFilter(msg, filter)) {
         return content
       }
       if (!content[msg.category]) {
@@ -226,6 +238,39 @@ export class MsgBoardProvider extends ProviderWrapper {
       content[msg.category].push(msgboard.toRPCMessage(msg))
       return content
     }, {} as msgboard.Content)
+  }
+  /**
+   * Returns one page of the msgboard, walked by an ascending-hash keyset cursor.
+   *
+   * Matches the msgboard_contentPage node contract: `limit` is required, an integer
+   * from 1 to 1,000 (else -32602). Messages come back in ascending hash order.
+   * `after` is exclusive. `next` is the last hash of the page, or null when no
+   * message is left — also null when the last page is exactly `limit` long.
+   * @param request `limit` (required), `after` (exclusive cursor), and the same
+   * filters `content()` takes
+   * @returns One page of content, grouped by category, and the next cursor
+   */
+  private contentPage(request: msgboard.ContentFilter & { limit?: number; after?: Hex } = {}) {
+    const { limit, after, ...filter } = request
+    if (!Number.isInteger(limit) || (limit as number) < 1 || (limit as number) > 1000) {
+      throw Object.assign(new Error('msgboard_contentPage: limit must be an integer from 1 to 1,000'), {
+        code: -32602,
+      })
+    }
+    const sorted = this.messages
+      .filter((msg) => this.matchesFilter(msg, filter))
+      .sort((a, b) => (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0))
+    const rest = after ? sorted.filter((msg) => msg.hash > after) : sorted
+    const page = rest.slice(0, limit)
+    const next = rest.length > page.length ? page[page.length - 1]!.hash : null
+    const content = page.reduce((acc, msg) => {
+      if (!acc[msg.category]) {
+        acc[msg.category] = []
+      }
+      acc[msg.category].push(msgboard.toRPCMessage(msg))
+      return acc
+    }, {} as msgboard.Content)
+    return { content, next }
   }
   /**
    * Returns the categories of the msgboard
@@ -252,6 +297,9 @@ export class MsgBoardProvider extends ProviderWrapper {
     if (args.method === 'msgboard_content') {
       return this.content(...(args.params as [msgboard.ContentFilter])) as R
     }
+    if (args.method === 'msgboard_contentPage') {
+      return this.contentPage(...(args.params as [msgboard.ContentFilter & { limit?: number; after?: Hex }])) as R
+    }
     if (args.method === 'msgboard_categories') {
       return this.categories(...(args.params as [])) as R
     }
@@ -259,7 +307,7 @@ export class MsgBoardProvider extends ProviderWrapper {
     if (args.method === 'msgboard_reset') {
       return this.reset(...(args.params as [])) as R
     }
-    throw new Error('msgboard: unknown method')
+    throw Object.assign(new Error('msgboard: unknown method'), { code: -32601 })
   }
   /**
    * Emulates network latency by adding a XXms delay before and after the function call

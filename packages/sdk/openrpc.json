@@ -68,6 +68,7 @@
     {
       "name": "msgboard_content",
       "summary": "All messages on the board, grouped by category hash. Optionally filtered.",
+      "description": "Messages on the board, grouped by category hash. With no filter, the node sends the whole board, as erigon-pulse does, which can be more than 160 MB. To read a large board, use msgboard_contentPage. The valve.city gateway answers error -32012 when an answer is larger than its byte cap, or when a call with no `limit` does not finish within 9 seconds. The error's `data.method` names msgboard_contentPage, and `data.maxLimit` is the largest page. The gateway never sends part of a board. From reth v2.7.0.2-pulse, `after` here gives -32602; `offset` still works and is deprecated.",
       "params": [
         {
           "name": "filter",
@@ -95,6 +96,46 @@
           "result": {
             "name": "content",
             "value": {}
+          }
+        }
+      ]
+    },
+    {
+      "name": "msgboard_contentPage",
+      "summary": "One page of the board, in ascending hash order. reth extension, v2.7.0.2-pulse and later.",
+      "description": "Reads the board in pages. Send {\"limit\": 1000} for the first page. Each answer holds `content`, grouped by category as msgboard_content groups it, and `next`. Pass `next` back unchanged as `after`, and stop only when `next` is null. A short page, or an empty one, is not the end. Pages are in ascending hash order, so a walk is stable while the board changes: a message present for the whole walk appears exactly once. `limit` is required, from 1 to 1000; outside that range the node answers -32602. The cursor works like Stripe's `starting_after` and GraphQL Relay's `endCursor`. A node without this method answers -32601. @msgboard/sdk `contentPages()` and `contentAll()` do this walk for you.",
+      "params": [
+        {
+          "name": "request",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/ContentPageRequest"
+          }
+        }
+      ],
+      "result": {
+        "name": "page",
+        "schema": {
+          "$ref": "#/components/schemas/ContentPage"
+        }
+      },
+      "examples": [
+        {
+          "name": "last page",
+          "params": [
+            {
+              "name": "request",
+              "value": {
+                "limit": 1000
+              }
+            }
+          ],
+          "result": {
+            "name": "page",
+            "value": {
+              "content": {},
+              "next": null
+            }
           }
         }
       ]
@@ -315,6 +356,74 @@
           "toBlock": {
             "$ref": "#/components/schemas/Hex",
             "description": "Upper block bound (hex quantity)."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Most messages in the answer, counted over every category. reth extension. Without it, the node sends every matching message. To page, use msgboard_contentPage."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "deprecated": true,
+            "description": "Messages to skip. reth extension. Deprecated: not stable while the board changes. Use msgboard_contentPage."
+          }
+        }
+      },
+      "ContentPageRequest": {
+        "title": "ContentPageRequest",
+        "type": "object",
+        "required": [
+          "limit"
+        ],
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "Most messages in the page, counted over every category. Required."
+          },
+          "after": {
+            "$ref": "#/components/schemas/Hex",
+            "description": "The previous page's `next`, unchanged. Leave it out for the first page. The page starts at the first hash above it."
+          },
+          "category": {
+            "$ref": "#/components/schemas/Hex",
+            "description": "Restrict to one category hash."
+          },
+          "fromBlock": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Lower block bound, inclusive, as a JSON number."
+          },
+          "toBlock": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Upper block bound, inclusive, as a JSON number."
+          }
+        }
+      },
+      "ContentPage": {
+        "title": "ContentPage",
+        "type": "object",
+        "required": [
+          "content",
+          "next"
+        ],
+        "properties": {
+          "content": {
+            "$ref": "#/components/schemas/Content"
+          },
+          "next": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Hex"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The last hash in this page, or null when no message is left. Pass it back unchanged as `after`."
           }
         }
       },
