@@ -13,8 +13,8 @@ The 943 sponsor had failed every tick on a legacy `sponsored` table; it also rea
 category. Both fixed and live; first grants mined. UI now posts the padded category only.
 - [ ] Sponsor pays gas on contract recipients that reject value (0x6da4…5041 burned 2 grants).
       Consider skipping addresses with code.
-- [ ] The 1Password service account is deleted. `op` works only through the desktop app
-      (`env -u OP_SERVICE_ACCOUNT_TOKEN op read ...`); drop the dead token from ~/.zshrc.
+- NOT a todo: `op` 403 "Service Account Deleted" = a stale token inherited by the session. The live
+      token is ~/.config/op/service-account.token (rotated 10-21); open a fresh shell.
 - [ ] Unmerged work (decide each): PR #47 gas-only Mechanics tab (posts keccak: fix before merge);
       feat/content-page-walk (worktree, no PR, 6 commits); deps/dependabot-safe-overrides (npm
       override pins not in master); fix/landing-card-gap-and-ecosystem ("Built on MsgBoard").
