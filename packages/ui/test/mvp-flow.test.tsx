@@ -95,7 +95,7 @@ describe('MVP vertical slice (Interactive flow)', () => {
   it('grinds in the worker seam (fake worker), posts, then reloads board content', async () => {
     const { Interactive } = await import('../src/components/Interactive')
     const { useChainStore } = await import('../src/stores/chain')
-    const { keccak256, stringToHex: s2h } = await import('viem')
+    const { stringToHex: s2h } = await import('viem')
 
     // gas demo requires a faucet-supported chain
     act(() => {
@@ -120,10 +120,12 @@ describe('MVP vertical slice (Interactive flow)', () => {
     // the grind was dispatched to the worker — a {type:'work'} message was posted
     await waitFor(() => expect(posted.length).toBe(1))
     expect(posted[0].type).toBe('work')
+    // the sponsor reads the zero-padded category, never keccak
+    const gasCategory = s2h('gasmoneyplease', { size: 32 })
+    expect((posted[0] as { category?: string }).category).toBe(gasCategory)
     expect(lastWorker).not.toBeNull()
 
     // resolve the grind from the worker → seam resolves → flow reloads content
-    const gasCategory = keccak256(s2h('gasmoneyplease'))
     sdkContent = {
       [gasCategory]: [],
     }
