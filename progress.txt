@@ -1,18 +1,25 @@
 # MsgBoard — Progress
 
-Updated: 2026-10-21
+Updated: 2026-10-26
 
 ## CADDY DIRECTORY MOUNT SHIPPED (2026-10-21)
 
 caddy reads deploy/caddy through a directory mount at /etc/caddy/msgboard (PR #72, ef86a08).
 Cutover ran 2026-10-20 via ansible/caddy-dir-mount-cutover.yml; all 13 hosts kept their codes.
 
-## GAS SPONSOR NEVER SEES UI REQUESTS (found 2026-10-26)
+## GAS SPONSOR SPONSORS AGAIN (2026-10-26, PR #78, deployed)
 
-- [x] Fixed on branch fix/gas-sponsor-category: the UI posts only the zero-padded category; the
-      sponsor reads both (old UI builds posted keccak256). 2 keccak requests wait on 943.
-- [ ] Deploy: sponsor via ansible/deploy-msgboard-core.yml, UI via deploy-msgboard-ui.yml.
-- [ ] The 1Password service account is deleted; `op read` fails, so headless box access is down.
+The 943 sponsor had failed every tick on a legacy `sponsored` table; it also read the wrong
+category. Both fixed and live; first grants mined. UI now posts the padded category only.
+- [ ] Sponsor pays gas on contract recipients that reject value (0x6da4…5041 burned 2 grants).
+      Consider skipping addresses with code.
+- [ ] The 1Password service account is deleted. `op` works only through the desktop app
+      (`env -u OP_SERVICE_ACCOUNT_TOKEN op read ...`); drop the dead token from ~/.zshrc.
+- [ ] Unmerged work (decide each): PR #47 gas-only Mechanics tab (posts keccak: fix before merge);
+      feat/content-page-walk (worktree, no PR, 6 commits); deps/dependabot-safe-overrides (npm
+      override pins not in master); fix/landing-card-gap-and-ecosystem ("Built on MsgBoard").
+      Already in master, safe to delete: chore/sdk-grind-rename, fix/lint-if-present,
+      worktree-agent-a486273199a5544cd.
 
 ## SNOOZED — DO NOT RAISE BEFORE 2026-11-21
 
