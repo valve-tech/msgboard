@@ -130,14 +130,15 @@ export function Interactive({ workerFactory }: Props) {
 
   const categoryByteLength = new TextEncoder().encode(categoryValue).byteLength
   const categoryExceedsLimit = categoryByteLength > 32
+  // Gas requests always use the zero-padded category: that is the one the sponsor reads.
   const effectiveUseDirectEncoding =
-    categoryType !== 'gas-request' && !useKeccak && !categoryExceedsLimit
+    (categoryType === 'gas-request' || !useKeccak) && !categoryExceedsLimit
   const hexdText = (isHex(text) ? text : stringToHex(text)).toLowerCase() as Hex
 
   const oncategoryupdate = (type: CategoryKey, category: string) => {
     const modeChanged = type !== categoryType
     if (type === 'gas-request') {
-      if (modeChanged) setUseKeccak(true)
+      if (modeChanged) setUseKeccak(false)
       if (account.address) {
         setText(account.address)
       }

@@ -1,5 +1,5 @@
 import pg from 'pg'
-import { http, type Hex, isAddress } from 'viem'
+import { http, type Hex, isAddress, keccak256, stringToHex } from 'viem'
 import { mnemonicToAccount } from 'viem/accounts'
 import type { RPCMessage } from '@msgboard/sdk'
 import {
@@ -39,7 +39,11 @@ const main = async () => {
     node: { transport: http(rpcUrl) },
     mode,
     intervalMs: 20_000,
-    source: msgboardContentSource({ category: 'gasmoneyplease' }),
+    // The UI posts the zero-padded category. UI builds before 2026-10-26 posted the keccak one,
+    // so watch both until those clients are gone.
+    source: msgboardContentSource({
+      category: ['gasmoneyplease', keccak256(stringToHex('gasmoneyplease'))],
+    }),
     condition: (message) => isAddress(message.data),
     key: (message) => message.hash.toLowerCase(),
     store,
