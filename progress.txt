@@ -2,22 +2,36 @@
 
 Updated: 2026-10-26
 
-## CADDY DIRECTORY MOUNT SHIPPED (2026-10-21)
+## ONE RPC KEY PER CONTAINER, ENCRYPTED AT REST (2026-10-26, live)
 
-caddy reads deploy/caddy through a directory mount at /etc/caddy/msgboard (PR #72, ef86a08).
-Cutover ran 2026-10-20 via ansible/caddy-dir-mount-cutover.yml; all 13 hosts kept their codes.
+All 27 containers (msgboard box, games-actors, bridge sponsor, games proxy) run on their own
+valve.city key. 0 of 38 running containers hold the shared admin-key-v3; no key literal is left
+in any .env, Caddyfile or backup under the three app dirs.
+- Keys: 7 1Password items "valve city msgboard <role> keys", field `keys` (container=vk_ pairs).
+  Seeded by the api (valve-tech/monorepo#2, deployed); indexers are `no-writes`.
+- Box: /etc/credstore.encrypted/msgboard-keys (systemd-creds). ALWAYS run compose through
+  `msgboard-compose`; bare `docker compose` fails closed on ${MBK_<CONTAINER>:?}.
+- Runbooks (private ansible/): install-msgboard-keys.yml (rerun after a rotation),
+  switch-container-key.yml -e target=<svc> [-e mode=revert]. All deploy plays use the wrapper.
+- [ ] api stores every key's raw value in api.project_key.value (plaintext). Hash on write. Monorepo.
+- [ ] admin-key-v3 is no longer used by msgboard, but other Valve consumers hold it; retire it there.
+- NOT a todo: `op` 403 "Service Account Deleted" = a stale token in the session env. The live
+      token is ~/.config/op/service-account.token; open a fresh shell.
 
-## GAS SPONSOR SPONSORS AGAIN (2026-10-26, PR #78, deployed)
+## DONE 2026-10-26
 
-The 943 sponsor had failed every tick on a legacy `sponsored` table; it also read the wrong
-category. Both fixed and live; first grants mined. UI now posts the padded category only.
-- [ ] Sponsor pays gas on contract recipients that reject value (0x6da4…5041 burned 2 grants).
-      Consider skipping addresses with code.
-- NOT a todo: `op` 403 "Service Account Deleted" = a stale token inherited by the session. The live
-      token is ~/.config/op/service-account.token (rotated 10-21); open a fresh shell.
-- [ ] Unmerged work (decide each): PR #47 gas-only Mechanics tab (posts keccak: fix before merge);
-      feat/content-page-walk (worktree, no PR, 6 commits); deps/dependabot-safe-overrides (npm
-      override pins not in master); fix/landing-card-gap-and-ecosystem ("Built on MsgBoard").
+- Gas sponsor sponsors again (PR #78): legacy `sponsored` table + wrong category; first grants mined.
+- PR #47 gas-only Mechanics tab merged + live; posts the zero-padded category.
+- Warnings already mirror to Telegram (monorepo f5cc3f79). Bridge-sponsor fee fix is in
+  github.com/hexpay-day/pulsechain-bridge-sponsor-dapp master (PR #12); use the HexPay.Day 1P key.
+- NOT a todo: the sponsor pays ~0.00004 tPLS gas on a contract recipient that rejects value. Owner: leave it.
+
+## OPEN BRANCHES
+
+- [ ] PR #82 paged board reads (msgboard_contentPage), all suites pass locally; awaiting review.
+- [ ] deps/dependabot-safe-overrides (npm override pins not in master); fix/landing-card-gap-and-
+      ecosystem ("Built on MsgBoard" section). Decide each.
+- fix/parity-gate-native-symbol (3092d47) is the valve session's; local only, not pushed.
 
 ## SNOOZED — DO NOT RAISE BEFORE 2026-11-21
 
@@ -27,13 +41,9 @@ category. Both fixed and live; first grants mined. UI now posts the padded categ
 ## OPEN TODO LIST (backfilled 2026-10-21 from git + Claude's memory notes; date = last confirmed)
 
 Ops / infra
-- [ ] One RPC key per service; 26 services share the interim v3 key since 10-19. (10-19)
-- [ ] Alert email: Proton rejects ~97% (550 SpamAssassin); warning tier sends nothing. Quick fix:
-      a `continue: true` route mirroring warnings to Telegram. Real fix: a transactional relay. (09-15)
-- [ ] Drop the dead keyed VITE_RPC_* values from the box .env. (07-28)
+- [ ] Alert email: Proton rejects ~98%. Warnings reach Telegram; real fix is a transactional relay. (10-26)
 - [ ] valve.city msgboard_addMessage writes flaky ("all upstream attempts failed"); tell infra. (07-28)
 - [ ] eRPC shadow prober mirrors msgboard_addMessage writes to our nodes; erpc owner's fix. (09-16)
-- [ ] Bridge-sponsor fee fix lives only on the box; apply the 10-file patch to its private repo. (08-28)
 - [ ] Go faucet: no replace-by-fee loop (gas pricing is fixed). (08-09)
 
 Bots on the box (checked 2026-10-22)
