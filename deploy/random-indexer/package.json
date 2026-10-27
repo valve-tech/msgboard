@@ -1,0 +1,29 @@
+{
+  "name": "random-indexer-943",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "description": "gibsfinance/random ponder indexer for PulseChain testnet v4 (943), upgraded to ponder 0.16. Vendored standalone for the msgboard deploy; depends on the published @gibs/random package for ABIs and chain-943 addresses.",
+  "scripts": {
+    "dev": "ponder dev",
+    "start": "ponder start",
+    "db": "ponder db",
+    "codegen": "ponder codegen",
+    "serve": "ponder serve",
+    "lint": "eslint .",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@gibs/random": "^0.0.18",
+    "hono": "^4.7.5",
+    "ponder": "^0.16.6",
+    "viem": "^2.48.11"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=18.14"
+  }
+}

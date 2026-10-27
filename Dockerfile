@@ -1,4 +1,4 @@
-FROM node:lts AS builder
+FROM node:24.22.1 AS builder
 WORKDIR /app
 COPY package*.json ./
 COPY packages packages
@@ -31,7 +31,7 @@ ENV VITE_PETITION_INDEXER_URL=$VITE_PETITION_INDEXER_URL
 RUN npm i
 RUN npm run build
 
-FROM node:lts-slim
+FROM node:24.22.1-slim
 WORKDIR /app
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
