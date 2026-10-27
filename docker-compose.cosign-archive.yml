@@ -37,7 +37,7 @@ services:
       DATABASE_URL: postgres://msgboard-postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@msgboard-postgres:5432/msgboard-postgres
       # Board-chain RPC for the live-share leg. Default the public valve.city 943 endpoint the app uses;
       # override in the box .env (the box already sets PONDER_RPC_URL_943 for the ponder indexers).
-      MSGBOARD_RPC: ${MSGBOARD_RPC:-${PONDER_RPC_URL_943:-https://one.valve.city/rpc/vk_demo/evm/943}}
+      MSGBOARD_RPC: ${MSGBOARD_RPC_BASE:-https://one.valve.city/rpc}/${MBK_COSIGN_ARCHIVE:?MBK_COSIGN_ARCHIVE unset - run docker compose through msgboard-compose}/evm/943
       MSGBOARD_CHAIN_ID: ${MSGBOARD_CHAIN_ID:-943}
       # Non-loopback bind (0.0.0.0 inside the container) REQUIRES a token or archiveServer refuses to
       # start. Caddy injects `Authorization: Bearer <COSIGN_ARCHIVE_TOKEN>` upstream so the browser stays

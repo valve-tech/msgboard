@@ -25,7 +25,7 @@ services:
       DATABASE_URL: postgres://msgboard-postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@msgboard-postgres:5432/safes
       # Default to the public valve.city RPC (same key the app already uses in config.ts) so the
       # indexer needs no extra secret; override in the box .env to point at a private endpoint.
-      PONDER_RPC_URL_369: ${PONDER_RPC_URL_369:-https://one.valve.city/rpc/vk_demo/evm/369}
-      PONDER_RPC_URL_943: ${PONDER_RPC_URL_943:-https://one.valve.city/rpc/vk_demo/evm/943}
+      PONDER_RPC_URL_369: ${MSGBOARD_RPC_BASE:-https://one.valve.city/rpc}/${MBK_SAFE_INDEXER:?MBK_SAFE_INDEXER unset - run docker compose through msgboard-compose}/evm/369
+      PONDER_RPC_URL_943: ${MSGBOARD_RPC_BASE:-https://one.valve.city/rpc}/${MBK_SAFE_INDEXER:?MBK_SAFE_INDEXER unset - run docker compose through msgboard-compose}/evm/943
       PONDER_SCHEMA: ${SAFE_SCHEMA:-safe_1}
       PONDER_TELEMETRY_DISABLED: 'true'

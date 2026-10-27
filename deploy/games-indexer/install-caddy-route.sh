@@ -24,9 +24,10 @@ BAK="$CF.bak.gamesidx.$(date +%s)"
 cp "$CF" "$BAK"
 echo "backed up Caddyfile -> $BAK"
 
-# The real RPC key, extracted from the URL the indexers already use. Never printed.
-RPC_KEY=$(grep -m1 '^PONDER_RPC_URL_943=' /opt/msgboard/.env | sed -E 's|.*/rpc/([^/]+)/evm/.*|\1|')
-[ -n "$RPC_KEY" ] && [ "$RPC_KEY" != "vk_demo" ] || { echo "!! no real RPC key in /opt/msgboard/.env (PONDER_RPC_URL_943)"; exit 1; }
+# The proxy's own RPC key (msgboard-games-proxy) reaches Caddy as the container env var
+# MBK_GAMES_PROXY, set by msgboard-compose from the encrypted credential. The Caddyfile names
+# the variable, never the value, so no key sits in this file or in its backups. Checked, never printed.
+docker exec caddy sh -c '[ -n "$MBK_GAMES_PROXY" ]' || { echo "!! caddy has no MBK_GAMES_PROXY; recreate it through msgboard-compose"; exit 1; }
 
 # Drop a top-level `host { ... }` block (brace-balanced). Matches only when the host starts at column
 # 1, so it never touches indented inner directives or a different host that shares a prefix.
@@ -52,7 +53,7 @@ mv "$TMP.next" "$TMP"
 
 # Canonical block: indexer route first (handle_path strips the /games-indexer prefix so the upstream
 # sees /graphql, /health, …), then the keyed RPC proxy routes, SPA catch-all last. The heredoc is
-# UNQUOTED so $RPC_KEY interpolates; Caddy placeholders ({path}) contain no `$` and pass through.
+# {$MBK_GAMES_PROXY} is a Caddy env placeholder, escaped here so the shell leaves it alone.
 cat >> "$TMP" <<EOF
 
 games.msgboard.xyz {
@@ -62,13 +63,13 @@ games.msgboard.xyz {
 		reverse_proxy games-indexer-943:42069
 	}
 	handle /rpc/evm/943 {
-		rewrite * /rpc/$RPC_KEY/evm/943
+		rewrite * /rpc/{\$MBK_GAMES_PROXY}/evm/943
 		reverse_proxy https://one.valve.city {
 			header_up Host one.valve.city
 		}
 	}
 	handle /rpc/evm/369 {
-		rewrite * /rpc/$RPC_KEY/evm/369
+		rewrite * /rpc/{\$MBK_GAMES_PROXY}/evm/369
 		reverse_proxy https://one.valve.city {
 			header_up Host one.valve.city
 		}
