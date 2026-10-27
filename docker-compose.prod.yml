@@ -53,6 +53,9 @@ services:
       - ui
       - faucet
       - hasura
+    environment:
+      # The games.msgboard.xyz RPC proxy's own key, read by the Caddyfile as {$MBK_GAMES_PROXY}.
+      MBK_GAMES_PROXY: ${MBK_GAMES_PROXY:?MBK_GAMES_PROXY unset - run docker compose through msgboard-compose}
     networks:
       - msgboard
       - edge
@@ -67,9 +70,9 @@ services:
         # bundle. The browser uses /api/rpc-proxy?chain=<id> and the server injects RPC_<id> at runtime.
         VITE_LANDING_HOUSE_ADDRESS: ${VITE_LANDING_HOUSE_ADDRESS:-}
     environment:  # ui-runtime-rpc (key-safe proxy): the preview server substitutes these; NOT build args
-      RPC_1: ${RPC_1:-}
-      RPC_369: ${RPC_369:-}
-      RPC_943: ${RPC_943:-}
+      RPC_1: ${MSGBOARD_RPC_BASE:-https://one.valve.city/rpc}/${MBK_UI:?MBK_UI unset - run docker compose through msgboard-compose}/evm/1
+      RPC_369: ${MSGBOARD_RPC_BASE:-https://one.valve.city/rpc}/${MBK_UI:?MBK_UI unset - run docker compose through msgboard-compose}/evm/369
+      RPC_943: ${MSGBOARD_RPC_BASE:-https://one.valve.city/rpc}/${MBK_UI:?MBK_UI unset - run docker compose through msgboard-compose}/evm/943
     restart: unless-stopped
     networks:
       - msgboard
@@ -105,8 +108,8 @@ services:
     environment:
       MNEMONIC: ${MNEMONIC:-}
       DATABASE_URL: postgres://msgboard-postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@msgboard-postgres:5432/msgboard-postgres
-      RPC_369: ${RPC_369:-}
-      RPC_943: ${RPC_943:-}
+      RPC_369: ${MSGBOARD_RPC_BASE:-https://one.valve.city/rpc}/${MBK_SPONSOR:?MBK_SPONSOR unset - run docker compose through msgboard-compose}/evm/369
+      RPC_943: ${MSGBOARD_RPC_BASE:-https://one.valve.city/rpc}/${MBK_SPONSOR:?MBK_SPONSOR unset - run docker compose through msgboard-compose}/evm/943
     command: ['npm', 'run', 'sponsor:start']
 
   # spam: posts random lorem-style messages so each board shows activity. Submission
@@ -124,7 +127,7 @@ services:
     container_name: spam-943
     environment:
       SPAM_CHAIN_ID: '943'
-      RPC_943: ${RPC_943:-}
+      RPC_943: ${MSGBOARD_RPC_BASE:-https://one.valve.city/rpc}/${MBK_SPAM_943:?MBK_SPAM_943 unset - run docker compose through msgboard-compose}/evm/943
       SPAM_INTERVAL_MS: ${SPAM_INTERVAL_MS:-60000}
       SPAM_CATEGORIES: ${SPAM_CATEGORIES:-lorem,musings,chatter}
       # parallel grind threads per chain (8-core box; grinders idle between posts)
@@ -135,7 +138,7 @@ services:
     container_name: spam-369
     environment:
       SPAM_CHAIN_ID: '369'
-      RPC_369: ${RPC_369:-}
+      RPC_369: ${MSGBOARD_RPC_BASE:-https://one.valve.city/rpc}/${MBK_SPAM_369:?MBK_SPAM_369 unset - run docker compose through msgboard-compose}/evm/369
       SPAM_INTERVAL_MS: ${SPAM_INTERVAL_MS:-60000}
       SPAM_CATEGORIES: ${SPAM_CATEGORIES:-lorem,musings,chatter}
       SPAM_WORKERS: ${SPAM_WORKERS:-2}
@@ -145,7 +148,7 @@ services:
     container_name: spam-1
     environment:
       SPAM_CHAIN_ID: '1'
-      RPC_1: ${RPC_1:-}
+      RPC_1: ${MSGBOARD_RPC_BASE:-https://one.valve.city/rpc}/${MBK_SPAM_1:?MBK_SPAM_1 unset - run docker compose through msgboard-compose}/evm/1
       SPAM_INTERVAL_MS: ${SPAM_INTERVAL_MS:-60000}
       SPAM_CATEGORIES: ${SPAM_CATEGORIES:-lorem,musings,chatter}
       SPAM_WORKERS: ${SPAM_WORKERS:-2}
@@ -157,7 +160,7 @@ services:
     container_name: spam-11155111
     environment:
       SPAM_CHAIN_ID: '11155111'
-      RPC_11155111: ${RPC_11155111:-}
+      RPC_11155111: ${MSGBOARD_RPC_BASE:-https://one.valve.city/rpc}/${MBK_SPAM_11155111:?MBK_SPAM_11155111 unset - run docker compose through msgboard-compose}/evm/11155111
       SPAM_INTERVAL_MS: ${SPAM_INTERVAL_MS:-60000}
       SPAM_CATEGORIES: ${SPAM_CATEGORIES:-lorem,musings,chatter}
       SPAM_WORKERS: ${SPAM_WORKERS:-2}
@@ -174,8 +177,8 @@ services:
     networks:
       - msgboard
     environment:
-      RPC_369: ${RPC_369:-}
-      RPC_943: ${RPC_943:-}
+      RPC_369: ${MSGBOARD_RPC_BASE:-https://one.valve.city/rpc}/${MBK_BRIDGE:?MBK_BRIDGE unset - run docker compose through msgboard-compose}/evm/369
+      RPC_943: ${MSGBOARD_RPC_BASE:-https://one.valve.city/rpc}/${MBK_BRIDGE:?MBK_BRIDGE unset - run docker compose through msgboard-compose}/evm/943
       # default to PulseChain v4 testnet only (id 369 = mainnet, which the v4-only
       # sponsor does not fund); override DISABLED_CHAINS to change.
       DISABLED_CHAINS: ${DISABLED_CHAINS:-369}
@@ -200,10 +203,10 @@ services:
     environment:
       DATABASE_URL: postgres://msgboard-postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@msgboard-postgres:5432/msgboard-postgres
       INDEXER_CHAINS: ${INDEXER_CHAINS:-1,369,943,11155111}
-      RPC_1: ${RPC_1:-}
-      RPC_369: ${RPC_369:-}
-      RPC_943: ${RPC_943:-}
-      RPC_11155111: ${RPC_11155111:-}
+      RPC_1: ${MSGBOARD_RPC_BASE:-https://one.valve.city/rpc}/${MBK_INDEXER:?MBK_INDEXER unset - run docker compose through msgboard-compose}/evm/1
+      RPC_369: ${MSGBOARD_RPC_BASE:-https://one.valve.city/rpc}/${MBK_INDEXER:?MBK_INDEXER unset - run docker compose through msgboard-compose}/evm/369
+      RPC_943: ${MSGBOARD_RPC_BASE:-https://one.valve.city/rpc}/${MBK_INDEXER:?MBK_INDEXER unset - run docker compose through msgboard-compose}/evm/943
+      RPC_11155111: ${MSGBOARD_RPC_BASE:-https://one.valve.city/rpc}/${MBK_INDEXER:?MBK_INDEXER unset - run docker compose through msgboard-compose}/evm/11155111
       INDEXER_INTERVAL_MS: ${INDEXER_INTERVAL_MS:-20000}
       RETENTION_DAYS: ${RETENTION_DAYS:-365}
     command: ['npm', 'run', 'indexer:start']
@@ -224,7 +227,7 @@ services:
       - msgboard
     environment:
       DATABASE_URL: postgres://msgboard-postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@msgboard-postgres:5432/entropy
-      PONDER_RPC_URL_943: ${PONDER_RPC_URL_943:?PONDER_RPC_URL_943 must be set (one.valve.city/rpc/<key>/evm/943)}
+      PONDER_RPC_URL_943: ${MSGBOARD_RPC_BASE:-https://one.valve.city/rpc}/${MBK_RANDOM_INDEXER_943:?MBK_RANDOM_INDEXER_943 unset - run docker compose through msgboard-compose}/evm/943
       PONDER_SCHEMA: ${ENTROPY_943_SCHEMA:?ENTROPY_943_SCHEMA must be set (entropy_943_<n>)}
       PONDER_TELEMETRY_DISABLED: 'true'
 
@@ -246,8 +249,8 @@ services:
       - msgboard
     environment:
       DATABASE_URL: postgres://msgboard-postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@msgboard-postgres:5432/games
-      PONDER_RPC_URL_943: ${PONDER_RPC_URL_943:?PONDER_RPC_URL_943 must be set (one.valve.city/rpc/<key>/evm/943)}
-      PONDER_RPC_URL_369: ${PONDER_RPC_URL_369:?PONDER_RPC_URL_369 must be set (one.valve.city/rpc/<key>/evm/369)}
+      PONDER_RPC_URL_943: ${MSGBOARD_RPC_BASE:-https://one.valve.city/rpc}/${MBK_GAMES_INDEXER_943:?MBK_GAMES_INDEXER_943 unset - run docker compose through msgboard-compose}/evm/943
+      PONDER_RPC_URL_369: ${MSGBOARD_RPC_BASE:-https://one.valve.city/rpc}/${MBK_GAMES_INDEXER_943:?MBK_GAMES_INDEXER_943 unset - run docker compose through msgboard-compose}/evm/369
       PONDER_SCHEMA: ${GAMES_943_SCHEMA:?GAMES_943_SCHEMA must be set (games_943_<n>)}
       PONDER_TELEMETRY_DISABLED: 'true'
       # TODO(deploy-time): PetitionSignatures (Task H) — deploy/games-indexer/ponder.config.ts only
