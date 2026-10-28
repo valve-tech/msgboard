@@ -12,8 +12,7 @@ chain. Our own server certs are not eMudhra (GTS, Let's Encrypt, Cloudflare orig
   if any container trusts a compromised chain. Run it alone after any base change.
 - hasura moved v2.42.0 -> v2.51.3; catalog dump at /root/hdb_catalog-pre-v2.51.3-*.sql on the box.
 - random-indexer-943 is now vendored in deploy/random-indexer (was a box-only snapshot).
-- [ ] PUSH bridge-sponsor commit 993349b (node pin) to hexpay-day/pulsechain-bridge-sponsor-dapp.
-      Deployed on the box already; needs the HexPay.Day 1P key, which a background shell can't read.
+- Bridge-sponsor node pin 993349b pushed to hexpay-day/pulsechain-bridge-sponsor-dapp master.
 - [ ] random-indexer-943 serves ponder's /sql/* publicly (evm-943-entropy.msgboard.xyz/sql/db -> 400)
       and connects to Postgres as a superuser. Block /sql at Caddy or give it a read-only role.
       Also flagged (vendored code, pre-existing): duplicate-key inserts can halt indexing
