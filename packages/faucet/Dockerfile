@@ -1,4 +1,4 @@
-FROM node:lts-alpine as frontend
+FROM node:24.22.1-alpine as frontend
 
 WORKDIR /frontend-build
 
@@ -19,7 +19,7 @@ COPY --from=frontend /frontend-build/public ./web/public
 
 RUN go build -o pls-faucet -ldflags "-w -s"
 
-FROM alpine
+FROM alpine:3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
 
 RUN apk add --no-cache ca-certificates
 WORKDIR /app
