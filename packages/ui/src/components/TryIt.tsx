@@ -20,7 +20,7 @@ type SectionId = 'chat' | 'mechanics' | 'arcade' | 'petitions' | 'cosign'
 
 const SECTIONS: { id: SectionId; label: string; icon: string; blurb: string }[] = [
   { id: 'chat', label: 'Chat', icon: 'mdi:chat-outline', blurb: 'a live room — pick a privacy mode (public, anonymous, or encrypted) and say something' },
-  { id: 'mechanics', label: 'Gas', icon: 'mdi:fuel', blurb: 'Request testnet gas with a PoW grind' },
+  { id: 'mechanics', label: 'Gas', icon: 'mdi:fuel', blurb: 'Prove you’re not a bot, get a little gas.' },
   { id: 'arcade', label: 'Arcade', icon: 'mdi:dice-multiple', blurb: 'a provably-fair coin flip over the board — the arcade\'s whole thesis in one tab' },
   { id: 'petitions', label: 'Petitions', icon: 'mdi:file-sign-outline', blurb: 'sign a featured petition with your wallet — a co-signed statement, PoW-stamped to the board' },
   { id: 'cosign', label: 'Cosign', icon: 'mdi:shield-key-outline', blurb: 'watch a 2-of-3 Safe reach its threshold over the board — the bot fleet holds the other keys' },
