@@ -27,7 +27,7 @@ export function RequestSnapshot({ snapshot, working = false, onClose }: Props) {
   if (!snapshot) return null
 
   return (
-    <div className="flex flex-col rounded-lg border border-gray-300 dark:border-gray-600 shadow bg-gray-50 dark:bg-gray-900 p-3 font-mono text-sm mt-4">
+    <div className="flex flex-col rounded-lg border border-gray-300 dark:border-gray-600 shadow bg-gray-50 dark:bg-gray-900 p-3 font-mono text-sm">
       <div className="flex items-center justify-between">
         <span className="flex items-center gap-2">
           <span className="font-semibold text-gray-700 dark:text-gray-200">Request Data</span>
