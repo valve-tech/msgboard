@@ -78,7 +78,6 @@ export function Interactive({ workerFactory }: Props) {
   const [workSnapshot, setWorkSnapshot] = useState<WorkSnapshot | null>(null)
   const [result, setResult] = useState<'success' | 'error' | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const [showInspect, setShowInspect] = useState(false)
   const [pasteHint, setPasteHint] = useState<string | null>(null)
   const cancelRef = useRef<() => void>(() => {})
 
@@ -227,169 +226,151 @@ export function Interactive({ workerFactory }: Props) {
   }, [tree])
 
   return (
-    <div className="flex flex-col max-w-5xl pb-4 px-4 mx-auto w-full bg-white dark:bg-gray-950 lg:rounded-2xl shadow-sm gap-4">
-      <div className="flex flex-col grow justify-center items-center">
-        <div id="interactive" className="flex w-full grow flex-col gap-3">
-          <p className="text-base text-gray-700 dark:text-gray-200 pt-2">
-            Prove you’re not a bot, get a little gas.
-          </p>
+    <div
+      id="interactive"
+      className="flex flex-col w-full gap-4 p-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
+      <p className="text-base text-gray-700 dark:text-gray-200 pt-2">Prove you’re not a bot, get a little gas.</p>
 
-          <SelectChain
-            preferFaucet
-            onChange={(value) => {
-              useChainStore.getState().setChainOption(value as ChainOption)
-            }}
-          />
+      <SelectChain
+        preferFaucet
+        onChange={(value) => {
+          useChainStore.getState().setChainOption(value as ChainOption)
+        }}
+      />
 
-          {!faucetIsActive ? (
-            <div className="rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 p-4 text-sm text-amber-900 dark:text-amber-100">
-              <p className="font-medium">Faucet unavailable on this chain</p>
-              <p className="mt-1 text-amber-800 dark:text-amber-200/90">
-                Pick a faucet-supported network (e.g. PulseChain V4) to request testnet gas. Freeform
-                messaging lives in the Chat tab.
-              </p>
+      {!faucetIsActive ? (
+        <p className="text-sm text-amber-800 dark:text-amber-200">
+          <span className="font-medium">Faucet unavailable on this chain.</span> Pick a faucet-supported network (e.g.
+          PulseChain V4) to request testnet gas. Freeform messaging lives in the Chat tab.
+        </p>
+      ) : (
+        <>
+          {/* Recipient + paste/wallet — sits directly in the panel; helpers are plain text. */}
+          <div className="flex flex-col gap-1.5">
+            <div className="flex flex-row items-center justify-between gap-2">
+              <label htmlFor="gas-recipient" className="text-sm font-medium text-gray-800 dark:text-gray-100">
+                Recipient
+              </label>
+              <span className="flex flex-row items-center gap-x-2 text-xs italic text-gray-500 dark:text-gray-400">
+                <Icon icon="fe:wallet" className="size-4" />
+                {formatEther(account.balance ?? 0n)} {account.gasSymbol ?? ''}
+              </span>
             </div>
-          ) : (
-            <div className="container flex flex-col md:flex-row max-w-5xl items-start gap-4 justify-center grow">
-              <div className="container flex flex-col p-3 gap-3 rounded-lg border border-gray-300 dark:border-gray-600 shadow bg-gray-50 dark:bg-gray-900 flex-1 min-w-0">
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex flex-row items-center justify-between gap-2">
-                    <label
-                      htmlFor="gas-recipient"
-                      className="text-sm font-medium text-gray-800 dark:text-gray-100">
-                      Recipient
-                    </label>
-                    <span className="flex flex-row items-center gap-x-2 text-xs italic text-gray-500 dark:text-gray-400">
-                      <Icon icon="fe:wallet" className="size-4" />
-                      {formatEther(account.balance ?? 0n)} {account.gasSymbol ?? ''}
-                    </span>
-                  </div>
-                  <input
-                    id="gas-recipient"
-                    type="text"
-                    name="recipient"
-                    value={text}
-                    disabled={disabled}
-                    onChange={(e) => setInputValue(e.target.value)}
-                    placeholder="0x… recipient"
-                    spellCheck={false}
-                    autoComplete="off"
-                    className={`font-mono p-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100 dark:placeholder-gray-500 w-full outline-none text-sm ${
-                      text && !addressValid ? 'border-red-500' : 'border-gray-300'
-                    } disabled:opacity-70 disabled:pointer-events-none`}
-                  />
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => void pasteAddress()}
-                      disabled={disabled}
-                      className="text-xs px-2.5 py-1 rounded-full ring-1 ring-gray-300 dark:ring-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50">
-                      Paste
-                    </button>
-                    {hasInjectedWallet && (
-                      <button
-                        type="button"
-                        onClick={() => void useConnectedWallet()}
-                        disabled={disabled}
-                        className="text-xs px-2.5 py-1 rounded-full ring-1 ring-gray-300 dark:ring-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50">
-                        Use connected wallet
-                      </button>
-                    )}
-                  </div>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    Your browser does the work. No wallet signature required to grind.
-                  </p>
-                  {pasteHint && (
-                    <p className="text-xs text-amber-700 dark:text-amber-300">{pasteHint}</p>
-                  )}
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex flex-row items-center gap-2">
-                    <button
-                      type="button"
-                      className="bg-white dark:bg-gray-800 flex-grow text-center justify-center py-3 px-4 inline-flex items-center gap-x-2 text-sm font-semibold text-gray-900 dark:text-gray-100 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:pointer-events-none"
-                      onClick={() => void workAndSend()}
-                      disabled={submitDisabled}>
-                      {working ? 'Working…' : 'Work + Send It!'}
-                    </button>
-                    {working && (
-                      <button
-                        type="button"
-                        className="bg-red-500 text-slate-100 px-4 py-3 rounded-lg text-sm leading-6 cursor-pointer shrink-0"
-                        onClick={() => {
-                          cancelRef.current()
-                          setWorking(false)
-                          setWorkSnapshot(null)
-                        }}>
-                        Cancel
-                      </button>
-                    )}
-                  </div>
-                  {submitDisabled && disableReason && !working && (
-                    <p className="text-xs text-gray-500 dark:text-gray-400">{disableReason}</p>
-                  )}
-                </div>
-
-                <Terminal working={!!working} />
-
-                <RequestSnapshot
-                  snapshot={workSnapshot}
-                  working={working}
-                  onClose={() => {
-                    cancelRef.current()
-                    setWorkSnapshot(null)
-                  }}
-                />
-
-                {result === 'success' && addressValid && (
-                  <div className="rounded-lg border border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-950/40 p-3 text-sm text-green-900 dark:text-green-100">
-                    Gas requested for {shortAddr(text)} on {chainName}.
-                  </div>
-                )}
-                {result === 'error' && (
-                  <div className="rounded-lg border border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-950/40 p-3 text-sm text-red-900 dark:text-red-100 flex flex-col gap-2">
-                    <span>{errorMessage ?? 'Something went wrong requesting gas.'}</span>
-                    <button
-                      type="button"
-                      className="self-start text-xs px-2.5 py-1 rounded-full ring-1 ring-red-400 text-red-800 dark:text-red-100 hover:bg-red-100 dark:hover:bg-red-900/40"
-                      onClick={() => void workAndSend()}
-                      disabled={submitDisabled}>
-                      Retry
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              <div className="container flex flex-col mx-auto md:max-w-sm align-top overflow-hidden w-full md:w-auto">
+            <input
+              id="gas-recipient"
+              type="text"
+              name="recipient"
+              value={text}
+              disabled={disabled}
+              onChange={(e) => setInputValue(e.target.value)}
+              placeholder="0x… recipient"
+              spellCheck={false}
+              autoComplete="off"
+              className={`font-mono p-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100 dark:placeholder-gray-500 w-full outline-none text-sm ${
+                text && !addressValid ? 'border-red-500' : 'border-gray-300'
+              } disabled:opacity-70 disabled:pointer-events-none`}
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void pasteAddress()}
+                disabled={disabled}
+                className="text-xs px-2.5 py-1 rounded-full ring-1 ring-gray-300 dark:ring-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50">
+                Paste
+              </button>
+              {hasInjectedWallet && (
                 <button
                   type="button"
-                  className="md:hidden mb-2 text-sm text-indigo-600 dark:text-indigo-400 underline-offset-2 hover:underline self-start"
-                  onClick={() => setShowInspect((v) => !v)}
-                  aria-expanded={showInspect}>
-                  {showInspect ? 'Hide inspect' : 'Under the hood'}
+                  onClick={() => void useConnectedWallet()}
+                  disabled={disabled}
+                  className="text-xs px-2.5 py-1 rounded-full ring-1 ring-gray-300 dark:ring-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50">
+                  Use connected wallet
                 </button>
-                <div className={`${showInspect ? 'flex' : 'hidden'} md:flex flex-col gap-2`}>
-                  <p className="hidden md:block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                    Under the hood
-                  </p>
-                  <div className="relative rounded-lg border border-gray-200 dark:border-gray-700 p-2 bg-white dark:bg-gray-950">
-                    {loading && (
-                      <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/70 dark:bg-gray-900/70 rounded-lg backdrop-blur-[1px]">
-                        <span className="text-sm text-gray-500 dark:text-gray-400 font-mono">
-                          Loading…
-                        </span>
-                      </div>
-                    )}
-                    <Summary />
-                    <TreeView childrenNodes={tree.children} label="Message Board" isRoot hideContent />
+              )}
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Your browser does the work. No wallet signature required to grind.
+            </p>
+            {pasteHint && <p className="text-xs text-amber-700 dark:text-amber-300">{pasteHint}</p>}
+          </div>
+
+          {/* Work + Send It! */}
+          <div className="flex flex-col gap-1.5">
+            <div className="flex flex-row items-center gap-2">
+              <button
+                type="button"
+                className="bg-white dark:bg-gray-800 flex-grow text-center justify-center py-3 px-4 inline-flex items-center gap-x-2 text-sm font-semibold text-gray-900 dark:text-gray-100 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:pointer-events-none"
+                onClick={() => void workAndSend()}
+                disabled={submitDisabled}>
+                {working ? 'Working…' : 'Work + Send It!'}
+              </button>
+              {working && (
+                <button
+                  type="button"
+                  className="bg-red-500 text-slate-100 px-4 py-3 rounded-lg text-sm leading-6 cursor-pointer shrink-0"
+                  onClick={() => {
+                    cancelRef.current()
+                    setWorking(false)
+                    setWorkSnapshot(null)
+                  }}>
+                  Cancel
+                </button>
+              )}
+            </div>
+            {submitDisabled && disableReason && !working && (
+              <p className="text-xs text-gray-500 dark:text-gray-400">{disableReason}</p>
+            )}
+          </div>
+
+          {/* Logs — work progress, always in flow directly under the CTA. */}
+          <Terminal working={!!working} />
+
+          {/* Under the hood — collapsed disclosure for request hex + tree inspect only. */}
+          <details className="group text-sm">
+            <summary className="cursor-pointer select-none text-indigo-600 dark:text-indigo-400 underline-offset-2 hover:underline">
+              Under the hood
+            </summary>
+            <div className="mt-2 flex flex-col gap-2">
+              <RequestSnapshot
+                snapshot={workSnapshot}
+                working={working}
+                onClose={() => {
+                  cancelRef.current()
+                  setWorkSnapshot(null)
+                }}
+              />
+              <div className="relative">
+                {loading && (
+                  <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/70 dark:bg-gray-900/70 backdrop-blur-[1px]">
+                    <span className="text-sm text-gray-500 dark:text-gray-400 font-mono">Loading…</span>
                   </div>
-                </div>
+                )}
+                <Summary />
+                <TreeView childrenNodes={tree.children} label="Message Board" isRoot hideContent />
               </div>
             </div>
+          </details>
+
+          {/* Result card — success/error, not wrapped again. */}
+          {result === 'success' && addressValid && (
+            <div className="rounded-lg border border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-950/40 p-3 text-sm text-green-900 dark:text-green-100">
+              Gas requested for {shortAddr(text)} on {chainName}.
+            </div>
           )}
-        </div>
-      </div>
+          {result === 'error' && (
+            <div className="rounded-lg border border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-950/40 p-3 text-sm text-red-900 dark:text-red-100 flex flex-col gap-2">
+              <span>{errorMessage ?? 'Something went wrong requesting gas.'}</span>
+              <button
+                type="button"
+                className="self-start text-xs px-2.5 py-1 rounded-full ring-1 ring-red-400 text-red-800 dark:text-red-100 hover:bg-red-100 dark:hover:bg-red-900/40"
+                onClick={() => void workAndSend()}
+                disabled={submitDisabled}>
+                Retry
+              </button>
+            </div>
+          )}
+        </>
+      )}
     </div>
   )
 }
