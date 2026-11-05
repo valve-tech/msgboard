@@ -4,17 +4,32 @@ import type {
   Config,
   Content,
   ContentFilter,
+  ContentPage,
   DifficultyFactors,
   Logger,
   Message,
   MessageSeed,
+  PageOptions,
   Provider,
   RPCMessage,
+  RpcCall,
   Status,
+  TxpoolContentPage,
+  TxpoolInspectPage,
   WorkResult,
   WorkStats,
 } from '@msgboard/core'
-import { categoryHash, createChallengeSearch, difficulty, encodeData, toRLP } from '@msgboard/core'
+import {
+  categoryHash,
+  contentAll as collectContent,
+  contentPages as walkContentPages,
+  createChallengeSearch,
+  difficulty,
+  encodeData,
+  toRLP,
+  txpoolContentPages as walkTxpoolContent,
+  txpoolInspectPages as walkTxpoolInspect,
+} from '@msgboard/core'
 import { loadDefaultStamper, type Stamper } from './grinder.js'
 
 export * from '@msgboard/core'
@@ -284,6 +299,40 @@ export class MsgBoardClient {
    */
   async content(filter: ContentFilter = {}) {
     return this.request<Content, [ContentFilter]>({ method: 'msgboard_content', params: [filter] })
+  }
+
+  /** The provider as a plain (method, params) call, for the page walkers. */
+  private readonly rpcCall: RpcCall = (method, params) => this.request<unknown, unknown[]>({ method, params })
+
+  /**
+   * Reads the board one page at a time with msgboard_contentPage (reth
+   * v2.7.0.2-pulse). Stop early with `break`. A node without that method
+   * gives one whole-board page with `mode: 'whole'`.
+   * @throws error responses from the RPC
+   */
+  contentPages(filter: ContentFilter = {}, opts: PageOptions = {}): AsyncGenerator<ContentPage> {
+    return walkContentPages(this.rpcCall, filter, opts)
+  }
+
+  /**
+   * Fetches the whole board in pages. Use this instead of `content()` when
+   * you need every message: the valve.city gateway refuses one answer above
+   * its byte cap with -32012.
+   * @returns the board messages, grouped by category
+   * @throws error responses from the RPC
+   */
+  async contentAll(filter: ContentFilter = {}, opts: PageOptions = {}): Promise<Content> {
+    return collectContent(this.rpcCall, filter, opts)
+  }
+
+  /** Walks txpool_contentPage (reth v2.7.0.1-pulse) by sender. `limit` counts senders, 1 to 1,000. */
+  txpoolContentPages(opts: PageOptions = {}): AsyncGenerator<TxpoolContentPage> {
+    return walkTxpoolContent(this.rpcCall, opts)
+  }
+
+  /** Walks txpool_inspectPage (reth v2.7.0.1-pulse) by sender. `limit` counts senders, 1 to 1,000. */
+  txpoolInspectPages(opts: PageOptions = {}): AsyncGenerator<TxpoolInspectPage> {
+    return walkTxpoolInspect(this.rpcCall, opts)
   }
 
   /**

@@ -33,7 +33,9 @@ export const msgboardContentSource = (
   return {
     poll: async (context) => {
       const filters = categories ? categories.map((category) => ({ category })) : [{}]
-      const contents = await Promise.all(filters.map((filter) => context.client.content(filter)))
+      const contents = await Promise.all(
+        filters.map((filter) => context.client.contentAll(filter)),
+      )
       return contents.flatMap((content) => Object.values(content).flat())
     },
   }

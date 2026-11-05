@@ -39,4 +39,10 @@ describe('renderReference', () => {
   it('includes a result type for status', () => {
     expect(md).toMatch(/msgboard_status[\s\S]*Status/)
   })
+
+  // ContentPage.next is `oneOf [Hex, null]` in the spec. Rendering it as `any`
+  // hides that the field can be a hash at all.
+  it('renders a oneOf field as a union of its member types, not "any"', () => {
+    expect(md).toContain('| `next` (required) | `Hex | null` |')
+  })
 })

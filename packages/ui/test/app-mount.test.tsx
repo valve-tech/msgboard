@@ -18,6 +18,9 @@ vi.mock('@msgboard/sdk', async (importOriginal) => {
     async content() {
       return {}
     }
+    async contentAll() {
+      return {}
+    }
   }
   return { ...actual, MsgBoardClient: FakeClient }
 })

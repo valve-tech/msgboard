@@ -77,9 +77,12 @@ export function Docs() {
       },
     },
     content: {
-      shell: { req: curl('msgboard_content', []), res: curlResponse({ [gasMoneyCategory]: [] }) },
+      shell: {
+        req: `${curl('msgboard_contentPage', [{ limit: 1000 }])}\n# Pass the response's "next" back as "after" on the next call, and stop only when next is null.`,
+        res: curlResponse({ content: { [gasMoneyCategory]: [] }, next: null }),
+      },
       typescript: {
-        req: `const content = await client.content()`,
+        req: `const content = await client.contentAll()  // pages msgboard_contentPage until next is null`,
         res: `type MessageSeed = {
   version: number
   blockHash: Hex
