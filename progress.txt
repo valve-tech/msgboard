@@ -1,6 +1,12 @@
 # MsgBoard — Progress
 
-Updated: 2026-10-27
+Updated: 2026-11-04
+
+## DONE 2026-11-04
+
+- msgboard.xyz UI deployed from master dafa819 (PR #91, flat Gas tab) via deploy-msgboard-ui.yml.
+  Recap failed=0 rescued=0, ui rebuilt, TLS gate 0 of 38. Browser smoke: V4 shows one column,
+  Logs under the CTA, Under the hood collapsed; 369 shows the plain-text no-faucet notice.
 
 ## eMUDHRA CA COMPROMISE: BOX PATCHED (2026-10-27, PR #85, deployed)
 

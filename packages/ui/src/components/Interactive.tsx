@@ -229,8 +229,6 @@ export function Interactive({ workerFactory }: Props) {
     <div
       id="interactive"
       className="flex flex-col w-full gap-4 p-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
-      <p className="text-base text-gray-700 dark:text-gray-200 pt-2">Prove you’re not a bot, get a little gas.</p>
-
       <SelectChain
         preferFaucet
         onChange={(value) => {
